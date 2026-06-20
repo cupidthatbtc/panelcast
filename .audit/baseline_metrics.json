@@ -1,0 +1,129 @@
+{
+  "model": "user_score",
+  "model_path": "models/user_score_20260206_031920.nc",
+  "primary_split": "within_artist_temporal",
+  "splits": {
+    "within_artist_temporal": {
+      "point_metrics": {
+        "rmse": 8.634395599365234,
+        "mae": 6.006406307220459,
+        "r2": 0.4296305775642395,
+        "mean_bias": 1.4513131380081177,
+        "n_observations": 7562
+      },
+      "calibration": {
+        "coverages": {
+          "0.80": {
+            "nominal": 0.8,
+            "empirical": 0.8378735784184078,
+            "interval_width": 20.792875289916992,
+            "abs_error": 0.03787357841840777,
+            "within_tolerance": false
+          },
+          "0.95": {
+            "nominal": 0.95,
+            "empirical": 0.930044961650357,
+            "interval_width": 31.087827682495117,
+            "abs_error": 0.019955038349642962,
+            "within_tolerance": true
+          }
+        },
+        "coverage_tolerance": 0.03,
+        "within_tolerance": false
+      },
+      "crps": {
+        "mean_crps": 4.539293869393904,
+        "n_obs": 7562
+      },
+      "prediction_interval": {
+        "level": 0.95,
+        "lower_percentile": 2.500000000000002,
+        "upper_percentile": 97.5
+      },
+      "n_test": 7562,
+      "info_criteria": {
+        "status": "unavailable",
+        "reason": ""
+      }
+    },
+    "artist_disjoint": {
+      "point_metrics": {
+        "rmse": 10.36247730255127,
+        "mae": 7.295893669128418,
+        "r2": 0.03778839111328125,
+        "mean_bias": 0.08048311620950699,
+        "n_observations": 9396
+      },
+      "calibration": {
+        "coverages": {
+          "0.80": {
+            "nominal": 0.8,
+            "empirical": 0.7889527458492975,
+            "interval_width": 20.47095489501953,
+            "abs_error": 0.011047254150702512,
+            "within_tolerance": true
+          },
+          "0.95": {
+            "nominal": 0.95,
+            "empirical": 0.9095359727543636,
+            "interval_width": 30.6540584564209,
+            "abs_error": 0.04046402724563636,
+            "within_tolerance": false
+          }
+        },
+        "coverage_tolerance": 0.03,
+        "within_tolerance": false
+      },
+      "crps": {
+        "mean_crps": 5.350718007288187,
+        "n_obs": 9396
+      },
+      "prediction_interval": {
+        "level": 0.95,
+        "lower_percentile": 2.500000000000002,
+        "upper_percentile": 97.5
+      },
+      "n_test": 9396,
+      "info_criteria": {
+        "status": "unavailable",
+        "reason": "artist-disjoint evaluation uses new-artist predictive path"
+      }
+    }
+  },
+  "n_test": 7562,
+  "point_metrics": {
+    "rmse": 8.634395599365234,
+    "mae": 6.006406307220459,
+    "r2": 0.4296305775642395,
+    "mean_bias": 1.4513131380081177,
+    "n_observations": 7562
+  },
+  "calibration": {
+    "coverages": {
+      "0.80": {
+        "nominal": 0.8,
+        "empirical": 0.8378735784184078,
+        "interval_width": 20.792875289916992,
+        "abs_error": 0.03787357841840777,
+        "within_tolerance": false
+      },
+      "0.95": {
+        "nominal": 0.95,
+        "empirical": 0.930044961650357,
+        "interval_width": 31.087827682495117,
+        "abs_error": 0.019955038349642962,
+        "within_tolerance": true
+      }
+    },
+    "coverage_tolerance": 0.03,
+    "within_tolerance": false
+  },
+  "crps": {
+    "mean_crps": 4.539293869393904,
+    "n_obs": 7562
+  },
+  "info_criteria": {
+    "status": "unavailable",
+    "reason": ""
+  }
+}
