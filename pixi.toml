@@ -1,0 +1,53 @@
+[workspace]
+name = "panelcast"
+version = "0.1.0"
+description = "Hierarchical Bayesian prediction for bounded scores of events nested in entities over time, configured by a YAML descriptor"
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64", "osx-arm64"]
+
+[tasks]
+test = "pytest tests/"
+# CI selection with the coverage gate (fail_under lives in pyproject.toml)
+test-cov = "pytest tests/ -m 'not slow and not e2e' --cov=src --cov-report=term"
+# Quick inner-loop selection without coverage instrumentation
+test-fast = "pytest tests/ -m 'not slow and not e2e'"
+lint = "ruff check src/"
+
+[dependencies]
+python = ">=3.11"
+numpy = ">=1.26"
+pandas = ">=2.2"
+pandera = ">=0.18"
+pyarrow = ">=15.0"
+pydantic = ">=2.6"
+pyyaml = ">=6.0"
+scikit-learn = ">=1.4"
+scipy = ">=1.11"
+statsmodels = ">=0.14"
+structlog = ">=24.1"
+arviz = ">=0.18"
+xarray = ">=2024.1"
+typer = ">=0.12"
+rich = ">=13.7"
+# Required by pandas DataFrame.to_latex (Styler) for publication tables.
+jinja2 = ">=3.1"
+matplotlib = ">=3.8"
+packaging = ">=23.0"
+seaborn = ">=0.13"
+graphviz = ">=2.50"
+python-graphviz = ">=0.20"
+uncertainties = ">=3.1"
+pytest = ">=8.0"
+pytest-cov = ">=4.1"
+ruff = "*"
+pip = ">=25.3,<26"
+
+[pypi-dependencies]
+gitpython = ">=3.1"
+numpyro = ">=0.19.0"
+jax = ">=0.8.2"
+properscoring = ">=0.1"
+plotly = ">=6.1.1"
+kaleido = ">=1.0.0"
+nvidia-ml-py = ">=13.580.65"
+packaging = ">=23.0"

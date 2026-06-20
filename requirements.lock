@@ -1,0 +1,7 @@
+# Canonical environment lock is `pixi.lock` (cross-platform).
+# SHA256(pixi.lock)=417f24d3db8c39dd1869065378c7ffcc03fa77df3143980ce4572602a61cdd00
+#
+# This file is intentionally informational only; do not use it as an installer
+# source for publication runs. Use:
+#   pixi install
+#   panelcast run --strict

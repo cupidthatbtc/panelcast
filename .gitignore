@@ -1,0 +1,57 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+.venv-wsl/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+/.pytest_tail.log
+/htmlcov/
+
+# Data and outputs (top-level only)
+/data/
+/runs/
+/reports/
+/logs/
+
+# Model artifacts - binary traces (2.3GB+)
+/models/
+
+# Pipeline outputs (45MB+)
+/outputs/
+
+# NetCDF files (model traces)
+*.nc
+
+# Log files
+*.log
+
+# Backup directory (safety backups for cleanup)
+/.backup/
+
+# Env and local config
+.env
+/configs/local.yaml
+
+# IDE
+/.vscode/
+/.idea/
+
+# Legacy CLI backup (preserved locally, not tracked)
+/scripts/legacy_cli.py
+
+# Windows reserved name artifacts
+/nul
+/.planning/
+
+# Coverage report snapshots
+/coverage_src.txt
+
+# Presentation / media assets (not part of the pipeline)
+/media/
+/presentation/

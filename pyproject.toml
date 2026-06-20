@@ -1,0 +1,122 @@
+[project]
+name = "panelcast"
+version = "0.1.0"
+description = "Hierarchical Bayesian prediction for bounded scores of events nested in entities over time, configured by a YAML descriptor"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Jack Wenenn", email = "jcwenenn@gmail.com" }]
+keywords = [
+  "bayesian",
+  "numpyro",
+  "jax",
+  "hierarchical",
+  "forecasting",
+  "panel-data",
+]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Mathematics",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.2",
+  "pandera>=0.18",
+  "pyarrow>=15.0",
+  "pydantic>=2.6",
+  "pyyaml>=6.0",
+  "scikit-learn>=1.4",
+  "scipy>=1.11",
+  "statsmodels>=0.14",
+  "structlog>=24.1",
+  "arviz>=0.18",
+  "xarray>=2024.1",
+  "typer>=0.12",
+  "rich>=13.7",
+  "matplotlib>=3.8",
+  "seaborn>=0.13",
+  "uncertainties>=3.1",
+  "properscoring>=0.1",
+  "jax>=0.8.2",
+  "numpyro>=0.19",
+  # Required by pandas DataFrame.to_latex (Styler) for publication tables.
+  "jinja2>=3.1",
+  "plotly>=6.1",
+]
+
+[project.scripts]
+panelcast = "panelcast.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/cupidthatbtc/panelcast"
+Repository = "https://github.com/cupidthatbtc/panelcast"
+Issues = "https://github.com/cupidthatbtc/panelcast/issues"
+
+[project.optional-dependencies]
+gpu = [
+  "nvidia-ml-py>=13.580.65",
+]
+dev = [
+  "pytest>=8.0",
+  "pytest-cov>=4.1",
+]
+comparison = [
+  "pymc>=5.13",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+python_files = ["test_*.py"]
+filterwarnings = [
+    # Upstream numpyro deprecation with JAX 0.8.x; harmless in this codebase.
+    "ignore:jax\\.interpreters\\.pxla\\.xla_pmap_p is deprecated as of JAX v0\\.8\\.2\\.:DeprecationWarning:numpyro\\.ops\\.provenance",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "e2e: marks tests as end-to-end tests",
+]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Imports at bottom required to avoid circular imports with submodules
+"src/panelcast/preflight/__init__.py" = ["E402"]
+# Test files: allow imports after pytest.skip, unused vars in test setup, long lines
+"tests/**/*.py" = ["E402", "F401", "F841", "E501"]
+# Scripts: allow long lines in docstrings/examples, unused imports for availability checks
+"scripts/*.py" = ["E501", "F401"]
+
+[tool.coverage.run]
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 80
+precision = 1
+show_missing = false
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = false  # Too noisy for data science code
+warn_unused_ignores = false  # Allow unused ignores during transition
+disallow_untyped_defs = false  # Too strict for gradual adoption
+ignore_missing_imports = true  # Many data science libs lack stubs
+check_untyped_defs = true  # Check type errors inside untyped functions
+strict = false
+# Ignore specific error codes that are too noisy for data science code
+disable_error_code = ["arg-type", "assignment", "return-value", "var-annotated", "misc", "union-attr", "operator", "attr-defined", "call-arg", "no-any-return"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
