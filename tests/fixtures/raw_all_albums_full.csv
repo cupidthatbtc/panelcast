@@ -1,0 +1,4 @@
+Artist,Album,Year,Release Date,Genres,Critic Score,User Score,Avg Track Score,User Ratings,Critic Reviews,Tracks,Runtime (min),Avg Track Runtime (min),Label,Descriptors,Album URL,All Artists,Album Type
+Kendrick Lamar,To Pimp a Butterfly,2015,"March 15, 2015","Conscious Hip Hop, Jazz Rap",95,95,94,44802,47,16,78.85,4.93,Top Dawg,"concept album, political",https://example.com/a,Kendrick Lamar,Album
+Artist Two,Second Album,2018,2018-05-01,Indie Rock,80,82,78,1200,25,10,40.0,4.0,Indie Label,"melodic, guitar",https://example.com/b,Artist Two,EP
+Artist Three,Third Album,2020,2020-10-10,Pop,70,70,72,300,15,9,32.0,3.6,Major Label,"dance-pop, upbeat",https://example.com/c,"Artist Three|Feat Artist",Album
