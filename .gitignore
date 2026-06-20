@@ -37,6 +37,7 @@ __pycache__/
 # Env and local config
 .env
 /configs/local.yaml
+/CLAUDE.md
 
 # IDE
 /.vscode/
