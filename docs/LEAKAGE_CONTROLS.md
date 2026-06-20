@@ -1,5 +1,10 @@
 # Leakage Controls
 
+Rules use AOTY's "artist" entity name; they apply to any domain's entities.
+Enforcement lives in `pipelines/create_splits.py` and `data/split.py` (split
+construction and the artist/group-disjointness checks) and in the feature
+pipeline (`features/pipeline.py`, train-only fitting and label masking).
+
 Mandatory rules
 - No test data used for imputation, scaling, or feature selection.
 - Group splits must prevent artist overlap across train/val/test.
@@ -15,6 +20,6 @@ Artifacts to store
 - data/splits/artist_disjoint/manifest.json
 - data/splits/within_artist_temporal/split_*.json (versioned archive)
 - data/splits/artist_disjoint/split_*.json (versioned archive)
-- data/audit/summary.csv
+- data/audit/summary_<run_id>.json and data/audit/exclusions_<run_id>.jsonl
 - outputs/<run_id>/manifest.json
 - outputs/<run_id>/dataset_hash.txt

@@ -1,5 +1,8 @@
 # Evaluation Protocol
 
+Protocol terms use AOTY's entity/event names ("artist"/"album"); they apply to
+any domain's entities and events.
+
 Metrics
 - R2 on held-out test sets (primary and secondary splits)
 - RMSE and MAE
@@ -14,10 +17,13 @@ Cross-validation
 - Primary split fails fast if unknown artists appear in test data (no silent row dropping)
 
 Diagnostics
-- R-hat <= 1.01 for all key parameters
-- ESS above threshold
-- No divergent transitions after tuning
-- Coverage must be within configured tolerance (`coverage_tolerance`)
+- R-hat <= 1.01 for all key parameters (`rhat_threshold`, default 1.01)
+- ESS >= 400 per chain (`ess_threshold`, default 400)
+- No divergent transitions (`allow_divergences` is false by default)
+- Coverage must be within configured tolerance (`coverage_tolerance`, default 0.03)
+- Posterior predictive checks are informational, not gating: with AOTY's known
+  left-skewed target against the symmetric likelihood, several PPC p-values are
+  expected to pin at 0.000/1.000 (see `MODEL_CARD.md`)
 
 Model comparison
 - LOO and WAIC computed for the primary split when pointwise log-likelihood is available

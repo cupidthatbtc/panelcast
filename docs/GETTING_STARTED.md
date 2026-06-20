@@ -1,6 +1,9 @@
 # Getting Started
 
 Step-by-step guide from cloning the repository to running your first prediction.
+This is the quickstart for panelcast's flagship example domain, **Album of the
+Year (AOTY)**. To run a different domain, see `docs/PORTING.md` — the steps are
+the same, with that domain's descriptor and dataset path.
 
 ## Prerequisites
 
@@ -65,7 +68,9 @@ See [DATA_CONTRACT.md](DATA_CONTRACT.md) for full schema details.
 
 ## Step 5: Configure Dataset Path
 
-Choose one of these options:
+`AOTY_DATASET_PATH` is the AOTY domain's dataset env var. Other domains define
+their own in their descriptor's `raw_path_env` (e.g. `AERO_DATASET_PATH` for the
+aerospace example). Choose one of these options:
 
 **Option A: Environment variable (recommended)**
 
@@ -111,6 +116,9 @@ panelcast --help
 
 # Check GPU memory and data loading (no actual training)
 panelcast run --preflight-only
+
+# Or a measured check via a mini-MCMC (~30-60s, more accurate)
+panelcast run --preflight-only --preflight-full
 ```
 
 If preflight passes (exit code 0), you're ready to run.

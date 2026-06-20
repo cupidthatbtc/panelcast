@@ -122,6 +122,39 @@ These features are **enabled by default**. Use these flags to disable them:
 | `--n-exponent-alpha` | `2.0` | ≥0.01 | Beta prior alpha parameter (only with `--n-exponent-prior beta`) |
 | `--n-exponent-beta` | `4.0` | ≥0.01 | Beta prior beta parameter (only with `--n-exponent-prior beta`) |
 
+#### Domain & Model Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--config` / `-c` | | YAML config file(s) with `PipelineConfig` keys; repeatable, later files win. Explicit CLI options always win over YAML. |
+| `--dataset` | built-in AOTY | Dataset descriptor: bare name (resolves to `configs/datasets/{name}.yaml`) or YAML path |
+| `--debut-prev-score-source` | `train_mean` | Debut `prev_score` fill: `train_mean` or `dataset_stats` (legacy; mild leakage) |
+| `--target-transform` | `identity` | Score-scale transform: `identity` (soft-clip) or `offset_logit` (logit scale) |
+| `--ar-center` | `global` | AR(1) centering: `global`, `none` (legacy), or `artist_running` (sensitivity only) |
+| `--latent-process` | `rw` | Artist-effect process: `rw` (random walk) or `ar1` (stationary). Experimental |
+| `--exclude-rw-raw-from-collection` | `false` | Don't store `rw_raw` draws on device (~96% peak-GPU cut); required for the 4-chain publication run on 24 GB GPUs |
+
+#### MCMC (advanced)
+
+| Option | Default | Range | Description |
+|--------|---------|-------|-------------|
+| `--chain-method` | `sequential` | | `sequential`, `vectorized`, or `parallel` (multi-GPU) |
+| `--max-tree-depth` | `10` | 5–15 | Maximum NUTS tree depth |
+| `--likelihood-df` | `4.0` | ≥1.0 | Student-t degrees of freedom; ≥100 ≈ Normal |
+
+#### Splits & Calibration
+
+| Option | Default | Range | Description |
+|--------|---------|-------|-------------|
+| `--val-albums` | `0` | ≥0 | Albums per artist held out for validation (0 = none) |
+| `--min-train-albums` | `2` | ≥1 | Minimum training albums per artist |
+| `--secondary-split` / `--no-secondary-split` | on | | Artist-disjoint secondary evaluation split |
+| `--calibration-intervals` | `0.80,0.95` | | Comma-separated interval levels for calibration checks |
+| `--coverage-tolerance` | `0.03` | ≥0.0 | Allowed absolute coverage error |
+| `--prediction-interval` | `0.95` | 0.01–0.99 | Interval level for saved prediction bands |
+
+For the full list, run `panelcast run --help`.
+
 #### Examples
 
 ```bash
@@ -178,7 +211,9 @@ panelcast stage <STAGE> [OPTIONS]
 | `features` | Build feature matrices from split data |
 | `train` | Fit Bayesian models using NumPyro MCMC |
 | `evaluate` | Compute diagnostics, calibration metrics, LOO-CV |
+| `predict` | Generate next-event predictions for known and new entities (next album per artist on AOTY) |
 | `report` | Generate publication artifacts (figures, tables, model cards) |
+| `sensitivity` | Optional prior-variant / feature-ablation analysis (opt-in; run by name, not part of a default run) |
 
 #### Common Stage Options
 
@@ -307,9 +342,14 @@ When using `--preflight-only`:
 
 ## Configuration Files
 
-`panelcast` runtime behavior is currently driven by CLI flags and environment
-variables (for example `AOTY_DATASET_PATH`). YAML files under `configs/` are
-project reference artifacts and are not loaded by the CLI command interface.
+`panelcast` runtime behavior is driven by CLI flags, environment variables (for
+example `AOTY_DATASET_PATH`), and optional YAML configs:
+
+- `--config` / `-c` loads one or more YAML files of `PipelineConfig` keys
+  (repeatable; later files win). Explicit CLI options always override YAML.
+- `--dataset` loads a dataset descriptor (a bare name resolves to
+  `configs/datasets/{name}.yaml`, or pass a YAML path) to retarget the pipeline
+  to another domain — see `docs/PORTING.md`.
 
 ---
 
