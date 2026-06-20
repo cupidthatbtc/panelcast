@@ -1,0 +1,80 @@
+# Worked example: retargeting the pipeline to a different domain.
+#
+# This descriptor points the pipeline at a synthetic aerospace test-flight
+# dataset (airframes fly sequential test flights, each scored 0-10).
+# It exists as documentation and as the fixture for the domain-portability
+# e2e tests (tests/e2e/test_domain_portability.py).
+#
+# Every key omitted here keeps its AOTY default — see
+# src/panelcast/config/descriptor.py for the full field list.
+# Walkthrough: docs/PORTING.md.
+
+name: aero
+
+# --- raw source ----------------------------------------------------------
+raw_path_env: AERO_DATASET_PATH
+raw_path_default: data/raw/test_flights.csv
+encoding: utf-8
+raw_column_map:
+  "Flight Date": Flight_Date
+  "Perf Score": Perf_Score
+  "Sensor Samples": Sensor_Samples
+  "Test Crew": Test_Crew
+  "Flight ID": Flight_ID
+  "Campaign Year": Year
+  "Thrust Margin": Thrust_Margin
+  "Payload Fraction": Payload_Fraction
+required_raw_columns:
+  - Airframe
+  - "Flight ID"
+  - "Campaign Year"
+  - "Flight Date"
+  - "Perf Score"
+  - "Sensor Samples"
+  - "Test Crew"
+optional_raw_columns: []
+
+# --- identity / sequencing ------------------------------------------------
+entity_col: Airframe
+event_col: Flight_ID
+date_col: Flight_Date
+parsed_date_col: Flight_Date_Parsed
+year_col: Year
+date_format: "%Y-%m-%d"   # ISO, unlike AOTY's "April 10, 2018"
+
+# --- targets ----------------------------------------------------------------
+target_col: Perf_Score
+target_bounds: [0.0, 10.0]
+model_prefix: perf
+n_obs_col: Sensor_Samples
+# No secondary (critic-score analogue) model in this domain.
+secondary_target_col: null
+secondary_prefix: null
+secondary_n_obs_col: null
+
+# --- cleaning semantics ----------------------------------------------------
+multi_entity_col: Test_Crew
+multi_entity_separator: " + "
+unknown_entity_sentinel: null
+min_year: 2015
+
+# --- dataset preparation -----------------------------------------------------
+min_obs_thresholds: [5, 10, 25]
+primary_min_obs: 5
+processed_name_template: "perf_minobs_{min_ratings}"
+
+# --- features -----------------------------------------------------------------
+# No music-domain packs: genre / album-type / collaboration blocks stay
+# unregistered. The generic temporal + entity-history blocks run, plus the
+# core_numeric pass-through for the domain's own numeric covariates —
+# pure-YAML feature selection, no Python required.
+feature_packs: []
+feature_blocks:
+  - name: temporal
+  - name: entity_history
+  - name: core_numeric
+    params:
+      columns: [Thrust_Margin, Payload_Fraction]
+ablation_groups:
+  temporal: [temporal]
+  artist: [entity_history]
