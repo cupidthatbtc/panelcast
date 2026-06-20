@@ -214,47 +214,6 @@ panelcast stage report
 
 ---
 
-### `generate-diagrams` — Data Flow Diagrams
-
-Generate publication-quality pipeline diagrams.
-
-```bash
-panelcast generate-diagrams [OPTIONS]
-```
-
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--output` | `-o` | `docs/figures` | Output directory |
-| `--theme` | `-t` | `all` | Theme: `light`, `dark`, `transparent`, or `all` |
-| `--level` | `-l` | `all` | Detail: `high`, `intermediate`, `detailed`, or `all` |
-| `--help` | | | Show help |
-
-#### Detail Levels
-
-| Level | Nodes | Use Case |
-|-------|-------|----------|
-| `high` | ~10 | README, quick overview |
-| `intermediate` | ~20 | Presentations |
-| `detailed` | 30+ | Technical papers |
-
-#### Examples
-
-```bash
-# Generate all 9 variants (3 levels × 3 themes)
-panelcast generate-diagrams
-
-# High-level only (3 themes)
-panelcast generate-diagrams --level high
-
-# Single specific diagram
-panelcast generate-diagrams --theme light --level intermediate
-
-# Custom output
-panelcast generate-diagrams -o ./my_diagrams
-```
-
----
-
 ### `export-figures` — Static Figure Export
 
 Export visualization figures to static formats.
@@ -389,9 +348,6 @@ panelcast run --num-chains 8 --num-samples 2000 --target-accept 0.95 --strict
 
 # Export figures
 panelcast export-figures --formats svg,png,pdf --scale 3.0
-
-# Generate diagrams
-panelcast generate-diagrams
 ```
 
 ### Preflight Checks (CI/Scripting)

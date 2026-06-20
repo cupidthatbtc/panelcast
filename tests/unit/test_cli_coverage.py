@@ -2,13 +2,11 @@
 
 Tests uncovered paths in cli.py including stage subcommand wiring,
 flag passthrough to PipelineConfig, exit codes from pipeline failures,
-preflight/resume flags, generate-diagrams commands, and
-error message formatting.
+preflight/resume flags, and error message formatting.
 """
 
 from __future__ import annotations
 
-import importlib.util
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -20,7 +18,6 @@ from typer.testing import CliRunner
 from panelcast.cli import app
 
 runner = CliRunner()
-_HAS_GRAPHVIZ = importlib.util.find_spec("graphviz") is not None
 
 
 def strip_ansi(text: str) -> str:
@@ -682,115 +679,6 @@ class TestPreflightFlags:
 
         result = runner.invoke(app, ["run", "--preflight-only"])
         assert result.exit_code == 1
-
-
-# ============================================================================
-# Generate-Diagrams Command
-# ============================================================================
-
-
-@pytest.mark.skipif(not _HAS_GRAPHVIZ, reason="graphviz not installed")
-class TestGenerateDiagramsCommand:
-    """Tests for generate-diagrams subcommand."""
-
-    def test_generate_diagrams_invalid_level(self, monkeypatch):
-        """Invalid --level exits with error."""
-        result = runner.invoke(app, ["generate-diagrams", "--level", "invalid"])
-        assert result.exit_code == 1
-
-    def test_generate_diagrams_invalid_theme(self, monkeypatch):
-        """Invalid --theme exits with error."""
-        result = runner.invoke(app, ["generate-diagrams", "--theme", "invalid"])
-        assert result.exit_code == 1
-
-    def test_generate_diagrams_all_themes_calls_generate_all(self, monkeypatch):
-        """Generate-diagrams with default 'all' theme calls generate_all_diagrams."""
-        captured = {}
-
-        def fake_generate_all(output_path, levels):
-            captured["output_path"] = output_path
-            captured["levels"] = levels
-            return {"high_light": [Path("test.svg")]}
-
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.generate_all_diagrams",
-            fake_generate_all,
-        )
-        # Also mock LEVEL_FUNCTIONS and DetailLevel since they're imported
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.LEVEL_FUNCTIONS",
-            {"high": lambda t: None, "intermediate": lambda t: None, "detailed": lambda t: None},
-        )
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.DetailLevel",
-            str,
-        )
-
-        result = runner.invoke(app, ["generate-diagrams"])
-        assert result.exit_code == 0
-        assert captured["levels"] == ["high", "intermediate", "detailed"]
-
-    def test_generate_diagrams_specific_theme_and_level(self, monkeypatch):
-        """Generate-diagrams with specific theme renders specific diagrams."""
-        render_calls = []
-
-        class FakeDiagram:
-            format = "svg"
-            source = "digraph{}"
-
-            def render(self, filename, directory, cleanup):
-                render_calls.append(filename)
-                return f"{filename}.{self.format}"
-
-        def fake_level_func(theme):
-            return FakeDiagram()
-
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.LEVEL_FUNCTIONS",
-            {"high": fake_level_func, "intermediate": fake_level_func, "detailed": fake_level_func},
-        )
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.DetailLevel",
-            str,
-        )
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.generate_all_diagrams",
-            lambda *a, **k: {},
-        )
-
-        result = runner.invoke(
-            app,
-            ["generate-diagrams", "--theme", "light", "--level", "high"],
-        )
-        assert result.exit_code == 0
-        # Should have rendered 3 formats (svg, png, pdf)
-        assert len(render_calls) == 3
-
-    def test_generate_diagrams_custom_output_dir(self, monkeypatch, tmp_path):
-        """Generate-diagrams --output uses custom directory."""
-        captured = {}
-
-        def fake_generate_all(output_path, levels):
-            captured["output_path"] = output_path
-            return {}
-
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.generate_all_diagrams",
-            fake_generate_all,
-        )
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.LEVEL_FUNCTIONS",
-            {},
-        )
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.DetailLevel",
-            str,
-        )
-
-        out_dir = str(tmp_path / "my_diagrams")
-        result = runner.invoke(app, ["generate-diagrams", "--output", out_dir])
-        assert result.exit_code == 0
-        assert captured["output_path"] == Path(out_dir)
 
 
 # ============================================================================

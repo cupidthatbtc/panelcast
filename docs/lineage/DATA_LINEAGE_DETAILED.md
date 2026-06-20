@@ -235,7 +235,6 @@ src/panelcast/
 └── visualization/
     ├── charts.py                   # Plotly chart builders
     ├── dashboard.py                # Figure assembly + run-data loading
-    ├── diagrams.py                 # Graphviz data flow diagrams
     ├── export.py                   # Static figure export
     └── theme.py                    # Visualization theming
 ```
@@ -1123,7 +1122,6 @@ The CLI is built with Typer (`src/panelcast/cli.py`):
 panelcast                    # Show help
 panelcast run [OPTIONS]      # Full pipeline execution
 panelcast stage <name>       # Individual stage execution
-panelcast generate-diagrams  # Data flow diagrams
 panelcast export-figures     # Static figure export
 ```
 

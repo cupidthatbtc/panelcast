@@ -381,19 +381,6 @@ class TestCLISetupGuide:
         assert "installation" in output.lower()
 
 
-class TestCLIGenerateDiagrams:
-    """Tests for generate-diagrams command."""
-
-    def test_generate_diagrams_help(self):
-        """Generate-diagrams command shows help."""
-        result = runner.invoke(app, ["generate-diagrams", "--help"])
-        assert result.exit_code == 0
-        output = strip_ansi(result.output)
-        assert "--output" in output
-        assert "--theme" in output
-        assert "--level" in output
-
-
 class TestCLIStageTrainOptions:
     """Tests for stage train subcommand options."""
 

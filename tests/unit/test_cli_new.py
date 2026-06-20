@@ -4,25 +4,21 @@ Covers:
 - Full preflight flow (--preflight-full)
 - export-figures command wiring
 - main() entry point
-- generate-diagrams with specific theme/level combinations
 - Edge cases in validation and error handling
 """
 
 from __future__ import annotations
 
-import importlib.util
 import re
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
 from typer.testing import CliRunner
 
 from panelcast.cli import app, main
 
 runner = CliRunner()
-_HAS_GRAPHVIZ = importlib.util.find_spec("graphviz") is not None
 
 
 def strip_ansi(text: str) -> str:
@@ -618,79 +614,6 @@ class TestMainEntryPoint:
         monkeypatch.setattr("panelcast.cli.app", fake_app)
         main()
         assert called["value"] is True
-
-
-# ============================================================================
-# Generate-Diagrams Edge Cases
-# ============================================================================
-
-
-@pytest.mark.skipif(not _HAS_GRAPHVIZ, reason="graphviz not installed")
-class TestGenerateDiagramsEdgeCases:
-    """Additional tests for generate-diagrams command."""
-
-    def test_generate_diagrams_single_level_all_themes(self, monkeypatch, tmp_path):
-        """Generate a single level with all themes calls generate_all_diagrams."""
-        captured = {}
-
-        def fake_generate_all(output_path, levels):
-            captured["levels"] = levels
-            return {"high_light": [Path("test.svg")]}
-
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.generate_all_diagrams",
-            fake_generate_all,
-        )
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.LEVEL_FUNCTIONS",
-            {"high": lambda t: None, "intermediate": lambda t: None, "detailed": lambda t: None},
-        )
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.DetailLevel",
-            str,
-        )
-
-        result = runner.invoke(
-            app, ["generate-diagrams", "--level", "high", "--output", str(tmp_path)]
-        )
-        assert result.exit_code == 0
-        assert captured["levels"] == ["high"]
-
-    def test_generate_diagrams_multiple_levels_specific_theme(self, monkeypatch, tmp_path):
-        """Generate all levels with specific theme renders each."""
-        render_calls = []
-
-        class FakeDiagram:
-            format = "svg"
-            source = "digraph{}"
-
-            def render(self, filename, directory, cleanup):
-                render_calls.append(filename)
-                return f"{filename}.{self.format}"
-
-        def fake_level_func(theme):
-            return FakeDiagram()
-
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.LEVEL_FUNCTIONS",
-            {"high": fake_level_func, "intermediate": fake_level_func, "detailed": fake_level_func},
-        )
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.DetailLevel",
-            str,
-        )
-        monkeypatch.setattr(
-            "panelcast.visualization.diagrams.generate_all_diagrams",
-            lambda *a, **k: {},
-        )
-
-        result = runner.invoke(
-            app,
-            ["generate-diagrams", "--theme", "dark", "--level", "all", "--output", str(tmp_path)],
-        )
-        assert result.exit_code == 0
-        # 3 levels * 3 formats = 9 render calls
-        assert len(render_calls) == 9
 
 
 # ============================================================================
