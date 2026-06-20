@@ -26,7 +26,7 @@ from tests.e2e.conftest import create_minimal_dataset
 from tests.helpers.aero_data import make_aero_dataset
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AERO_DESCRIPTOR = REPO_ROOT / "configs" / "datasets" / "example_aero.yaml"
+AERO_DESCRIPTOR = REPO_ROOT / "configs" / "datasets" / "aero.yaml"
 AOTY_DESCRIPTOR = REPO_ROOT / "configs" / "datasets" / "aoty_full.yaml"
 
 

@@ -8,7 +8,7 @@ domain is **one YAML file and zero source changes**.
 
 This guide walks the bundled aerospace example end to end:
 airframes fly sequential test flights, each scored 0–10 by flight-test
-telemetry. The full descriptor lives at `configs/datasets/example_aero.yaml`;
+telemetry. The full descriptor lives at `configs/datasets/aero.yaml`;
 the e2e proof at `tests/e2e/test_domain_portability.py`.
 
 ## The mental model
@@ -82,7 +82,7 @@ Key decisions:
 
 ```bash
 # descriptor resolves bare names to configs/datasets/{name}.yaml
-panelcast run --dataset example_aero --num-chains 2 --num-samples 500
+panelcast run --dataset aero --num-chains 2 --num-samples 500
 ```
 
 The raw CSV path comes from `raw_path_env` (environment variable) or

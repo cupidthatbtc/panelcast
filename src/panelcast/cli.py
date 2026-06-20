@@ -706,17 +706,22 @@ def run(
 
     try:
         if config_files:
-            from click.core import ParameterSource
-
             from panelcast.config.loader import load_yaml_config
             from panelcast.config.pipeline_yaml import apply_yaml_overrides
 
             yaml_data = load_yaml_config(list(config_files))
-            explicit_cli_params = {
-                name
-                for name in ctx.params
-                if ctx.get_parameter_source(name) == ParameterSource.COMMANDLINE
-            }
+            # Params set explicitly on the command line win over YAML. click's
+            # parameter-source API lives in internals that have drifted across
+            # click/typer versions, so compare the source by its enum member
+            # name (stable) rather than importing or identity-checking the enum,
+            # and degrade gracefully if the API is unavailable.
+            explicit_cli_params: set[str] = set()
+            get_source = getattr(ctx, "get_parameter_source", None)
+            if get_source is not None:
+                for name in ctx.params:
+                    source = get_source(name)
+                    if source is not None and getattr(source, "name", "") == "COMMANDLINE":
+                        explicit_cli_params.add(name)
             config_kwargs = apply_yaml_overrides(config_kwargs, yaml_data, explicit_cli_params)
 
         config = PipelineConfig(**config_kwargs)

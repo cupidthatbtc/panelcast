@@ -6,7 +6,7 @@
 # tests/e2e/test_domain_portability.py).
 #
 # Full field reference: src/panelcast/config/descriptor.py.
-# Worked non-music example: configs/datasets/example_aero.yaml + docs/PORTING.md.
+# Worked non-music example: configs/datasets/aero.yaml + docs/PORTING.md.
 #
 # Operational note: processed data, splits, features and models all live under
 # relative paths (data/, models/, outputs/) — run each domain from its own

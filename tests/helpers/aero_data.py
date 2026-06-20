@@ -15,7 +15,7 @@ from panelcast.config.descriptor import DatasetDescriptor, FeatureBlockSpec
 
 
 def make_aero_descriptor(**overrides) -> DatasetDescriptor:
-    """Aero descriptor mirroring configs/datasets/example_aero.yaml."""
+    """Aero descriptor mirroring configs/datasets/aero.yaml."""
     fields: dict = dict(
         name="aero",
         raw_path_env="AERO_DATASET_PATH",

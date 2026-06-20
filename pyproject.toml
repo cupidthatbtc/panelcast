@@ -25,22 +25,28 @@ classifiers = [
   "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
+# NOTE: `pixi.lock` is the authoritative, tested environment — `pixi install`
+# reproduces it exactly across platforms. The upper bounds below keep a plain
+# `pip install -e .` from silently resolving to a breaking major (e.g. arviz 1.x
+# dropped `az.InferenceData`; pandas 3.x broke the data path). They are guards,
+# not a reproducibility guarantee: the jax/numpyro pair in particular is tightly
+# version-coupled, so for an exact, supported environment use pixi.
 dependencies = [
-  "numpy>=1.26",
-  "pandas>=2.2",
-  "pandera>=0.18",
+  "numpy>=1.26,<3",
+  "pandas>=2.2,<3",
+  "pandera>=0.18,<1",
   "pyarrow>=15.0",
-  "pydantic>=2.6",
+  "pydantic>=2.6,<3",
   "pyyaml>=6.0",
-  "scikit-learn>=1.4",
-  "scipy>=1.11",
-  "statsmodels>=0.14",
+  "scikit-learn>=1.4,<2",
+  "scipy>=1.11,<2",
+  "statsmodels>=0.14,<1",
   "structlog>=24.1",
-  "arviz>=0.18",
+  "arviz>=0.18,<1",
   "xarray>=2024.1",
   "typer>=0.12",
   "rich>=13.7",
-  "matplotlib>=3.8",
+  "matplotlib>=3.8,<4",
   "seaborn>=0.13",
   "uncertainties>=3.1",
   "properscoring>=0.1",

@@ -17,7 +17,7 @@ the flagship example domain.
   bounds, date formats, posterior-site prefixes, feature blocks) flows through a
   single `DatasetDescriptor`, with a default-equals-AOTY contract. New domains
   run with zero source changes.
-- **Worked aerospace example** (`configs/datasets/example_aero.yaml`) plus an
+- **Worked aerospace example** (`configs/datasets/aero.yaml`) plus an
   end-to-end domain-portability test that proves `--dataset aoty_full` is
   byte-identical to the built-in defaults.
 - **Optional per-entity overdispersion** with a lognormal variance prior, behind

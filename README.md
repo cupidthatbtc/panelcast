@@ -30,7 +30,7 @@ prefixes, feature blocks) flows through a single `DatasetDescriptor`. Each field
 | Domain | Entity → Event | Bounded score | Status |
 |---|---|---|---|
 | **Album of the Year** (flagship) | Artist → Album | `User_Score` ∈ [0, 100] | Built-in defaults + the `aoty` feature pack (genre, album-type, collaboration). Run with no `--dataset` flag. |
-| **Aerospace** (worked example) | Airframe → Test flight | `Perf_Score` ∈ [0, 10] | Bundled descriptor `configs/datasets/example_aero.yaml` + end-to-end portability test. One YAML, no music-specific code. |
+| **Aerospace** (worked example) | Airframe → Test flight | `Perf_Score` ∈ [0, 10] | Bundled descriptor `configs/datasets/aero.yaml` + end-to-end portability test. One YAML, no music-specific code. |
 | **US elections** | Candidate/seat → Contest | Vote share ∈ [0, 1] | Sibling project (`elections_pred`) that retargets this pipeline — lives in its own repo, not bundled here. |
 
 The contract that `--dataset aoty_full` is byte-identical to running with no flag
@@ -64,6 +64,13 @@ pip install -e .             # install the panelcast package + CLI into it
 panelcast --help
 ```
 
+> **pixi is the supported, reproducible path.** `pixi.lock` pins the exact,
+> tested versions of the whole stack (notably the tightly-coupled jax/numpyro
+> pair). A standalone `pip install -e .` outside pixi is best-effort: the
+> dependency bounds in `pyproject.toml` cap known-breaking majors, but they do
+> not guarantee an identical environment. For anything reproducibility-sensitive,
+> use pixi.
+
 ## 60-second quickstart (aerospace example)
 
 Retarget the whole pipeline to a non-music domain with no code changes, using
@@ -79,7 +86,7 @@ make_aero_dataset(seed=42).to_csv('data/raw/test_flights.csv', index=False)"
 panelcast run --dataset aero --num-chains 1 --num-samples 300
 ```
 
-`--dataset aero` resolves to `configs/datasets/example_aero.yaml`. That one file
+`--dataset aero` resolves to `configs/datasets/aero.yaml`. That one file
 remaps the columns, switches the score bounds to [0, 10], drops the
 music-specific feature packs, and adds the domain's own numeric covariates —
 the model code is untouched.

@@ -26,6 +26,7 @@ from panelcast.evaluation.calibration import ReliabilityData
 from panelcast.reporting.figures import (
     COLORBLIND_COLORS,
     get_trace_plot_vars,
+    save_artist_prediction_plot,
     save_forest_plot,
     save_posterior_plot,
     save_predictions_plot,
@@ -400,9 +401,9 @@ class TestGetTracePlotVarsSigmaRef:
         # sigma_ref should appear BEFORE sigma_obs
         ref_idx = var_names.index("user_sigma_ref")
         obs_idx = var_names.index("user_sigma_obs")
-        assert (
-            ref_idx < obs_idx
-        ), f"sigma_ref (idx={ref_idx}) should precede sigma_obs (idx={obs_idx})"
+        assert ref_idx < obs_idx, (
+            f"sigma_ref (idx={ref_idx}) should precede sigma_obs (idx={obs_idx})"
+        )
 
     def test_no_sigma_ref_when_absent(self):
         """sigma_ref should NOT appear when absent from posterior (homoscedastic)."""
@@ -437,3 +438,78 @@ class TestGetTracePlotVarsSigmaRef:
 
         assert "user_sigma_ref" in var_names
         assert "user_n_exponent" in var_names
+
+
+# =============================================================================
+# Artist prediction fan chart
+# =============================================================================
+
+
+class TestSaveArtistPredictionPlot:
+    """Tests for save_artist_prediction_plot.
+
+    Regression coverage for the per-entity fan chart: ``actual_scores`` and the
+    columns of ``pred_samples`` must share the same length. The publication
+    pipeline appends one forecast point to the prediction fan, so the observed
+    series is extended with a trailing NaN (rendered as a gap) — exercised here.
+    """
+
+    def test_creates_pdf_and_png(self, tmp_path):
+        actual = np.array([70.0, 75.0, 72.0, 80.0])
+        pred_samples = np.tile(actual, (5, 1))  # (n_samples, n_albums)
+        pdf_path, png_path = save_artist_prediction_plot(
+            artist="Test Artist",
+            actual_scores=actual,
+            pred_samples=pred_samples,
+            album_labels=["A1", "A2", "A3", "A4"],
+            output_dir=tmp_path,
+            filename_base="artist_test",
+        )
+        assert pdf_path.exists()
+        assert png_path.exists()
+
+    def test_appended_forecast_point_with_nan_actual(self, tmp_path):
+        """The pipeline shape: N observed albums + 1 forecast column.
+
+        ``pred_samples`` is (n_samples, N+1) and ``actual_scores`` is the N
+        observed values plus a trailing NaN for the forecast slot. Dimensions
+        line up, so the figure renders instead of being silently swallowed.
+        """
+        actual = np.array([70.0, 75.0, 72.0])
+        quantiles = np.array([60.0, 68.0, 74.0, 80.0, 88.0])  # q05..q95
+        pred_for_fan = np.tile(actual, (5, 1))
+        pred_for_fan = np.column_stack([pred_for_fan, quantiles[:, None]])  # (5, N+1)
+
+        actual_for_fan = np.append(actual, np.nan)  # N+1, gap at forecast
+        albums_for_fan = ["A1", "A2", "A3", "next"]
+
+        assert pred_for_fan.shape[1] == len(actual_for_fan) == len(albums_for_fan)
+
+        pdf_path, png_path = save_artist_prediction_plot(
+            artist="Test Artist",
+            actual_scores=actual_for_fan,
+            pred_samples=pred_for_fan,
+            album_labels=albums_for_fan,
+            output_dir=tmp_path,
+            filename_base="artist_forecast",
+        )
+        assert pdf_path.exists()
+        assert png_path.exists()
+
+    def test_mismatched_dimensions_raise(self, tmp_path):
+        """Guard the contract: N actual vs N+1 prediction columns is invalid.
+
+        This is exactly the off-by-one the publication pipeline previously hit
+        (and swallowed); the function must not silently accept it.
+        """
+        actual = np.array([70.0, 75.0, 72.0])  # N = 3
+        pred_samples = np.tile(np.append(actual, 80.0), (5, 1))  # (5, N+1)
+        with pytest.raises(ValueError):
+            save_artist_prediction_plot(
+                artist="Test Artist",
+                actual_scores=actual,
+                pred_samples=pred_samples,
+                album_labels=None,
+                output_dir=tmp_path,
+                filename_base="artist_bad",
+            )

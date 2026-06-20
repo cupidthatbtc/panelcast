@@ -11,7 +11,7 @@ Goal
    posterior-site prefix, the feature-block list — comes from a
    `DatasetDescriptor`. One YAML under `configs/datasets/` retargets the
    pipeline; omitted keys keep their AOTY defaults ("default-equals-AOTY").
-   Worked example: `configs/datasets/example_aero.yaml` + `docs/PORTING.md`.
+   Worked example: `configs/datasets/aero.yaml` + `docs/PORTING.md`.
 2. **Feature registry** (`src/panelcast/features/registry.py`):
    `build_default_registry(descriptor)` registers the generic blocks
    (`temporal`, `entity_history`) closed over the descriptor's column names,

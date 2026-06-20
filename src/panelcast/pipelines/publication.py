@@ -946,17 +946,23 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                     if not all(c in same_preds.columns for c in q_cols):
                         continue
                     pred_quantiles = same_preds[q_cols].values[0]
-                    # Create a simple fan: actual scores + one predicted point
+                    # Build a fan: the observed trajectory (no predictive spread)
+                    # plus one appended forecast point carrying the quantile fan.
                     pred_for_fan = np.tile(actual, (5, 1))
                     pred_for_fan = np.column_stack([pred_for_fan, pred_quantiles[:, None]])
+                    # The appended column adds a forecast time point, so extend the
+                    # observed series and labels to match pred_for_fan's width: the
+                    # forecast slot has no observed value (NaN -> rendered as a gap).
+                    actual_for_fan = np.append(np.asarray(actual, dtype=float), np.nan)
+                    albums_for_fan = (list(albums) + ["next"]) if albums is not None else None
 
                     safe_name = artist.replace("/", "_").replace(" ", "_")[:50]
                     try:
                         pdf_path, png_path = save_artist_prediction_plot(
                             artist=artist,
-                            actual_scores=actual,
+                            actual_scores=actual_for_fan,
                             pred_samples=pred_for_fan,
-                            album_labels=albums,
+                            album_labels=albums_for_fan,
                             output_dir=figures_dir,
                             filename_base=f"artist_{safe_name}",
                             categories=categories,
