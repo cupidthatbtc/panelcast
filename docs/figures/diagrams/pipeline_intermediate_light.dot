@@ -1,0 +1,97 @@
+digraph AOTYPipeline {
+	compound=true fontname=Arial fontsize=24 label="AOTY Prediction Pipeline" labeljust=c labelloc=t nodesep=1.2 overlap=false pad=0.5 rankdir=TB ranksep=1.5 splines=polyline
+	bgcolor="#FFFFFF"
+	node [color="#333333" fillcolor="#FFFFFF" fontcolor="#000000" fontname=Arial fontsize=16 margin="0.3,0.15" penwidth=1.2 shape=box style="filled,rounded"]
+	edge [arrowsize=0.8 color="#333333" fontcolor="#000000" fontname=Arial fontsize=8 penwidth=1.2]
+	subgraph cluster_input {
+		color="#333333" fillcolor="#F7F7F7" fontcolor="#000000" fontname=Arial fontsize=18 label="1. Input" penwidth=2 style="rounded,filled"
+		input_file [label="Raw CSV
+130K albums" fillcolor="#E8E8E8" shape=ellipse]
+	}
+	subgraph cluster_preprocess {
+		color="#333333" fillcolor="#F0F0F0" fontcolor="#000000" fontname=Arial fontsize=18 label="2. Preprocessing" penwidth=2 style="rounded,filled"
+		schema_val [label="Schema
+Validation"]
+		cleaning [label="Cleaning &
+Filtering"]
+		cleaned_data [label="Cleaned Data
+~62K rows" fillcolor="#D4E8D4" shape=ellipse]
+		schema_val -> cleaning
+		cleaning -> cleaned_data
+	}
+	subgraph cluster_split {
+		color="#333333" fillcolor="#FAFAFA" fontcolor="#000000" fontname=Arial fontsize=18 label="3. Data Splitting" penwidth=2 style="rounded,filled"
+		split_strategy [label="Temporal
+Split"]
+		train_set [label="Train
+(64%)" fillcolor="#C8E0C8" shape=ellipse]
+		val_set [label="Val
+(12%)" fillcolor="#C8D8E8" shape=ellipse]
+		test_set [label="Test
+(12%)" fillcolor="#E0D0E8" shape=ellipse]
+	}
+	subgraph cluster_features {
+		color="#333333" fillcolor="#F5F9F5" fontcolor="#000000" fontname=Arial fontsize=18 label="4. Feature Engineering" penwidth=2 style="rounded,filled"
+		temporal_block [label=Temporal]
+		album_type_block [label="Album Type"]
+		artist_history_block [label="Artist History"]
+		genre_block [label=Genre]
+		collab_block [label=Collaboration]
+		feature_pipeline [label="Feature Pipeline" fillcolor="#E8E4D4"]
+	}
+	subgraph cluster_model {
+		color="#333333" fillcolor="#FFFDF0" fontcolor="#000000" fontname=Arial fontsize=18 label="5. Bayesian Model" penwidth=2 style="rounded,filled"
+		prior_config [label="Prior
+Configuration"]
+		hierarchical [label="Hierarchical
+Structure"]
+		time_varying [label="Time-varying
+Effects"]
+		mcmc_sampling [label="MCMC Sampling
+(NUTS/GPU)" fillcolor="#B8D4E8" penwidth=2]
+		prior_config -> hierarchical
+		hierarchical -> time_varying
+		time_varying -> mcmc_sampling
+	}
+	subgraph cluster_eval {
+		color="#333333" fillcolor="#F8F5FA" fontcolor="#000000" fontname=Arial fontsize=18 label="6. Evaluation" penwidth=2 style="rounded,filled"
+		convergence [label="Convergence
+Checks" fillcolor="#FFE4B5" shape=diamond]
+		loo_cv [label="LOO-CV"]
+		calibration [label=Calibration]
+		sensitivity [label="Sensitivity
+Analysis"]
+		convergence -> loo_cv
+		loo_cv -> calibration
+		calibration -> sensitivity
+	}
+	subgraph cluster_output {
+		color="#333333" fillcolor="#F7F7F7" fontcolor="#000000" fontname=Arial fontsize=18 label="7. Output" penwidth=2 style="rounded,filled"
+		predictions [label="Predictions
+(95% CI)" fillcolor="#D4E8D4" shape=ellipse]
+		publication [label="Publication
+Artifacts"]
+	}
+	input_file -> schema_val [color="#333333" penwidth=1.2]
+	cleaned_data -> split_strategy [color="#333333" penwidth=1.2]
+	split_strategy -> train_set [color="#333333" penwidth=1.2]
+	split_strategy -> val_set [color="#333333" penwidth=1.2]
+	split_strategy -> test_set [color="#333333" penwidth=1.2]
+	train_set -> temporal_block [color="#2E7D32" penwidth=1.2]
+	train_set -> album_type_block [color="#2E7D32" penwidth=1.2]
+	train_set -> artist_history_block [color="#2E7D32" penwidth=1.2]
+	train_set -> genre_block [color="#2E7D32" penwidth=1.2]
+	train_set -> collab_block [color="#2E7D32" penwidth=1.2]
+	temporal_block -> feature_pipeline
+	album_type_block -> feature_pipeline
+	artist_history_block -> feature_pipeline
+	genre_block -> feature_pipeline
+	collab_block -> feature_pipeline
+	feature_pipeline -> prior_config [color="#333333" penwidth=1.2]
+	mcmc_sampling -> convergence [color="#333333" penwidth=1.2]
+	convergence -> predictions [color="#333333" penwidth=1.2]
+	sensitivity -> publication [color="#333333" penwidth=1.2]
+	convergence -> mcmc_sampling [color="#666666" constraint=false fontsize=7 style=dashed xlabel=retry]
+	sensitivity -> prior_config [color="#666666" constraint=false fontsize=7 style=dashed xlabel=tune]
+	test_set -> predictions [color="#666666" style=dashed]
+}

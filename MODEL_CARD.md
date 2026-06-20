@@ -1,0 +1,215 @@
+> **WARNING — DIAGNOSTICS GATE**
+>
+> - Convergence diagnostics **FAILED**.
+>
+> This model card was generated from a run that does not meet publication-quality convergence standards. Interpret all results with caution.
+
+# Model Card: AOTY Artist Score Prediction Model
+
+## Model Details
+
+- **Model type:** Bayesian Hierarchical Regression with Time-Varying Effects
+- **Version:** 0.1.0
+- **Authors:** AOTY Prediction Project
+- **Created:** 2026-06-11
+- **Last updated:** 2026-06-11
+
+## Intended Use
+
+This model is intended for:
+
+- Academic research on music industry trends and career trajectories
+- Personal exploration of album score patterns and artist development
+- Understanding factors that influence critical and user reception
+- Educational demonstration of Bayesian hierarchical modeling
+- Reproducibility research in music information retrieval
+
+### Out-of-Scope Use
+
+This model should NOT be used for:
+
+- Commercial artist evaluation or signing decisions
+- Real-time prediction systems in production environments
+- Automated content moderation or recommendation without human review
+- High-stakes decisions affecting artists' careers or livelihoods
+- Marketing claims about album quality or artist potential
+
+## Training Data
+
+- **Dataset:** Album of the Year (AOTY)
+- **Size:** 48,652 albums
+- **Description:** Music album metadata and scores from Album of the Year, including artist information, release dates, genres, and both critic and user scores.
+- **Preprocessing:** Leak-safe within-artist temporal splitting with artist-disjoint secondary checks, minimum-ratings filtering, features standardized to zero mean and unit variance.
+
+## Model Architecture
+
+Bayesian hierarchical regression with four key components:
+
+1. **Hierarchical artist effects**: Partial pooling across artists for robust estimation of artist quality. Non-centered parameterization via LocScaleReparam avoids funnel geometry.
+
+2. **Time-varying slopes**: Artist quality modeled as a random walk, allowing career trajectories to evolve over time.
+
+3. **AR(1) structure**: Album-to-album dependencies captured via autoregressive term, modeling momentum effects where consecutive albums tend to have correlated scores.
+
+4. **Heteroscedastic observation noise** (sigma_ref parameterization): Albums with more reviews have lower observation noise. The model samples sigma_ref (noise at the median review count n_ref) and derives per-observation noise as: sigma_obs = sigma_ref * n_ref^n_exponent, then sigma_i = sigma_obs / n_reviews_i^n_exponent. This reparameterization breaks the multiplicative funnel between sigma_obs and n_exponent that causes divergent transitions in MCMC sampling.
+
+Mathematical form:
+- y_ij ~ Normal(mu_ij, sigma_i)
+- mu_ij = artist_effect_jt + X_ij @ beta + rho * prev_score_ij
+- artist_effect_jt evolves via random walk from initial effect
+- sigma_i = sigma_obs / n_reviews_i^n_exponent (heteroscedastic mode)
+
+### Prior Distributions
+
+Prior distributions are weakly informative, chosen to regularize inference while allowing the data to dominate:
+
+- **mu_artist** ~ Normal(70.28749075063718, 1.0): Centered at 70.28749075063718 because artist effects represent deviations from feature-based predictions. Scale of 1.0 permits the population center to shift by ~1.0 SD on the standardized score scale.
+- **sigma_artist** ~ HalfNormal(0.5): Scale of 0.5 encourages moderate partial pooling. Implies most artist effects within +/-1.0, consistent with observed between-artist spread.
+- **sigma_rw** ~ HalfNormal(0.1): Scale of 0.1 produces smooth career trajectories where album-to-album quality changes are small relative to overall artist variation.
+- **rho** ~ TruncatedNormal(0.0, 0.3, -0.99, 0.99): Centered at 0.0 with scale 0.3, allowing moderate autoregressive momentum without strong prior commitment to direction.
+- **beta** ~ Normal(0.0, 1.0): Scale of 1.0 is weakly informative for standardized features, allowing data to determine effect sizes.
+- **sigma_obs** ~ HalfNormal(1.0): Scale of 1.0 allows data to determine observation-level noise.
+
+
+**Prior Predictive Check**: Prior predictive simulation (n_samples=500) shows 99.9% of prior-implied predictions fall within [0.0, 100.0]. Summary: mean=70.2, sd=6.6, range=[-0.3, 115.3].
+
+### Hyperparameters
+
+| Parameter | Value |
+|-----------|-------|
+| mu_artist_loc | 0.0 |
+| mu_artist_scale | 1.0 |
+| sigma_artist_scale | 0.5 |
+| sigma_rw_scale | 0.1 |
+| rho_loc | 0.0 |
+| rho_scale | 0.3 |
+| beta_loc | 0.0 |
+| beta_scale | 1.0 |
+| sigma_obs_scale | 1.0 |
+| sigma_ref_scale | 1.0 |
+| n_exponent_default | 0.0 |
+| n_features | 32 |
+| n_artists | 7562 |
+| max_albums | 50 |
+| num_chains | 2 |
+| num_warmup | 500 |
+| num_samples | 500 |
+| chain_method | sequential |
+| target_accept_prob | 0.9 |
+| max_tree_depth | 10 |
+
+## Evaluation Results
+
+### Convergence Diagnostics
+
+Convergence status: FAILED
+
+- R-hat (max): 1.0300 (threshold: < 1.01)
+- ESS bulk (min): 158
+- ESS tail (min): 158
+- Divergent transitions: 0
+
+### Calibration
+
+Credible interval coverage:
+- 80% CI: 83.7% empirical coverage, mean width=18.33
+- 95% CI: 94.3% empirical coverage, mean width=31.26
+
+**Posterior Predictive Checks:**
+- mean: T(y_obs)=68.43, p=1.000 (MC SE: 0.000)
+- sd: T(y_obs)=11.43, p=0.003 (MC SE: 0.002)
+- skewness: T(y_obs)=-1.89, p=0.998 (MC SE: 0.001)
+- min: T(y_obs)=0.00, p=0.439 (MC SE: 0.016)
+- max: T(y_obs)=94.00, p=1.000 (MC SE: 0.000)
+- q10: T(y_obs)=55.00, p=1.000 (MC SE: 0.000)
+- q50: T(y_obs)=71.00, p=0.000 (MC SE: 0.000)
+- q90: T(y_obs)=79.00, p=1.000 (MC SE: 0.000)
+
+### Predictive Performance
+
+Point prediction metrics:
+
+- MAE: 5.61
+- RMSE: 8.19
+- R-squared: 0.486
+- ELPD (LOO-CV): -28264.9 (SE: 103.1)
+
+- **ELPD (LOO-CV):** -28264.9
+
+## Limitations
+
+- **Convergence (compute-bounded, geometry fixed).** The historical sigma_artist ESS deficit was traced to a sampling-geometry confound: the uncentered AR(1) term absorbed the score level, ridge-coupling rho and mu_artist (corr -0.997). AR centering with a level-located mu_artist prior removed it (corr +0.016, debut AR terms exactly zero). Remaining R-hat/ESS shortfalls at cheap validation settings (2 chains x 500) are compute-bounded; the publication configuration (4 chains x 5000, warmup 3000, with the rw_raw collection exclusion required for 24 GB GPUs) extrapolates to ~4000 bulk ESS.
+- **Symmetric likelihood vs. left-skewed target.** The Student-t likelihood is symmetric, but observed user-score distribution has skewness ~= -1.79 (long left tail of poorly-received albums). This is a structural mismatch, not a fitting issue. PPC p-values pinned at 0.000/1.000 for sd, skewness, q50, q90, and max are the expected signature of this mismatch. The lightest candidate fix — an offset-logit target transform — was implemented and evaluated twice (pre- and post-AR-centering) and is HELD: its sampler geometry does not mix at validation settings (R-hat 1.27-1.37, bulk ESS 5-10) and its priors fail score-scale plausibility checks. Remaining candidates: (a) skew-Student-t likelihood; (b) Beta likelihood scaled to [0, 100]. Both are future work; the symmetric likelihood's point accuracy and 95% interval calibration are unaffected.
+- **Soft-clip at [0, 100] interacts with symmetric tails.** Because the target is bounded but the likelihood is symmetric, soft_clip compresses both tails simultaneously. A logit-scale target would remove the clip, but the transform is held (see above); the clip stays.
+- **Trained on English-language reviews; may not generalize to other markets.**
+- Dynamic artist trajectories are learned only when an artist has at least 2 training albums (configurable via `dynamic.min_albums`).
+- Less reliable for genre-crossing artists due to sparse data.
+- Historical biases in music criticism may be reflected in predictions.
+- Does not account for album-specific factors (production, label influence).
+- Assumes gradual career evolution; sudden style changes poorly predicted.
+- Score predictions are probabilistic and should not be treated as ground truth.
+
+## Ethical Considerations
+
+- Predictions should not gatekeep artists or influence career decisions
+- Aggregated scores may not reflect artistic merit or listener preferences
+- Care should be taken when interpreting genre-based effects
+- Model may perpetuate historical biases present in music criticism
+- Predictions are for research and exploration, not commercial evaluation
+- Artists and labels should not be ranked solely based on predicted scores
+
+## How to Use
+
+### Loading the Model
+
+```python
+from pathlib import Path
+
+from panelcast.models.bayes.io import load_manifest, load_model
+
+# Load the current user-score model referenced by models/manifest.json
+manifest = load_manifest(Path("models"))
+model_name = manifest.current["user_score"]
+idata = load_model(Path("models") / model_name)
+```
+
+### Making Predictions
+
+```python
+from panelcast.models.bayes.predict import (
+    extract_posterior_samples,
+    predict_new_artist,
+)
+import jax.numpy as jnp
+
+# Build posterior sample dict from InferenceData
+posterior_samples = extract_posterior_samples(idata)
+
+# Predict one new album using standardized feature vector
+n_features = int(posterior_samples["user_beta"].shape[-1])
+X_new = jnp.zeros((1, n_features), dtype=jnp.float32)
+
+# Generate predictions with uncertainty
+pred = predict_new_artist(
+    posterior_samples=posterior_samples,
+    X_new=X_new,
+    prev_score=jnp.array([72.5], dtype=jnp.float32),
+    n_reviews_new=jnp.array([300.0], dtype=jnp.float32),
+    prefix="user_",
+)
+```
+
+### Interpreting Results
+
+```python
+import numpy as np
+
+# Extract prediction statistics from posterior predictive draws
+y_samples = np.asarray(pred['y']).ravel()
+pred_mean = float(np.mean(y_samples))
+pred_std = float(np.std(y_samples))
+ci_95 = np.percentile(y_samples, [2.5, 97.5])
+
+print(f"Predicted score: {pred_mean:.1f} +/- {pred_std:.1f}")
+print(f"95% CI: [{ci_95[0]:.1f}, {ci_95[1]:.1f}]")
+```

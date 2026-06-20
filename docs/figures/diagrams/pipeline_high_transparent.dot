@@ -1,0 +1,47 @@
+digraph AOTYPipeline {
+	compound=true fontname=Arial fontsize=20 label="AOTY Prediction Pipeline" labeljust=c labelloc=t nodesep=0.8 overlap=false pad=0.5 rankdir=TB ranksep=1.0 splines=polyline
+	node [color="#333333" fillcolor="#FFFFFF" fontcolor="#000000" fontname=Arial fontsize=14 margin="0.25,0.15" penwidth=1.2 shape=box style="filled,rounded"]
+	edge [arrowsize=0.8 color="#333333" fontcolor="#000000" fontname=Arial fontsize=8 penwidth=1.2]
+	subgraph cluster_input {
+		color="#333333" fillcolor="#F7F7F7" fontcolor="#000000" fontname=Arial fontsize=14 label=Input penwidth=1.5 style="rounded,filled"
+		input_data [label="Raw Data
+(130K albums)" fillcolor="#E8E8E8" shape=ellipse]
+	}
+	subgraph cluster_preprocess {
+		color="#333333" fillcolor="#F0F0F0" fontcolor="#000000" fontname=Arial fontsize=14 label=Preprocessing penwidth=1.5 style="rounded,filled"
+		cleaning [label="Data Cleaning
+& Validation"]
+	}
+	subgraph cluster_split {
+		color="#333333" fillcolor="#FAFAFA" fontcolor="#000000" fontname=Arial fontsize=14 label="Data Splitting" penwidth=1.5 style="rounded,filled"
+		splits [label="Train / Val / Test
+(temporal split)"]
+	}
+	subgraph cluster_features {
+		color="#333333" fillcolor="#F5F9F5" fontcolor="#000000" fontname=Arial fontsize=14 label="Feature Engineering" penwidth=1.5 style="rounded,filled"
+		features [label="Feature Pipeline
+(6 blocks)" fillcolor="#E8E4D4" shape=box]
+	}
+	subgraph cluster_model {
+		color="#333333" fillcolor="#FFFDF0" fontcolor="#000000" fontname=Arial fontsize=14 label="Bayesian Modeling" penwidth=1.5 style="rounded,filled"
+		model [label="Hierarchical Model
+(MCMC)" fillcolor="#B8D4E8" penwidth=2 shape=box]
+	}
+	subgraph cluster_eval {
+		color="#333333" fillcolor="#F8F5FA" fontcolor="#000000" fontname=Arial fontsize=14 label=Evaluation penwidth=1.5 style="rounded,filled"
+		evaluation [label="Diagnostics &
+Validation" fillcolor="#FFE4B5" shape=diamond]
+	}
+	subgraph cluster_output {
+		color="#333333" fillcolor="#F7F7F7" fontcolor="#000000" fontname=Arial fontsize=14 label=Output penwidth=1.5 style="rounded,filled"
+		predictions [label="Predictions
+(with 95% CI)" fillcolor="#D4E8D4" shape=ellipse]
+	}
+	input_data -> cleaning [color="#333333" penwidth=1.5]
+	cleaning -> splits [color="#333333" penwidth=1.5]
+	splits -> features [color="#333333" penwidth=1.5]
+	features -> model [color="#333333" penwidth=1.5]
+	model -> evaluation [color="#333333" penwidth=1.5]
+	evaluation -> predictions [color="#333333" penwidth=1.5]
+	evaluation -> model [color="#666666" constraint=false fontsize=8 style=dashed xlabel=tune]
+}

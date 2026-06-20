@@ -1,0 +1,214 @@
+digraph AOTYPipeline {
+	compound=true fontname="Courier New" fontsize=10 forcelabels=true label="AOTY PREDICTION PIPELINE
+Technical Reference" labeljust=c labelloc=t nodesep=0.6 overlap=false pad=0.75 rankdir=TB ranksep=0.8 splines=ortho
+	bgcolor="#FFFEF0"
+	node [color="#333333" fillcolor="#FFFEF0" fontcolor="#333333" fontname="Courier New" fontsize=8 margin="0.15,0.1" penwidth=1 shape=box style=filled]
+	edge [color="#333333" fontcolor="#333333" fontname="Courier New" fontsize=7 penwidth=1]
+	subgraph cluster_input {
+		color="#333333" fillcolor="#E8E8D0" fontcolor="#333333" label="1.0 INPUT" style=filled
+		input_file [label="1.1 all_albums_full.csv
+─────────────────────
+130,023 rows x 18 cols" fillcolor="#FFF8DC" shape=folder]
+	}
+	subgraph cluster_preprocess {
+		color="#333333" fillcolor="#F5F5DC" fontcolor="#333333" label="2.0 PREPROCESSING" style=filled
+		schema_val [label="2.1 Schema Validation
+─────────────────────
+Pandera checks
+type enforcement"]
+		cleaning [label="2.2 Cleaning Rules
+─────────────────────
+null handling
+date parsing
+deduplication"]
+		min_ratings [label="2.3 Min Ratings Filter
+─────────────────────
+threshold=10
+quality gate"]
+		audit_trail [label="2.4 Audit Trail
+─────────────────────
+JSONL exclusion log
+reproducibility" fillcolor="#FFFACD" shape=note]
+		cleaned_data [label="2.5 CLEANED DATA
+─────────────────────
+~62,000 rows
+(52% retained)" fillcolor="#C8E6C9" shape=cylinder]
+		schema_val -> cleaning
+		cleaning -> min_ratings
+		min_ratings -> audit_trail
+		min_ratings -> cleaned_data
+	}
+	subgraph cluster_split {
+		color="#333333" fillcolor="#FFF3E0" fontcolor="#333333" label="3.0 SPLIT INFRASTRUCTURE" style=filled
+		within_artist [label="3.1 Within-Artist Split
+─────────────────────
+temporal ordering
+per-artist"]
+		artist_disjoint [label="3.2 Artist-Disjoint Split
+─────────────────────
+holdout artists
+generalization"]
+		split_manifest [label="3.3 Split Manifest
+─────────────────────
+hash verification
+version tracking" fillcolor="#FFFACD" shape=note]
+		train_set [label="TRAIN
+─────────────────────
+~41,000 rows (64%)" fillcolor="#81C784" shape=cylinder]
+		val_set [label="VAL
+─────────────────────
+~7,500 rows (12%)" fillcolor="#64B5F6" shape=cylinder]
+		test_set [label="TEST
+─────────────────────
+~7,500 rows (12%)" fillcolor="#CE93D8" shape=cylinder]
+	}
+	subgraph cluster_features {
+		color="#333333" fillcolor="#E8F5E9" fontcolor="#333333" label="4.0 FEATURE ENGINEERING (fit on TRAIN only)" style=filled
+		temporal_block [label="4.1 TemporalBlock
+─────────────────────
+album_sequence
+career_years
+release_gap"]
+		album_type_block [label="4.2 AlbumTypeBlock
+─────────────────────
+one-hot encoding
+FittedVocabulary"]
+		artist_history_block [label="4.3 ArtistHistoryBlock
+─────────────────────
+leave-one-out
+prior stats"]
+		artist_rep_block [label="4.4 ArtistReputationBlock
+─────────────────────
+prior mean
+smoothing"]
+		genre_block [label="4.5 GenreBlock
+─────────────────────
+multi-hot + PCA
+min_count=20"]
+		collab_block [label="4.6 CollaborationBlock
+─────────────────────
+ordinal encoding
+solo -> ensemble"]
+		feature_pipeline [label="4.7 FeaturePipeline
+─────────────────────
+fit(train)
+transform(all)" fillcolor="#FFD54F" shape=parallelogram]
+	}
+	subgraph cluster_model {
+		color="#333333" fillcolor="#FFF9C4" fontcolor="#333333" label="5.0 BAYESIAN MODEL" style=filled
+		prior_config [label="5.1 PriorConfig
+─────────────────────
+9 hyperparameters
+default/diffuse/informative"]
+		hierarchical [label="5.2 Hierarchical Structure
+─────────────────────
+artist random effects
+partial pooling"]
+		non_centered [label="5.3 Non-centered Param
+─────────────────────
+LocScaleReparam
+better sampling"]
+		time_varying [label="5.4 Time-varying Effects
+─────────────────────
+random walk
+trend capture"]
+		ar1 [label="5.5 AR(1) Structure
+─────────────────────
+stationary constraint
+|rho| < 1"]
+		mcmc_sampling [label="5.6 MCMC Sampling
+─────────────────────
+4 chains x 1000 draws
+NUTS / JAX GPU" fillcolor="#FFEB3B" shape=doubleoctagon]
+	}
+	subgraph cluster_eval {
+		color="#333333" fillcolor="#EDE7F6" fontcolor="#333333" label="6.0 EVALUATION" style=filled
+		convergence [label="6.1 Convergence Checks
+─────────────────────
+R-hat < 1.01
+ESS > 400
+divergences = 0" fillcolor="#FFE0B2" shape=diamond]
+		loo_cv [label="6.2 LOO-CV
+─────────────────────
+PSIS importance
+Pareto-k < 0.7"]
+		calibration [label="6.3 Calibration
+─────────────────────
+coverage analysis
+reliability diagrams"]
+		prior_predictive [label="6.4 Prior Predictive
+─────────────────────
+sanity check
+prior influence"]
+		sensitivity [label="6.5 Sensitivity Analysis
+─────────────────────
+prior configs
+feature ablation"]
+	}
+	subgraph cluster_output {
+		color="#333333" fillcolor="#E8E8D0" fontcolor="#333333" label="7.0 OUTPUT" style=filled
+		predictions [label="7.1 Predictions
+─────────────────────
+posterior mean
+95% credible intervals" fillcolor="#C8E6C9" shape=cylinder]
+		model_artifacts [label="7.2 Model Artifacts
+─────────────────────
+InferenceData (netCDF)
+manifest JSON" fillcolor="#FFF8DC" shape=folder]
+		publication [label="7.3 Publication
+─────────────────────
+figures, tables
+model card" fillcolor="#FFFACD" shape=note]
+	}
+	subgraph cluster_legend {
+		color="#333333" fillcolor="#FFFEF0" fontcolor="#333333" label=LEGEND style=filled
+		legend_data [label="Data/File" fillcolor="#FFF8DC" shape=folder]
+		legend_storage [label=Storage fillcolor="#C8E6C9" shape=cylinder]
+		legend_decision [label=Decision fillcolor="#FFE0B2" shape=diamond]
+		legend_merge [label=Transform fillcolor="#FFD54F" shape=parallelogram]
+		legend_result [label="Key Result" fillcolor="#FFEB3B" shape=doubleoctagon]
+		legend_note [label="Note/Ref" fillcolor="#FFFACD" shape=note]
+		legend_data -> legend_storage [style=invis]
+		legend_storage -> legend_decision [style=invis]
+		legend_decision -> legend_merge [style=invis]
+		legend_merge -> legend_result [style=invis]
+		legend_result -> legend_note [style=invis]
+	}
+	input_file -> schema_val [penwidth=1.5]
+	cleaned_data -> within_artist [penwidth=1.5]
+	cleaned_data -> artist_disjoint [penwidth=1.5]
+	within_artist -> split_manifest [style=dashed]
+	artist_disjoint -> split_manifest [style=dashed]
+	within_artist -> train_set [penwidth=1.5]
+	within_artist -> val_set [penwidth=1.5]
+	within_artist -> test_set [penwidth=1.5]
+	train_set -> temporal_block [color="#388E3C" penwidth=1.5]
+	train_set -> album_type_block [color="#388E3C" penwidth=1.5]
+	train_set -> artist_history_block [color="#388E3C" penwidth=1.5]
+	train_set -> artist_rep_block [color="#388E3C" penwidth=1.5]
+	train_set -> genre_block [color="#388E3C" penwidth=1.5]
+	train_set -> collab_block [color="#388E3C" penwidth=1.5]
+	temporal_block -> feature_pipeline
+	album_type_block -> feature_pipeline
+	artist_history_block -> feature_pipeline
+	artist_rep_block -> feature_pipeline
+	genre_block -> feature_pipeline
+	collab_block -> feature_pipeline
+	feature_pipeline -> prior_config [penwidth=1.5]
+	prior_config -> hierarchical
+	hierarchical -> non_centered
+	non_centered -> time_varying
+	time_varying -> ar1
+	ar1 -> mcmc_sampling
+	mcmc_sampling -> convergence [penwidth=1.5]
+	convergence -> loo_cv
+	loo_cv -> calibration
+	calibration -> prior_predictive
+	prior_predictive -> sensitivity
+	convergence -> predictions [penwidth=1.5]
+	mcmc_sampling -> model_artifacts [style=dashed]
+	sensitivity -> publication
+	convergence -> mcmc_sampling [color="#D32F2F" constraint=false style=dashed xlabel=retry]
+	sensitivity -> prior_config [color="#7B1FA2" constraint=false style=dashed xlabel=tune]
+	test_set -> predictions [color="#7B1FA2" style=dashed xlabel=eval]
+}
