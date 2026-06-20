@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "panelcast: Hierarchical Bayesian prediction for bounded scores over entity histories"
+type: software
+authors:
+  - family-names: Wenenn
+    given-names: Jack
+    email: jcwenenn@gmail.com
+repository-code: "https://github.com/cupidthatbtc/panelcast"
+url: "https://github.com/cupidthatbtc/panelcast"
+abstract: >-
+  panelcast is a publication-quality hierarchical Bayesian prediction pipeline
+  (NumPyro/JAX) for bounded scores of events nested in entities over time. Every
+  dataset-specific name flows through a single YAML descriptor, so a new domain
+  runs with no source changes. It ships an Album of the Year flagship example
+  and a worked aerospace example, with leakage controls, data lineage, preflight
+  gates, and convergence/calibration diagnostics as first-class checks.
+keywords:
+  - bayesian
+  - numpyro
+  - jax
+  - hierarchical
+  - forecasting
+  - panel-data
+license: MIT
+version: 0.1.0
+date-released: "2026-06-19"

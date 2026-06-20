@@ -1,0 +1,24 @@
+# Pre-commit hooks for code quality
+# Run: pre-commit install (once)
+# Manual: pre-commit run --all-files
+
+repos:
+  # Ruff - fast Python linter and formatter
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      # Format first (fixes spacing, quotes, etc.)
+      - id: ruff-format
+        args: [--config, pyproject.toml]
+      # Then lint (catches errors, imports, etc.)
+      - id: ruff
+        args: [--fix, --config, pyproject.toml]
+
+  # MyPy - static type checker
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.1
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - types-PyYAML
+        args: [--config-file, pyproject.toml]
