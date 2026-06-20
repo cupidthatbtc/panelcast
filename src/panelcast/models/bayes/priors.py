@@ -1,0 +1,225 @@
+"""Prior configuration for Bayesian hierarchical model.
+
+This module defines the hyperparameters for the album score model priors.
+All priors are configurable to support sensitivity analysis.
+
+Prior Roles:
+- mu_artist: Population mean of artist quality (centering artist effects)
+- sigma_artist: Between-artist variance controlling partial pooling strength
+  - Large sigma_artist -> less pooling, artists estimated independently
+  - Small sigma_artist -> more pooling, artists shrunk toward population mean
+- sigma_rw: Innovation scale for time-varying artist effects (random walk)
+  - Controls how much an artist's quality changes between albums
+  - Smaller values -> smoother career trajectories
+- rho: AR(1) coefficient for album-to-album score dependency
+  - Captures momentum: positive rho -> hot streaks, negative -> regression to mean
+- beta: Fixed effect coefficients for covariates (genre PCA, release year, etc.)
+- sigma_obs: Observation-level noise (unexplained variance per album)
+- sigma_ref: Observation noise at the reference review count (median n_reviews).
+  When sigma-ref mode is active (n_ref provided and heteroscedastic mode on),
+  the model samples sigma_ref instead of sigma_obs and derives:
+      sigma_obs = sigma_ref * n_ref^n_exponent
+  This breaks the multiplicative funnel between sigma_obs and n_exponent.
+- n_exponent: Scaling exponent for heteroscedastic observation noise
+  - sigma_scaled = sigma_obs / n_reviews^exponent
+  - Higher exponent -> more noise reduction for albums with many reviews
+  - exponent=0 -> homoscedastic (constant noise)
+"""
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class PriorConfig:
+    """Hyperparameter configuration for album score model priors.
+
+    All parameters are frozen to ensure immutability during model fitting.
+
+    Attributes:
+        mu_artist_loc: Location (mean) for artist effect population mean prior.
+            Default 0.0 centers artist effects around zero (deviations from baseline).
+        mu_artist_scale: Scale (std) for artist effect population mean prior.
+            Default 1.0 allows moderate uncertainty in population center.
+        sigma_artist_scale: Scale for HalfNormal prior on artist effect dispersion.
+            Default 0.5 encourages moderate pooling. Lower values -> more pooling.
+        sigma_rw_scale: Scale for HalfNormal prior on random walk innovation.
+            Default 0.1 produces smooth career trajectories. Controls how much
+            an artist's quality can change between consecutive albums.
+            Smaller values -> more stable artist effects over time.
+        rho_loc: Location (mean) for AR(1) coefficient prior.
+            Default 0.0 centers the autoregressive coefficient at zero,
+            expressing no prior belief about momentum direction.
+        rho_scale: Scale for AR(1) coefficient prior.
+            Default 0.3 allows moderate uncertainty while keeping most prior
+            mass on reasonable AR coefficients (roughly -0.6 to 0.6).
+        beta_loc: Location for fixed effect coefficient priors.
+            Default 0.0 centers effects at zero (no effect assumption).
+        beta_scale: Scale for fixed effect coefficient priors.
+            Default 1.0 is weakly informative for standardized features.
+        sigma_obs_scale: Scale for HalfNormal prior on observation noise.
+            Default 1.0 allows moderate observation-level variance.
+        sigma_ref_scale: Scale for HalfNormal prior on sigma_ref (noise at
+            reference review count). Used when n_ref is provided
+            (sigma-ref reparameterization mode). Default 1.0 is weakly
+            informative for standardized scores.
+        n_exponent_alpha: Alpha (concentration1) parameter for Beta prior on
+            learned n_exponent. Default 2.0. (Legacy - use logit-normal instead)
+        n_exponent_beta: Beta (concentration0) parameter for Beta prior on
+            learned n_exponent. Default 4.0. (Legacy - use logit-normal instead)
+            Note: Beta(2, 4) has mode at 0.25 and mean at 0.33, centering
+            prior mass on cube-root-like scaling for heteroscedastic noise.
+        n_exponent_loc: Location parameter for logit-normal prior on n_exponent.
+            Default -2.2 maps to a mode near 0.10 via the sigmoid transform,
+            reflecting the fitted posterior (~0.002 on AOTY data) rather than
+            the iid-averaging value of 0.5. Logit-normal is the recommended
+            prior type as it avoids funnel geometry issues.
+        n_exponent_scale: Scale parameter for logit-normal prior on n_exponent.
+            Default 1.0 gives reasonable spread in [0,1] after sigmoid transform.
+    """
+
+    mu_artist_loc: float = 0.0
+    mu_artist_scale: float = 1.0
+    sigma_artist_scale: float = 0.5
+    sigma_rw_scale: float = 0.1
+    rho_loc: float = 0.0
+    rho_scale: float = 0.3
+    beta_loc: float = 0.0
+    beta_scale: float = 1.0
+    sigma_obs_scale: float = 1.0
+    sigma_ref_scale: float = 1.0
+    n_exponent_alpha: float = 2.0
+    n_exponent_beta: float = 4.0
+    # Logit-normal prior parameters for n_exponent (new default)
+    # Default -2.2 puts the prior mode near 0.10 (sigmoid(-2.2) ~ 0.0997):
+    # the fitted posterior sits near 0 (~0.002), far below the iid-ratings
+    # value of 0.5 the old 0.0 default implied — AOTY score aggregation is
+    # not iid averaging. (Phase-8 grid: 0.5 remains worth testing.)
+    n_exponent_loc: float = -2.2
+    n_exponent_scale: float = 1.0  # reasonable spread in logit space
+    # Likelihood degrees of freedom (Student-t; inf => Normal)
+    likelihood_df: float = 4.0  # Student-t(4) for heavier tails
+    # sigma_rw prior type: "lognormal" removes zero-boundary pile-up for better
+    # NUTS mixing; "halfnormal" is the legacy behavior.
+    sigma_rw_prior_type: str = "lognormal"
+    # LogNormal parameters for sigma_rw (only used when sigma_rw_prior_type == "lognormal").
+    # LogNormal(loc, sigma) means the underlying Normal in log-space has mean=loc
+    # and std=sigma.  NOT the log of a scale parameter.
+    # Default LogNormal(-2.8, 0.6): median=0.061, mean=0.074, 95th=0.167.
+    sigma_rw_lognormal_loc: float = -2.8
+    sigma_rw_lognormal_sigma: float = 0.6
+    # Latent process for time-varying artist effects: "rw" (random walk,
+    # legacy default) or "ar1" (stationary deviations; nests rw at phi=1).
+    latent_process: str = "rw"
+    # TruncatedNormal prior parameters for the AR(1) latent persistence phi
+    # (only used when latent_process == "ar1"; truncated to (-0.99, 0.99)).
+    phi_loc: float = 0.0
+    phi_scale: float = 0.5
+    # Target transform: "identity" (soft-clip on mu, legacy default) or
+    # "offset_logit" (Smithson-Verkuilen logit; model runs on logit scale).
+    target_transform: str = "identity"
+    # Half-count continuity offset for the offset-logit transform.
+    logit_offset: float = 0.5
+    # Likelihood family: "studentt" (df from likelihood_df; df>=100 behaves
+    # as Normal) or "normal" (explicit Gaussian likelihood).
+    likelihood_family: str = "studentt"
+    # AR(1) centering mode: "global" (default) subtracts the training-mean
+    # prev_score so debut AR terms are exactly zero and rho decorrelates
+    # from mu_artist; "none" is the legacy uncentered form; "artist_running"
+    # subtracts each artist's running mean (sensitivity analysis only --
+    # double-counts the artist effect). The center VALUE is data-dependent
+    # and travels as the ar_center model argument / summary.ar_center_value;
+    # this knob records which rule produced it.
+    ar_center: str = "global"
+    # Artist-effect parameterization: "noncentered" (legacy LocScaleReparam)
+    # or "zerosum" (ZeroSumNormal deviations around mu_artist — removes the
+    # mu_artist <-> effects location ridge that throttles sigma_artist ESS).
+    artist_effect_param: str = "noncentered"
+    # sigma_artist prior type: "halfnormal" (legacy) or "lognormal" (removes
+    # zero-boundary pile-up; mirrors the sigma_rw pattern).
+    sigma_artist_prior_type: str = "halfnormal"
+    # LogNormal parameters for sigma_artist (used when
+    # sigma_artist_prior_type == "lognormal").
+    # Default LogNormal(-0.9, 0.6): median=0.41, mean=0.49, 95th=1.09 —
+    # comparable mass to HalfNormal(0.5) without the boundary pile-up.
+    sigma_artist_lognormal_loc: float = -0.9
+    sigma_artist_lognormal_sigma: float = 0.6
+    # sigma_obs prior type: "halfnormal" (legacy default) or "lognormal".
+    # A HalfNormal piles mass at zero, so on heavily zero-inflated targets
+    # (e.g. econ log-citations, median ~4) NUTS can collapse sigma_obs onto
+    # the boundary (-> 0.004) and blow the variance into sigma_artist/sigma_rw.
+    # LogNormal removes that boundary artifact -- the same rationale already
+    # adopted for sigma_rw and sigma_artist. Site name {prefix}sigma_obs is
+    # unchanged under both, preserving downstream parity.
+    sigma_obs_prior_type: str = "halfnormal"
+    # LogNormal parameters for sigma_obs (used when
+    # sigma_obs_prior_type == "lognormal").
+    # Default LogNormal(-0.4, 0.6): median=0.67, mean=0.80, 95th=1.80 —
+    # comparable mass to HalfNormal(1.0) without the zero-boundary pile-up.
+    sigma_obs_lognormal_loc: float = -0.4
+    sigma_obs_lognormal_sigma: float = 0.6
+    # Entity-level observation overdispersion gate (default off => legacy
+    # behavior, bit-identical RNG path). When True, the model adds a
+    # per-entity multiplicative noise inflation on top of sigma_scaled:
+    #     sigma_scaled_i *= exp((tau_entity * entity_obs_raw)[artist_idx])
+    # with entity_obs_raw ~ Normal(0, 1) (non-centered plate over n_artists)
+    # and tau_entity ~ HalfNormal(tau_entity_scale). Noisy series (e.g. IMDb
+    # episodes) get wider, better-calibrated intervals; zero-inflated targets
+    # (econ) get an entity-noise home so sigma_obs stops collapsing. The new
+    # sample sites ({prefix}tau_entity, {prefix}entity_obs_raw) are created
+    # ONLY on this branch and AFTER every existing site, so the gate-off draw
+    # sequence -- and every published number -- stays bit-identical.
+    heteroscedastic_entity_obs: bool = False
+    # HalfNormal scale for tau_entity (the entity-noise dispersion). Default
+    # 0.25 keeps exp(tau * z) close to 1 a priori (a 1-sigma entity inflates
+    # noise by ~28%), so the gate widens intervals without overwhelming the
+    # base sigma_obs.
+    tau_entity_scale: float = 0.25
+
+
+def priors_for_transform(target_transform: str = "identity", **overrides) -> PriorConfig:
+    """Build a PriorConfig with defaults appropriate to the target transform.
+
+    On the offset-logit scale the target is O(1-3) instead of O(100):
+    observation-noise scales shrink accordingly (a raw-score sigma of ~8 maps
+    to ~0.3-0.5 on the logit scale near the data mean). Effect priors
+    (Normal(0,1)) are already right-sized for a logit-scale target.
+
+    Explicit keyword overrides always win over transform defaults.
+    """
+    if target_transform == "offset_logit":
+        base: dict = {
+            "target_transform": "offset_logit",
+            "sigma_obs_scale": 0.5,
+            "sigma_ref_scale": 0.5,
+        }
+    else:
+        base = {"target_transform": target_transform}
+    base.update(overrides)
+    return PriorConfig(**base)
+
+
+def get_default_priors() -> PriorConfig:
+    """Return default prior configuration.
+
+    The defaults are designed to be weakly informative:
+    - Artist effects centered at 0 with moderate pooling (sigma_artist_scale=0.5)
+    - Time-varying effects with small innovation (sigma_rw_scale=0.1 for smooth careers)
+    - AR(1) coefficient centered at 0 with moderate uncertainty (rho_scale=0.3)
+    - Fixed effects centered at 0 with unit scale (appropriate for standardized features)
+    - Observation noise with unit scale HalfNormal
+
+    Returns:
+        PriorConfig with sensible default hyperparameters.
+
+    Example:
+        >>> priors = get_default_priors()
+        >>> priors.mu_artist_loc
+        0.0
+        >>> priors.sigma_artist_scale
+        0.5
+        >>> priors.sigma_rw_scale
+        0.1
+        >>> priors.rho_loc
+        0.0
+    """
+    return PriorConfig()
