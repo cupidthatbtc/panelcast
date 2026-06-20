@@ -1,0 +1,74 @@
+# Base pipeline configuration.
+#
+# Keys mirror PipelineConfig field names and are loadable via
+# `panelcast run --config configs/base.yaml`. Every value below equals
+# the effective CLI default, so loading this file changes nothing — it exists
+# as the documented starting point for custom configs (copy, edit, pass with
+# --config; later --config files and explicit CLI options override).
+#
+# Domain/dataset settings (column names, score bounds, feature blocks, file
+# paths) do NOT belong here — they live in a dataset descriptor under
+# configs/datasets/ and are selected with --dataset.
+
+seed: 42
+
+# MCMC configuration
+num_chains: 4
+num_samples: 1000
+num_warmup: 1000
+target_accept: 0.90
+max_tree_depth: 10
+chain_method: sequential
+
+# Convergence thresholds
+rhat_threshold: 1.01
+ess_threshold: 400
+allow_divergences: false
+
+# Data filtering
+min_ratings: 10
+min_albums_filter: 2
+max_albums: 50
+
+# Feature ablation (block composition itself comes from the dataset
+# descriptor's feature_blocks list; these flags disable ablation groups)
+enable_genre: true
+enable_artist: true
+enable_temporal: true
+
+# Heteroscedastic noise
+# Learning n_exponent is unnecessary for AOTY: posterior n_exponent ~= 0.002,
+# so review-count noise scaling has negligible effect and costs ~30% compute.
+n_exponent: 0.0
+learn_n_exponent: false
+n_exponent_prior: logit-normal
+
+# Likelihood: Student-t with df=4 gives heavier tails than Normal, reducing
+# overprediction for extreme-score albums. Set >= 100 for Normal.
+likelihood_df: 4.0
+
+# Model gates (Phase 5/6 adopted decisions; defaults restated)
+target_transform: identity
+ar_center: global
+latent_process: rw
+debut_prev_score_source: train_mean
+
+# Observation-noise gates (default off => bit-identical to published fits).
+# sigma_obs_prior_type: "lognormal" removes the HalfNormal zero-boundary
+#   pile-up (use on heavily zero-inflated targets where sigma_obs collapses).
+# heteroscedastic_entity_obs: True adds a per-entity multiplicative noise
+#   inflation (wider, better-calibrated intervals for noisy series);
+#   tau_entity_scale is the HalfNormal scale on that entity dispersion.
+sigma_obs_prior_type: halfnormal
+heteroscedastic_entity_obs: false
+tau_entity_scale: 0.25
+
+# Split configuration
+val_albums: 0
+min_train_albums: 2
+
+# Evaluation configuration
+calibration_intervals: [0.80, 0.95]
+coverage_tolerance: 0.03
+prediction_interval: 0.95
+evaluate_secondary_split: true

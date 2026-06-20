@@ -1,0 +1,6 @@
+# Developer overrides for quick iteration: the cheap 2x500 validation run.
+# Usage: panelcast run --config configs/dev.yaml
+# (or layered: --config configs/base.yaml --config configs/dev.yaml)
+num_chains: 2
+num_samples: 500
+num_warmup: 500

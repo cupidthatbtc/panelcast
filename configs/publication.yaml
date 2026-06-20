@@ -1,0 +1,69 @@
+# Publication run configuration (the final 4x5000 run).
+#
+# Keys mirror PipelineConfig field names; this file becomes loadable via
+# `panelcast run --config configs/publication.yaml` once the YAML config
+# wiring lands. Until then, the equivalent CLI invocation is:
+#
+#   panelcast run --num-chains 4 --num-samples 5000 --num-warmup 3000 \
+#       --target-accept 0.95 --strict
+#
+# Adopted gate decisions (validated on 2x500 cheap runs, 2026-06-10):
+# - target_transform: identity — offset_logit HELD: failed PPC/PIT/coverage
+#   gates and did not mix (R-hat 1.27, ESS 10) at cheap settings; revisit
+#   post-centering via scripts/experiment_logit_transform.py.
+#   (Encouraging: it was the only config to pass disjoint 95% >= 0.92.)
+# - ar_center: global — corr(rho, mu_artist) collapsed -0.9974 -> +0.0155,
+#   debut AR terms exactly zero, prior predictive flipped to passing.
+# - artist_effect_param: noncentered, sigma_artist_prior_type: halfnormal —
+#   won the 4-variant mixing bake-off (sigma_artist bulk ESS 121/600 draws
+#   vs 68 zerosum, 5 lognormal; see outputs/experiments/sigma_artist_mixing.json).
+#   ESS extrapolates to ~4000 at these settings (gate: 800).
+# - latent_process: rw — ar1 registered but adopt only if LOO clearly wins
+#   (Phase-8 comparison).
+# - Warmup 3000 (plan range 3000-5000): the centered geometry adapts fast
+#   (stable step size well before iteration 500 on cheap runs).
+#
+# Preflight status (RTX 5090 laptop, 24 GB; re-verified 2026-06-10 with the
+# measured-ladder overhaul — outputs/experiments/preflight_validation.json):
+# - The earlier "22.8 GB projected, marginal fail" assessment was a
+#   single-chain calibration artifact: sequential chains accumulate their
+#   collected draws on device, so the true collection-on peak for 4x5000 is
+#   ~60-90 GiB. Neither 4x5000 nor the old 4x4500 fallback fits without the
+#   in-sampler exclusion.
+# - WITH exclude_rw_raw_from_collection (set below): chain-aware calibrated
+#   projection 1.4 GB vs 22.5 GB available — PASS with 94% headroom
+#   (quick-formula cross-check: 2.2 GiB). Posterior draws for all other
+#   sites are bit-identical to a collection-on fit (parity-tested); rw_raw
+#   was already excluded from saved artifacts, so downstream stages are
+#   unchanged. This run is launch-ready as configured.
+
+num_chains: 4
+num_samples: 5000
+num_warmup: 3000
+target_accept: 0.95
+max_tree_depth: 10
+chain_method: sequential
+
+# Memory gate (REQUIRED on 24 GB GPUs — see preflight notes above)
+exclude_rw_raw_from_collection: true
+
+# Convergence gates (publication thresholds)
+rhat_threshold: 1.01
+ess_threshold: 400
+allow_divergences: false
+
+# Adopted model gates (all defaults as of the Phase 5/6 decisions; restated
+# here so the publication run is reproducible even if defaults drift)
+target_transform: identity
+ar_center: global
+latent_process: rw
+debut_prev_score_source: train_mean
+likelihood_df: 4.0
+
+# Data/evaluation settings (defaults, restated for provenance)
+min_ratings: 10
+min_albums_filter: 2
+max_albums: 50
+calibration_intervals: [0.80, 0.95]
+coverage_tolerance: 0.03
+prediction_interval: 0.95
