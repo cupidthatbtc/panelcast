@@ -1,0 +1,387 @@
+"""End-to-end pipeline for creating train/validation/test splits."""
+
+import hashlib
+import json
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import pandas as pd
+import structlog
+
+from panelcast.data.manifests import (
+    SplitManifest,
+    SplitStats,
+    create_split_assignments,
+    save_manifest,
+)
+from panelcast.data.split import (
+    artist_disjoint_split,
+    assert_no_artist_overlap,
+    validate_temporal_split,
+    within_artist_temporal_split,
+)
+from panelcast.utils.hashing import hash_dataframe
+from panelcast.utils.logging import setup_pipeline_logging
+
+
+@dataclass
+class SplitConfig:
+    """Configuration for split pipeline."""
+
+    min_ratings: int = 10
+    output_dir: Path = Path("data/splits")
+    version: str = "v1"
+    random_state: int = 42
+
+    # Within-artist temporal parameters
+    test_albums: int = 1
+    val_albums: int = 0
+    min_train_albums: int = 1
+
+    # Artist-disjoint parameters
+    disjoint_test_size: float = 0.15
+    disjoint_val_size: float = 0.15
+
+    # Dataset identity columns (from the descriptor; defaults = AOTY)
+    entity_col: str = "Artist"
+    date_col: str = "Release_Date_Parsed"
+    event_col: str = "Album"
+
+    # Computed source path based on min_ratings (set in __post_init__)
+    source_path: Path | None = None
+
+    def __post_init__(self):
+        """Compute source_path from min_ratings if not provided."""
+        if self.source_path is None:
+            self.source_path = Path(
+                f"data/processed/user_score_minratings_{self.min_ratings}.parquet"
+            )
+
+
+@dataclass
+class SplitResult:
+    """Result of split pipeline execution."""
+
+    source_path: Path
+    temporal_manifest_path: Path
+    disjoint_manifest_path: Path
+    temporal_splits: Dict[str, Path]
+    disjoint_splits: Dict[str, Path]
+    summary: Dict[str, Any]
+
+
+def save_split_parquet(df: pd.DataFrame, path: Path) -> None:
+    """Save DataFrame to parquet with snappy compression."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_parquet(path, compression="snappy", index=False)
+
+
+def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
+    """
+    Create train/validation/test splits from cleaned dataset.
+
+    Produces:
+    - Within-artist temporal splits (primary evaluation)
+    - Artist-disjoint splits (cold-start robustness)
+    - Full manifests with per-row assignment reasoning
+    - Pipeline summary
+
+    Args:
+        config: SplitConfig with paths and parameters
+
+    Returns:
+        SplitResult with paths and summary
+    """
+    if config is None:
+        config = SplitConfig()
+
+    log = structlog.get_logger()
+    log.info(
+        "split_pipeline_start",
+        source=str(config.source_path),
+        min_ratings=config.min_ratings,
+    )
+
+    # Load source dataset
+    source_df = pd.read_parquet(config.source_path)
+    source_hash = hash_dataframe(source_df)
+    log.info(
+        "source_loaded",
+        rows=len(source_df),
+        artists=source_df[config.entity_col].nunique(),
+        hash=source_hash[:16],
+    )
+
+    results = {"temporal": {}, "disjoint": {}}
+
+    # ===== WITHIN-ARTIST TEMPORAL SPLIT =====
+    temporal_dir = config.output_dir / "within_artist_temporal"
+    temporal_dir.mkdir(parents=True, exist_ok=True)
+
+    train_t, val_t, test_t = within_artist_temporal_split(
+        source_df,
+        artist_col=config.entity_col,
+        date_col=config.date_col,
+        test_albums=config.test_albums,
+        val_albums=config.val_albums,
+        min_train_albums=config.min_train_albums,
+        event_col=config.event_col,
+    )
+
+    # Validate temporal ordering
+    validate_temporal_split(
+        train_t, val_t, test_t, artist_col=config.entity_col, date_col=config.date_col
+    )
+    log.info("temporal_split_validated")
+
+    # Save parquet files
+    temporal_paths = {
+        "train": temporal_dir / "train.parquet",
+        "validation": temporal_dir / "validation.parquet",
+        "test": temporal_dir / "test.parquet",
+    }
+    save_split_parquet(train_t, temporal_paths["train"])
+    save_split_parquet(val_t, temporal_paths["validation"])
+    save_split_parquet(test_t, temporal_paths["test"])
+
+    # Compute hashes
+    train_t_hash = hash_dataframe(train_t)
+    val_t_hash = hash_dataframe(val_t)
+    test_t_hash = hash_dataframe(test_t)
+
+    # Combined content hash
+    combined_t = hashlib.sha256((train_t_hash + val_t_hash + test_t_hash).encode()).hexdigest()
+
+    # Create manifest
+    temporal_manifest = SplitManifest(
+        version=config.version,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        split_type="within_artist_temporal",
+        parameters={
+            "test_albums": config.test_albums,
+            "val_albums": config.val_albums,
+            "min_train_albums": config.min_train_albums,
+        },
+        source_dataset={
+            "path": str(config.source_path),
+            "sha256": source_hash,
+            "row_count": len(source_df),
+            "unique_artists": source_df[config.entity_col].nunique(),
+        },
+        splits={
+            "train": SplitStats(
+                row_count=len(train_t),
+                unique_artists=train_t[config.entity_col].nunique(),
+                sha256=train_t_hash,
+            ),
+            "validation": SplitStats(
+                row_count=len(val_t),
+                unique_artists=val_t[config.entity_col].nunique(),
+                sha256=val_t_hash,
+            ),
+            "test": SplitStats(
+                row_count=len(test_t),
+                unique_artists=test_t[config.entity_col].nunique(),
+                sha256=test_t_hash,
+            ),
+        },
+        assignments=create_split_assignments(
+            train_t, val_t, test_t, "within_artist_temporal", artist_col=config.entity_col
+        ),
+        content_hash=combined_t,
+    )
+    temporal_manifest_path = save_manifest(temporal_manifest, temporal_dir)
+
+    log.info(
+        "temporal_split_complete",
+        train=len(train_t),
+        val=len(val_t),
+        test=len(test_t),
+        artists_included=train_t[config.entity_col].nunique(),
+        manifest=str(temporal_manifest_path.name),
+    )
+
+    results["temporal"] = {
+        "train": len(train_t),
+        "validation": len(val_t),
+        "test": len(test_t),
+        "artists": train_t[config.entity_col].nunique(),
+    }
+
+    # ===== ARTIST-DISJOINT SPLIT =====
+    disjoint_dir = config.output_dir / "artist_disjoint"
+    disjoint_dir.mkdir(parents=True, exist_ok=True)
+
+    train_d, val_d, test_d = artist_disjoint_split(
+        source_df,
+        artist_col=config.entity_col,
+        test_size=config.disjoint_test_size,
+        val_size=config.disjoint_val_size,
+        random_state=config.random_state,
+    )
+
+    # Validate no overlap
+    assert_no_artist_overlap(train_d, val_d, test_d, artist_col=config.entity_col)
+    log.info("disjoint_split_validated", overlap="none")
+
+    # Save parquet files
+    disjoint_paths = {
+        "train": disjoint_dir / "train.parquet",
+        "validation": disjoint_dir / "validation.parquet",
+        "test": disjoint_dir / "test.parquet",
+    }
+    save_split_parquet(train_d, disjoint_paths["train"])
+    save_split_parquet(val_d, disjoint_paths["validation"])
+    save_split_parquet(test_d, disjoint_paths["test"])
+
+    # Compute hashes
+    train_d_hash = hash_dataframe(train_d)
+    val_d_hash = hash_dataframe(val_d)
+    test_d_hash = hash_dataframe(test_d)
+    combined_d = hashlib.sha256((train_d_hash + val_d_hash + test_d_hash).encode()).hexdigest()
+
+    # Create manifest
+    disjoint_manifest = SplitManifest(
+        version=config.version,
+        created_at=datetime.now(timezone.utc).isoformat(),
+        split_type="artist_disjoint",
+        parameters={
+            "test_size": config.disjoint_test_size,
+            "val_size": config.disjoint_val_size,
+            "random_state": config.random_state,
+        },
+        source_dataset={
+            "path": str(config.source_path),
+            "sha256": source_hash,
+            "row_count": len(source_df),
+            "unique_artists": source_df[config.entity_col].nunique(),
+        },
+        splits={
+            "train": SplitStats(
+                row_count=len(train_d),
+                unique_artists=train_d[config.entity_col].nunique(),
+                sha256=train_d_hash,
+            ),
+            "validation": SplitStats(
+                row_count=len(val_d),
+                unique_artists=val_d[config.entity_col].nunique(),
+                sha256=val_d_hash,
+            ),
+            "test": SplitStats(
+                row_count=len(test_d),
+                unique_artists=test_d[config.entity_col].nunique(),
+                sha256=test_d_hash,
+            ),
+        },
+        assignments=create_split_assignments(
+            train_d, val_d, test_d, "artist_disjoint", artist_col=config.entity_col
+        ),
+        content_hash=combined_d,
+    )
+    disjoint_manifest_path = save_manifest(disjoint_manifest, disjoint_dir)
+
+    log.info(
+        "disjoint_split_complete",
+        train=len(train_d),
+        val=len(val_d),
+        test=len(test_d),
+        train_artists=train_d[config.entity_col].nunique(),
+        val_artists=val_d[config.entity_col].nunique(),
+        test_artists=test_d[config.entity_col].nunique(),
+        manifest=str(disjoint_manifest_path.name),
+    )
+
+    results["disjoint"] = {
+        "train": len(train_d),
+        "validation": len(val_d),
+        "test": len(test_d),
+        "train_artists": train_d[config.entity_col].nunique(),
+        "val_artists": val_d[config.entity_col].nunique(),
+        "test_artists": test_d[config.entity_col].nunique(),
+    }
+
+    # ===== PIPELINE SUMMARY =====
+    summary = {
+        "run_timestamp": datetime.now().isoformat(),
+        "source": {
+            "path": str(config.source_path),
+            "rows": len(source_df),
+            "artists": source_df[config.entity_col].nunique(),
+            "sha256": source_hash,
+        },
+        "within_artist_temporal": {
+            "train_rows": results["temporal"]["train"],
+            "val_rows": results["temporal"]["validation"],
+            "test_rows": results["temporal"]["test"],
+            "artists_included": results["temporal"]["artists"],
+            "artists_excluded": source_df[config.entity_col].nunique()
+            - results["temporal"]["artists"],
+            "manifest": str(temporal_manifest_path),
+        },
+        "artist_disjoint": {
+            "train_rows": results["disjoint"]["train"],
+            "val_rows": results["disjoint"]["validation"],
+            "test_rows": results["disjoint"]["test"],
+            "train_artists": results["disjoint"]["train_artists"],
+            "val_artists": results["disjoint"]["val_artists"],
+            "test_artists": results["disjoint"]["test_artists"],
+            "manifest": str(disjoint_manifest_path),
+        },
+    }
+
+    # Save summary
+    summary_path = config.output_dir / "pipeline_summary.json"
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+
+    log.info("pipeline_complete", summary_path=str(summary_path))
+
+    return SplitResult(
+        source_path=config.source_path,
+        temporal_manifest_path=temporal_manifest_path,
+        disjoint_manifest_path=disjoint_manifest_path,
+        temporal_splits=temporal_paths,
+        disjoint_splits=disjoint_paths,
+        summary=summary,
+    )
+
+
+def main() -> None:
+    """CLI entry point for split pipeline."""
+    # Logging configuration is owned by utils.logging.setup_pipeline_logging.
+    setup_pipeline_logging()
+
+    result = create_splits()
+
+    # Print formatted summary
+    print("\n" + "=" * 60)
+    print("SPLIT PIPELINE COMPLETE")
+    print("=" * 60)
+
+    s = result.summary
+    print(f"\nSource: {s['source']['path']}")
+    print(f"  Rows: {s['source']['rows']:,}")
+    print(f"  Artists: {s['source']['artists']:,}")
+
+    print("\nWithin-Artist Temporal Split:")
+    print(f"  Train:      {s['within_artist_temporal']['train_rows']:,} rows")
+    print(f"  Validation: {s['within_artist_temporal']['val_rows']:,} rows")
+    print(f"  Test:       {s['within_artist_temporal']['test_rows']:,} rows")
+    print(f"  Artists included: {s['within_artist_temporal']['artists_included']:,}")
+    excl = s["within_artist_temporal"]["artists_excluded"]
+    print(f"  Artists excluded: {excl:,} (insufficient albums)")
+
+    print("\nArtist-Disjoint Split:")
+    ad = s["artist_disjoint"]
+    print(f"  Train:      {ad['train_rows']:,} rows ({ad['train_artists']:,} artists)")
+    print(f"  Validation: {ad['val_rows']:,} rows ({ad['val_artists']:,} artists)")
+    print(f"  Test:       {ad['test_rows']:,} rows ({ad['test_artists']:,} artists)")
+
+    print(f"\nOutput directory: {result.temporal_splits['train'].parent.parent}")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()

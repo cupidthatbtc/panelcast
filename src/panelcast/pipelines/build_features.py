@@ -1,0 +1,356 @@
+"""Feature matrix building pipeline.
+
+Builds combined feature matrices from configured feature blocks for all splits
+(train, validation, test) and saves them for reuse in model training.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import numpy as np
+import pandas as pd
+import structlog
+
+from panelcast.config.descriptor import DatasetDescriptor
+from panelcast.data.alignment import ROW_ID_COL
+from panelcast.features.base import FeatureContext
+from panelcast.features.pipeline import FeaturePipeline
+from panelcast.features.registry import FeatureSpec, build_default_registry
+
+if TYPE_CHECKING:
+    from panelcast.pipelines.stages import StageContext
+
+log = structlog.get_logger()
+
+
+def _safe_split_stats(features: pd.DataFrame, path: Path) -> dict:
+    """Build feature stats dict, handling empty DataFrames (e.g. no val split)."""
+    has_data = len(features) > 0
+    has_reviews = has_data and "n_reviews" in features.columns
+    return {
+        "path": str(path),
+        "rows": int(features.shape[0]),
+        "cols": int(features.shape[1]) if has_data else 0,
+        "n_reviews_min": int(features["n_reviews"].min()) if has_reviews else 0,
+        "n_reviews_max": int(features["n_reviews"].max()) if has_reviews else 0,
+        "n_reviews_median": int(features["n_reviews"].median()) if has_reviews else 0,
+    }
+
+
+def get_feature_blocks(
+    enable_genre: bool = True,
+    enable_artist: bool = True,
+    enable_temporal: bool = True,
+    descriptor: DatasetDescriptor | None = None,
+) -> list:
+    """Get feature blocks for a descriptor, filtered by ablation flags.
+
+    The block list and parameters come from ``descriptor.feature_blocks``
+    (instantiated through the descriptor-aware registry); the boolean flags
+    disable the block groups named in ``descriptor.ablation_groups``.
+
+    Args:
+        enable_genre: Keep the descriptor's "genre" ablation group if True.
+        enable_artist: Keep the descriptor's "artist" ablation group if True.
+        enable_temporal: Keep the descriptor's "temporal" ablation group if True.
+        descriptor: Dataset descriptor (None = AOTY defaults).
+
+    Returns:
+        List of enabled feature blocks in dependency order.
+    """
+    descriptor = descriptor or DatasetDescriptor()
+    registry = build_default_registry(descriptor)
+
+    disabled: set[str] = set()
+    for group, enabled in (
+        ("genre", enable_genre),
+        ("artist", enable_artist),
+        ("temporal", enable_temporal),
+    ):
+        if not enabled:
+            disabled.update(descriptor.ablation_groups.get(group, []))
+
+    specs = [
+        FeatureSpec(name=spec.name, params=dict(spec.params))
+        for spec in descriptor.feature_blocks
+        if spec.name not in disabled
+    ]
+    return registry.build_all(specs)
+
+
+def get_default_feature_blocks() -> list:
+    """Get the default feature blocks for the pipeline.
+
+    Legacy function for backward compatibility. Prefer get_feature_blocks()
+    with explicit flags for new code.
+
+    Returns:
+        List of all feature blocks in dependency order.
+    """
+    return get_feature_blocks(
+        enable_genre=True,
+        enable_artist=True,
+        enable_temporal=True,
+    )
+
+
+def _assign_n_reviews(
+    features_df: pd.DataFrame,
+    n_reviews: pd.Series,
+    name: str,
+) -> pd.DataFrame:
+    """Assign n_reviews to features DataFrame with alignment validation."""
+    aligned = n_reviews.reindex(features_df.index)
+    null_count = aligned.isna().sum()
+    if null_count > 0:
+        missing_indices = features_df.index[aligned.isna()].tolist()[:5]
+        raise ValueError(
+            f"{name}_n_reviews has {null_count} null values after reindexing to "
+            f"{name}_features index. First missing indices: {missing_indices}. "
+            f"Ensure {name}_n_reviews index matches {name}_features index."
+        )
+    out = features_df.copy()
+    out["n_reviews"] = aligned
+    return out
+
+
+def _attach_row_ids(
+    features_df: pd.DataFrame,
+    source_df: pd.DataFrame,
+    name: str,
+) -> pd.DataFrame:
+    """Carry the stable row-identity key from the split into the feature matrix.
+
+    Downstream stages join splits with features on ``original_row_id`` instead
+    of relying on positional index equality, which cannot detect reordering.
+    """
+    if ROW_ID_COL not in source_df.columns:
+        log.warning(
+            "row_id_missing_from_split",
+            split=name,
+            reason=f"'{ROW_ID_COL}' not in split columns; keyed join unavailable",
+        )
+        return features_df
+    aligned = source_df[ROW_ID_COL].reindex(features_df.index)
+    if aligned.isna().any():
+        raise ValueError(
+            f"{name}: '{ROW_ID_COL}' has null values after aligning split rows "
+            "to the feature matrix index. Split and feature rows do not match."
+        )
+    out = features_df.copy()
+    out[ROW_ID_COL] = aligned.astype(np.int64)
+    return out
+
+
+def _transform_with_train_history(
+    pipeline: FeaturePipeline,
+    train_df: pd.DataFrame,
+    target_df: pd.DataFrame,
+    feature_ctx: FeatureContext,
+    mask_target_score_cols: tuple[str, ...] = ("User_Score", "Critic_Score"),
+) -> pd.DataFrame:
+    """Transform target split while preserving train-history semantics.
+
+    Target labels are masked before concatenation so history-based blocks
+    (e.g., ArtistHistoryBlock) cannot read held-out score labels from the
+    target split. This prevents within-split label leakage.
+    """
+    train_work = train_df.copy()
+    target_work = target_df.copy()
+
+    # Prevent feature leakage from held-out score labels.
+    for col in mask_target_score_cols:
+        if col in target_work.columns:
+            target_work[col] = np.nan
+
+    # Renumber to a combined unique RangeIndex so target rows can be recovered
+    # unambiguously even when train/target indices overlap or contain duplicates.
+    train_work.index = pd.RangeIndex(0, len(train_work))
+    target_index = pd.RangeIndex(len(train_work), len(train_work) + len(target_work))
+    target_work.index = target_index
+
+    combined = pd.concat([train_work, target_work], axis=0)
+    combined_features = pipeline.transform(combined, feature_ctx).data
+    if len(combined_features) != len(combined):
+        raise ValueError(
+            "Feature pipeline changed the row count during transform "
+            f"({len(combined)} in, {len(combined_features)} out). Target rows "
+            "can no longer be recovered reliably."
+        )
+    target_features = combined_features.loc[target_index].copy()
+    target_features.index = target_df.index
+    return target_features
+
+
+def build_features(ctx: "StageContext") -> dict:
+    """Build feature matrices for all splits.
+
+    Fits feature pipeline on training data only, then transforms all splits
+    to prevent data leakage. Respects feature ablation flags from CLI.
+
+    Args:
+        ctx: Stage context with run configuration.
+
+    Returns:
+        Dictionary with paths to created feature matrices and metadata.
+    """
+    descriptor = getattr(ctx, "descriptor", None) or DatasetDescriptor()
+    # Mask all target labels in held-out splits before history transforms.
+    mask_score_cols = tuple(
+        col for col in (descriptor.target_col, descriptor.secondary_target_col) if col is not None
+    )
+
+    log.info(
+        "feature_pipeline_start",
+        seed=ctx.seed,
+        enable_genre=ctx.enable_genre,
+        enable_artist=ctx.enable_artist,
+        enable_temporal=ctx.enable_temporal,
+    )
+
+    # Define paths
+    splits_root = Path("data/splits")
+    features_dir = Path("data/features")
+    features_dir.mkdir(parents=True, exist_ok=True)
+    split_names = ["within_artist_temporal", "artist_disjoint"]
+
+    # Create feature context
+    feature_ctx = FeatureContext(
+        config={},  # Using default configs
+        random_state=ctx.seed,
+    )
+
+    split_manifests: dict[str, dict] = {}
+    feature_names: list[str] = []
+
+    for split_name in split_names:
+        split_dir = splits_root / split_name
+        feature_split_dir = features_dir / split_name
+        feature_split_dir.mkdir(parents=True, exist_ok=True)
+
+        train_df = pd.read_parquet(split_dir / "train.parquet")
+        val_df = pd.read_parquet(split_dir / "validation.parquet")
+        test_df = pd.read_parquet(split_dir / "test.parquet")
+
+        log.info(
+            "splits_loaded",
+            split=split_name,
+            train_rows=len(train_df),
+            val_rows=len(val_df),
+            test_rows=len(test_df),
+        )
+
+        train_n_reviews = train_df[descriptor.n_obs_col].rename("n_reviews")
+        val_n_reviews = val_df[descriptor.n_obs_col].rename("n_reviews")
+        test_n_reviews = test_df[descriptor.n_obs_col].rename("n_reviews")
+
+        blocks = get_feature_blocks(
+            enable_genre=ctx.enable_genre,
+            enable_artist=ctx.enable_artist,
+            enable_temporal=ctx.enable_temporal,
+            descriptor=descriptor,
+        )
+        pipeline = FeaturePipeline(blocks)
+
+        log.info(
+            "fitting_features",
+            split=split_name,
+            blocks=[b.name for b in blocks],
+            ablated={
+                "genre": not ctx.enable_genre,
+                "artist": not ctx.enable_artist,
+                "temporal": not ctx.enable_temporal,
+            },
+        )
+        pipeline.fit(train_df, feature_ctx)
+
+        train_features = pipeline.transform(train_df, feature_ctx).data
+        val_features = _transform_with_train_history(
+            pipeline, train_df, val_df, feature_ctx, mask_target_score_cols=mask_score_cols
+        )
+        test_features = _transform_with_train_history(
+            pipeline, train_df, test_df, feature_ctx, mask_target_score_cols=mask_score_cols
+        )
+
+        train_features = _assign_n_reviews(train_features, train_n_reviews, f"{split_name}_train")
+        val_features = _assign_n_reviews(val_features, val_n_reviews, f"{split_name}_val")
+        test_features = _assign_n_reviews(test_features, test_n_reviews, f"{split_name}_test")
+
+        train_features = _attach_row_ids(train_features, train_df, f"{split_name}_train")
+        val_features = _attach_row_ids(val_features, val_df, f"{split_name}_val")
+        test_features = _attach_row_ids(test_features, test_df, f"{split_name}_test")
+
+        train_path = feature_split_dir / "train_features.parquet"
+        val_path = feature_split_dir / "validation_features.parquet"
+        test_path = feature_split_dir / "test_features.parquet"
+
+        train_features.to_parquet(train_path, index=True)
+        val_features.to_parquet(val_path, index=True)
+        test_features.to_parquet(test_path, index=True)
+
+        # Backward compatibility: root feature paths follow primary split.
+        if split_name == "within_artist_temporal":
+            train_features.to_parquet(features_dir / "train_features.parquet", index=True)
+            val_features.to_parquet(features_dir / "validation_features.parquet", index=True)
+            test_features.to_parquet(features_dir / "test_features.parquet", index=True)
+
+        # Exclude the row-identity key: it is join metadata, not a feature.
+        feature_names = [c for c in train_features.columns if c != ROW_ID_COL]
+        split_manifests[split_name] = {
+            "train": {
+                "path": str(train_path),
+                "rows": int(train_features.shape[0]),
+                "cols": int(train_features.shape[1]),
+                "n_reviews_min": int(train_features["n_reviews"].min()),
+                "n_reviews_max": int(train_features["n_reviews"].max()),
+                "n_reviews_median": int(train_features["n_reviews"].median()),
+            },
+            "validation": _safe_split_stats(val_features, val_path),
+            "test": {
+                "path": str(test_path),
+                "rows": int(test_features.shape[0]),
+                "cols": int(test_features.shape[1]),
+                "n_reviews_min": int(test_features["n_reviews"].min()),
+                "n_reviews_max": int(test_features["n_reviews"].max()),
+                "n_reviews_median": int(test_features["n_reviews"].median()),
+            },
+        }
+
+    # Save manifest
+    block_names = [
+        b.name
+        for b in get_feature_blocks(
+            enable_genre=ctx.enable_genre,
+            enable_artist=ctx.enable_artist,
+            enable_temporal=ctx.enable_temporal,
+            descriptor=descriptor,
+        )
+    ]
+    manifest = {
+        "seed": ctx.seed,
+        "blocks": block_names,
+        "feature_ablation": {
+            "enable_genre": ctx.enable_genre,
+            "enable_artist": ctx.enable_artist,
+            "enable_temporal": ctx.enable_temporal,
+        },
+        "feature_names": feature_names,
+        "n_reviews_included": True,
+        "target_label_leakage_prevention": {
+            "masked_score_columns": list(mask_score_cols),
+            "applies_to_splits": ["validation", "test"],
+        },
+        "split_features": split_manifests,
+        "legacy_primary_split": "within_artist_temporal",
+    }
+
+    manifest_path = features_dir / "manifest.json"
+    with open(manifest_path, "w", encoding="utf-8") as f:
+        json.dump(manifest, f, indent=2)
+
+    log.info("feature_pipeline_complete", manifest_path=str(manifest_path))
+
+    return manifest
