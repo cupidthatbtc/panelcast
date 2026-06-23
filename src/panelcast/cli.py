@@ -1083,6 +1083,148 @@ def export_figures(
         typer.echo(f"  {name}: {', '.join(p.name for p in paths)}")
 
 
+@app.command("demo")
+def demo(
+    descriptor_path: str = typer.Option(
+        "examples/aerospace/descriptor.yaml",
+        "--descriptor",
+        help="Descriptor YAML for the demo dataset.",
+    ),
+    num_chains: int = typer.Option(1, "--num-chains", min=1, help="MCMC chains (default 1)."),
+    num_samples: int = typer.Option(
+        300, "--num-samples", min=50, help="Post-warmup samples per chain (default 300)."
+    ),
+    num_warmup: int = typer.Option(
+        300, "--num-warmup", min=50, help="Warmup iterations per chain (default 300)."
+    ),
+    seed: int = typer.Option(42, "--seed", help="Random seed."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG logging."),
+) -> None:
+    """Run the whole pipeline end-to-end on the bundled aerospace example.
+
+    A tiny, self-contained demonstration: airframes flying scored test flights,
+    selected entirely by a one-file descriptor with zero source changes. Runs
+    data → splits → features → train → evaluate → predict → report at small
+    scale and finishes with a generated model card under reports/.
+
+    Examples:
+        panelcast demo
+        panelcast demo --num-chains 2 --num-samples 500
+    """
+    from pathlib import Path
+
+    from panelcast.pipelines.orchestrator import PipelineConfig, run_pipeline
+
+    if not Path(descriptor_path).exists():
+        typer.echo(
+            f"Error: demo descriptor not found at {descriptor_path}.\n"
+            "Regenerate the example with: python scripts/generate_aero_example.py"
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Running the panelcast demo on {descriptor_path} (tiny scale)...\n")
+
+    # Tiny, tolerant settings: this is a smoke demonstration, not a publication
+    # run, so convergence gates are relaxed and divergences are allowed.
+    config = PipelineConfig(
+        seed=seed,
+        dataset=descriptor_path,
+        num_chains=num_chains,
+        num_samples=num_samples,
+        num_warmup=num_warmup,
+        min_ratings=5,
+        max_albums=10,
+        min_albums_filter=2,
+        rhat_threshold=1.1,
+        ess_threshold=100,
+        allow_divergences=True,
+        strict=False,
+        verbose=verbose,
+        enforce_lockfile=False,
+    )
+    exit_code = run_pipeline(config)
+
+    if exit_code == 0:
+        typer.echo("\nDemo complete. Generated artifacts:")
+        for artifact in (
+            "reports/MODEL_CARD.md",
+            "reports/tables/metrics_summary.csv",
+            "outputs/evaluation/metrics.json",
+        ):
+            marker = "✓" if Path(artifact).exists() else "·"
+            typer.echo(f"  {marker} {artifact}")
+    raise typer.Exit(code=exit_code)
+
+
+@app.command("compare")
+def compare(
+    baselines: bool = typer.Option(
+        False,
+        "--baselines",
+        help="Fit the baseline predictors and emit the benchmark comparison table.",
+    ),
+    dataset: Optional[str] = typer.Option(
+        None,
+        "--dataset",
+        help="Dataset descriptor (bare name or YAML path; omit for AOTY defaults).",
+    ),
+    output_dir: str = typer.Option(
+        "reports/baselines", "--output", "-o", help="Directory for the comparison artifacts."
+    ),
+    num_samples: int = typer.Option(
+        1000, "--num-samples", min=2, help="Predictive samples per baseline for interval scoring."
+    ),
+    seed: int = typer.Option(0, "--seed", help="Random seed for predictive sampling."),
+    include_bayes: bool = typer.Option(
+        True,
+        "--bayes/--no-bayes",
+        help="Append the current Bayesian model's metrics from outputs/evaluation/metrics.json.",
+    ),
+) -> None:
+    """Benchmark simple baselines against the model on the existing splits.
+
+    Fits global-mean, entity-mean, last-score (persistence), ridge, and gradient
+    boosting baselines on the within-entity-temporal and entity-disjoint splits,
+    scores them through the same metrics/calibration/CRPS toolkit as the model,
+    and writes a populated comparison table (CSV + Markdown + JSON).
+
+    Requires the splits and features stages to have run (run them first with
+    `panelcast run --stages splits,features`).
+
+    Examples:
+        panelcast compare --baselines
+        panelcast compare --baselines --dataset aero --output reports/aero_baselines
+    """
+    from pathlib import Path
+
+    if not baselines:
+        typer.echo("Nothing to do. Pass --baselines to run the baseline benchmark.")
+        raise typer.Exit(code=0)
+
+    from panelcast.pipelines.compare_baselines import run_baseline_comparison
+
+    try:
+        result = run_baseline_comparison(
+            dataset=dataset,
+            n_samples=num_samples,
+            seed=seed,
+            output_dir=Path(output_dir),
+            include_bayes=include_bayes,
+        )
+    except FileNotFoundError as e:
+        typer.echo(
+            "Error: split/feature artifacts not found. Run "
+            "`panelcast run --stages splits,features` first.\n"
+            f"  ({e})"
+        )
+        raise typer.Exit(code=1) from e
+
+    typer.echo(result.table.to_string(index=False))
+    typer.echo("")
+    for path in result.artifacts:
+        typer.echo(f"  wrote {path}")
+
+
 def main() -> None:
     """Entry point for CLI."""
     app()

@@ -33,6 +33,7 @@ __all__ = [
     "create_coefficient_table",
     "create_diagnostics_table",
     "create_comparison_table",
+    "create_baseline_benchmark_table",
     "create_sensitivity_summary_table",
     "export_table",
 ]
@@ -457,6 +458,77 @@ def create_comparison_table(
     result["Weight"] = comparison["weight"].apply(lambda x: f"{x:.2f}")
 
     return result
+
+
+def create_baseline_benchmark_table(
+    rows: list[dict],
+    levels: tuple[float, ...] = (0.80, 0.95),
+) -> pd.DataFrame:
+    """Format a baseline/model benchmark table for publication.
+
+    Turns the flat rows produced by
+    ``panelcast.models.baselines.BaselineScore.to_row`` (one per model x split)
+    into a publication table: Model x {MAE, RMSE, R2, CRPS, coverage at each
+    level, 95% interval width, PPC skewness p-value, runtime}. Empty input
+    yields an empty, correctly-columned frame rather than raising, so a partial
+    run still emits a (clearly empty) table instead of a TBD placeholder.
+
+    Parameters
+    ----------
+    rows : list[dict]
+        Flattened benchmark rows. Each must carry ``model``, ``split``, and the
+        metric keys (``mae``, ``rmse``, ``r2``, ``crps``, ``cov80``/``cov95``,
+        ``width95``, ``ppc_skew_p``, ``runtime_s``).
+    levels : tuple of float, default (0.80, 0.95)
+        Coverage levels present in the rows (drives the coverage columns).
+
+    Returns
+    -------
+    pd.DataFrame
+        Publication-formatted benchmark table.
+    """
+    cov_keys = [f"cov{int(round(level * 100))}" for level in levels]
+    pub_cols = {
+        "model": "Model",
+        "split": "Split",
+        "n_obs": "N",
+        "mae": "MAE",
+        "rmse": "RMSE",
+        "r2": "R²",
+        "crps": "CRPS",
+        **{key: f"{int(round(level * 100))}% Cov" for key, level in zip(cov_keys, levels)},
+        "width95": "95% Width",
+        "ppc_skew_p": "PPC skew p",
+        "runtime_s": "Runtime (s)",
+    }
+
+    if not rows:
+        return pd.DataFrame(columns=list(pub_cols.values()))
+
+    df = pd.DataFrame(rows)
+
+    def _fmt(value, places: int) -> str:
+        numeric = pd.to_numeric(value, errors="coerce")
+        if pd.isna(numeric):
+            return "—"  # em-dash
+        return f"{float(numeric):.{places}f}"
+
+    out = pd.DataFrame()
+    out["Model"] = df["model"].astype(str)
+    out["Split"] = df["split"].astype(str)
+    if "n_obs" in df.columns:
+        out["N"] = df["n_obs"].apply(lambda v: _fmt(v, 0))
+    for key, places in (("mae", 2), ("rmse", 2), ("r2", 3), ("crps", 2)):
+        if key in df.columns:
+            out[pub_cols[key]] = df[key].apply(lambda v, p=places: _fmt(v, p))
+    for key in cov_keys:
+        if key in df.columns:
+            out[pub_cols[key]] = df[key].apply(lambda v: _fmt(v, 3))
+    for key, places in (("width95", 2), ("ppc_skew_p", 3), ("runtime_s", 2)):
+        if key in df.columns:
+            out[pub_cols[key]] = df[key].apply(lambda v, p=places: _fmt(v, p))
+
+    return out
 
 
 def create_sensitivity_summary_table(oat_summary_df: pd.DataFrame) -> pd.DataFrame:
