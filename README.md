@@ -1,6 +1,7 @@
 # panelcast
 
 [![CI](https://github.com/cupidthatbtc/panelcast/actions/workflows/ci.yml/badge.svg)](https://github.com/cupidthatbtc/panelcast/actions/workflows/ci.yml)
+[![Nightly](https://github.com/cupidthatbtc/panelcast/actions/workflows/nightly.yml/badge.svg)](https://github.com/cupidthatbtc/panelcast/actions/workflows/nightly.yml)
 [![codecov](https://codecov.io/gh/cupidthatbtc/panelcast/branch/main/graph/badge.svg)](https://codecov.io/gh/cupidthatbtc/panelcast)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)

@@ -21,7 +21,7 @@ jobs:
       - name: Run linting
         run: pixi run lint
 
-  test:
+  test-fast:
     runs-on: ubuntu-latest
     needs: lint
     steps:
@@ -33,7 +33,7 @@ jobs:
         with:
           cache: true
 
-      - name: Run unit tests with coverage
+      - name: Run fast unit tests with coverage
         run: pixi run pytest tests/ -m "not slow and not e2e" --cov=src --cov-report=xml --cov-report=term
 
       - name: Upload coverage to Codecov
@@ -42,3 +42,20 @@ jobs:
           files: ./coverage.xml
           fail_ci_if_error: false
           verbose: true
+
+  smoke:
+    # Tiny synthetic end-to-end (panelcast demo shape) on every PR.
+    runs-on: ubuntu-latest
+    needs: lint
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@v0.8.1
+        with:
+          cache: true
+
+      - name: Run end-to-end smoke check
+        run: pixi run pytest tests/ -m smoke -q

@@ -88,6 +88,7 @@ filterwarnings = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "e2e: marks tests as end-to-end tests",
+    "smoke: marks a fast end-to-end smoke check (the CI PR smoke job)",
 ]
 
 [tool.ruff]
