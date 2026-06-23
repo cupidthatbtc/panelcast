@@ -5,6 +5,18 @@
 ![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![pixi](https://img.shields.io/badge/pixi-package%20manager-brightgreen)](https://pixi.sh)
+![Status: experimental](https://img.shields.io/badge/status-experimental-orange)
+
+> **⚠️ Experimental — infrastructure ahead of the demonstrated result.**
+>
+> The reproducibility, diagnostics, and domain-portability scaffolding is the
+> finished part. The headline *statistical* result is **not** yet established:
+> the documented model card is from a validation-scale run that **fails the
+> convergence gate**, and its posterior-predictive p-values are pinned at the
+> extremes by a symmetric-likelihood / left-skewed-target mismatch (see
+> [`MODEL_CARD.md`](MODEL_CARD.md)). Baseline comparisons and a skew/bounded
+> likelihood are in progress. Treat all reported numbers as indicative until
+> the full publication run (`configs/publication.yaml`) passes its gates.
 
 **Hierarchical Bayesian prediction for bounded scores of events nested in entities over time — configured by one YAML descriptor.**
 
