@@ -1,0 +1,12 @@
+# Quick smoke preset: the fastest end-to-end run (1 chain, tiny sample count).
+#
+# For wiring/plumbing checks and CI smoke — NOT for any inference you would
+# report. Convergence cannot be assessed from a single chain, so the gates are
+# relaxed and divergences are allowed.
+# Usage: panelcast run --preset quick
+num_chains: 1
+num_samples: 200
+num_warmup: 200
+rhat_threshold: 1.1
+ess_threshold: 50
+allow_divergences: true

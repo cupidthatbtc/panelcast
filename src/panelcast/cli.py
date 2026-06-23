@@ -87,6 +87,15 @@ def run(
             "earlier ones. Explicit CLI options always win over YAML."
         ),
     ),
+    preset: Optional[str] = typer.Option(
+        None,
+        "--preset",
+        help=(
+            "Named config preset {quick,dev,diagnostic,publication} — sugar for "
+            "--config configs/<preset>.yaml, layered first so any --config files "
+            "and explicit CLI options still win."
+        ),
+    ),
     seed: int = typer.Option(42, "--seed", help="Random seed for reproducibility"),
     skip_existing: bool = typer.Option(
         False,
@@ -708,12 +717,33 @@ def run(
         exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
     )
 
+    # Resolve --preset to a config file layered FIRST, so explicit --config
+    # files and CLI options still win (later layers override earlier ones).
+    effective_config_files: list[str] = []
+    if preset is not None:
+        from pathlib import Path
+
+        valid_presets = ("quick", "dev", "diagnostic", "publication")
+        if preset not in valid_presets:
+            typer.echo(
+                f"Error: unknown --preset '{preset}'. "
+                f"Choose one of: {', '.join(valid_presets)}"
+            )
+            raise typer.Exit(code=1)
+        preset_path = Path("configs") / f"{preset}.yaml"
+        if not preset_path.exists():
+            typer.echo(f"Error: preset config not found at {preset_path}.")
+            raise typer.Exit(code=1)
+        effective_config_files.append(str(preset_path))
+    if config_files:
+        effective_config_files.extend(config_files)
+
     try:
-        if config_files:
+        if effective_config_files:
             from panelcast.config.loader import load_yaml_config
             from panelcast.config.pipeline_yaml import apply_yaml_overrides
 
-            yaml_data = load_yaml_config(list(config_files))
+            yaml_data = load_yaml_config(effective_config_files)
             # Params set explicitly on the command line win over YAML. click's
             # parameter-source API lives in internals that have drifted across
             # click/typer versions, so compare the source by its enum member
@@ -1222,6 +1252,58 @@ def compare(
     typer.echo(result.table.to_string(index=False))
     typer.echo("")
     for path in result.artifacts:
+        typer.echo(f"  wrote {path}")
+
+
+@app.command("diagnose")
+def diagnose(
+    eval_dir: str = typer.Option(
+        "outputs/evaluation",
+        "--eval-dir",
+        help="Directory holding diagnostics.json / metrics.json from an evaluate run.",
+    ),
+    output_dir: str = typer.Option(
+        "reports/diagnostics", "--output", "-o", help="Directory for the diagnostics report."
+    ),
+) -> None:
+    """Summarize convergence + PPC over an existing evaluation run.
+
+    Re-presents the two things the review flagged — the convergence gate and the
+    posterior-predictive-check p-values — from artifacts the evaluate stage
+    already wrote. PPC statistics pinned near 0/1 are flagged as the signature of
+    likelihood misspecification. No model refit.
+
+    Examples:
+        panelcast diagnose
+        panelcast diagnose --eval-dir outputs/2026-06-23_192630/evaluation
+    """
+    from pathlib import Path
+
+    from panelcast.pipelines.diagnose import run_diagnose
+
+    try:
+        report = run_diagnose(eval_dir=Path(eval_dir), output_dir=Path(output_dir))
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(code=1) from e
+
+    typer.echo(f"Verdict: {report.verdict}\n")
+    c = report.convergence
+    if c:
+        rhat = c.get("rhat_max")
+        typer.echo("Convergence:")
+        typer.echo(f"  status:      {'PASS' if c.get('passed') else 'FAIL'}")
+        typer.echo(f"  R-hat (max): {rhat if rhat is not None else 'n/a (single chain)'}")
+        ess_min = c.get("ess_bulk_min", "?")
+        ess_thr = c.get("ess_threshold", "?")
+        typer.echo(f"  ESS bulk:    {ess_min} (>= {ess_thr})")
+        typer.echo(f"  divergences: {c.get('divergences', '?')}")
+    if report.ppc:
+        typer.echo("\nPPC (statistic: p-value [flag]):")
+        for row in report.ppc:
+            typer.echo(f"  {row['statistic']:<10} {row['p_value']:.3f}  [{row['flag']}]")
+    typer.echo("")
+    for path in report.artifacts:
         typer.echo(f"  wrote {path}")
 
 
