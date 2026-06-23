@@ -86,22 +86,27 @@ panelcast --help
 ## 60-second quickstart (aerospace example)
 
 Retarget the whole pipeline to a non-music domain with no code changes, using
-the bundled synthetic aerospace dataset:
+the bundled synthetic aerospace dataset (committed under `examples/aerospace/`:
+8 airframes flying ~39 sequential test flights scored 0–10):
 
 ```bash
-# 1. Generate the synthetic dataset (8 airframes, ~44 sequential test flights)
-python -c "import os; from tests.helpers.aero_data import make_aero_dataset; \
-os.makedirs('data/raw', exist_ok=True); \
-make_aero_dataset(seed=42).to_csv('data/raw/test_flights.csv', index=False)"
-
-# 2. Run the pipeline on that domain — selected entirely by the descriptor
-panelcast run --dataset aero --num-chains 1 --num-samples 300
+# Run the entire pipeline end-to-end on the example, at tiny scale
+panelcast demo
 ```
 
-`--dataset aero` resolves to `configs/datasets/aero.yaml`. That one file
-remaps the columns, switches the score bounds to [0, 10], drops the
-music-specific feature packs, and adds the domain's own numeric covariates —
-the model code is untouched.
+`demo` reads `examples/aerospace/descriptor.yaml` — one file that remaps the
+columns, switches the score bounds to [0, 10], drops the music-specific feature
+packs, and adds the domain's own numeric covariates — and runs data → splits →
+features → train → evaluate → predict → report, finishing with a generated
+model card under `reports/`. The model code is untouched.
+
+The committed CSV is regenerated from the shared synthetic generator with
+`python scripts/generate_aero_example.py`. To benchmark the model against simple
+baselines on the splits it just produced:
+
+```bash
+panelcast compare --baselines --dataset examples/aerospace/descriptor.yaml
+```
 
 To run the flagship AOTY domain instead, point at your data and omit `--dataset`:
 

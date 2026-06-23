@@ -5,6 +5,14 @@ This is the quickstart for panelcast's flagship example domain, **Album of the
 Year (AOTY)**. To run a different domain, see `docs/PORTING.md` — the steps are
 the same, with that domain's descriptor and dataset path.
 
+> **Fastest path — no data required.** After installing (Steps 1–3 below), run
+> `panelcast demo`. It runs the whole pipeline end-to-end on the bundled
+> synthetic aerospace example (`examples/aerospace/`) at tiny scale and writes a
+> model card under `reports/` — a one-command way to see every stage execute
+> before wiring up the AOTY dataset. Then `panelcast compare --baselines
+> --dataset examples/aerospace/descriptor.yaml` prints the baseline benchmark
+> table for that run.
+
 ## Prerequisites
 
 - Python >= 3.11
