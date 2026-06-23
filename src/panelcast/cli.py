@@ -498,8 +498,12 @@ def run(
         console = Console()
 
         # Check if required data exists
+        from panelcast.data.split_types import SplitType, resolve_split_dir
+
         features_path = Path("data/features/train_features.parquet")
-        splits_path = Path("data/splits/within_artist_temporal/train.parquet")
+        splits_path = resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL) / (
+            "train.parquet"
+        )
 
         if not features_path.exists() or not splits_path.exists():
             console.print(

@@ -4,24 +4,24 @@ import pandas as pd
 import pytest
 
 from panelcast.data.split import (
-    artist_disjoint_split,
+    entity_disjoint_split,
     assert_no_artist_overlap,
     validate_temporal_split,
-    within_artist_temporal_split,
+    within_entity_temporal_split,
 )
 
 # =============================================================================
-# within_artist_temporal_split tests
+# within_entity_temporal_split tests
 # =============================================================================
 
 
 class TestWithinArtistTemporalSplit:
-    """Tests for within_artist_temporal_split."""
+    """Tests for within_entity_temporal_split."""
 
     def test_requires_date_column(self):
         df = pd.DataFrame({"Artist": ["A", "A", "A"], "Album": ["a1", "a2", "a3"]})
         with pytest.raises(ValueError, match="Missing required date column"):
-            within_artist_temporal_split(df, date_col="Release_Date_Parsed")
+            within_entity_temporal_split(df, date_col="Release_Date_Parsed")
 
     def test_places_missing_dates_in_train(self):
         df = pd.DataFrame(
@@ -31,7 +31,7 @@ class TestWithinArtistTemporalSplit:
                 "Release_Date_Parsed": pd.to_datetime([None, "2020-01-01", "2021-01-01"]),
             }
         )
-        train, val, test = within_artist_temporal_split(
+        train, val, test = within_entity_temporal_split(
             df,
             test_albums=1,
             val_albums=1,
@@ -52,7 +52,7 @@ class TestWithinArtistTemporalSplit:
                 ),
             }
         )
-        train, val, test = within_artist_temporal_split(
+        train, val, test = within_entity_temporal_split(
             df,
             test_albums=1,
             val_albums=1,
@@ -69,7 +69,7 @@ class TestWithinArtistTemporalSplit:
                 "Release_Date_Parsed": pd.date_range("2018", periods=5, freq="YS"),
             }
         )
-        train, val, test = within_artist_temporal_split(
+        train, val, test = within_entity_temporal_split(
             df,
             test_albums=1,
             val_albums=1,
@@ -89,7 +89,7 @@ class TestWithinArtistTemporalSplit:
                 ),
             }
         )
-        train, val, test = within_artist_temporal_split(
+        train, val, test = within_entity_temporal_split(
             df,
             test_albums=1,
             val_albums=1,
@@ -107,7 +107,7 @@ class TestWithinArtistTemporalSplit:
             }
         )
         # B has only 2 albums, needs 3 (1+1+1)
-        train, val, test = within_artist_temporal_split(
+        train, val, test = within_entity_temporal_split(
             df,
             test_albums=1,
             val_albums=1,
@@ -124,7 +124,7 @@ class TestWithinArtistTemporalSplit:
                 "Release_Date_Parsed": pd.date_range("2018", periods=7, freq="YS"),
             }
         )
-        train, val, test = within_artist_temporal_split(
+        train, val, test = within_entity_temporal_split(
             df,
             test_albums=1,
             val_albums=1,
@@ -141,7 +141,7 @@ class TestWithinArtistTemporalSplit:
                 "Release_Date_Parsed": pd.date_range("2018", periods=5, freq="YS"),
             }
         )
-        train, val, test = within_artist_temporal_split(
+        train, val, test = within_entity_temporal_split(
             df,
             test_albums=1,
             val_albums=1,
@@ -159,7 +159,7 @@ class TestWithinArtistTemporalSplit:
                 "Release_Date_Parsed": pd.date_range("2016", periods=6, freq="YS"),
             }
         )
-        train, val, test = within_artist_temporal_split(
+        train, val, test = within_entity_temporal_split(
             df,
             test_albums=2,
             val_albums=2,
@@ -176,7 +176,7 @@ class TestWithinArtistTemporalSplit:
                 "Release_Date_Parsed": pd.date_range("2018", periods=3, freq="YS"),
             }
         )
-        train, val, test = within_artist_temporal_split(
+        train, val, test = within_entity_temporal_split(
             df,
             test_albums=1,
             val_albums=1,
@@ -186,12 +186,12 @@ class TestWithinArtistTemporalSplit:
 
 
 # =============================================================================
-# artist_disjoint_split tests
+# entity_disjoint_split tests
 # =============================================================================
 
 
 class TestArtistDisjointSplit:
-    """Tests for artist_disjoint_split."""
+    """Tests for entity_disjoint_split."""
 
     def _make_multi_artist_df(self, n_artists=20, albums_per=3):
         rows = []
@@ -202,7 +202,7 @@ class TestArtistDisjointSplit:
 
     def test_no_artist_overlap(self):
         df = self._make_multi_artist_df(n_artists=20)
-        train, val, test = artist_disjoint_split(df, random_state=42)
+        train, val, test = entity_disjoint_split(df, random_state=42)
         train_a = set(train["Artist"])
         val_a = set(val["Artist"])
         test_a = set(test["Artist"])
@@ -212,26 +212,26 @@ class TestArtistDisjointSplit:
 
     def test_all_rows_preserved(self):
         df = self._make_multi_artist_df(n_artists=20)
-        train, val, test = artist_disjoint_split(df, random_state=42)
+        train, val, test = entity_disjoint_split(df, random_state=42)
         assert len(train) + len(val) + len(test) == len(df)
 
     def test_reproducible_with_same_seed(self):
         df = self._make_multi_artist_df(n_artists=20)
-        t1, v1, te1 = artist_disjoint_split(df, random_state=42)
-        t2, v2, te2 = artist_disjoint_split(df, random_state=42)
+        t1, v1, te1 = entity_disjoint_split(df, random_state=42)
+        t2, v2, te2 = entity_disjoint_split(df, random_state=42)
         assert set(t1["Artist"]) == set(t2["Artist"])
         assert set(te1["Artist"]) == set(te2["Artist"])
 
     def test_different_seed_different_split(self):
         df = self._make_multi_artist_df(n_artists=20)
-        t1, _, te1 = artist_disjoint_split(df, random_state=42)
-        t2, _, te2 = artist_disjoint_split(df, random_state=99)
+        t1, _, te1 = entity_disjoint_split(df, random_state=42)
+        t2, _, te2 = entity_disjoint_split(df, random_state=99)
         # Very unlikely to be identical with different seeds
         assert set(te1["Artist"]) != set(te2["Artist"])
 
     def test_approximate_proportions(self):
         df = self._make_multi_artist_df(n_artists=100, albums_per=3)
-        train, val, test = artist_disjoint_split(df, test_size=0.15, val_size=0.15, random_state=42)
+        train, val, test = entity_disjoint_split(df, test_size=0.15, val_size=0.15, random_state=42)
         total = len(df)
         assert len(test) / total > 0.05
         assert len(test) / total < 0.35
@@ -257,21 +257,21 @@ class TestAssertNoArtistOverlap:
         train = pd.DataFrame({"Artist": ["A", "B"]})
         val = pd.DataFrame({"Artist": ["B"]})
         test = pd.DataFrame({"Artist": ["C"]})
-        with pytest.raises(ValueError, match="Artist overlap"):
+        with pytest.raises(ValueError, match="Entity overlap"):
             assert_no_artist_overlap(train, val, test)
 
     def test_train_test_overlap_raises(self):
         train = pd.DataFrame({"Artist": ["A", "B"]})
         val = pd.DataFrame({"Artist": ["C"]})
         test = pd.DataFrame({"Artist": ["A"]})
-        with pytest.raises(ValueError, match="Artist overlap"):
+        with pytest.raises(ValueError, match="Entity overlap"):
             assert_no_artist_overlap(train, val, test)
 
     def test_val_test_overlap_raises(self):
         train = pd.DataFrame({"Artist": ["A"]})
         val = pd.DataFrame({"Artist": ["B"]})
         test = pd.DataFrame({"Artist": ["B"]})
-        with pytest.raises(ValueError, match="Artist overlap"):
+        with pytest.raises(ValueError, match="Entity overlap"):
             assert_no_artist_overlap(train, val, test)
 
     def test_empty_splits_pass(self):

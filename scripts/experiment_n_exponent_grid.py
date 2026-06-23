@@ -69,7 +69,7 @@ def main() -> None:
 
     model_args, feature_cols, train_df = load_training_data(
         features_path=Path("data/features/train_features.parquet"),
-        splits_path=Path("data/splits/within_artist_temporal/train.parquet"),
+        splits_path=Path("data/splits/within_entity_temporal/train.parquet"),
         descriptor=descriptor,
         target_transform=transform_name,
         ar_center="global",
@@ -109,10 +109,10 @@ def main() -> None:
     model = make_score_model(prefix)
 
     # Test-set inputs (mirrors the evaluate stage's primary-split path).
-    split_dir = Path("data/splits/within_artist_temporal")
+    split_dir = Path("data/splits/within_entity_temporal")
     test_df = pd.read_parquet(split_dir / "test.parquet")
     test_features = pd.read_parquet(
-        Path("data/features/within_artist_temporal/test_features.parquet")
+        Path("data/features/within_entity_temporal/test_features.parquet")
     )
     val_df = None
     val_path = split_dir / "validation.parquet"

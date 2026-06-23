@@ -156,7 +156,7 @@ class TestResolveFeatureSplitDir:
 
     def test_existing_split_dir_returned(self, tmp_path, monkeypatch):
         """When split dir exists, it should be returned."""
-        split_dir = tmp_path / "data" / "features" / "within_artist_temporal"
+        split_dir = tmp_path / "data" / "features" / "within_entity_temporal"
         split_dir.mkdir(parents=True)
 
         monkeypatch.setattr(
@@ -164,7 +164,7 @@ class TestResolveFeatureSplitDir:
             lambda p: tmp_path / p,
         )
 
-        result = _resolve_feature_split_dir("within_artist_temporal")
+        result = _resolve_feature_split_dir("within_entity_temporal")
         assert result == split_dir
 
     def test_primary_split_fallback(self, tmp_path, monkeypatch):
@@ -178,7 +178,7 @@ class TestResolveFeatureSplitDir:
             lambda p: tmp_path / p,
         )
 
-        result = _resolve_feature_split_dir("within_artist_temporal")
+        result = _resolve_feature_split_dir("within_entity_temporal")
         assert result == features_dir
 
     def test_secondary_split_no_fallback(self, tmp_path, monkeypatch):
@@ -188,9 +188,9 @@ class TestResolveFeatureSplitDir:
             lambda p: tmp_path / p,
         )
 
-        result = _resolve_feature_split_dir("artist_disjoint")
+        result = _resolve_feature_split_dir("entity_disjoint")
         # Should return the candidate path, not fall back
-        assert "artist_disjoint" in str(result)
+        assert "entity_disjoint" in str(result)
 
 
 # ============================================================================

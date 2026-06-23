@@ -28,20 +28,20 @@ from tests.integration.test_prepare_golden_hashes import EXTRA_ROWS, FIELDNAMES
 
 # Frozen on the pre-descriptor implementation (2026-06-10).
 GOLDEN_FEATURE_HASHES = {
-    "within_artist_temporal/train": (
+    "within_entity_temporal/train": (
         "e6b4ea8b864ff2e35587c03a2a1ff2116f5a89e1e3708690c55e28af705f5aad"
     ),
-    "within_artist_temporal/validation": (
+    "within_entity_temporal/validation": (
         "255cd169ed4ad1e5f0a58f82ad206b823d1282605569cae05d35b96ff00f84c0"
     ),
-    "within_artist_temporal/test": (
+    "within_entity_temporal/test": (
         "57f5e07b02830bec2aab4c12bddd2a6ed1148e6bcf321e79ee1bc5e7a3486c97"
     ),
-    "artist_disjoint/train": ("52dc781661bf32e98322162ebf580291e9037753907de447d66d14e01ebf74c9"),
-    "artist_disjoint/validation": (
+    "entity_disjoint/train": ("52dc781661bf32e98322162ebf580291e9037753907de447d66d14e01ebf74c9"),
+    "entity_disjoint/validation": (
         "109aece9bc3ea35655b576f3dab062d73487d7ac1574ffea3f942f9e72be8d6f"
     ),
-    "artist_disjoint/test": ("faf7ed362e54fc65ff32eb664a5f111782762962eb45aa5ae774580cbbbaaaaf"),
+    "entity_disjoint/test": ("faf7ed362e54fc65ff32eb664a5f111782762962eb45aa5ae774580cbbbaaaaf"),
 }
 
 GOLDEN_FEATURE_NAMES = [

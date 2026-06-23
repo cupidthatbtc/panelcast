@@ -304,8 +304,8 @@ def test_json_safe_replaces_non_finite_with_null():
 def test_evaluate_models_returns_split_metrics(tmp_path, mock_summary):
     """evaluate_models returns split-aware metrics payload."""
     (tmp_path / "models").mkdir()
-    (tmp_path / "data/splits/within_artist_temporal").mkdir(parents=True)
-    (tmp_path / "data/features/within_artist_temporal").mkdir(parents=True)
+    (tmp_path / "data/splits/within_entity_temporal").mkdir(parents=True)
+    (tmp_path / "data/features/within_entity_temporal").mkdir(parents=True)
 
     # Minimal split/features files
     test_df = pd.DataFrame(
@@ -327,9 +327,9 @@ def test_evaluate_models_returns_split_metrics(tmp_path, mock_summary):
         }
     )
     feat_df = pd.DataFrame({"feat_1": [1.0, -0.5], "feat_2": [2.5, 1.5], "n_reviews": [100, 80]})
-    train_df.to_parquet(tmp_path / "data/splits/within_artist_temporal/train.parquet")
-    test_df.to_parquet(tmp_path / "data/splits/within_artist_temporal/test.parquet")
-    feat_df.to_parquet(tmp_path / "data/features/within_artist_temporal/test_features.parquet")
+    train_df.to_parquet(tmp_path / "data/splits/within_entity_temporal/train.parquet")
+    test_df.to_parquet(tmp_path / "data/splits/within_entity_temporal/test.parquet")
+    feat_df.to_parquet(tmp_path / "data/features/within_entity_temporal/test_features.parquet")
 
     with open(tmp_path / "models/training_summary.json", "w", encoding="utf-8") as f:
         json.dump(mock_summary, f)
@@ -381,14 +381,14 @@ def test_evaluate_models_returns_split_metrics(tmp_path, mock_summary):
 
     assert "metrics" in result
     assert "splits" in result["metrics"]
-    assert "within_artist_temporal" in result["metrics"]["splits"]
+    assert "within_entity_temporal" in result["metrics"]["splits"]
 
 
 def test_evaluate_models_strict_fails_when_secondary_artifacts_missing(tmp_path, mock_summary):
     """Strict mode should fail when secondary split evaluation artifacts are missing."""
     (tmp_path / "models").mkdir()
-    (tmp_path / "data/splits/within_artist_temporal").mkdir(parents=True)
-    (tmp_path / "data/features/within_artist_temporal").mkdir(parents=True)
+    (tmp_path / "data/splits/within_entity_temporal").mkdir(parents=True)
+    (tmp_path / "data/features/within_entity_temporal").mkdir(parents=True)
 
     test_df = pd.DataFrame(
         {
@@ -409,9 +409,9 @@ def test_evaluate_models_strict_fails_when_secondary_artifacts_missing(tmp_path,
         }
     )
     feat_df = pd.DataFrame({"feat_1": [1.0, -0.5], "feat_2": [2.5, 1.5], "n_reviews": [100, 80]})
-    train_df.to_parquet(tmp_path / "data/splits/within_artist_temporal/train.parquet")
-    test_df.to_parquet(tmp_path / "data/splits/within_artist_temporal/test.parquet")
-    feat_df.to_parquet(tmp_path / "data/features/within_artist_temporal/test_features.parquet")
+    train_df.to_parquet(tmp_path / "data/splits/within_entity_temporal/train.parquet")
+    test_df.to_parquet(tmp_path / "data/splits/within_entity_temporal/test.parquet")
+    feat_df.to_parquet(tmp_path / "data/features/within_entity_temporal/test_features.parquet")
 
     with open(tmp_path / "models/training_summary.json", "w", encoding="utf-8") as f:
         json.dump(mock_summary, f)

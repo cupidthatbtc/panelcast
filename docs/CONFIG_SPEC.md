@@ -6,7 +6,7 @@ Dataset
 - dataset.min_ratings: int (default 10)
 
 Splits
-- splits.strategy: string (within_artist_temporal | artist_disjoint)
+- splits.strategy: string (within_entity_temporal | entity_disjoint)
 - splits.group_col: string (default Artist)
 - splits.seed: int (default 42)
 - splits.train_frac: float (default 0.65)

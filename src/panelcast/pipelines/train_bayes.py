@@ -20,6 +20,7 @@ import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
+from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.models.bayes.diagnostics import check_convergence
 from panelcast.models.bayes.fit import MCMCConfig, fit_model
 from panelcast.models.bayes.io import save_model
@@ -475,7 +476,8 @@ def train_models(
         features_path: Optional path to features parquet. Defaults to
             data/features/train_features.parquet.
         splits_path: Optional path to splits parquet. Defaults to
-            data/splits/within_artist_temporal/train.parquet.
+            data/splits/within_entity_temporal/train.parquet (resolving a
+            legacy-named directory if only that exists).
 
     Returns:
         Dictionary with training results and paths.
@@ -509,7 +511,9 @@ def train_models(
 
     # Load training data using shared function
     features_path = features_path or Path("data/features/train_features.parquet")
-    splits_path = splits_path or Path("data/splits/within_artist_temporal/train.parquet")
+    splits_path = splits_path or (
+        resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL) / "train.parquet"
+    )
 
     debut_prev_score_source = str(getattr(ctx, "debut_prev_score_source", "train_mean"))
     target_transform = str(getattr(ctx, "target_transform", "identity"))

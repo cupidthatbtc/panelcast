@@ -233,9 +233,9 @@ class TestCreateSplits:
         with (
             patch("panelcast.pipelines.create_splits.pd.read_parquet") as mock_read,
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split"
+                "panelcast.pipelines.create_splits.within_entity_temporal_split"
             ) as mock_temporal,
-            patch("panelcast.pipelines.create_splits.artist_disjoint_split") as mock_disjoint,
+            patch("panelcast.pipelines.create_splits.entity_disjoint_split") as mock_disjoint,
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
             patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
             patch("panelcast.pipelines.create_splits.save_manifest") as mock_save_manifest,
@@ -275,11 +275,11 @@ class TestCreateSplits:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -313,11 +313,11 @@ class TestCreateSplits:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -335,8 +335,8 @@ class TestCreateSplits:
 
         summary = result.summary
         assert "source" in summary
-        assert "within_artist_temporal" in summary
-        assert "artist_disjoint" in summary
+        assert "within_entity_temporal" in summary
+        assert "entity_disjoint" in summary
         assert "run_timestamp" in summary
         assert summary["source"]["rows"] == len(sample_df)
 
@@ -351,11 +351,11 @@ class TestCreateSplits:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -376,7 +376,7 @@ class TestCreateSplits:
         with open(summary_path, encoding="utf-8") as f:
             data = json.load(f)
         assert "source" in data
-        assert "within_artist_temporal" in data
+        assert "within_entity_temporal" in data
 
     def test_passes_config_params_to_temporal_split(self, tmp_path, sample_df, mock_split_results):
         """Temporal split receives config parameters."""
@@ -392,11 +392,11 @@ class TestCreateSplits:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ) as mock_temporal,
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -432,11 +432,11 @@ class TestCreateSplits:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ) as mock_disjoint,
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),

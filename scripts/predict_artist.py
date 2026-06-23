@@ -38,7 +38,7 @@ def load_everything():
         summary = json.load(f)
     posterior_samples = extract_posterior_samples(idata)
 
-    train = pd.read_parquet("data/splits/within_artist_temporal/train.parquet")
+    train = pd.read_parquet("data/splits/within_entity_temporal/train.parquet")
     train_feat = pd.read_parquet("data/features/train_features.parquet")
     overlap = list(set(train.columns) & set(train_feat.columns))
     if overlap:
@@ -47,14 +47,14 @@ def load_everything():
     feature_cols = summary["feature_cols"]
     train[feature_cols] = train[feature_cols].fillna(0)
 
-    test = pd.read_parquet("data/splits/within_artist_temporal/test.parquet")
+    test = pd.read_parquet("data/splits/within_entity_temporal/test.parquet")
 
     # Load raw data for albums not in train/test
     raw = pd.read_csv("data/raw/all_albums_full.csv", encoding="utf-8-sig")
 
     # Evaluation predictions for accuracy check
     eval_preds = None
-    eval_path = Path("outputs/evaluation/within_artist_temporal/predictions.json")
+    eval_path = Path("outputs/evaluation/within_entity_temporal/predictions.json")
     if eval_path.exists():
         with open(eval_path) as f:
             eval_preds = json.load(f)

@@ -9,6 +9,11 @@
 **CLI Entry Point:** `panelcast run` via `src/panelcast/cli.py`
 **Tracked Example:** Kendrick Lamar - "To Pimp a Butterfly" (2015)
 
+> **Split naming:** the split strategies are now role-based —
+> `within_entity_temporal` and `entity_disjoint`. Pre-rename artifacts written
+> with the AOTY-flavored `within_artist_temporal` / `artist_disjoint` literals
+> still load via the aliases in `panelcast.data.split_types`.
+
 ---
 
 # PART 1: PIPELINE OVERVIEW
@@ -50,9 +55,9 @@
 │  │ • Validation: temporal ordering + no artist overlap     │           │
 │  │ • SHA-256 manifests with per-row assignment reasoning   │           │
 │  │ Input:  data/processed/user_score_minratings_10.parquet │           │
-│  │ Output: data/splits/within_artist_temporal/{train,      │           │
+│  │ Output: data/splits/within_entity_temporal/{train,      │           │
 │  │           validation,test}.parquet                      │           │
-│  │         data/splits/artist_disjoint/{train,             │           │
+│  │         data/splits/entity_disjoint/{train,             │           │
 │  │           validation,test}.parquet                      │           │
 │  └─────────────────────────────────┬───────────────────────┘           │
 │                                    │                                    │
@@ -65,7 +70,7 @@
 │  │ • Feature blocks: TemporalBlock, AlbumTypeBlock,        │           │
 │  │   ArtistHistoryBlock, GenreBlock, CollaborationBlock    │           │
 │  │ • n_reviews preserved from User_Ratings                 │           │
-│  │ Input:  data/splits/within_artist_temporal/*.parquet    │           │
+│  │ Input:  data/splits/within_entity_temporal/*.parquet    │           │
 │  │ Output: data/features/{train,validation,test}           │           │
 │  │           _features.parquet                             │           │
 │  └─────────────────────────────────┬───────────────────────┘           │
@@ -392,7 +397,7 @@ Audit log saved to `data/audit/` via `data/lineage.py:AuditLogger`.
 
 ### 3.2.2 Within-Artist Temporal Split
 
-**Algorithm** (`data/split.py:within_artist_temporal_split`):
+**Algorithm** (`data/split.py:within_entity_temporal_split`):
 
 For each artist with sufficient albums (>= `min_train_albums + val_albums + test_albums`):
 1. Sort albums chronologically
@@ -407,7 +412,7 @@ Artists with fewer albums are excluded entirely. This prevents data leakage by e
 
 ### 3.2.3 Artist-Disjoint Split
 
-**Algorithm** (`data/split.py:artist_disjoint_split`):
+**Algorithm** (`data/split.py:entity_disjoint_split`):
 
 Artists (not albums) are split into train/val/test groups. No artist appears in more than one split. Uses `random_state` for reproducibility.
 
@@ -432,7 +437,7 @@ Each split strategy produces:
 **SplitManifest** (`data/manifests.py`) contains:
 - `version`: manifest version
 - `created_at`: ISO-8601 timestamp
-- `split_type`: `"within_artist_temporal"` or `"artist_disjoint"`
+- `split_type`: `"within_entity_temporal"` or `"entity_disjoint"`
 - `parameters`: split configuration parameters
 - `source_dataset`: path, SHA-256 hash, row count, unique artists
 - `splits`: per-split `SplitStats` (row count, unique artists, SHA-256)
@@ -550,7 +555,7 @@ Feature manifest records:
 
 **Loading** (`train_bayes.py:load_training_data`):
 
-1. Load `data/features/train_features.parquet` and `data/splits/within_artist_temporal/train.parquet`
+1. Load `data/features/train_features.parquet` and `data/splits/within_entity_temporal/train.parquet`
 2. Validate DataFrame alignment (row count and index match)
 3. Join features with original split data (left join)
 4. Fill NaN feature values with 0 for numeric stability
@@ -1271,7 +1276,7 @@ See [Section 5.3](#53-prior-configuration) for full field listing with defaults 
 ┌─────────────────────────────────────────────────────────────────┐
 │ FEATURE PIPELINE (features/pipeline.py:FeaturePipeline)         │
 │                                                                 │
-│ Input: data/splits/within_artist_temporal/{split}.parquet       │
+│ Input: data/splits/within_entity_temporal/{split}.parquet       │
 │                                                                 │
 │  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐       │
 │  │ TemporalBlock │  │ AlbumTypeBlock│  │ ArtistHistory │       │
@@ -1320,7 +1325,7 @@ data/processed/user_score_minratings_10.parquet
        │                       │
        ▼                       ▼
 ┌──────────────────┐    ┌──────────────────┐
-│ within_artist_   │    │ artist_disjoint/ │
+│ within_entity_   │    │ entity_disjoint/ │
 │ temporal/        │    │ ├── train.pq     │
 │ ├── train.pq     │    │ ├── val.pq       │
 │ ├── val.pq       │    │ ├── test.pq      │
@@ -1356,12 +1361,12 @@ data/
 │   ├── critic_score.parquet
 │   └── *.csv (CSV duplicates)
 ├── splits/
-│   ├── within_artist_temporal/
+│   ├── within_entity_temporal/
 │   │   ├── train.parquet
 │   │   ├── validation.parquet
 │   │   ├── test.parquet
 │   │   └── manifest.json
-│   ├── artist_disjoint/
+│   ├── entity_disjoint/
 │   │   ├── train.parquet
 │   │   ├── validation.parquet
 │   │   ├── test.parquet
@@ -1506,7 +1511,7 @@ Each split strategy saves its own manifest (`data/manifests.py:SplitManifest`):
 |-------|-------------|
 | `version` | Manifest version tag |
 | `created_at` | ISO-8601 UTC timestamp |
-| `split_type` | `"within_artist_temporal"` or `"artist_disjoint"` |
+| `split_type` | `"within_entity_temporal"` or `"entity_disjoint"` |
 | `parameters` | Split-specific parameters (test_albums, random_state, etc.) |
 | `source_dataset` | Path, SHA-256, row count, unique artists |
 | `splits` | Per-split `SplitStats`: row count, unique artists, SHA-256 |
@@ -1794,7 +1799,7 @@ is_unknown_artist: False
 # 5. Mr. Morale & The Big Steppers (2022) → test
 
 # Assignment for TPAB: train split
-# Reason: within_artist_temporal, position 3 of 5 (not last 2)
+# Reason: within_entity_temporal, position 3 of 5 (not last 2)
 ```
 
 ### After Feature Engineering (Stage 3)
@@ -1965,8 +1970,8 @@ Key entities referenced in this document:
 - [ ] `load_raw_albums()` in `ingest.py`
 - [ ] `create_splits()` in `create_splits.py`
 - [ ] `SplitConfig` dataclass in `create_splits.py`
-- [ ] `within_artist_temporal_split()` in `split.py`
-- [ ] `artist_disjoint_split()` in `split.py`
+- [ ] `within_entity_temporal_split()` in `split.py`
+- [ ] `entity_disjoint_split()` in `split.py`
 - [ ] `build_features()` in `build_features.py`
 - [ ] `get_feature_blocks()` in `build_features.py`
 - [ ] `FeaturePipeline` class in `pipeline.py`

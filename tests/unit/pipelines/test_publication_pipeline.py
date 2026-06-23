@@ -16,9 +16,9 @@ from panelcast.pipelines.publication import generate_publication_artifacts
 def _write_metrics(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     metrics = {
-        "primary_split": "within_artist_temporal",
+        "primary_split": "within_entity_temporal",
         "splits": {
-            "within_artist_temporal": {
+            "within_entity_temporal": {
                 "point_metrics": {"rmse": 1.0, "mae": 0.8, "r2": 0.5},
                 "calibration": {
                     "coverages": {
@@ -168,9 +168,9 @@ def test_publication_strict_raises_when_any_artifact_fails(tmp_path):
 def test_publication_model_card_includes_loaded_metrics_and_training_summary(tmp_path):
     """Model card update should receive parsed diagnostics/metrics payloads."""
     metrics_payload = {
-        "primary_split": "within_artist_temporal",
+        "primary_split": "within_entity_temporal",
         "splits": {
-            "within_artist_temporal": {
+            "within_entity_temporal": {
                 "point_metrics": {"rmse": 1.25, "mae": 0.75, "r2": 0.42},
                 "calibration": {
                     "coverages": {
@@ -353,9 +353,9 @@ def test_publication_v1_metrics_backward_compat(tmp_path):
 def test_publication_ppc_summary_missing_fields_is_tolerated(tmp_path):
     """PPC summary with missing/null fields should not crash publication pipeline."""
     metrics_payload = {
-        "primary_split": "within_artist_temporal",
+        "primary_split": "within_entity_temporal",
         "splits": {
-            "within_artist_temporal": {
+            "within_entity_temporal": {
                 "point_metrics": {"rmse": 1.0, "mae": 0.8, "r2": 0.5},
                 "calibration": {"coverages": {"0.80": {"nominal": 0.8, "empirical": 0.79}}},
                 "ppc": {

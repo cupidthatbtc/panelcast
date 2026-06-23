@@ -109,7 +109,7 @@ def _load_all():
         summary = json.load(f)
     posterior_samples = extract_posterior_samples(idata)
 
-    train = pd.read_parquet("data/splits/within_artist_temporal/train.parquet")
+    train = pd.read_parquet("data/splits/within_entity_temporal/train.parquet")
     train_feat = pd.read_parquet("data/features/train_features.parquet")
     overlap = list(set(train.columns) & set(train_feat.columns))
     if overlap:
@@ -118,13 +118,13 @@ def _load_all():
     feature_cols = summary["feature_cols"]
     train[feature_cols] = train[feature_cols].fillna(0)
 
-    test = pd.read_parquet("data/splits/within_artist_temporal/test.parquet")
+    test = pd.read_parquet("data/splits/within_entity_temporal/test.parquet")
     raw = pd.read_csv("data/raw/all_albums_full.csv", encoding="utf-8-sig")
 
     # Load validation split
     val = pd.DataFrame()
     for val_name in ("validation.parquet", "val.parquet"):
-        val_path = Path("data/splits/within_artist_temporal") / val_name
+        val_path = Path("data/splits/within_entity_temporal") / val_name
         if val_path.exists():
             val = pd.read_parquet(val_path)
             break

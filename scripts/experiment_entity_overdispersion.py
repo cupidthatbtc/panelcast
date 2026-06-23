@@ -134,7 +134,7 @@ def main() -> None:
     # --- Training data (mirrors train_models prep at defaults) ---
     model_args, feature_cols, train_df = load_training_data(
         features_path=data_root / "data/features/train_features.parquet",
-        splits_path=data_root / "data/splits/within_artist_temporal/train.parquet",
+        splits_path=data_root / "data/splits/within_entity_temporal/train.parquet",
         descriptor=descriptor,
         target_transform=transform_name,
         ar_center="global",
@@ -153,10 +153,10 @@ def main() -> None:
     model_args["target_bounds"] = bounds
 
     # --- Held-out test inputs (mirrors evaluate's primary-split path) ---
-    split_dir = data_root / "data/splits/within_artist_temporal"
+    split_dir = data_root / "data/splits/within_entity_temporal"
     test_df = pd.read_parquet(split_dir / "test.parquet")
     test_features = pd.read_parquet(
-        data_root / "data/features/within_artist_temporal/test_features.parquet"
+        data_root / "data/features/within_entity_temporal/test_features.parquet"
     )
     val_path = split_dir / "validation.parquet"
     val_df = pd.read_parquet(val_path) if val_path.exists() else None

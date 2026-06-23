@@ -57,11 +57,11 @@ def main() -> None:
     summary = load_training_summary(models_dir / "training_summary.json").to_json_dict()
     prefix = summary["dataset"]["model_prefix"]
 
-    split_dir = Path("data/splits/within_artist_temporal")
+    split_dir = Path("data/splits/within_entity_temporal")
     test_df = pd.read_parquet(split_dir / "test.parquet")
     train_df = pd.read_parquet(split_dir / "train.parquet")
     test_features = pd.read_parquet(
-        Path("data/features/within_artist_temporal/test_features.parquet")
+        Path("data/features/within_entity_temporal/test_features.parquet")
     )
     val_df = None
     val_path = split_dir / "validation.parquet"

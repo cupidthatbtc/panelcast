@@ -17,11 +17,12 @@ from panelcast.data.manifests import (
     save_manifest,
 )
 from panelcast.data.split import (
-    artist_disjoint_split,
     assert_no_artist_overlap,
+    entity_disjoint_split,
     validate_temporal_split,
-    within_artist_temporal_split,
+    within_entity_temporal_split,
 )
+from panelcast.data.split_types import SplitType, split_dir_name
 from panelcast.utils.hashing import hash_dataframe
 from panelcast.utils.logging import setup_pipeline_logging
 
@@ -116,13 +117,13 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
 
     results = {"temporal": {}, "disjoint": {}}
 
-    # ===== WITHIN-ARTIST TEMPORAL SPLIT =====
-    temporal_dir = config.output_dir / "within_artist_temporal"
+    # ===== WITHIN-ENTITY TEMPORAL SPLIT =====
+    temporal_dir = config.output_dir / split_dir_name(SplitType.WITHIN_ENTITY_TEMPORAL)
     temporal_dir.mkdir(parents=True, exist_ok=True)
 
-    train_t, val_t, test_t = within_artist_temporal_split(
+    train_t, val_t, test_t = within_entity_temporal_split(
         source_df,
-        artist_col=config.entity_col,
+        entity_col=config.entity_col,
         date_col=config.date_col,
         test_albums=config.test_albums,
         val_albums=config.val_albums,
@@ -132,7 +133,7 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
 
     # Validate temporal ordering
     validate_temporal_split(
-        train_t, val_t, test_t, artist_col=config.entity_col, date_col=config.date_col
+        train_t, val_t, test_t, entity_col=config.entity_col, date_col=config.date_col
     )
     log.info("temporal_split_validated")
 
@@ -158,7 +159,7 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
     temporal_manifest = SplitManifest(
         version=config.version,
         created_at=datetime.now(timezone.utc).isoformat(),
-        split_type="within_artist_temporal",
+        split_type=str(SplitType.WITHIN_ENTITY_TEMPORAL.value),
         parameters={
             "test_albums": config.test_albums,
             "val_albums": config.val_albums,
@@ -188,7 +189,7 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
             ),
         },
         assignments=create_split_assignments(
-            train_t, val_t, test_t, "within_artist_temporal", artist_col=config.entity_col
+            train_t, val_t, test_t, SplitType.WITHIN_ENTITY_TEMPORAL, entity_col=config.entity_col
         ),
         content_hash=combined_t,
     )
@@ -210,20 +211,20 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
         "artists": train_t[config.entity_col].nunique(),
     }
 
-    # ===== ARTIST-DISJOINT SPLIT =====
-    disjoint_dir = config.output_dir / "artist_disjoint"
+    # ===== ENTITY-DISJOINT SPLIT =====
+    disjoint_dir = config.output_dir / split_dir_name(SplitType.ENTITY_DISJOINT)
     disjoint_dir.mkdir(parents=True, exist_ok=True)
 
-    train_d, val_d, test_d = artist_disjoint_split(
+    train_d, val_d, test_d = entity_disjoint_split(
         source_df,
-        artist_col=config.entity_col,
+        entity_col=config.entity_col,
         test_size=config.disjoint_test_size,
         val_size=config.disjoint_val_size,
         random_state=config.random_state,
     )
 
     # Validate no overlap
-    assert_no_artist_overlap(train_d, val_d, test_d, artist_col=config.entity_col)
+    assert_no_artist_overlap(train_d, val_d, test_d, entity_col=config.entity_col)
     log.info("disjoint_split_validated", overlap="none")
 
     # Save parquet files
@@ -246,7 +247,7 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
     disjoint_manifest = SplitManifest(
         version=config.version,
         created_at=datetime.now(timezone.utc).isoformat(),
-        split_type="artist_disjoint",
+        split_type=str(SplitType.ENTITY_DISJOINT.value),
         parameters={
             "test_size": config.disjoint_test_size,
             "val_size": config.disjoint_val_size,
@@ -276,7 +277,7 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
             ),
         },
         assignments=create_split_assignments(
-            train_d, val_d, test_d, "artist_disjoint", artist_col=config.entity_col
+            train_d, val_d, test_d, SplitType.ENTITY_DISJOINT, entity_col=config.entity_col
         ),
         content_hash=combined_d,
     )
@@ -311,7 +312,7 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
             "artists": source_df[config.entity_col].nunique(),
             "sha256": source_hash,
         },
-        "within_artist_temporal": {
+        "within_entity_temporal": {
             "train_rows": results["temporal"]["train"],
             "val_rows": results["temporal"]["validation"],
             "test_rows": results["temporal"]["test"],
@@ -320,7 +321,7 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
             - results["temporal"]["artists"],
             "manifest": str(temporal_manifest_path),
         },
-        "artist_disjoint": {
+        "entity_disjoint": {
             "train_rows": results["disjoint"]["train"],
             "val_rows": results["disjoint"]["validation"],
             "test_rows": results["disjoint"]["test"],
@@ -365,16 +366,16 @@ def main() -> None:
     print(f"  Rows: {s['source']['rows']:,}")
     print(f"  Artists: {s['source']['artists']:,}")
 
-    print("\nWithin-Artist Temporal Split:")
-    print(f"  Train:      {s['within_artist_temporal']['train_rows']:,} rows")
-    print(f"  Validation: {s['within_artist_temporal']['val_rows']:,} rows")
-    print(f"  Test:       {s['within_artist_temporal']['test_rows']:,} rows")
-    print(f"  Artists included: {s['within_artist_temporal']['artists_included']:,}")
-    excl = s["within_artist_temporal"]["artists_excluded"]
-    print(f"  Artists excluded: {excl:,} (insufficient albums)")
+    print("\nWithin-Entity Temporal Split:")
+    print(f"  Train:      {s['within_entity_temporal']['train_rows']:,} rows")
+    print(f"  Validation: {s['within_entity_temporal']['val_rows']:,} rows")
+    print(f"  Test:       {s['within_entity_temporal']['test_rows']:,} rows")
+    print(f"  Entities included: {s['within_entity_temporal']['artists_included']:,}")
+    excl = s["within_entity_temporal"]["artists_excluded"]
+    print(f"  Entities excluded: {excl:,} (insufficient events)")
 
-    print("\nArtist-Disjoint Split:")
-    ad = s["artist_disjoint"]
+    print("\nEntity-Disjoint Split:")
+    ad = s["entity_disjoint"]
     print(f"  Train:      {ad['train_rows']:,} rows ({ad['train_artists']:,} artists)")
     print(f"  Validation: {ad['val_rows']:,} rows ({ad['val_artists']:,} artists)")
     print(f"  Test:       {ad['test_rows']:,} rows ({ad['test_artists']:,} artists)")

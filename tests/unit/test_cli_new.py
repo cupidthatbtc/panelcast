@@ -115,7 +115,7 @@ class TestPreflightFull:
         features_path = tmp_path / "data" / "features"
         features_path.mkdir(parents=True)
         (features_path / "train_features.parquet").write_text("dummy")
-        splits_path = tmp_path / "data" / "splits" / "within_artist_temporal"
+        splits_path = tmp_path / "data" / "splits" / "within_entity_temporal"
         splits_path.mkdir(parents=True)
         (splits_path / "train.parquet").write_text("dummy")
 
@@ -133,7 +133,7 @@ class TestPreflightFull:
         features_path = tmp_path / "data" / "features"
         features_path.mkdir(parents=True)
         (features_path / "train_features.parquet").write_text("dummy")
-        splits_path = tmp_path / "data" / "splits" / "within_artist_temporal"
+        splits_path = tmp_path / "data" / "splits" / "within_entity_temporal"
         splits_path.mkdir(parents=True)
         (splits_path / "train.parquet").write_text("dummy")
 
@@ -149,7 +149,7 @@ class TestPreflightFull:
         features_path = tmp_path / "data" / "features"
         features_path.mkdir(parents=True)
         (features_path / "train_features.parquet").write_text("dummy")
-        splits_path = tmp_path / "data" / "splits" / "within_artist_temporal"
+        splits_path = tmp_path / "data" / "splits" / "within_entity_temporal"
         splits_path.mkdir(parents=True)
         (splits_path / "train.parquet").write_text("dummy")
 
@@ -167,7 +167,7 @@ class TestPreflightFull:
         features_path = tmp_path / "data" / "features"
         features_path.mkdir(parents=True)
         (features_path / "train_features.parquet").write_text("dummy")
-        splits_path = tmp_path / "data" / "splits" / "within_artist_temporal"
+        splits_path = tmp_path / "data" / "splits" / "within_entity_temporal"
         splits_path.mkdir(parents=True)
         (splits_path / "train.parquet").write_text("dummy")
 
@@ -185,7 +185,7 @@ class TestPreflightFull:
         features_path = tmp_path / "data" / "features"
         features_path.mkdir(parents=True)
         (features_path / "train_features.parquet").write_text("dummy")
-        splits_path = tmp_path / "data" / "splits" / "within_artist_temporal"
+        splits_path = tmp_path / "data" / "splits" / "within_entity_temporal"
         splits_path.mkdir(parents=True)
         (splits_path / "train.parquet").write_text("dummy")
 
@@ -201,7 +201,7 @@ class TestPreflightFull:
         features_path = tmp_path / "data" / "features"
         features_path.mkdir(parents=True)
         (features_path / "train_features.parquet").write_text("dummy")
-        splits_path = tmp_path / "data" / "splits" / "within_artist_temporal"
+        splits_path = tmp_path / "data" / "splits" / "within_entity_temporal"
         splits_path.mkdir(parents=True)
         (splits_path / "train.parquet").write_text("dummy")
 
@@ -218,7 +218,7 @@ class TestPreflightFull:
         features_path = tmp_path / "data" / "features"
         features_path.mkdir(parents=True)
         (features_path / "train_features.parquet").write_text("dummy")
-        splits_path = tmp_path / "data" / "splits" / "within_artist_temporal"
+        splits_path = tmp_path / "data" / "splits" / "within_entity_temporal"
         splits_path.mkdir(parents=True)
         (splits_path / "train.parquet").write_text("dummy")
 

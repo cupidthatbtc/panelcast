@@ -16,10 +16,10 @@ Mandatory rules
 - CV folds must be group-aware and nested when tuning.
 
 Artifacts to store
-- data/splits/within_artist_temporal/manifest.json
-- data/splits/artist_disjoint/manifest.json
-- data/splits/within_artist_temporal/split_*.json (versioned archive)
-- data/splits/artist_disjoint/split_*.json (versioned archive)
+- data/splits/within_entity_temporal/manifest.json
+- data/splits/entity_disjoint/manifest.json
+- data/splits/within_entity_temporal/split_*.json (versioned archive)
+- data/splits/entity_disjoint/split_*.json (versioned archive)
 - data/audit/summary_<run_id>.json and data/audit/exclusions_<run_id>.jsonl
 - outputs/<run_id>/manifest.json
 - outputs/<run_id>/dataset_hash.txt

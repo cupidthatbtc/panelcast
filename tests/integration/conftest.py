@@ -17,7 +17,7 @@ import xarray as xr
 
 from panelcast.data.cleaning import clean_albums
 from panelcast.data.ingest import load_raw_albums
-from panelcast.data.split import within_artist_temporal_split
+from panelcast.data.split import within_entity_temporal_split
 from panelcast.features.album_type import AlbumTypeBlock
 from panelcast.features.artist import ArtistHistoryBlock
 from panelcast.features.base import FeatureContext
@@ -185,7 +185,7 @@ def synthetic_albums_df() -> pd.DataFrame:
 def split_datasets(synthetic_albums_df: pd.DataFrame) -> dict:
     """Split synthetic data into train/val/test.
 
-    Uses within_artist_temporal_split to create temporal splits
+    Uses within_entity_temporal_split to create temporal splits
     where each artist has albums in all three splits.
 
     Returns
@@ -193,9 +193,9 @@ def split_datasets(synthetic_albums_df: pd.DataFrame) -> dict:
     dict
         Dictionary with keys "train", "val", "test" containing DataFrames.
     """
-    train, val, test = within_artist_temporal_split(
+    train, val, test = within_entity_temporal_split(
         synthetic_albums_df,
-        artist_col="Artist",
+        entity_col="Artist",
         date_col="Release_Date_Parsed",
         test_albums=1,
         val_albums=1,

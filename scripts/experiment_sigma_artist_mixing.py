@@ -59,7 +59,7 @@ def prepare_args(descriptor: DatasetDescriptor) -> tuple[dict, float]:
     """Replicate train_models data prep at defaults (identity, centered)."""
     model_args, feature_cols, _train_df = load_training_data(
         features_path=Path("data/features/train_features.parquet"),
-        splits_path=Path("data/splits/within_artist_temporal/train.parquet"),
+        splits_path=Path("data/splits/within_entity_temporal/train.parquet"),
         descriptor=descriptor,
     )
     artist_album_counts = model_args.pop("artist_album_counts")
