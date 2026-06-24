@@ -568,6 +568,7 @@ class PipelineOrchestrator:
         "tau_entity_scale",
         "exclude_rw_raw_from_collection",
         "max_albums",
+        "min_ratings",
         "min_albums_filter",
         "min_train_albums",
         "calibration_intervals",
@@ -662,6 +663,13 @@ class PipelineOrchestrator:
         # YAML has changed since the original run would silently mix domains.
         self.descriptor = load_descriptor(self.config.dataset)
         self.descriptor_path = resolve_descriptor_path(self.config.dataset)
+        # __init__ resolved min_ratings against the pre-resume (CLI/default)
+        # descriptor; the manifest restore above re-pointed the dataset, so
+        # re-derive the threshold from the restored descriptor when it wasn't
+        # pinned in the manifest. Without this a resumed cross-domain run keeps
+        # the wrong threshold and reads the wrong processed parquet.
+        if self.config.min_ratings is None:
+            self.config.min_ratings = self.descriptor.primary_min_obs
         recorded_hash = self.manifest.flags.get("dataset_descriptor_hash")
         if recorded_hash is None:
             log.warning(

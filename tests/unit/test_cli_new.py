@@ -438,6 +438,61 @@ class TestExportFiguresCommand:
         )
         assert result.exit_code == 0
 
+    def _run_export_with_trace_samples(self, monkeypatch, tmp_path, samples):
+        """Drive export-figures with an idata whose first var has the given shape."""
+        import plotly.graph_objects as go
+
+        mock_posterior = MagicMock()
+        mock_posterior.data_vars = ["beta"]
+        mock_posterior.__getitem__ = MagicMock(return_value=MagicMock(values=samples))
+        mock_idata = MagicMock()
+        mock_idata.posterior = mock_posterior
+
+        data = SimpleNamespace(
+            predictions=None, coefficients=None, reliability=None, idata=mock_idata
+        )
+        monkeypatch.setattr(
+            "panelcast.visualization.dashboard.load_dashboard_data", lambda run_path: data
+        )
+        monkeypatch.setattr(
+            "panelcast.visualization.export.ensure_kaleido_chrome", lambda: True
+        )
+        captured: dict[str, object] = {}
+        monkeypatch.setattr(
+            "panelcast.visualization.charts.create_trace_plot",
+            lambda samples, var_name: captured.setdefault("shape", samples.shape) or go.Figure(),
+        )
+        monkeypatch.setattr(
+            "panelcast.visualization.export.export_all_figures",
+            lambda output_dir, figures, formats, width, height, scale: {
+                "trace": [tmp_path / "trace.svg"]
+            },
+        )
+        result = runner.invoke(
+            app, ["export-figures", "--output", str(tmp_path), "--formats", "svg"]
+        )
+        return result, captured
+
+    def test_export_figures_trace_3d_samples_reshaped(self, monkeypatch, tmp_path):
+        """A 3-D posterior var is flattened to 2-D before plotting."""
+        import numpy as np
+
+        result, captured = self._run_export_with_trace_samples(
+            monkeypatch, tmp_path, np.random.randn(4, 10, 5)
+        )
+        assert result.exit_code == 0
+        assert captured["shape"] == (4, 50)  # reshaped to (chains, flattened)
+
+    def test_export_figures_trace_1d_samples_reshaped(self, monkeypatch, tmp_path):
+        """A 1-D posterior var is promoted to a single-chain 2-D array."""
+        import numpy as np
+
+        result, captured = self._run_export_with_trace_samples(
+            monkeypatch, tmp_path, np.random.randn(200)
+        )
+        assert result.exit_code == 0
+        assert captured["shape"] == (1, 200)
+
     def test_export_figures_kaleido_warning(self, monkeypatch, tmp_path):
         """export-figures warns when Kaleido Chrome is unavailable."""
         data = SimpleNamespace(

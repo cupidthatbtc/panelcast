@@ -253,6 +253,62 @@ class TestStageDatasetConfigPresetWiring:
         assert result.exit_code == 1
         assert "unknown --preset" in strip_ansi(result.stdout)
 
+    def test_stage_invalid_config_value_errors(self, tmp_path):
+        """An invalid config value surfaces as a parameter error (real PipelineConfig)."""
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text("target_transform: bogus\n", encoding="utf-8")
+        result = runner.invoke(app, ["stage", "data", "--config", str(cfg)])
+        assert result.exit_code != 0
+        assert "target_transform" in strip_ansi(result.output)
+
+
+class TestPreflightUsesMergedConfig:
+    """--preflight[-full] read the --config/--preset-merged values, not raw CLI defaults."""
+
+    def _mock_quick_preflight(self, monkeypatch, captured_dims):
+        def fake_extract(**kwargs):
+            captured_dims.update(kwargs)
+            return SimpleNamespace(n_observations=500, n_artists=50)
+
+        monkeypatch.setattr("panelcast.data.ingest.extract_data_dimensions", fake_extract)
+        monkeypatch.setattr(
+            "panelcast.preflight.run_preflight_check",
+            lambda **kwargs: SimpleNamespace(status="pass", exit_code=0),
+        )
+        monkeypatch.setattr(
+            "panelcast.preflight.render_preflight_result",
+            lambda result, verbose, dimensions: None,
+        )
+        monkeypatch.setattr(
+            "panelcast.preflight.PreflightStatus", SimpleNamespace(FAIL="fail")
+        )
+
+    def test_quick_preflight_uses_config_min_ratings(self, monkeypatch, tmp_path):
+        """--preflight reads a --config min_ratings, not the raw CLI default."""
+        _make_pipeline_mocks(monkeypatch)
+        captured_dims: dict[str, object] = {}
+        self._mock_quick_preflight(monkeypatch, captured_dims)
+
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text("min_ratings: 33\n", encoding="utf-8")
+        result = runner.invoke(app, ["run", "--preflight", "--config", str(cfg)])
+        assert result.exit_code == 0
+        assert captured_dims["min_ratings"] == 33
+
+    def test_quick_preflight_cli_min_ratings_beats_config(self, monkeypatch, tmp_path):
+        """An explicit --min-ratings still wins over the config in preflight."""
+        _make_pipeline_mocks(monkeypatch)
+        captured_dims: dict[str, object] = {}
+        self._mock_quick_preflight(monkeypatch, captured_dims)
+
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text("min_ratings: 33\n", encoding="utf-8")
+        result = runner.invoke(
+            app, ["run", "--preflight", "--min-ratings", "12", "--config", str(cfg)]
+        )
+        assert result.exit_code == 0
+        assert captured_dims["min_ratings"] == 12
+
 
 # ============================================================================
 # Run Command: Full Config Passthrough
@@ -877,3 +933,140 @@ class TestExportFiguresCommand:
         assert "--height" in output
         assert "--scale" in output
         assert "--run" in output
+
+
+# ============================================================================
+# Run-command branch coverage (relocated --preset wiring + validation)
+# ============================================================================
+
+
+class TestRunBranchCoverage:
+    """Covers the relocated --preset fallback and run-level validation branches."""
+
+    def test_preset_bundled_fallback_when_no_local_configs(self, monkeypatch, tmp_path):
+        """--preset resolves to the repo-bundled config when cwd has no configs/."""
+        _make_pipeline_mocks(monkeypatch)
+        monkeypatch.chdir(tmp_path)  # no ./configs here -> bundled fallback
+        result = runner.invoke(app, ["run", "--preset", "quick"])
+        assert result.exit_code == 0
+
+    def test_invalid_likelihood_family_errors(self, monkeypatch):
+        """An unknown --likelihood-family exits 1 with a clear message."""
+        _make_pipeline_mocks(monkeypatch)
+        result = runner.invoke(app, ["run", "--likelihood-family", "bogus"])
+        assert result.exit_code == 1
+        assert "Invalid --likelihood-family" in strip_ansi(result.output)
+
+
+# ============================================================================
+# Standalone commands: demo / compare / diagnose
+# ============================================================================
+
+
+class TestDemoCommand:
+    """Tests for the demo subcommand."""
+
+    def test_demo_missing_descriptor_errors(self):
+        """A missing descriptor path exits 1 with guidance."""
+        result = runner.invoke(app, ["demo", "--descriptor", "does/not/exist.yaml"])
+        assert result.exit_code == 1
+        assert "demo descriptor not found" in strip_ansi(result.output)
+
+    def test_demo_happy_path(self, monkeypatch):
+        """The demo runs the pipeline and reports artifacts on success."""
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.run_pipeline", lambda config: 0)
+        result = runner.invoke(app, ["demo"])
+        assert result.exit_code == 0
+        assert "Demo complete" in strip_ansi(result.output)
+
+
+class TestCompareCommand:
+    """Tests for the compare subcommand."""
+
+    def test_compare_no_baselines_is_noop(self):
+        """Without --baselines the command is a no-op (exit 0)."""
+        result = runner.invoke(app, ["compare"])
+        assert result.exit_code == 0
+        assert "Nothing to do" in strip_ansi(result.output)
+
+    def test_compare_baselines_happy(self, monkeypatch):
+        """--baselines prints the comparison table and artifact paths."""
+        fake_result = SimpleNamespace(
+            table=SimpleNamespace(to_string=lambda index: "BENCHMARK_TABLE"),
+            artifacts=[Path("reports/baselines/comparison.csv")],
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.compare_baselines.run_baseline_comparison",
+            lambda **kwargs: fake_result,
+        )
+        result = runner.invoke(app, ["compare", "--baselines"])
+        assert result.exit_code == 0
+        assert "BENCHMARK_TABLE" in strip_ansi(result.output)
+
+    def test_compare_baselines_missing_artifacts(self, monkeypatch):
+        """A missing split/feature artifact surfaces a clear error (exit 1)."""
+
+        def boom(**kwargs):
+            raise FileNotFoundError("data/splits missing")
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.compare_baselines.run_baseline_comparison", boom
+        )
+        result = runner.invoke(app, ["compare", "--baselines"])
+        assert result.exit_code == 1
+        assert "artifacts not found" in strip_ansi(result.output)
+
+
+class TestDiagnoseCommand:
+    """Tests for the diagnose subcommand."""
+
+    def test_diagnose_missing_eval_dir_errors(self, monkeypatch):
+        """A missing evaluation directory exits 1."""
+
+        def boom(eval_dir, output_dir):
+            raise FileNotFoundError("no diagnostics.json")
+
+        monkeypatch.setattr("panelcast.pipelines.diagnose.run_diagnose", boom)
+        result = runner.invoke(app, ["diagnose"])
+        assert result.exit_code == 1
+        assert "Error:" in strip_ansi(result.output)
+
+    def test_diagnose_happy_path(self, monkeypatch):
+        """A full report prints verdict, convergence, and PPC rows."""
+        fake_report = SimpleNamespace(
+            verdict="likelihood adequate",
+            convergence={
+                "passed": True,
+                "rhat_max": 1.01,
+                "ess_bulk_min": 500,
+                "ess_threshold": 400,
+                "divergences": 0,
+            },
+            ppc=[{"statistic": "mean", "p_value": 0.42, "flag": "ok"}],
+            artifacts=[Path("reports/diagnostics/report.json")],
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.diagnose.run_diagnose",
+            lambda eval_dir, output_dir: fake_report,
+        )
+        result = runner.invoke(app, ["diagnose"])
+        assert result.exit_code == 0
+        out = strip_ansi(result.output)
+        assert "Verdict: likelihood adequate" in out
+        assert "PPC" in out
+
+    def test_diagnose_single_chain_no_ppc(self, monkeypatch):
+        """Single-chain (rhat None) + empty PPC still renders cleanly."""
+        fake_report = SimpleNamespace(
+            verdict="n/a",
+            convergence={"passed": False, "rhat_max": None},
+            ppc=[],
+            artifacts=[],
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.diagnose.run_diagnose",
+            lambda eval_dir, output_dir: fake_report,
+        )
+        result = runner.invoke(app, ["diagnose"])
+        assert result.exit_code == 0
+        assert "n/a (single chain)" in strip_ansi(result.output)

@@ -106,7 +106,7 @@ def _resolve_effective_config_files(
             bundled = Path(__file__).resolve().parents[2] / "configs" / f"{preset}.yaml"
             if bundled.exists():
                 preset_path = bundled
-            else:
+            else:  # pragma: no cover - every validated preset ships a bundled config
                 typer.echo(f"Error: preset config not found at {preset_path}.")
                 raise typer.Exit(code=1)
         effective.append(str(preset_path))
@@ -153,7 +153,7 @@ def _build_stage_config(
     config_files: Optional[list[str]],
     preset: Optional[str],
     **extra: object,
-) -> "PipelineConfig":
+) -> PipelineConfig:
     """Build a single-stage ``PipelineConfig`` with ``run``'s option-wiring.
 
     Shares the ``--preset`` / ``--config`` / ``--dataset`` resolution used by
@@ -626,192 +626,10 @@ def run(
         typer.echo("Error: --calibration-intervals values must be in (0, 1).")
         raise typer.Exit(code=1)
 
-    # Full preflight mode (--preflight-full) takes precedence over quick preflight
-    if preflight_full:
-        from pathlib import Path
-
-        import numpy as np
-        from rich.console import Console
-
-        from panelcast.pipelines.train_bayes import load_training_data
-        from panelcast.preflight import (
-            PreflightStatus,
-            render_extrapolation_result,
-            run_extrapolated_preflight_check,
-        )
-        from panelcast.preflight.full_check import _derive_dimensions_from_model_args
-
-        console = Console()
-
-        # Check if required data exists
-        from panelcast.data.split_types import SplitType, resolve_split_dir
-
-        features_path = Path("data/features/train_features.parquet")
-        splits_path = resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL) / (
-            "train.parquet"
-        )
-
-        if not features_path.exists() or not splits_path.exists():
-            console.print(
-                "[bold red]Error:[/bold red] --preflight-full requires processed data.\n"
-                "Missing files:\n"
-                f"  - {features_path}: {'exists' if features_path.exists() else 'MISSING'}\n"
-                f"  - {splits_path}: {'exists' if splits_path.exists() else 'MISSING'}\n\n"
-                "Run data stages first, or use [bold]--preflight[/bold] for quick estimation."
-            )
-            raise typer.Exit(2)  # CANNOT_CHECK exit code
-
-        from panelcast.config.descriptor import load_descriptor
-
-        preflight_descriptor = load_descriptor(dataset)
-
-        # Load data and build model_args using shared function
-        model_args, _, _ = load_training_data(
-            features_path=features_path,
-            splits_path=splits_path,
-            min_albums_filter=min_albums,
-            descriptor=preflight_descriptor,
-        )
-
-        # Remove artist_album_counts (not needed for preflight)
-        model_args.pop("artist_album_counts", None)
-
-        # Apply max_albums cap to model_args["album_seq"]
-        album_seq = model_args["album_seq"]
-        model_args["album_seq"] = np.clip(album_seq, 1, max_albums)
-        model_args["max_seq"] = max_albums
-
-        # Add heteroscedastic params (use CLI-parsed values)
-        model_args["n_exponent"] = n_exponent
-        model_args["learn_n_exponent"] = learn_n_exponent
-        model_args["likelihood_df"] = likelihood_df
-
-        # Use shared dimension derivation for consistent validation
-        n_observations, n_artists_dim, n_features, _ = _derive_dimensions_from_model_args(
-            model_args
-        )
-
-        # Target is POST-WARMUP samples per chain: warmup draws are never
-        # stored (measured: identical peaks at warmup 50 vs 250), and the
-        # calibration runs at the production chain count so multi-chain
-        # accumulation is measured rather than modeled.
-        target_samples = num_samples
-
-        # Show progress indicator
-        progress_msg = (
-            "[bold blue]Running calibration (10+50 samples)...[/bold blue]"
-            if not recalibrate
-            else "[bold blue]Running fresh calibration...[/bold blue]"
-        )
-        # Structural gates for the calibration cache key: a calibration must
-        # never serve projections for a structurally different model.
-        model_signature = {
-            "descriptor_hash": preflight_descriptor.descriptor_hash(),
-            "latent_process": latent_process,
-            "target_transform": target_transform,
-            "n_exponent": n_exponent,
-            "learn_n_exponent": learn_n_exponent,
-            "likelihood_df": likelihood_df,
-            "likelihood_family": likelihood_family,
-            "discretize_observation": discretize_observation,
-            "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
-        }
-        # Mirror the production fit's memory gate in the calibration runs:
-        # with the rw_raw exclusion on, the dominant memory term disappears
-        # and the projection must reflect that.
-        preflight_exclude_collection = (
-            (f"{preflight_descriptor.model_prefix}_rw_raw",)
-            if exclude_rw_raw_from_collection
-            else ()
-        )
-
-        with console.status(progress_msg):
-            full_result = run_extrapolated_preflight_check(
-                model_args=model_args,
-                target_samples=target_samples,
-                n_observations=n_observations,
-                n_artists=n_artists_dim,
-                n_features=n_features,
-                max_seq=max_albums,
-                headroom_target=0.20,
-                # Sequential chains run one after another in the calibration
-                # mini-runs; scale the per-run timeout with the chain count.
-                timeout_seconds=120 * max(1, num_chains),
-                recalibrate=recalibrate,
-                model_signature=model_signature,
-                exclude_collection=preflight_exclude_collection,
-                num_chains=num_chains,
-            )
-
-        render_extrapolation_result(full_result, verbose=verbose)
-
-        if preflight_only:
-            raise typer.Exit(full_result.exit_code)
-
-        if full_result.status == PreflightStatus.FAIL:
-            if force_run:
-                typer.echo("Warning: Continuing despite preflight failure (--force-run)")
-            else:
-                typer.echo("Use --force-run to override preflight failure")
-                raise typer.Exit(full_result.exit_code)
-
-    # Run preflight check if requested (quick estimation mode)
-    # Note: Preflight runs BEFORE building PipelineConfig to fail fast
-    # Skip quick preflight when full preflight was already run (--preflight-full takes precedence)
-    if (preflight or preflight_only) and not preflight_full:
-        import os
-
-        from panelcast.config.descriptor import load_descriptor
-        from panelcast.data.ingest import extract_data_dimensions
-        from panelcast.preflight import (
-            PreflightStatus,
-            render_preflight_result,
-            run_preflight_check,
-        )
-
-        # Resolve the dataset descriptor and its raw CSV path so the quick
-        # preflight reads the configured domain's data and columns, not just
-        # AOTY's. dataset=None -> AOTY defaults.
-        quick_descriptor = load_descriptor(dataset)
-        quick_csv_path = os.environ.get(
-            quick_descriptor.raw_path_env, quick_descriptor.raw_path_default
-        )
-        # Mirror the orchestrator's resolution so the preflight reads the same
-        # threshold a default run would use.
-        effective_min_ratings = (
-            min_ratings if min_ratings is not None else quick_descriptor.primary_min_obs
-        )
-
-        # Extract actual data dimensions (graceful fallback to defaults)
-        dimensions = extract_data_dimensions(
-            csv_path=quick_csv_path,
-            min_ratings=effective_min_ratings,
-            descriptor=quick_descriptor,
-        )
-
-        result = run_preflight_check(
-            n_observations=dimensions.n_observations,
-            n_features=QUICK_PREFLIGHT_FEATURES,  # Features built from columns, not counted
-            n_artists=dimensions.n_artists,
-            max_seq=max_albums,
-            num_chains=num_chains,
-            num_samples=num_samples,
-            num_warmup=num_warmup,
-            exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
-        )
-
-        render_preflight_result(result, verbose=verbose, dimensions=dimensions)
-
-        if preflight_only:
-            raise typer.Exit(code=result.exit_code)
-
-        if result.status == PreflightStatus.FAIL:
-            if force_run:
-                typer.echo("Warning: Continuing despite preflight failure (--force-run)")
-            else:
-                typer.echo("Aborting. Use --force-run to override.")
-                raise typer.Exit(code=result.exit_code)
-
+    # Build the effective config (CLI + --preset/--config overlay) BEFORE the
+    # preflight branches so --preflight[-full] check the merged dataset, sizes,
+    # and model gates rather than raw CLI defaults. PipelineConfig only
+    # validates here; the heavy run still happens after preflight.
     config_kwargs: dict = dict(
         seed=seed,
         skip_existing=skip_existing,
@@ -871,6 +689,193 @@ def run(
         config = PipelineConfig(**config_kwargs)
     except ValueError as e:
         raise typer.BadParameter(str(e)) from e
+
+    # Full preflight mode (--preflight-full) takes precedence over quick preflight
+    if preflight_full:
+        from pathlib import Path
+
+        import numpy as np
+        from rich.console import Console
+
+        from panelcast.pipelines.train_bayes import load_training_data
+        from panelcast.preflight import (
+            PreflightStatus,
+            render_extrapolation_result,
+            run_extrapolated_preflight_check,
+        )
+        from panelcast.preflight.full_check import _derive_dimensions_from_model_args
+
+        console = Console()
+
+        # Check if required data exists
+        from panelcast.data.split_types import SplitType, resolve_split_dir
+
+        features_path = Path("data/features/train_features.parquet")
+        splits_path = resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL) / (
+            "train.parquet"
+        )
+
+        if not features_path.exists() or not splits_path.exists():
+            console.print(
+                "[bold red]Error:[/bold red] --preflight-full requires processed data.\n"
+                "Missing files:\n"
+                f"  - {features_path}: {'exists' if features_path.exists() else 'MISSING'}\n"
+                f"  - {splits_path}: {'exists' if splits_path.exists() else 'MISSING'}\n\n"
+                "Run data stages first, or use [bold]--preflight[/bold] for quick estimation."
+            )
+            raise typer.Exit(2)  # CANNOT_CHECK exit code
+
+        from panelcast.config.descriptor import load_descriptor
+
+        preflight_descriptor = load_descriptor(config.dataset)
+
+        # Load data and build model_args using shared function
+        model_args, _, _ = load_training_data(
+            features_path=features_path,
+            splits_path=splits_path,
+            min_albums_filter=config.min_albums_filter,
+            descriptor=preflight_descriptor,
+        )
+
+        # Remove artist_album_counts (not needed for preflight)
+        model_args.pop("artist_album_counts", None)
+
+        # Apply max_albums cap to model_args["album_seq"]
+        album_seq = model_args["album_seq"]
+        model_args["album_seq"] = np.clip(album_seq, 1, config.max_albums)
+        model_args["max_seq"] = config.max_albums
+
+        # Add heteroscedastic params (use effective-config values)
+        model_args["n_exponent"] = config.n_exponent
+        model_args["learn_n_exponent"] = config.learn_n_exponent
+        model_args["likelihood_df"] = config.likelihood_df
+
+        # Use shared dimension derivation for consistent validation
+        n_observations, n_artists_dim, n_features, _ = _derive_dimensions_from_model_args(
+            model_args
+        )
+
+        # Target is POST-WARMUP samples per chain: warmup draws are never
+        # stored (measured: identical peaks at warmup 50 vs 250), and the
+        # calibration runs at the production chain count so multi-chain
+        # accumulation is measured rather than modeled.
+        target_samples = config.num_samples
+
+        # Show progress indicator
+        progress_msg = (
+            "[bold blue]Running calibration (10+50 samples)...[/bold blue]"
+            if not recalibrate
+            else "[bold blue]Running fresh calibration...[/bold blue]"
+        )
+        # Structural gates for the calibration cache key: a calibration must
+        # never serve projections for a structurally different model.
+        model_signature = {
+            "descriptor_hash": preflight_descriptor.descriptor_hash(),
+            "latent_process": config.latent_process,
+            "target_transform": config.target_transform,
+            "n_exponent": config.n_exponent,
+            "learn_n_exponent": config.learn_n_exponent,
+            "likelihood_df": config.likelihood_df,
+            "likelihood_family": config.likelihood_family,
+            "discretize_observation": config.discretize_observation,
+            "exclude_rw_raw_from_collection": config.exclude_rw_raw_from_collection,
+        }
+        # Mirror the production fit's memory gate in the calibration runs:
+        # with the rw_raw exclusion on, the dominant memory term disappears
+        # and the projection must reflect that.
+        preflight_exclude_collection = (
+            (f"{preflight_descriptor.model_prefix}_rw_raw",)
+            if config.exclude_rw_raw_from_collection
+            else ()
+        )
+
+        with console.status(progress_msg):
+            full_result = run_extrapolated_preflight_check(
+                model_args=model_args,
+                target_samples=target_samples,
+                n_observations=n_observations,
+                n_artists=n_artists_dim,
+                n_features=n_features,
+                max_seq=config.max_albums,
+                headroom_target=0.20,
+                # Sequential chains run one after another in the calibration
+                # mini-runs; scale the per-run timeout with the chain count.
+                timeout_seconds=120 * max(1, config.num_chains),
+                recalibrate=recalibrate,
+                model_signature=model_signature,
+                exclude_collection=preflight_exclude_collection,
+                num_chains=config.num_chains,
+            )
+
+        render_extrapolation_result(full_result, verbose=config.verbose)
+
+        if preflight_only:
+            raise typer.Exit(full_result.exit_code)
+
+        if full_result.status == PreflightStatus.FAIL:
+            if force_run:
+                typer.echo("Warning: Continuing despite preflight failure (--force-run)")
+            else:
+                typer.echo("Use --force-run to override preflight failure")
+                raise typer.Exit(full_result.exit_code)
+
+    # Run preflight check if requested (quick estimation mode)
+    # Skip quick preflight when full preflight was already run (--preflight-full takes precedence)
+    if (preflight or preflight_only) and not preflight_full:
+        import os
+
+        from panelcast.config.descriptor import load_descriptor
+        from panelcast.data.ingest import extract_data_dimensions
+        from panelcast.preflight import (
+            PreflightStatus,
+            render_preflight_result,
+            run_preflight_check,
+        )
+
+        # Resolve the dataset descriptor and its raw CSV path so the quick
+        # preflight reads the configured domain's data and columns, not just
+        # AOTY's. config.dataset=None -> AOTY defaults.
+        quick_descriptor = load_descriptor(config.dataset)
+        quick_csv_path = os.environ.get(
+            quick_descriptor.raw_path_env, quick_descriptor.raw_path_default
+        )
+        # Mirror the orchestrator's resolution so the preflight reads the same
+        # threshold a default run would use.
+        effective_min_ratings = (
+            config.min_ratings
+            if config.min_ratings is not None
+            else quick_descriptor.primary_min_obs
+        )
+
+        # Extract actual data dimensions (graceful fallback to defaults)
+        dimensions = extract_data_dimensions(
+            csv_path=quick_csv_path,
+            min_ratings=effective_min_ratings,
+            descriptor=quick_descriptor,
+        )
+
+        result = run_preflight_check(
+            n_observations=dimensions.n_observations,
+            n_features=QUICK_PREFLIGHT_FEATURES,  # Features built from columns, not counted
+            n_artists=dimensions.n_artists,
+            max_seq=config.max_albums,
+            num_chains=config.num_chains,
+            num_samples=config.num_samples,
+            num_warmup=config.num_warmup,
+            exclude_rw_raw_from_collection=config.exclude_rw_raw_from_collection,
+        )
+
+        render_preflight_result(result, verbose=config.verbose, dimensions=dimensions)
+
+        if preflight_only:
+            raise typer.Exit(code=result.exit_code)
+
+        if result.status == PreflightStatus.FAIL:
+            if force_run:
+                typer.echo("Warning: Continuing despite preflight failure (--force-run)")
+            else:
+                typer.echo("Aborting. Use --force-run to override.")
+                raise typer.Exit(code=result.exit_code)
 
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)
@@ -1500,5 +1505,5 @@ def main() -> None:
     app()
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
