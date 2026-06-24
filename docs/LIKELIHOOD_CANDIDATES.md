@@ -36,14 +36,20 @@ the pre-registry code).
 Orthogonal to the family: AOTY scores are integer-valued, so a continuous
 likelihood's replicated draws never land exactly on the observed integer
 quantiles and the q50/q90 PPC p-values pin as an artifact. With this flag the
-observation is **interval-censored to integers** — integer `k` contributes
-`log(F(k+0.5) − F(k−0.5))` via the family's CDF, and replicated/predictive draws
-are rounded (one `RoundedDistribution` wrapper handles both the inference
-`log_prob` and the PPC/predictive `sample`, so the known-artist and cold-start
-paths stay consistent). It composes with any location-scale family (`studentt`,
-`normal`, `skew_normal`, `split_normal`); `beta` and `skew_studentt` reject it
-(no usable CDF). Default off ⇒ the continuous likelihood is byte-identical to
-before.
+observation is made integer-aware by **dequantization** — inference conditions
+the continuous base on `y + u` with a single fixed jitter `u ~ Uniform(−0.5,
+0.5)` (held constant across every leapfrog step), and replicated/predictive
+draws are rounded so `y_rep` stays integer. This keeps the gradient finite
+everywhere; the marginalized interval-CDF alternative — integer `k` contributes
+`log(F(k+0.5) − F(k−0.5))` via the family's CDF (`RoundedDistribution`) —
+underflows to a flat-gradient cliff in the tails and walled the sampler
+([#4](https://github.com/cupidthatbtc/panelcast/issues/4)), so it is kept
+dormant behind `_DISCRETIZE_MODE` as a validated fallback. Either way one wrapper
+handles both the inference `log_prob` and the PPC/predictive `sample`, so the
+known-artist and cold-start paths stay consistent. It composes with any
+location-scale family (`studentt`, `normal`, `skew_normal`, `split_normal`);
+`beta` and `skew_studentt` reject it (no usable CDF). Default off ⇒ the
+continuous likelihood is byte-identical to before.
 
 ## Controlled synthetic experiment
 

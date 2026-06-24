@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import jax.numpy as jnp
 import numpy as np
+import numpyro.distributions as dist
 import pytest
 from jax import random
 from numpyro.handlers import seed, trace
 from numpyro.infer import Predictive
 
 from panelcast.config.gates import LikelihoodFamily
-from panelcast.models.bayes.likelihoods import REGISTRY
+from panelcast.models.bayes.likelihoods import REGISTRY, DequantizedDistribution
 from panelcast.models.bayes.model import make_score_model
 from panelcast.models.bayes.priors import PriorConfig
 
@@ -86,17 +87,41 @@ class TestDiscretization:
 
     @pytest.mark.parametrize("family", DISCRETIZABLE)
     def test_discretized_log_density_is_finite(self, family):
-        # Observed integers -> interval-censored log_prob must be finite.
-        y_int = jnp.asarray(
-            np.round(np.clip(np.random.default_rng(5).normal(70, 8, N_OBS), 0, 100)),
-            dtype=jnp.float32,
-        )
+        # Include the boundary integers 0 and 100, where the old interval-CDF
+        # log-difference underflowed.
+        draws = np.round(np.clip(np.random.default_rng(5).normal(70, 8, N_OBS), 0, 100))
+        draws[0], draws[1] = 0.0, 100.0
+        y_int = jnp.asarray(draws, dtype=jnp.float32)
         tr = trace(seed(make_score_model("user"), random.PRNGKey(3))).get_trace(
             y=y_int, **_model_args(family, discretize_observation=True)
         )
         site = tr["user_y"]
         lp = np.asarray(site["fn"].log_prob(site["value"]))
-        assert np.isfinite(lp).all(), f"{family}: non-finite interval-censored log_prob"
+        assert np.isfinite(lp).all(), f"{family}: non-finite dequantized log_prob"
+
+    def test_dequantized_log_prob_has_finite_gradient(self):
+        # The crux the interval-CDF path failed: its tail log-difference gave a
+        # flat/NaN gradient and walled the sampler. normal and studentt were the
+        # two underflow-prone CDFs.
+        import jax
+
+        y_extreme = jnp.array([0.0, 100.0, 250.0, -120.0])
+
+        def make_logp(base_ctor):
+            def logp(mu, sigma):
+                d = DequantizedDistribution(base_ctor(mu, sigma))
+                return jnp.sum(d.log_prob(y_extreme))
+
+            return logp
+
+        base_ctors = {
+            "normal": lambda mu, sigma: dist.Normal(mu, sigma),
+            "studentt": lambda mu, sigma: dist.StudentT(4.0, mu, sigma),
+        }
+        for name, ctor in base_ctors.items():
+            g_mu, g_sigma = jax.grad(make_logp(ctor), argnums=(0, 1))(70.0, 8.0)
+            assert jnp.isfinite(g_mu), f"{name}: non-finite d log_prob / d mu at tail"
+            assert jnp.isfinite(g_sigma), f"{name}: non-finite d log_prob / d sigma at tail"
 
     @pytest.mark.parametrize("family", ("beta", "skew_studentt"))
     def test_discretization_rejected_for_unsupported(self, family):

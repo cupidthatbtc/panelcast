@@ -15,15 +15,13 @@ prediction dispatch (``predict.predict_new_artist``) both resolve a family by
 name through :data:`REGISTRY`, so adding a family is a single new entry here
 instead of edits scattered across ``model.py`` and ``predict.py``.
 
-Discretization. ``PriorConfig.discretize_observation`` turns the observation
-into an interval-censored, integer-valued likelihood: the integer ``k``
-contributes ``log(F(k+0.5) - F(k-0.5))`` and replicated draws are rounded. This
-is implemented once by :class:`RoundedDistribution`, which wraps any continuous
-base distribution with a CDF and is used with ``obs=`` exactly like the
-continuous distribution — so inference (interval-censored ``log_prob``) and PPC
-generation (rounded ``sample``) stay consistent across both the known-artist
-``Predictive`` path and the manual cold-start path. The continuous (toggle-off)
-path is byte-identical to the pre-registry code.
+Discretization. ``PriorConfig.discretize_observation`` makes the observation
+integer-aware via dequantization (:class:`DequantizedDistribution`): inference
+conditions the continuous base on ``y + u``, ``u ~ Uniform(-0.5, 0.5)`` a single
+fixed jitter, and draws are rounded. This keeps the gradient finite where the
+interval-censored ``log(F(k+0.5) - F(k-0.5))`` underflowed (issue #4); that
+marginalized form (:class:`RoundedDistribution`) is kept as a dormant fallback.
+The continuous (toggle-off) path is byte-identical to the pre-registry code.
 """
 
 from __future__ import annotations
@@ -48,6 +46,7 @@ from panelcast.models.bayes.priors import DEFAULT_BETA_BOUNDARY_EPS, PriorConfig
 
 __all__ = [
     "LikelihoodSpec",
+    "DequantizedDistribution",
     "RoundedDistribution",
     "SplitNormal",
     "REGISTRY",
@@ -55,6 +54,14 @@ __all__ = [
 
 # Floor for interval-mass and Beta boundary clips, shared across the module.
 _TINY = 1e-12
+
+# "dequantize" (active, finite gradients) or the dormant "interval_cdf" fallback
+# (marginalized log-CDF; see docs/LIKELIHOOD_CANDIDATES.md, issue #4).
+_DISCRETIZE_MODE = "dequantize"
+
+# Fixed realization, so the jitter is identical on every leapfrog step — redrawing
+# per step would break NUTS.
+_DEQUANT_JITTER_SEED = 0
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +152,39 @@ class RoundedDistribution(dist.Distribution):
         return jnp.log(jnp.maximum(hi - lo, _TINY))
 
 
+class DequantizedDistribution(dist.Distribution):
+    """Dequantized view of a continuous base distribution.
+
+    ``log_prob`` passes through to the continuous base (finite gradient, scored at
+    ``y + u``); ``sample`` rounds the base draw so replicated ``y_rep`` stays
+    integer. Used with ``obs=y+u`` for inference and ``obs=None`` for generation.
+    """
+
+    arg_constraints: dict = {}
+    support = constraints.real
+
+    def __init__(self, base, *, validate_args=None):
+        self._base = base
+        super().__init__(
+            batch_shape=base.batch_shape,
+            event_shape=base.event_shape,
+            validate_args=validate_args,
+        )
+
+    def sample(self, key, sample_shape=()):
+        return jnp.round(self._base.sample(key, sample_shape))
+
+    def log_prob(self, value):
+        return self._base.log_prob(value)
+
+
+def _dequant_jitter(y):
+    """Single fixed Uniform(-0.5, 0.5) jitter realization, constant across steps."""
+    return random.uniform(
+        random.PRNGKey(_DEQUANT_JITTER_SEED), jnp.shape(y), minval=-0.5, maxval=0.5
+    )
+
+
 # ---------------------------------------------------------------------------
 # Family CDFs (value -> P(Y <= value)); ``params`` carries sampled globals.
 # ---------------------------------------------------------------------------
@@ -176,15 +216,21 @@ def _splitnormal_cdf(value, mu, sigma, df, params):
 
 
 def _emit_obs(prefix, base, n_obs, y, *, discretize, cdf_fn):
-    """Emit the ``{prefix}y`` site, interval-censored to integers when discretize.
+    """Emit the ``{prefix}y`` site, integer-aware when ``discretize`` is on.
 
-    With ``discretize=False`` this is the original
-    ``numpyro.sample(f"{prefix}y", base, obs=y)`` inside the obs plate, so the
-    toggle-off draw sequence is byte-identical to the pre-registry code.
+    ``discretize=False`` keeps the original ``sample(f"{prefix}y", base, obs=y)``
+    byte-identical. ``discretize=True`` dequantizes (condition on ``y + u``, round
+    on generation); the ``interval_cdf`` mode is the dormant marginalized fallback.
     """
-    d = RoundedDistribution(base, cdf_fn) if discretize else base
+    if not discretize:
+        d, obs = base, y
+    elif _DISCRETIZE_MODE == "interval_cdf":
+        d, obs = RoundedDistribution(base, cdf_fn), y
+    else:
+        d = DequantizedDistribution(base)
+        obs = None if y is None else y + _dequant_jitter(y)
     with numpyro.plate(f"{prefix}obs", n_obs):
-        numpyro.sample(f"{prefix}y", d, obs=y)
+        numpyro.sample(f"{prefix}y", d, obs=obs)
 
 
 def _reject_discretization(priors: PriorConfig, family: str) -> None:
