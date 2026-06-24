@@ -10,6 +10,7 @@ Focuses on the __main__ block (lines 220-254) which involves:
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -18,7 +19,14 @@ from unittest import mock
 
 import pytest
 
+import panelcast
 from panelcast.preflight.mini_run import _parse_args, run_and_measure
+
+# Directory containing the importable ``panelcast`` package. tests/conftest.py
+# puts ``src`` on sys.path for the pytest process, but a subprocess does not
+# inherit that, and CI does not pip-install the package — so pass it explicitly
+# on PYTHONPATH or ``python -m panelcast...`` fails with ModuleNotFoundError.
+_PKG_PARENT = str(Path(panelcast.__file__).resolve().parent.parent)
 
 
 def _run_mini(*args: str, timeout: int = 120) -> tuple[int, dict]:
@@ -30,11 +38,16 @@ def _run_mini(*args: str, timeout: int = 120) -> tuple[int, dict]:
     stdout so the test asserts on the module's payload rather than on stdout
     being byte-pure, and surface stdout+stderr on failure for diagnosability.
     """
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (_PKG_PARENT, env.get("PYTHONPATH", "")) if p
+    )
     result = subprocess.run(
         [sys.executable, "-m", "panelcast.preflight.mini_run", *args],
         capture_output=True,
         text=True,
         timeout=timeout,
+        env=env,
     )
     payload = None
     for line in reversed(result.stdout.splitlines()):
