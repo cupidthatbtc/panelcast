@@ -400,7 +400,7 @@ def run(
         help=(
             "Score-scale transform: 'identity' (legacy soft-clip) or "
             "'offset_logit' (model runs on the Smithson-Verkuilen logit scale; "
-            "fixes ceiling-skew PPC failures)."
+            "tested but held — did not mix; see LIKELIHOOD_CANDIDATES.md)."
         ),
     ),
     ar_center: str = typer.Option(

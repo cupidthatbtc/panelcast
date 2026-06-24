@@ -3,7 +3,7 @@
 > - **Convergence is now demonstrated on real data.** A representative subset of
 >   the AOTY corpus (~800 artists / 5,182 albums, user-score skewness −2.08)
 >   **passes** the convergence gate at the publication configuration (4×5000):
->   R-hat 1.00, bulk ESS 3,504, 0 divergences. See *Real-data subset validation*
+>   R-hat 1.00, bulk ESS 3,134, 0 divergences. See *Real-data subset validation*
 >   below.
 > - **The likelihood is still misspecified.** On the same real data the symmetric
 >   Student-t pins four PPC statistics (skewness, max, q50, q90) — an open
@@ -140,7 +140,7 @@ user ratings across 653 multi-album artists, observed user-score skewness −2.0
 (the full corpus is −2.06) — was fit on GPU (RTX 5090) at the publication
 configuration (4 chains × 5,000, warmup 3,000, Student-t).
 
-- **Convergence gate: PASS** — R-hat (max) 1.00, bulk ESS 3,504 (≥ 400), 0
+- **Convergence gate: PASS** — R-hat (max) 1.00, bulk ESS 3,134 (≥ 400), 0
   divergences, LOO Pareto-k all < 0.7.
 - **Predictive** (within-entity temporal test, n = 653): MAE 5.64, RMSE 8.26,
   R² 0.42, CRPS 4.19; 80% coverage 0.856, 95% coverage 0.956 (within tolerance).
@@ -204,7 +204,7 @@ Point prediction metrics:
 
 ## Limitations
 
-- **Convergence (compute-bounded, geometry fixed).** The historical sigma_artist ESS deficit was traced to a sampling-geometry confound: the uncentered AR(1) term absorbed the score level, ridge-coupling rho and mu_artist (corr -0.997). AR centering with a level-located mu_artist prior removed it (corr +0.016, debut AR terms exactly zero). Remaining R-hat/ESS shortfalls at cheap validation settings (2 chains x 500) were compute-bounded; this is now **confirmed on real data**: at the publication configuration (4 chains x 5000, warmup 3000, with the rw_raw collection exclusion required for 24 GB GPUs) the ~5k-album subset reaches R-hat 1.00, bulk ESS 3,504 and 0 divergences — the gate passes. The full-corpus run remains future work.
+- **Convergence (compute-bounded, geometry fixed).** The historical sigma_artist ESS deficit was traced to a sampling-geometry confound: the uncentered AR(1) term absorbed the score level, ridge-coupling rho and mu_artist (corr -0.997). AR centering with a level-located mu_artist prior removed it (corr +0.016, debut AR terms exactly zero). Remaining R-hat/ESS shortfalls at cheap validation settings (2 chains x 500) were compute-bounded; this is now **confirmed on real data**: at the publication configuration (4 chains x 5000, warmup 3000, with the rw_raw collection exclusion required for 24 GB GPUs) the ~5k-album subset reaches R-hat 1.00, bulk ESS 3,134 and 0 divergences — the gate passes. The full-corpus run remains future work.
 - **Symmetric likelihood vs. left-skewed target.** The Student-t likelihood is symmetric, but observed user-score distribution has skewness ~= -1.79 (long left tail of poorly-received albums). This is a structural mismatch, not a fitting issue. PPC p-values pinned at 0.000/1.000 for sd, skewness, q50, q90, and max are the expected signature of this mismatch. The lightest candidate fix — an offset-logit target transform — was implemented and evaluated twice (pre- and post-AR-centering) and is HELD: its sampler geometry does not mix at validation settings (R-hat 1.27-1.37, bulk ESS 5-10) and its priors fail score-scale plausibility checks. **Two more candidates are now implemented and selectable via `--likelihood-family`:** (a) `skew_studentt`, a sinh-arcsinh skew-t, and (b) `beta`, a mean-precision Beta on the score bounds. A controlled synthetic experiment (`scripts/experiment_likelihood_ppc.py`, left-skewed bounded panel) found **both mix well** (R-hat <= 1.02, no offset-logit-style failure) but with a clear structural split: `beta` predictions are bounded to [0, 100] **by construction** (the direct fix for the bounds-violating max/min mismatch — symmetric Student-t draws ranged [-579, 580] on the same data), while `skew_studentt` is a **documented negative result** (the skew on heavy Student-t tails explodes the right tail, [-3, 2784]). On the *synthetic* data `beta` was the recommended candidate — but that **did not survive real data**: on the AOTY subset (skew −2.08) `beta` pinned *more* PPC statistics than Student-t (six vs four), mixed worse, and broke LOO, so the publication default reverted to Student-t (see `docs/LIKELIHOOD_CANDIDATES.md`). The bounded-skew misspecification is therefore **confirmed on real data and unresolved** — none of the implemented candidates fixes it. A likely cause is that user scores are **integer-valued** (100% integers, range 1–94), so a continuous likelihood cannot reproduce the integer-heaped quantiles regardless of skew handling; a discretized/rounded observation layer or an aggregated-ratings (Beta-Binomial) likelihood is the natural next step. The symmetric likelihood's point accuracy and 95% interval calibration are unaffected.
 - **Soft-clip at [0, 100] interacts with symmetric tails.** Because the target is bounded but the likelihood is symmetric, soft_clip compresses both tails simultaneously. A logit-scale target would remove the clip, but the transform is held (see above); the clip stays.
 - **Trained on English-language reviews; may not generalize to other markets.**
