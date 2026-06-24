@@ -38,6 +38,19 @@ DEFAULT_COMBOS = (
 )
 
 
+def _json_safe(obj):
+    """Recursively replace non-finite floats with None so json.dumps is valid JSON."""
+    import math
+
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    return obj
+
+
 def _parse_combo(combo: str) -> tuple[str, bool]:
     """'skew_normal+discretize' -> ('skew_normal', True)."""
     parts = [p.strip() for p in combo.split("+")]
@@ -199,7 +212,7 @@ def main() -> int:
         row.update(_read_metrics(eval_dir))
         rows.append(row)
 
-    (out_dir / "comparison.json").write_text(json.dumps(rows, indent=2), encoding="utf-8")
+    (out_dir / "comparison.json").write_text(json.dumps(_json_safe(rows), indent=2), encoding="utf-8")
     md = _render_markdown(rows)
     (out_dir / "comparison.md").write_text(md, encoding="utf-8")
     print("\n" + md)

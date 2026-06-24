@@ -766,8 +766,15 @@ def run(
             raise typer.Exit(code=1)
         preset_path = Path("configs") / f"{preset}.yaml"
         if not preset_path.exists():
-            typer.echo(f"Error: preset config not found at {preset_path}.")
-            raise typer.Exit(code=1)
+            # Fall back to the repo-bundled configs (relative to this file) so
+            # --preset works when running from a separate domain directory
+            # (docs/PORTING.md), not only from the repo root.
+            bundled = Path(__file__).resolve().parents[2] / "configs" / f"{preset}.yaml"
+            if bundled.exists():
+                preset_path = bundled
+            else:
+                typer.echo(f"Error: preset config not found at {preset_path}.")
+                raise typer.Exit(code=1)
         effective_config_files.append(str(preset_path))
     if config_files:
         effective_config_files.extend(config_files)

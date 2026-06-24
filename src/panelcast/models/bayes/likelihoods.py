@@ -44,7 +44,7 @@ from numpyro.distributions.transforms import AffineTransform
 # tests rely on). model.py imports REGISTRY lazily, so this top-level import does
 # not create a cycle: by the time likelihoods.py is imported, model.py is loaded.
 from panelcast.models.bayes.model import SinhArcsinhTransform
-from panelcast.models.bayes.priors import PriorConfig
+from panelcast.models.bayes.priors import DEFAULT_BETA_BOUNDARY_EPS, PriorConfig
 
 __all__ = [
     "LikelihoodSpec",
@@ -379,7 +379,9 @@ def _beta_predict_draws(
         )
     low, high = float(bounds[0]), float(bounds[1])
     span = high - low
-    eps = 1e-3
+    # Mirror the inference-side default clip (PriorConfig.beta_boundary_eps); the
+    # predict path has no priors object, so it tracks the shared default constant.
+    eps = DEFAULT_BETA_BOUNDARY_EPS
     mu01 = jnp.clip((mu_pred - low) / span, eps, 1.0 - eps)
     phi = phi[:, None]
     beta01 = random.beta(key, mu01 * phi, (1.0 - mu01) * phi)

@@ -28,6 +28,11 @@ Prior Roles:
 
 from dataclasses import dataclass
 
+# Beta boundary squeeze / mu-clip epsilon. Shared so inference
+# (PriorConfig.beta_boundary_eps default) and the prediction path
+# (likelihoods._beta_predict_draws) stay consistent at the default.
+DEFAULT_BETA_BOUNDARY_EPS = 1e-3
+
 
 @dataclass(frozen=True)
 class PriorConfig:
@@ -139,7 +144,7 @@ class PriorConfig:
     beta_precision_rate: float = 0.1
     # Boundary squeeze: observed scores are clamped this far inside the bounds so
     # exact-boundary observations have finite Beta density.
-    beta_boundary_eps: float = 1e-3
+    beta_boundary_eps: float = DEFAULT_BETA_BOUNDARY_EPS
     # split_normal: Normal(loc, scale) prior on the log scale-ratio
     # log(sigma_R / sigma_L). 0 recovers a symmetric Normal; negative values
     # lengthen the left tail (sigma_L > sigma_R). Adds site {prefix}split_log_ratio.

@@ -116,7 +116,13 @@ class BaselineScore:
 
 
 def _train_residual_sigma(residuals: np.ndarray) -> float:
-    """Robust-ish residual scale with a floor (std, never below the floor)."""
+    """Robust-ish residual scale with a floor (std, never below the floor).
+
+    Non-finite residuals (e.g. from coerced-NaN targets) are dropped first so a
+    single NaN can't turn the whole predictive sigma — and every interval/CRPS
+    metric downstream — into NaN.
+    """
+    residuals = residuals[np.isfinite(residuals)]
     if residuals.size == 0:
         return _SIGMA_FLOOR
     sigma = float(np.std(residuals))

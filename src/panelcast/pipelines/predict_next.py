@@ -571,7 +571,7 @@ def predict_artist_next(
     seed: int = 42,
     batch_size: int = 500,
     models_dir: str | Path = "models",
-    splits_path: str | Path = "data/splits/within_entity_temporal/train.parquet",
+    splits_path: str | Path | None = None,
     features_path: str | Path = "data/features/train_features.parquet",
 ) -> pd.DataFrame:
     """Next-album predictions for one known artist (library convenience).
@@ -587,7 +587,8 @@ def predict_artist_next(
         seed: Predictive rng seed.
         batch_size: Posterior-draw batch size for the predictive.
         models_dir: Directory holding manifest.json / training_summary.json.
-        splits_path: Training split parquet.
+        splits_path: Training split parquet. Defaults to the alias-resolved
+            within-entity-temporal train split (canonical or legacy directory).
         features_path: Training features parquet.
 
     Returns:
@@ -596,6 +597,11 @@ def predict_artist_next(
     Raises:
         KeyError: If the artist was not part of the trained model.
     """
+    if splits_path is None:
+        splits_path = (
+            resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL)
+            / "train.parquet"
+        )
     model_dir = Path(models_dir)
     summary = load_training_summary(model_dir / "training_summary.json").to_json_dict()
     ds_block = summary.get("dataset") or {}
