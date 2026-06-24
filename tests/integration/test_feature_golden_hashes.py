@@ -26,22 +26,38 @@ from panelcast.utils.hashing import hash_dataframe
 from tests.e2e.conftest import MINIMAL_TEST_DATA
 from tests.integration.test_prepare_golden_hashes import EXTRA_ROWS, FIELDNAMES
 
-# Frozen on the pre-descriptor implementation (2026-06-10).
+# Float columns are rounded before hashing so the guard is robust to the
+# platform-level float noise (different BLAS/LAPACK builds) that otherwise makes
+# byte-exact %.17g hashes differ between the dev machine and CI — while still
+# catching real feature changes, which move values by far more than this.
+_HASH_DECIMALS = 4
+
+
+def _stable_feature_hash(df: pd.DataFrame) -> str:
+    """hash_dataframe of the frame with float columns rounded to _HASH_DECIMALS."""
+    rounded = df.copy()
+    float_cols = rounded.select_dtypes(include="floating").columns
+    rounded[float_cols] = rounded[float_cols].round(_HASH_DECIMALS)
+    return hash_dataframe(rounded)
+
+
+# Frozen on the pre-descriptor implementation (2026-06-10); hashes are over the
+# rounded feature matrices (see _stable_feature_hash).
 GOLDEN_FEATURE_HASHES = {
     "within_entity_temporal/train": (
-        "e6b4ea8b864ff2e35587c03a2a1ff2116f5a89e1e3708690c55e28af705f5aad"
+        "1848368d2d0bfef815dfbd006ff51abdfdbe6fd1488b9797b5462383615a0d42"
     ),
     "within_entity_temporal/validation": (
         "255cd169ed4ad1e5f0a58f82ad206b823d1282605569cae05d35b96ff00f84c0"
     ),
     "within_entity_temporal/test": (
-        "57f5e07b02830bec2aab4c12bddd2a6ed1148e6bcf321e79ee1bc5e7a3486c97"
+        "cd3bf6c1fbc7e790086ea40e10292166154dfe2f72a0920fd1a66c767604ca09"
     ),
-    "entity_disjoint/train": ("52dc781661bf32e98322162ebf580291e9037753907de447d66d14e01ebf74c9"),
+    "entity_disjoint/train": ("34b097f3cd48d20af50ebe847a077b276309b675401e81676f71380cc975bfdf"),
     "entity_disjoint/validation": (
-        "109aece9bc3ea35655b576f3dab062d73487d7ac1574ffea3f942f9e72be8d6f"
+        "4f5b2d5ae99d8e9f4846eb1345171eecedf7f5ae81909b060876a5dd30f082e4"
     ),
-    "entity_disjoint/test": ("faf7ed362e54fc65ff32eb664a5f111782762962eb45aa5ae774580cbbbaaaaf"),
+    "entity_disjoint/test": ("180845ce1ef30915ef8ae7da2cef02e8e7dc0d4b73bd447b504b60a283934049"),
 }
 
 GOLDEN_FEATURE_NAMES = [
@@ -115,7 +131,7 @@ class TestFeatureGoldenHashes:
         for key, expected in GOLDEN_FEATURE_HASHES.items():
             split, part = key.split("/")
             path = Path(tmp) / "data" / "features" / split / f"{part}_features.parquet"
-            actual = hash_dataframe(pd.read_parquet(path))
+            actual = _stable_feature_hash(pd.read_parquet(path))
             if actual != expected:
                 mismatches[key] = actual
         assert not mismatches, (
