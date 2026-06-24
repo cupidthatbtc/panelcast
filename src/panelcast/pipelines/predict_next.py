@@ -346,6 +346,11 @@ def _predict_new_artists(
                 "target_transform": target_transform,
                 "logit_offset": logit_offset,
                 "ar_center": ar_center_on_model_scale(summary),
+                # Cold-start must use the trained likelihood family, not the
+                # studentt default — otherwise a beta/skew/discretized model
+                # silently predicts new entities under Student-t.
+                "likelihood_family": summary.get("likelihood_family") or "studentt",
+                "discretize_observation": bool(summary.get("discretize_observation")),
             }
 
             if has_hetero:
