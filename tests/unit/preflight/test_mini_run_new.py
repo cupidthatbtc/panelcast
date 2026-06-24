@@ -21,6 +21,40 @@ import pytest
 from panelcast.preflight.mini_run import _parse_args, run_and_measure
 
 
+def _run_mini(*args: str, timeout: int = 120) -> tuple[int, dict]:
+    """Invoke ``python -m panelcast.preflight.mini_run`` and return (rc, json).
+
+    The module's contract is "JSON on stdout, logs/warnings on stderr", but a
+    fresh subprocess can still pick up an environment line on stdout (e.g. an
+    editable-install or platform notice in CI). Parse the last JSON object on
+    stdout so the test asserts on the module's payload rather than on stdout
+    being byte-pure, and surface stdout+stderr on failure for diagnosability.
+    """
+    result = subprocess.run(
+        [sys.executable, "-m", "panelcast.preflight.mini_run", *args],
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    payload = None
+    for line in reversed(result.stdout.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            try:
+                payload = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+    if payload is None:
+        raise AssertionError(
+            "mini_run produced no JSON object on stdout "
+            f"(returncode={result.returncode}).\n"
+            f"--- stdout ---\n{result.stdout!r}\n"
+            f"--- stderr (tail) ---\n{result.stderr[-3000:]!r}"
+        )
+    return result.returncode, payload
+
+
 class TestMainBlockViaSubprocess:
     """Test the __main__ block by actually invoking it as a subprocess.
 
@@ -31,14 +65,8 @@ class TestMainBlockViaSubprocess:
 
     def test_no_args_outputs_error_json(self):
         """Invoking with no args should produce JSON error with usage message."""
-        result = subprocess.run(
-            [sys.executable, "-m", "panelcast.preflight.mini_run"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 1
-        output = json.loads(result.stdout)
+        rc, output = _run_mini()
+        assert rc == 1
         assert output["success"] is False
         assert output["exit_code"] == 1
         assert "Usage" in output["error"]
@@ -47,73 +75,36 @@ class TestMainBlockViaSubprocess:
 
     def test_unknown_arg_outputs_error_json(self):
         """Invoking with unknown arg should produce JSON error."""
-        result = subprocess.run(
-            [sys.executable, "-m", "panelcast.preflight.mini_run", "dummy.json", "--bad-flag"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 1
-        output = json.loads(result.stdout)
+        rc, output = _run_mini("dummy.json", "--bad-flag")
+        assert rc == 1
         assert output["success"] is False
         assert "Unknown argument" in output["error"]
 
     def test_missing_warmup_value_outputs_error_json(self):
         """--num-warmup without value produces JSON error."""
-        result = subprocess.run(
-            [sys.executable, "-m", "panelcast.preflight.mini_run", "dummy.json", "--num-warmup"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 1
-        output = json.loads(result.stdout)
+        rc, output = _run_mini("dummy.json", "--num-warmup")
+        assert rc == 1
         assert output["success"] is False
         assert "--num-warmup requires" in output["error"]
 
     def test_missing_samples_value_outputs_error_json(self):
         """--num-samples without value produces JSON error."""
-        result = subprocess.run(
-            [sys.executable, "-m", "panelcast.preflight.mini_run", "dummy.json", "--num-samples"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 1
-        output = json.loads(result.stdout)
+        rc, output = _run_mini("dummy.json", "--num-samples")
+        assert rc == 1
         assert output["success"] is False
         assert "--num-samples requires" in output["error"]
 
     def test_zero_warmup_outputs_error_json(self):
         """--num-warmup 0 produces JSON error about positive value."""
-        result = subprocess.run(
-            [
-                sys.executable,
-                "-m",
-                "panelcast.preflight.mini_run",
-                "dummy.json",
-                "--num-warmup",
-                "0",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 1
-        output = json.loads(result.stdout)
+        rc, output = _run_mini("dummy.json", "--num-warmup", "0")
+        assert rc == 1
         assert output["success"] is False
         assert "positive" in output["error"]
 
     def test_nonexistent_file_outputs_error_json(self):
         """Passing a nonexistent JSON file should produce JSON error from exception handler."""
-        result = subprocess.run(
-            [sys.executable, "-m", "panelcast.preflight.mini_run", "/nonexistent/model_args.json"],
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
-        assert result.returncode == 1
-        output = json.loads(result.stdout)
+        rc, output = _run_mini("/nonexistent/model_args.json")
+        assert rc == 1
         assert output["success"] is False
         assert output["exit_code"] == 1
         assert output["peak_memory_bytes"] == 0
@@ -125,14 +116,8 @@ class TestMainBlockViaSubprocess:
             temp_path = f.name
 
         try:
-            result = subprocess.run(
-                [sys.executable, "-m", "panelcast.preflight.mini_run", temp_path],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            assert result.returncode == 1
-            output = json.loads(result.stdout)
+            rc, output = _run_mini(temp_path)
+            assert rc == 1
             assert output["success"] is False
             assert output["exit_code"] == 1
         finally:
@@ -145,14 +130,8 @@ class TestMainBlockViaSubprocess:
             temp_path = f.name
 
         try:
-            result = subprocess.run(
-                [sys.executable, "-m", "panelcast.preflight.mini_run", temp_path],
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            assert result.returncode == 1
-            output = json.loads(result.stdout)
+            rc, output = _run_mini(temp_path)
+            assert rc == 1
             assert output["success"] is False
             assert "Missing required keys" in output["error"]
         finally:
