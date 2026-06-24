@@ -298,7 +298,8 @@ class TestMakeStageFactories:
         stage = make_stage_predict()
         assert stage.name == "predict"
         assert stage.depends_on == ["evaluate"]
-        assert len(stage.output_paths) == 3
+        # 3 canonical artifacts + 2 legacy dual-write copies.
+        assert len(stage.output_paths) == 5
 
     def test_make_stage_report(self):
         """make_stage_report creates correct stage."""

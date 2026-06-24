@@ -205,15 +205,21 @@ class TestAeroTinyMcmc:
         assert not any(name.startswith("user_") for name in site_names), site_names
 
     def test_known_airframe_predictions_in_bounds(self, aero_full_run):
-        preds = pd.read_csv(
-            aero_full_run / "outputs" / "predictions" / "next_album_known_artists.csv"
-        )
+        pred_dir = aero_full_run / "outputs" / "predictions"
+        # Canonical generic-named artifact uses the entity/event schema.
+        preds = pd.read_csv(pred_dir / "next_event_known_entities.csv")
         assert len(preds) > 0
+        assert "entity" in preds.columns
         # Keyed by airframe names from the aero fixture.
-        assert preds["artist"].str.contains("-").all()
+        assert preds["entity"].str.contains("-").all()
         for col in ("pred_mean", "pred_q05", "pred_q95"):
             assert preds[col].between(0.0, 10.0).all(), f"{col} outside aero bounds"
         assert preds["pred_mean"].notna().all()
+
+        # Legacy AOTY-named copy is still dual-written for one release.
+        legacy = pd.read_csv(pred_dir / "next_album_known_artists.csv")
+        assert "artist" in legacy.columns
+        assert len(legacy) == len(preds)
 
 
 # ============================================================================
