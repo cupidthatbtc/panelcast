@@ -64,7 +64,14 @@ class TestSinhArcsinhTransform:
 class TestLikelihoodSites:
     @pytest.mark.parametrize(
         "family,extra",
-        [("studentt", None), ("normal", None), ("skew_studentt", "user_skewness"), ("beta", "user_phi")],
+        [
+            ("studentt", None),
+            ("normal", None),
+            ("skew_studentt", "user_skewness"),
+            ("beta", "user_phi"),
+            ("skew_normal", "user_skewness"),
+            ("split_normal", "user_split_log_ratio"),
+        ],
     )
     def test_obs_site_and_family_param(self, family, extra):
         model = make_score_model("user")
@@ -132,3 +139,53 @@ class TestPredictNewArtistDispatch:
                 prev_score=70.0,
                 likelihood_family="beta",
             )
+
+    def test_skew_normal_prediction_runs(self):
+        post = self._posterior(
+            extra={"user_skewness": jnp.asarray(np.random.default_rng(4).normal(-0.5, 0.1, 40))}
+        )
+        out = predict_new_artist(
+            post,
+            X_new=jnp.zeros(N_FEATURES),
+            prev_score=70.0,
+            likelihood_family="skew_normal",
+            target_bounds=(0.0, 100.0),
+            ar_center=70.0,
+        )
+        assert np.asarray(out["y"]).shape[0] == 40
+
+    def test_split_normal_prediction_runs(self):
+        post = self._posterior(
+            extra={"user_split_log_ratio": jnp.asarray(np.random.default_rng(4).normal(-0.3, 0.1, 40))}
+        )
+        out = predict_new_artist(
+            post,
+            X_new=jnp.zeros(N_FEATURES),
+            prev_score=70.0,
+            likelihood_family="split_normal",
+            target_bounds=(0.0, 100.0),
+            ar_center=70.0,
+        )
+        assert np.asarray(out["y"]).shape[0] == 40
+
+    def test_split_normal_without_site_raises(self):
+        with pytest.raises(ValueError, match="split_log_ratio"):
+            predict_new_artist(
+                self._posterior(),
+                X_new=jnp.zeros(N_FEATURES),
+                prev_score=70.0,
+                likelihood_family="split_normal",
+            )
+
+    def test_discretized_prediction_is_integer(self):
+        out = predict_new_artist(
+            self._posterior(),
+            X_new=jnp.zeros(N_FEATURES),
+            prev_score=70.0,
+            likelihood_family="studentt",
+            target_bounds=(0.0, 100.0),
+            ar_center=70.0,
+            discretize_observation=True,
+        )
+        y = np.asarray(out["y"])
+        assert np.array_equal(y, np.round(y))

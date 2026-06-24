@@ -665,6 +665,7 @@ def train_models(
         heteroscedastic_entity_obs=bool(getattr(ctx, "heteroscedastic_entity_obs", False)),
         tau_entity_scale=float(getattr(ctx, "tau_entity_scale", 0.25)),
         likelihood_family=str(getattr(ctx, "likelihood_family", "studentt")),
+        discretize_observation=bool(getattr(ctx, "discretize_observation", False)),
     )
 
     priors = locate_level_prior(
@@ -993,6 +994,7 @@ def train_models(
     # The mode that produced it lives in priors.ar_center.
     summary["ar_center_value"] = ar_center_value
     summary["likelihood_family"] = str(getattr(ctx, "likelihood_family", "studentt"))
+    summary["discretize_observation"] = bool(getattr(ctx, "discretize_observation", False))
     summary = TrainingSummary(**summary).to_json_dict()
 
     summary_path = model_dir / "training_summary.json"

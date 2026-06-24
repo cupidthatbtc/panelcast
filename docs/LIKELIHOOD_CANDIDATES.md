@@ -11,10 +11,39 @@ selectable with `--likelihood-family`:
 | `studentt` (default) | Symmetric Student-t, soft-clipped location | — |
 | `normal` | Symmetric Gaussian | — |
 | `skew_studentt` | sinh-arcsinh skew-t: Student-t base pushed through a Jones–Pewsey sinh-arcsinh transform with a learned skewness, then located/scaled | `{prefix}skewness` |
+| `skew_normal` | sinh-arcsinh skew-**normal**: same transform on a *Normal* base — the skew of `skew_studentt` without the heavy tail that exploded it | `{prefix}skewness` |
+| `split_normal` | Two-piece (Fechner) normal: separate left/right scales about `mu`; skew comes from σ_L ≠ σ_R, light tails on both sides | `{prefix}split_log_ratio` |
 | `beta` | Score rescaled to (0, 1) (boundary squeeze) and modeled with a mean-precision Beta, affine-mapped back to the score bounds | `{prefix}phi` |
 
 `{prefix}y` stays on the natural score scale under every family, so evaluation,
 prediction, and the saved inference data are untouched by the choice.
+
+### Plug-and-play registry
+
+Families are defined once in `src/panelcast/models/bayes/likelihoods.py` as a
+`LikelihoodSpec` (one entry per family in `REGISTRY`): how it contributes the
+observation likelihood (`sample_obs`), how it draws cold-start predictive samples
+(`predict_draws`), and — for location-scale families — its CDF (`cdf`). The
+model's likelihood seam and the new-artist prediction dispatch both resolve a
+family by name through `REGISTRY`, and the CLI/orchestrator validate against
+`tuple(REGISTRY)`, so **adding a family is a single new entry** rather than edits
+scattered across the model and prediction code. The four original families are
+moved verbatim (a `slow` parity test pins their posterior draws bit-identical to
+the pre-registry code).
+
+### Discretization toggle (`--discretize-observation`)
+
+Orthogonal to the family: AOTY scores are integer-valued, so a continuous
+likelihood's replicated draws never land exactly on the observed integer
+quantiles and the q50/q90 PPC p-values pin as an artifact. With this flag the
+observation is **interval-censored to integers** — integer `k` contributes
+`log(F(k+0.5) − F(k−0.5))` via the family's CDF, and replicated/predictive draws
+are rounded (one `RoundedDistribution` wrapper handles both the inference
+`log_prob` and the PPC/predictive `sample`, so the known-artist and cold-start
+paths stay consistent). It composes with any location-scale family (`studentt`,
+`normal`, `skew_normal`, `split_normal`); `beta` and `skew_studentt` reject it
+(no usable CDF). Default off ⇒ the continuous likelihood is byte-identical to
+before.
 
 ## Controlled synthetic experiment
 
@@ -100,11 +129,63 @@ coverage 0.957; beta MAE 5.67 / RMSE 8.08 / R² 0.44, 95% coverage 0.965; CRPS
   is confirmed (not just a synthetic artifact) and remains an open limitation —
   none of the implemented candidates resolves it.
 
+## Real-subset bake-off (new families + discretization)
+
+The `beta` real-data result above closed the *first* wave. The skew-light
+families (`skew_normal`, `split_normal`) and the discretization toggle are the
+*second* wave — the two highest-value, lowest-risk levers against the remaining
+pins: discretization attacks the integer-heaping q50/q90 pins directly, and the
+skew-light families attack the `skewness`/`max` pins without the heavy-tail
+blow-up that sank `skew_studentt`.
+
+`scripts/bakeoff_likelihoods.py` runs each family (× discretize on/off) through
+`panelcast run --preset diagnostic --stages train,evaluate` on the subset and
+emits one comparison table (convergence, PPC pinned-count, point/calibration,
+LOO Pareto-k):
+
+```bash
+AOTY_DATASET_PATH=data/raw/aoty_subset.csv \
+    python scripts/bakeoff_likelihoods.py \
+    --combos studentt,studentt+discretize,skew_normal,skew_normal+discretize,split_normal
+```
+
+Run it from the GPU venv (`~/aoty-gpu`) after the data/splits/features stages
+exist on disk. The Student-t baseline (already on record) anchors the table:
+
+| combo | conv | rhat | ess | div | ppc_pin | pinned | mae | rmse | cov95 | crps | k_max |
+|-------|------|------|-----|-----|---------|--------|-----|------|-------|------|-------|
+| studentt | PASS | 1.00 | 3504 | 0 | 4 | skewness,max,q50,q90 | 5.64 | 8.26 | 0.956 | 4.19 | 0.40 |
+
+**Success signal:** discretization should move `q50`/`q90` off the pins (interior
+p-values); `skew_normal` / `split_normal` should reduce the `skewness` pin
+*without* the `skew_studentt` `max` blow-up. The result is documented honestly
+either way — these are candidates under test, not a foregone adoption. (The GPU
+bake-off over the new combos is the remaining compute-bound step; the harness and
+the synthetic check, `scripts/experiment_likelihood_ppc.py` with the new families
+in its `FAMILIES`, run anywhere.)
+
+## Deferred candidates
+
+Two heavier candidates are deferred for follow-up (tracked as GitHub issues)
+rather than implemented now; the registry makes each a single new
+`LikelihoodSpec`:
+
+- **Beta-Binomial / aggregated-ratings likelihood** — model `User_Score` as the
+  mean of `n = User_Ratings` discrete ratings, so bounded support, left skew, and
+  n-dependent noise fall out of one generative story (`n_reviews` is already
+  threaded into `sample_obs`).
+- **Two-component mixture** — a dense 65–85 cluster plus a thin flop tail
+  (`MixtureSameFamily` with ordering/label-switching handling).
+
 ## Adopting a candidate
 
 ```bash
 # The publication default is the symmetric Student-t (see the real-data result
-# above). To reproduce the bounded-Beta comparison instead:
+# above). To test a skew-light candidate or the integer discretization:
+panelcast run --likelihood-family skew_normal
+panelcast run --likelihood-family studentt --discretize-observation
+
+# To reproduce the bounded-Beta comparison instead:
 panelcast run --likelihood-family beta
 
 # Re-present the convergence + PPC of any run:

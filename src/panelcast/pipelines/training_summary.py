@@ -102,6 +102,8 @@ class TrainingSummary(BaseModel):
     ar_center_value: float | None = None
     # Observation likelihood family (None on legacy summaries -> "studentt").
     likelihood_family: str | None = None
+    # Whether the observation was interval-censored to integers (None/legacy -> False).
+    discretize_observation: bool | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
         """Serialize preserving declaration order.

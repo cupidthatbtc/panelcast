@@ -35,7 +35,7 @@ from panelcast.models.bayes.predict import generate_posterior_predictive  # noqa
 from panelcast.models.bayes.priors import PriorConfig  # noqa: E402
 
 BOUNDS = (0.0, 100.0)
-FAMILIES = ("studentt", "skew_studentt", "beta")
+FAMILIES = ("studentt", "skew_studentt", "skew_normal", "split_normal", "beta")
 # The statistics the review reported as pinned (sd, skewness, q50, q90, max).
 WATCH = ("sd", "skewness", "min", "max", "q50", "q90")
 

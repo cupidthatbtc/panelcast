@@ -140,6 +140,18 @@ class PriorConfig:
     # Boundary squeeze: observed scores are clamped this far inside the bounds so
     # exact-boundary observations have finite Beta density.
     beta_boundary_eps: float = 1e-3
+    # split_normal: Normal(loc, scale) prior on the log scale-ratio
+    # log(sigma_R / sigma_L). 0 recovers a symmetric Normal; negative values
+    # lengthen the left tail (sigma_L > sigma_R). Adds site {prefix}split_log_ratio.
+    split_scale_ratio_loc: float = 0.0
+    split_scale_ratio_scale: float = 0.5
+    # Discretization toggle (orthogonal to the family; default off => legacy
+    # continuous likelihood, byte-identical RNG path). When True, the observation
+    # becomes interval-censored and integer-valued: integer k contributes
+    # log(F(k+0.5) - F(k-0.5)) and replicated draws are rounded. Only the
+    # location-scale families with a CDF (studentt, normal, skew_normal,
+    # split_normal) support it; beta / skew_studentt reject it with a clear error.
+    discretize_observation: bool = False
     # AR(1) centering mode: "global" (default) subtracts the training-mean
     # prev_score so debut AR terms are exactly zero and rho decorrelates
     # from mu_artist; "none" is the legacy uncentered form; "artist_running"

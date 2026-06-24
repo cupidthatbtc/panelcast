@@ -160,9 +160,13 @@ class PipelineConfig:
     n_exponent_prior: NExponentPrior = "logit-normal"
     # Likelihood configuration
     likelihood_df: float = 4.0
-    # Likelihood family gate: "studentt" (legacy) | "normal" | "skew_studentt"
-    # (sinh-arcsinh skew-t) | "beta" (bounded mean-precision Beta on [low, high]).
+    # Likelihood family gate: "studentt" (legacy) | "normal" | "skew_studentt" /
+    # "skew_normal" (sinh-arcsinh skew) | "split_normal" (two-piece) | "beta"
+    # (bounded mean-precision Beta on [low, high]).
     likelihood_family: LikelihoodFamily = "studentt"
+    # Discretization gate: interval-censor the observation to integers (default
+    # off => continuous likelihood). Location-scale families only; not for beta.
+    discretize_observation: bool = False
     # Debut prev_score fill source: "train_mean" | "dataset_stats" (legacy)
     debut_prev_score_source: DebutPrevScoreSource = "train_mean"
     # Target transform gate: "identity" (legacy) | "offset_logit"
@@ -229,10 +233,20 @@ class PipelineConfig:
                 f"Invalid target_transform: '{self.target_transform}'. "
                 "Must be 'identity' or 'offset_logit'."
             )
-        if self.likelihood_family not in ("studentt", "normal", "skew_studentt", "beta"):
+        from panelcast.models.bayes.likelihoods import REGISTRY
+
+        valid_families = tuple(REGISTRY)
+        if self.likelihood_family not in valid_families:
             raise ValueError(
                 f"Invalid likelihood_family: '{self.likelihood_family}'. "
-                "Must be 'studentt', 'normal', 'skew_studentt', or 'beta'."
+                f"Must be one of: {', '.join(valid_families)}."
+            )
+        _spec = REGISTRY[self.likelihood_family]
+        if self.discretize_observation and not _spec.supports_discretization:
+            supported = [f for f, s in REGISTRY.items() if s.supports_discretization]
+            raise ValueError(
+                f"discretize_observation=True is not supported by likelihood_family "
+                f"'{self.likelihood_family}'. Supported: {', '.join(supported)}."
             )
         if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
             raise ValueError(
@@ -484,6 +498,7 @@ class PipelineOrchestrator:
                 "n_exponent_prior": self.config.n_exponent_prior,
                 "likelihood_df": self.config.likelihood_df,
                 "likelihood_family": self.config.likelihood_family,
+                "discretize_observation": self.config.discretize_observation,
                 "debut_prev_score_source": self.config.debut_prev_score_source,
                 "target_transform": self.config.target_transform,
                 "logit_offset": self.config.logit_offset,
@@ -534,6 +549,7 @@ class PipelineOrchestrator:
         "n_exponent_beta",
         "likelihood_df",
         "likelihood_family",
+        "discretize_observation",
         "debut_prev_score_source",
         "target_transform",
         "logit_offset",
@@ -730,6 +746,8 @@ class PipelineOrchestrator:
             parts.append(f"--likelihood-df {self.config.likelihood_df}")
         if self.config.likelihood_family != defaults.likelihood_family:
             parts.append(f"--likelihood-family {self.config.likelihood_family}")
+        if self.config.discretize_observation != defaults.discretize_observation:
+            parts.append("--discretize-observation")
         if self.config.calibration_intervals != defaults.calibration_intervals:
             interval_str = ",".join(f"{p:.4g}" for p in self.config.calibration_intervals)
             parts.append(f"--calibration-intervals {interval_str}")
@@ -859,6 +877,7 @@ class PipelineOrchestrator:
             n_exponent_prior=self.config.n_exponent_prior,
             likelihood_df=self.config.likelihood_df,
             likelihood_family=self.config.likelihood_family,
+            discretize_observation=self.config.discretize_observation,
             debut_prev_score_source=self.config.debut_prev_score_source,
             target_transform=self.config.target_transform,
             logit_offset=self.config.logit_offset,

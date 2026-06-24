@@ -122,6 +122,14 @@ These features are **enabled by default**. Use these flags to disable them:
 | `--n-exponent-alpha` | `2.0` | ≥0.01 | Beta prior alpha parameter (only with `--n-exponent-prior beta`) |
 | `--n-exponent-beta` | `4.0` | ≥0.01 | Beta prior beta parameter (only with `--n-exponent-prior beta`) |
 
+#### Likelihood
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--likelihood-df` | `4.0` | Student-t degrees of freedom (`≥100` behaves as Normal) |
+| `--likelihood-family` | `studentt` | Observation likelihood: `studentt`, `normal`, `skew_studentt`, `skew_normal`, `split_normal`, or `beta`. See [`LIKELIHOOD_CANDIDATES.md`](LIKELIHOOD_CANDIDATES.md) |
+| `--discretize-observation` | `false` | Interval-censor the observation to integers (honest PPC for integer scores). Location-scale families only (`studentt`, `normal`, `skew_normal`, `split_normal`); rejected for `beta` / `skew_studentt` |
+
 #### Domain & Model Options
 
 | Option | Default | Description |

@@ -42,7 +42,7 @@ import numpyro
 import numpyro.distributions as dist
 from jax import lax
 from numpyro.distributions import constraints
-from numpyro.distributions.transforms import AffineTransform, Transform
+from numpyro.distributions.transforms import Transform
 from numpyro.handlers import reparam
 from numpyro.infer.reparam import LocScaleReparam
 
@@ -448,76 +448,41 @@ def _sample_likelihood(
     likelihood_df: float,
     priors: PriorConfig,
     target_bounds: tuple[float, float] = (0.0, 100.0),
+    n_reviews: jnp.ndarray | None = None,
 ) -> None:
-    """Sample the observation likelihood under the configured family.
+    """Dispatch the observation likelihood to the configured family's spec.
 
-    Families:
-        "studentt": StudentT(likelihood_df) for df < 100; the df >= 100
-            case degrades to Normal (numerically equivalent, legacy rule).
-        "normal": explicit Gaussian likelihood.
-        "skew_studentt": a sinh-arcsinh skew-t (StudentT base, learned skewness),
-            located/scaled by (mu, sigma_scaled). Adds the global sample site
-            ``{prefix}skewness``.
-        "beta": the score rescaled to (0, 1) and modeled with a mean-precision
-            Beta, then affine-mapped back to the score scale so ``{prefix}y``
-            stays on the natural scale. Adds the global site ``{prefix}phi``.
-
-    ``{prefix}y`` is on the score scale under every family, so evaluation,
-    prediction, and the saved idata are untouched by the choice.
+    The family math lives in :mod:`panelcast.models.bayes.likelihoods` — one
+    self-contained ``LikelihoodSpec`` per family — so this seam only resolves the
+    family by name and forwards. ``{prefix}y`` is on the score scale under every
+    family, so evaluation, prediction, and the saved idata are untouched by the
+    choice. Student-t with ``df >= 100`` degrades to Normal (legacy rule).
     """
+    # Lazy import breaks the cycle: likelihoods.py imports SinhArcsinhTransform
+    # from this module, so this module must not import it at load time.
+    from panelcast.models.bayes.likelihoods import REGISTRY
+
     family = priors.likelihood_family
     if family == "studentt" and likelihood_df >= 100:
         family = "normal"
-    low, high = float(target_bounds[0]), float(target_bounds[1])
-    span = high - low
-
-    if family == "studentt":
-        with numpyro.plate(f"{prefix}obs", n_obs):
-            numpyro.sample(f"{prefix}y", dist.StudentT(likelihood_df, mu, sigma_scaled), obs=y)
-    elif family == "normal":
-        with numpyro.plate(f"{prefix}obs", n_obs):
-            numpyro.sample(f"{prefix}y", dist.Normal(mu, sigma_scaled), obs=y)
-    elif family == "skew_studentt":
-        # Global skewness (epsilon); tailweight fixed so the base StudentT df
-        # carries the kurtosis. The base is standard StudentT, skewed, then
-        # located/scaled to (mu, sigma_scaled).
-        skewness = numpyro.sample(
-            f"{prefix}skewness", dist.Normal(priors.skew_loc, priors.skew_scale)
-        )
-        base = dist.StudentT(likelihood_df, jnp.zeros_like(mu), jnp.ones_like(sigma_scaled))
-        transforms = [
-            SinhArcsinhTransform(skewness, priors.skew_tailweight),
-            AffineTransform(mu, sigma_scaled),
-        ]
-        with numpyro.plate(f"{prefix}obs", n_obs):
-            numpyro.sample(f"{prefix}y", dist.TransformedDistribution(base, transforms), obs=y)
-    elif family == "beta":
-        # Mean-precision Beta on (0, 1), affine-mapped to [low, high]. The mean
-        # comes from the (bounds-clipped) location; phi is the precision.
-        if priors.target_transform not in ("identity", None):
-            raise ValueError(
-                "likelihood_family='beta' requires target_transform='identity' "
-                f"(got '{priors.target_transform}'); the Beta likelihood assumes "
-                "mu is on the score scale."
-            )
-        eps = priors.beta_boundary_eps
-        mu01 = jnp.clip((mu - low) / span, eps, 1.0 - eps)
-        phi = numpyro.sample(
-            f"{prefix}phi",
-            dist.Gamma(priors.beta_precision_concentration, priors.beta_precision_rate),
-        )
-        a = mu01 * phi
-        b = (1.0 - mu01) * phi
-        beta = dist.TransformedDistribution(dist.Beta(a, b), AffineTransform(low, span))
-        # Boundary squeeze: exact-boundary observations get finite density.
-        y_obs = None if y is None else jnp.clip(y, low + span * eps, high - span * eps)
-        with numpyro.plate(f"{prefix}obs", n_obs):
-            numpyro.sample(f"{prefix}y", beta, obs=y_obs)
-    else:
+    try:
+        spec = REGISTRY[family]
+    except KeyError:
         raise ValueError(
             f"Unknown likelihood_family: '{priors.likelihood_family}'. "
-            "Registered: ['studentt', 'normal', 'skew_studentt', 'beta']."
-        )
+            f"Registered: {sorted(REGISTRY)}."
+        ) from None
+    spec.sample_obs(
+        prefix,
+        mu,
+        sigma_scaled,
+        y,
+        n_obs,
+        likelihood_df,
+        priors,
+        target_bounds,
+        n_reviews,
+    )
 
 
 def make_score_model(score_type: str) -> Callable:
@@ -811,6 +776,7 @@ def make_score_model(score_type: str) -> Callable:
             likelihood_df,
             priors,
             target_bounds=target_bounds,
+            n_reviews=n_reviews,
         )
 
     # Apply non-centered reparameterization to init_artist_effect

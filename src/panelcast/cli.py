@@ -317,9 +317,19 @@ def run(
         "studentt",
         "--likelihood-family",
         help=(
-            "Observation likelihood: 'studentt' (default) or 'normal' (symmetric), "
-            "or the skew/bounded candidates 'skew_studentt' (sinh-arcsinh skew-t) "
-            "and 'beta' (bounded mean-precision Beta on the score bounds)."
+            "Observation likelihood: 'studentt' (default) or 'normal' (symmetric); "
+            "the skew candidates 'skew_studentt' / 'skew_normal' (sinh-arcsinh) and "
+            "'split_normal' (two-piece); or 'beta' (bounded mean-precision Beta)."
+        ),
+    ),
+    discretize_observation: bool = typer.Option(
+        False,
+        "--discretize-observation",
+        help=(
+            "Interval-censor the observation to integers: integer k contributes "
+            "log(F(k+0.5)-F(k-0.5)) and replicated draws are rounded (honest PPC "
+            "for integer-valued scores). Location-scale families only "
+            "(studentt, normal, skew_normal, split_normal); rejected for beta."
         ),
     ),
     val_albums: Annotated[
@@ -482,8 +492,10 @@ def run(
         )
         raise typer.Exit(code=1)
 
-    # Validate likelihood_family
-    valid_families = ("studentt", "normal", "skew_studentt", "beta")
+    # Validate likelihood_family (single source of truth: the registry)
+    from panelcast.models.bayes.likelihoods import REGISTRY
+
+    valid_families = tuple(REGISTRY)
     if likelihood_family not in valid_families:
         typer.echo(
             f"Error: Invalid --likelihood-family '{likelihood_family}'. "
@@ -594,6 +606,7 @@ def run(
             "learn_n_exponent": learn_n_exponent,
             "likelihood_df": likelihood_df,
             "likelihood_family": likelihood_family,
+            "discretize_observation": discretize_observation,
             "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
         }
         # Mirror the production fit's memory gate in the calibration runs:
@@ -723,6 +736,7 @@ def run(
         n_exponent_prior=n_exponent_prior,
         likelihood_df=likelihood_df,
         likelihood_family=likelihood_family,
+        discretize_observation=discretize_observation,
         val_albums=val_albums,
         min_train_albums=min_train_albums,
         calibration_intervals=calibration_levels,

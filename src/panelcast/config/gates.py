@@ -17,7 +17,12 @@ SigmaObsPriorType = Literal["halfnormal", "lognormal"]
 ArCenter = Literal["global", "none", "artist_running"]
 DebutPrevScoreSource = Literal["train_mean", "dataset_stats"]
 NExponentPrior = Literal["logit-normal", "beta"]
-LikelihoodFamily = Literal["studentt", "normal", "skew_studentt", "beta"]
+# Kept in sync with panelcast.models.bayes.likelihoods.REGISTRY by
+# tests/unit/models/bayes/test_likelihood_registry.py (a Literal is a static
+# type and can't be derived from the runtime registry).
+LikelihoodFamily = Literal[
+    "studentt", "normal", "skew_studentt", "beta", "skew_normal", "split_normal"
+]
 ChainMethod = Literal["sequential", "vectorized", "parallel"]
 
 __all__ = [

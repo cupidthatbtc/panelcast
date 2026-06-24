@@ -21,6 +21,7 @@ import jax.numpy as jnp
 from jax import random
 from numpyro.infer import MCMC, Predictive
 
+from panelcast.models.bayes.likelihoods import REGISTRY
 from panelcast.models.bayes.model import compute_sigma_scaled, soft_clip  # noqa: F401
 from panelcast.models.bayes.transforms import get_transform
 
@@ -282,6 +283,7 @@ def predict_new_artist(
     ar_center: float = 0.0,
     likelihood_family: str = "studentt",
     skew_tailweight: float = 1.0,
+    discretize_observation: bool = False,
 ) -> NewArtistPrediction:
     """Predict for unseen artist using population distribution.
 
@@ -399,9 +401,19 @@ def predict_new_artist(
     beta = posterior_samples[f"{prefix}beta"]
     rho = posterior_samples[f"{prefix}rho"]
     sigma_obs = posterior_samples[f"{prefix}sigma_obs"]
-    # Family-specific global params (present only for the matching family).
-    skewness_samples = posterior_samples.get(f"{prefix}skewness")
-    phi_samples = posterior_samples.get(f"{prefix}phi")
+    # Resolve the family spec and read its global sample sites generically
+    # (present only for the matching family; missing ones surface as None and
+    # the spec's predict_draws raises a clear error).
+    try:
+        spec = REGISTRY[likelihood_family]
+    except KeyError:
+        raise ValueError(
+            f"Unknown likelihood_family: '{likelihood_family}'. "
+            f"Registered: {sorted(REGISTRY)}."
+        ) from None
+    family_sites = {
+        name: posterior_samples.get(f"{prefix}{name}") for name in spec.required_sites
+    }
 
     n_samples = mu_artist.shape[0]
 
@@ -429,10 +441,11 @@ def predict_new_artist(
         beta = beta[indices]
         rho = rho[indices]
         sigma_obs = sigma_obs[indices]
-        if skewness_samples is not None:
-            skewness_samples = skewness_samples[indices]
-        if phi_samples is not None:
-            phi_samples = phi_samples[indices]
+        # Subsample the family-specific global sites alongside the shared ones.
+        family_sites = {
+            name: (None if arr is None else arr[indices])
+            for name, arr in family_sites.items()
+        }
         # Handle exponent samples based on learned vs fixed mode
         if has_learned_exponent:
             n_exponent_samples = posterior_samples[f"{prefix}n_exponent"]
@@ -526,45 +539,22 @@ def predict_new_artist(
             f"to mu_pred shape {mu_pred.shape}"
         )
 
-    # Sample from the observation distribution, dispatching on the likelihood
-    # family the model was trained under. The symmetric families (studentt /
-    # normal) draw on the model scale and back-transform; skew_studentt skews
-    # the StudentT base via sinh-arcsinh; beta draws a bounded Beta on the score
-    # bounds directly (so no back-transform of the draws is needed).
+    # Draw cold-start predictive samples through the family's spec (single source
+    # of truth shared with training). The spec returns y on the score scale
+    # (back-transformed where applicable); mu is back-transformed once here.
     rng_key, subkey = random.split(rng_key)
-    low, high = float(target_bounds[0]), float(target_bounds[1])
-    span = high - low
-    if likelihood_family == "beta":
-        if phi_samples is None:
-            raise ValueError(
-                f"beta likelihood requires '{prefix}phi' in posterior_samples; "
-                "the model must have been trained with --likelihood-family beta."
-            )
-        eps = 1e-3
-        mu01 = jnp.clip((mu_pred - low) / span, eps, 1.0 - eps)
-        phi = phi_samples[:, None]
-        beta01 = random.beta(subkey, mu01 * phi, (1.0 - mu01) * phi)
-        y_pred = low + span * beta01
-        mu_pred = transform.inverse(mu_pred)
-    else:
-        if likelihood_df >= 100:
-            base_noise = random.normal(subkey, mu_pred.shape)
-        else:
-            # Student-t for df < 100 — drawing Normal noise would understate
-            # predictive spread by sqrt(df/(df-2)) (~41% in SD at df=4).
-            base_noise = random.t(subkey, likelihood_df, mu_pred.shape)
-        if likelihood_family == "skew_studentt":
-            if skewness_samples is None:
-                raise ValueError(
-                    f"skew_studentt likelihood requires '{prefix}skewness' in "
-                    "posterior_samples; train with --likelihood-family skew_studentt."
-                )
-            skew = skewness_samples[:, None]
-            base_noise = jnp.sinh((jnp.arcsinh(base_noise) + skew) * skew_tailweight)
-        y_pred = mu_pred + sigma_scaled * base_noise
-        # Back-transform draws and locations to the score scale (identity: no-op).
-        y_pred = transform.inverse(y_pred)
-        mu_pred = transform.inverse(mu_pred)
+    y_pred = spec.predict_draws(
+        subkey,
+        mu_pred,
+        sigma_scaled,
+        sites=family_sites,
+        df=likelihood_df,
+        bounds=target_bounds,
+        skew_tailweight=skew_tailweight,
+        transform=transform,
+        discretize=discretize_observation,
+    )
+    mu_pred = transform.inverse(mu_pred)
 
     # Squeeze if single album
     if single_album:
