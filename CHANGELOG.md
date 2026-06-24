@@ -39,5 +39,7 @@ the flagship example domain.
 
 ### Notes
 
-- Results in `MODEL_CARD.md` remain indicative until the full 4×5000 publication
-  run (`configs/publication.yaml`) is executed.
+- The 4×5000 publication-configuration run has been executed on a ~5k-album AOTY
+  **subset** (R-hat 1.00, bulk ESS 3,134, 0 divergences); the `MODEL_CARD.md`
+  numbers come from that subset. The full-corpus run (`configs/publication.yaml`
+  over all ~62k albums) remains the open item.
