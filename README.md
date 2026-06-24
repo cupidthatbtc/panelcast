@@ -14,7 +14,7 @@
 > finished part. The headline *statistical* result is now **partially
 > established on real data**: on a representative ~800-artist / ~5k-album AOTY
 > subset (skewness −2.08), the model **passes the convergence gate** at the
-> publication configuration (R-hat 1.00, bulk ESS 3,504, 0 divergences), and
+> publication configuration (R-hat 1.00, bulk ESS 3,134, 0 divergences), and
 > the baseline benchmark runs on the same real splits. Still open: the
 > posterior-predictive p-values stay pinned at the extremes by a
 > symmetric-likelihood / left-skewed-target mismatch (a bounded-Beta candidate
@@ -149,7 +149,7 @@ See [`docs/CLI.md`](docs/CLI.md) for the complete command reference.
 
 A note on results: at the publication configuration the model now **passes the
 convergence gate** on a real ~800-artist / ~5k-album AOTY subset (R-hat 1.00,
-bulk ESS 3,504, 0 divergences) under the default **Student-t** likelihood:
+bulk ESS 3,134, 0 divergences) under the default **Student-t** likelihood:
 
 ```bash
 panelcast run --preset publication        # 4 chains × 5000, Student-t likelihood

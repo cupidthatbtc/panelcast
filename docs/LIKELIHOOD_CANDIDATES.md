@@ -186,6 +186,19 @@ point accuracy for the same or sharper pins. The bounded-skew misspecification i
 confirmed and remains an open limitation, now with the deferred candidates below
 (Beta-Binomial, mixture) as the next levers to try.
 
+### Publication-scale confirmation
+
+At the full publication configuration (4 chains × 5000, warmup 3000) the
+Student-t model **passes the convergence gate** on the subset — R-hat 1.00, bulk
+ESS **3,134**, 0 divergences, and a reliable LOO (Pareto-k max 0.43, none > 0.7).
+It is well-calibrated (95% coverage 0.957, 80% 0.856) and accurate (MAE 5.64,
+RMSE 8.27, CRPS 4.19). It nonetheless **still pins the same four PPC statistics**
+— skewness (p 0.99), max (1.00), q50 (0.006), q90 (1.00). Five times the posterior
+samples *sharpens* the pins rather than relaxing them, which confirms the
+bounded-skew mismatch is a structural property of the likelihood, not a
+sample-count or convergence artifact. The remaining open item is full-corpus
+scale; the likelihood mismatch itself is the deferred candidates' target.
+
 ## Deferred candidates
 
 Two heavier candidates are deferred for follow-up (tracked as GitHub issues)
