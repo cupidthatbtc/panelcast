@@ -207,6 +207,53 @@ class TestStageReportWiring:
         assert result.exit_code == 1
 
 
+class TestStageDatasetConfigPresetWiring:
+    """Stage commands honor --dataset / --config / --preset like `run` (issue 2d)."""
+
+    def test_stage_dataset_passthrough(self, monkeypatch):
+        """--dataset on a stage command reaches PipelineConfig."""
+        captured = _make_pipeline_mocks(monkeypatch)
+        result = runner.invoke(app, ["stage", "data", "--dataset", "aero"])
+        assert result.exit_code == 0
+        assert captured["kwargs"]["dataset"] == "aero"
+        assert captured["kwargs"]["stages"] == ["data"]
+
+    def test_stage_config_overrides_apply(self, monkeypatch, tmp_path):
+        """A --config YAML value overlays onto the stage config."""
+        captured = _make_pipeline_mocks(monkeypatch)
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text("min_ratings: 25\n", encoding="utf-8")
+        result = runner.invoke(app, ["stage", "splits", "--config", str(cfg)])
+        assert result.exit_code == 0
+        assert captured["kwargs"]["min_ratings"] == 25
+        assert captured["kwargs"]["stages"] == ["splits"]
+
+    def test_stage_explicit_flag_beats_config(self, monkeypatch, tmp_path):
+        """An explicit stage flag wins over the same key in --config."""
+        captured = _make_pipeline_mocks(monkeypatch)
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text("seed: 999\n", encoding="utf-8")
+        result = runner.invoke(app, ["stage", "data", "--seed", "7", "--config", str(cfg)])
+        assert result.exit_code == 0
+        assert captured["kwargs"]["seed"] == 7
+
+    def test_stage_config_cannot_redirect_stage(self, monkeypatch, tmp_path):
+        """A YAML `stages` key never redirects an explicit `stage <name>`."""
+        captured = _make_pipeline_mocks(monkeypatch)
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text("stages: [train]\n", encoding="utf-8")
+        result = runner.invoke(app, ["stage", "data", "--config", str(cfg)])
+        assert result.exit_code == 0
+        assert captured["kwargs"]["stages"] == ["data"]
+
+    def test_stage_unknown_preset_errors(self, monkeypatch):
+        """An unknown --preset exits non-zero with a clear message."""
+        _make_pipeline_mocks(monkeypatch)
+        result = runner.invoke(app, ["stage", "data", "--preset", "bogus"])
+        assert result.exit_code == 1
+        assert "unknown --preset" in strip_ansi(result.stdout)
+
+
 # ============================================================================
 # Run Command: Full Config Passthrough
 # ============================================================================
@@ -239,7 +286,9 @@ class TestRunConfigPassthrough:
         assert kwargs["rhat_threshold"] == 1.01
         assert kwargs["ess_threshold"] == 400
         assert kwargs["allow_divergences"] is False
-        assert kwargs["min_ratings"] == 10
+        # min_ratings defaults to None at the CLI; the orchestrator resolves it
+        # from the descriptor's primary_min_obs (10 for AOTY).
+        assert kwargs["min_ratings"] is None
         assert kwargs["min_albums_filter"] == 2
         assert kwargs["enable_genre"] is True
         assert kwargs["enable_artist"] is True

@@ -17,6 +17,35 @@ from panelcast.pipelines.orchestrator import (
     run_pipeline,
 )
 
+_TINY_DESCRIPTOR_YAML = "name: tiny\nmin_obs_thresholds: [3, 7, 9]\nprimary_min_obs: 7\n"
+
+
+class TestMinRatingsResolution:
+    """min_ratings resolves from the descriptor when left unset (issue 2c)."""
+
+    def test_unset_resolves_to_aoty_primary_min_obs(self):
+        """No dataset + unset min_ratings -> AOTY descriptor primary_min_obs (10)."""
+        config = PipelineConfig()
+        assert config.min_ratings is None
+        PipelineOrchestrator(config)
+        assert config.min_ratings == 10
+
+    def test_unset_resolves_to_custom_descriptor_primary_min_obs(self, tmp_path):
+        """A descriptor with primary_min_obs=7 drives the unset default."""
+        descriptor_yaml = tmp_path / "tiny.yaml"
+        descriptor_yaml.write_text(_TINY_DESCRIPTOR_YAML, encoding="utf-8")
+        config = PipelineConfig(dataset=str(descriptor_yaml))
+        PipelineOrchestrator(config)
+        assert config.min_ratings == 7
+
+    def test_explicit_min_ratings_wins_over_descriptor(self, tmp_path):
+        """An explicit min_ratings is never overridden by the descriptor."""
+        descriptor_yaml = tmp_path / "tiny.yaml"
+        descriptor_yaml.write_text(_TINY_DESCRIPTOR_YAML, encoding="utf-8")
+        config = PipelineConfig(dataset=str(descriptor_yaml), min_ratings=25)
+        PipelineOrchestrator(config)
+        assert config.min_ratings == 25
+
 
 class TestPipelineConfig:
     """Tests for PipelineConfig dataclass."""
