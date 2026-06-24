@@ -147,23 +147,26 @@ See [`docs/CLI.md`](docs/CLI.md) for the complete command reference.
 - [`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md) — raw schema and cleaned artifacts
 - [`MODEL_CARD.md`](MODEL_CARD.md) — intended use, results, and limitations
 
-A note on results: the figures in `MODEL_CARD.md` are from a validation-scale
-run that **fails the convergence gate**, and should be treated as indicative
-until the full 4×5000 publication run is executed:
+A note on results: at the publication configuration the model now **passes the
+convergence gate** on a real ~800-artist / ~5k-album AOTY subset (R-hat 1.00,
+bulk ESS 3,504, 0 divergences) under the default **Student-t** likelihood:
 
 ```bash
-panelcast run --preset publication        # 4 chains × 5000, bounded Beta likelihood
+panelcast run --preset publication        # 4 chains × 5000, Student-t likelihood
 panelcast diagnose                        # convergence + PPC of that run
 panelcast compare --baselines             # the model vs. simple baselines
 ```
 
-That run is the remaining compute-bound step (it needs the full AOTY dataset and
-a GPU). What *is* resolved: leak-safe splits with role-based names, an honest
-baseline comparison (`panelcast compare`), and a bounded Beta likelihood that
-fixes the symmetric-likelihood / left-skewed-target mismatch by construction
-(see [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md)). The code,
-the diagnostics, and the honest naming of what is and isn't resolved are the
-point.
+What's resolved: leak-safe splits with role-based names, an honest baseline
+comparison (`panelcast compare`) on the same real splits, and a convergent
+publication-scale fit on real data. Still open: the posterior-predictive
+p-values stay pinned at the extremes from a symmetric-likelihood /
+left-skewed-target mismatch — a bounded **Beta** candidate was tested on real
+data and **rejected** (see
+[`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md)) — and this is a
+subset, not the full ~62k-album corpus, which needs the full dataset and a GPU.
+The code, the diagnostics, and the honest naming of what is and isn't resolved
+are the point.
 
 ## License
 

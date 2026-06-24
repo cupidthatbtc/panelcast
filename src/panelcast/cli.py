@@ -593,6 +593,7 @@ def run(
             "n_exponent": n_exponent,
             "learn_n_exponent": learn_n_exponent,
             "likelihood_df": likelihood_df,
+            "likelihood_family": likelihood_family,
             "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
         }
         # Mirror the production fit's memory gate in the calibration runs:

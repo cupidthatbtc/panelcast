@@ -26,6 +26,7 @@ import arviz as az
 import numpy as np
 
 from panelcast.config.descriptor import DatasetDescriptor, load_descriptor
+from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.models.bayes.fit import MCMCConfig, fit_model
 from panelcast.models.bayes.model import make_score_model
 from panelcast.models.bayes.priors import priors_for_transform
@@ -59,7 +60,8 @@ def prepare_args(descriptor: DatasetDescriptor) -> tuple[dict, float]:
     """Replicate train_models data prep at defaults (identity, centered)."""
     model_args, feature_cols, _train_df = load_training_data(
         features_path=Path("data/features/train_features.parquet"),
-        splits_path=Path("data/splits/within_entity_temporal/train.parquet"),
+        splits_path=resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL)
+        / "train.parquet",
         descriptor=descriptor,
     )
     artist_album_counts = model_args.pop("artist_album_counts")

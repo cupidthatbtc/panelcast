@@ -9,6 +9,7 @@ an evaluation run, and writes the benchmark table as CSV + Markdown.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +40,20 @@ class ComparisonResult:
     scores: list[BaselineScore]
     table: pd.DataFrame
     artifacts: list[Path]
+
+
+def _json_safe(obj: object) -> object:
+    """Recursively replace non-finite floats with None so json.dumps emits valid JSON."""
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, (float, np.floating)):
+        f = float(obj)
+        return f if math.isfinite(f) else None
+    return obj
 
 
 def _feature_cols(features_df: pd.DataFrame) -> list[str]:
@@ -83,7 +98,14 @@ def _build_panel(
     entity = merged[entity_col].to_numpy()
 
     if is_train:
-        ordered = merged.sort_values([entity_col], kind="stable")
+        # Order chronologically within entity before shift(1) so prev_score is
+        # the true predecessor, not a random row (mirrors _entity_last_train_score).
+        sort_cols = [entity_col]
+        if descriptor.parsed_date_col in merged.columns:
+            sort_cols.append(descriptor.parsed_date_col)
+        if descriptor.event_col in merged.columns:
+            sort_cols.append(descriptor.event_col)
+        ordered = merged.sort_values(sort_cols, kind="stable", na_position="first")
         prev = ordered.groupby(entity_col)[target_col].shift(1)
         prev = prev.reindex(merged.index).fillna(train_mean)
         prev_score = pd.to_numeric(prev, errors="coerce").to_numpy(dtype=float)
@@ -240,7 +262,7 @@ def run_baseline_comparison(
     md_path.write_text(_render_markdown(table), encoding="utf-8")
     artifacts.append(md_path)
     json_path = output_dir / "baseline_comparison.json"
-    json_path.write_text(json.dumps(all_rows, indent=2, default=float), encoding="utf-8")
+    json_path.write_text(json.dumps(_json_safe(all_rows), indent=2), encoding="utf-8")
     artifacts.append(json_path)
 
     log.info("baseline_comparison_complete", rows=len(all_rows), artifacts=len(artifacts))

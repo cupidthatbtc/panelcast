@@ -494,6 +494,12 @@ def _sample_likelihood(
     elif family == "beta":
         # Mean-precision Beta on (0, 1), affine-mapped to [low, high]. The mean
         # comes from the (bounds-clipped) location; phi is the precision.
+        if priors.target_transform not in ("identity", None):
+            raise ValueError(
+                "likelihood_family='beta' requires target_transform='identity' "
+                f"(got '{priors.target_transform}'); the Beta likelihood assumes "
+                "mu is on the score scale."
+            )
         eps = priors.beta_boundary_eps
         mu01 = jnp.clip((mu - low) / span, eps, 1.0 - eps)
         phi = numpyro.sample(

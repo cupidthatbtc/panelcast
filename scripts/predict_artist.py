@@ -20,6 +20,7 @@ import pandas as pd
 from jax import random
 from numpyro.infer import Predictive
 
+from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.models.bayes.io import load_manifest, load_model
 from panelcast.models.bayes.model import user_score_model
 from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_artist
@@ -38,7 +39,8 @@ def load_everything():
         summary = json.load(f)
     posterior_samples = extract_posterior_samples(idata)
 
-    train = pd.read_parquet("data/splits/within_entity_temporal/train.parquet")
+    split_dir = resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL)
+    train = pd.read_parquet(split_dir / "train.parquet")
     train_feat = pd.read_parquet("data/features/train_features.parquet")
     overlap = list(set(train.columns) & set(train_feat.columns))
     if overlap:
@@ -47,7 +49,7 @@ def load_everything():
     feature_cols = summary["feature_cols"]
     train[feature_cols] = train[feature_cols].fillna(0)
 
-    test = pd.read_parquet("data/splits/within_entity_temporal/test.parquet")
+    test = pd.read_parquet(split_dir / "test.parquet")
 
     # Load raw data for albums not in train/test
     raw = pd.read_csv("data/raw/all_albums_full.csv", encoding="utf-8-sig")

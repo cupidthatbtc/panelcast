@@ -10,6 +10,7 @@ extremes). No model refit; this just re-presents what the run produced.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -31,11 +32,24 @@ class DiagnoseReport:
 
 
 def _flag(p: float) -> str:
+    if math.isnan(p):
+        return "missing"
     if p <= _EXTREME_LO or p >= _EXTREME_HI:
         return "pinned"
     if p <= _WARN_LO or p >= _WARN_HI:
         return "warn"
     return "ok"
+
+
+def _json_safe(obj: object) -> object:
+    """Recursively replace non-finite floats with None so json.dumps emits valid JSON."""
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    return obj
 
 
 def build_report(eval_dir: Path) -> DiagnoseReport:
@@ -55,6 +69,7 @@ def build_report(eval_dir: Path) -> DiagnoseReport:
 
     ppc_rows: list[dict] = []
     extreme: list[str] = []
+    missing: list[str] = []
     if metrics_path.exists():
         with open(metrics_path, encoding="utf-8") as f:
             metrics = json.load(f)
@@ -64,6 +79,8 @@ def build_report(eval_dir: Path) -> DiagnoseReport:
             flag = _flag(p)
             if flag == "pinned":
                 extreme.append(name)
+            elif flag == "missing":
+                missing.append(name)
             ppc_rows.append(
                 {
                     "statistic": name,
@@ -74,12 +91,17 @@ def build_report(eval_dir: Path) -> DiagnoseReport:
             )
 
     passed = convergence.get("passed")
+    missing_note = (
+        f" {len(missing)} PPC statistic(s) had no p-value ({', '.join(missing)})."
+        if missing
+        else ""
+    )
     if passed is True and not extreme:
-        verdict = "Converged and no PPC statistics pinned at the extremes."
+        verdict = "Converged and no PPC statistics pinned at the extremes." + missing_note
     elif passed is True:
         verdict = (
             f"Converged, but {len(extreme)} PPC statistic(s) pinned at the extremes "
-            f"({', '.join(extreme)}) — likely likelihood misspecification."
+            f"({', '.join(extreme)}) — likely likelihood misspecification." + missing_note
         )
     elif passed is False:
         tail = (
@@ -87,9 +109,9 @@ def build_report(eval_dir: Path) -> DiagnoseReport:
             if extreme
             else ""
         )
-        verdict = f"Convergence gate FAILED{tail}."
+        verdict = f"Convergence gate FAILED{tail}." + missing_note
     else:
-        verdict = "Convergence status unavailable; see PPC flags below."
+        verdict = "Convergence status unavailable; see PPC flags below." + missing_note
 
     return DiagnoseReport(
         convergence=convergence,
@@ -141,14 +163,15 @@ def run_diagnose(
     json_path = output_dir / "diagnostics_report.json"
     json_path.write_text(
         json.dumps(
-            {
-                "verdict": report.verdict,
-                "convergence": report.convergence,
-                "ppc": report.ppc,
-                "extreme_ppc": report.extreme_ppc,
-            },
+            _json_safe(
+                {
+                    "verdict": report.verdict,
+                    "convergence": report.convergence,
+                    "ppc": report.ppc,
+                    "extreme_ppc": report.extreme_ppc,
+                }
+            ),
             indent=2,
-            default=float,
         ),
         encoding="utf-8",
     )

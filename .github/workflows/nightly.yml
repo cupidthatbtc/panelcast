@@ -8,15 +8,23 @@ on:
     - cron: "0 6 * * *"  # daily, 06:00 UTC
   workflow_dispatch: {}
 
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   full:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
 
       - name: Install pixi
-        uses: prefix-dev/setup-pixi@v0.8.1
+        uses: prefix-dev/setup-pixi@ba3bb36eb2066252b2363392b7739741bb777659  # v0.8.1
         with:
           cache: true
 
