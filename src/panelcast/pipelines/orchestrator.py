@@ -108,7 +108,8 @@ class PipelineConfig:
         rhat_threshold: Maximum acceptable R-hat (default 1.01).
         ess_threshold: Minimum ESS per chain (default 400).
         allow_divergences: If True, don't fail on divergences (default False).
-        min_ratings: Minimum user ratings per album (default 10).
+        min_ratings: Minimum primary observations per event, or None to resolve
+            from the descriptor's ``primary_min_obs`` at run time (default None).
         min_albums_filter: Minimum albums per artist for dynamic effects (default 2).
         enable_genre: If False, disable genre features (default True).
         enable_artist: If False, disable artist features (default True).
@@ -145,8 +146,10 @@ class PipelineConfig:
     rhat_threshold: float = 1.01
     ess_threshold: int = 400
     allow_divergences: bool = False
-    # Data filtering
-    min_ratings: int = 10
+    # Data filtering. min_ratings=None defers to the descriptor's primary_min_obs
+    # (resolved in the orchestrator), so a retargeted domain needs no
+    # --min-ratings on the command line. An explicit value (CLI/YAML) wins.
+    min_ratings: int | None = None
     min_albums_filter: int = 2
     # Feature flags
     enable_genre: bool = True
@@ -334,6 +337,11 @@ class PipelineOrchestrator:
         # StageContext rather than re-deriving domain names from literals.
         self.descriptor = load_descriptor(config.dataset)
         self.descriptor_path = resolve_descriptor_path(config.dataset)
+        # Resolve the observation threshold: an explicit CLI/YAML value wins;
+        # otherwise fall back to the descriptor's primary_min_obs so retargeted
+        # domains don't need --min-ratings on the command line.
+        if config.min_ratings is None:
+            config.min_ratings = self.descriptor.primary_min_obs
 
     def run(self) -> int:
         """Execute the pipeline and return exit code.
@@ -560,6 +568,7 @@ class PipelineOrchestrator:
         "tau_entity_scale",
         "exclude_rw_raw_from_collection",
         "max_albums",
+        "min_ratings",
         "min_albums_filter",
         "min_train_albums",
         "calibration_intervals",
@@ -654,6 +663,13 @@ class PipelineOrchestrator:
         # YAML has changed since the original run would silently mix domains.
         self.descriptor = load_descriptor(self.config.dataset)
         self.descriptor_path = resolve_descriptor_path(self.config.dataset)
+        # __init__ resolved min_ratings against the pre-resume (CLI/default)
+        # descriptor; the manifest restore above re-pointed the dataset, so
+        # re-derive the threshold from the restored descriptor when it wasn't
+        # pinned in the manifest. Without this a resumed cross-domain run keeps
+        # the wrong threshold and reads the wrong processed parquet.
+        if self.config.min_ratings is None:
+            self.config.min_ratings = self.descriptor.primary_min_obs
         recorded_hash = self.manifest.flags.get("dataset_descriptor_hash")
         if recorded_hash is None:
             log.warning(
@@ -717,8 +733,10 @@ class PipelineOrchestrator:
             parts.append(f"--ess-threshold {self.config.ess_threshold}")
         if self.config.allow_divergences:
             parts.append("--allow-divergences")
-        # Data filtering
-        if self.config.min_ratings != defaults.min_ratings:
+        # Data filtering. Record --min-ratings only when it differs from the
+        # descriptor default it would otherwise resolve to (config.min_ratings
+        # is already resolved to an int by __init__).
+        if self.config.min_ratings != self.descriptor.primary_min_obs:
             parts.append(f"--min-ratings {self.config.min_ratings}")
         if self.config.min_albums_filter != defaults.min_albums_filter:
             parts.append(f"--min-albums {self.config.min_albums_filter}")

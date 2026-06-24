@@ -17,6 +17,70 @@ from panelcast.pipelines.orchestrator import (
     run_pipeline,
 )
 
+_TINY_DESCRIPTOR_YAML = "name: tiny\nmin_obs_thresholds: [3, 7, 9]\nprimary_min_obs: 7\n"
+
+
+class TestMinRatingsResolution:
+    """min_ratings resolves from the descriptor when left unset (issue 2c)."""
+
+    def test_unset_resolves_to_aoty_primary_min_obs(self):
+        """No dataset + unset min_ratings -> AOTY descriptor primary_min_obs (10)."""
+        config = PipelineConfig()
+        assert config.min_ratings is None
+        PipelineOrchestrator(config)
+        assert config.min_ratings == 10
+
+    def test_unset_resolves_to_custom_descriptor_primary_min_obs(self, tmp_path):
+        """A descriptor with primary_min_obs=7 drives the unset default."""
+        descriptor_yaml = tmp_path / "tiny.yaml"
+        descriptor_yaml.write_text(_TINY_DESCRIPTOR_YAML, encoding="utf-8")
+        config = PipelineConfig(dataset=str(descriptor_yaml))
+        PipelineOrchestrator(config)
+        assert config.min_ratings == 7
+
+    def test_explicit_min_ratings_wins_over_descriptor(self, tmp_path):
+        """An explicit min_ratings is never overridden by the descriptor."""
+        descriptor_yaml = tmp_path / "tiny.yaml"
+        descriptor_yaml.write_text(_TINY_DESCRIPTOR_YAML, encoding="utf-8")
+        config = PipelineConfig(dataset=str(descriptor_yaml), min_ratings=25)
+        PipelineOrchestrator(config)
+        assert config.min_ratings == 25
+
+    def test_min_ratings_in_resume_config_keys(self):
+        """min_ratings is restored from the manifest on resume."""
+        assert "min_ratings" in PipelineOrchestrator.RESUME_CONFIG_KEYS
+
+    def test_resume_restores_min_ratings_from_manifest(self, tmp_path):
+        """Resume restores the manifest's min_ratings, overriding __init__'s guess."""
+        descriptor_yaml = tmp_path / "tiny.yaml"
+        descriptor_yaml.write_text(_TINY_DESCRIPTOR_YAML, encoding="utf-8")
+        config = PipelineConfig(resume="some-run")
+        orch = PipelineOrchestrator(config)
+        # __init__ resolved against AOTY (the restored dataset isn't applied yet).
+        assert config.min_ratings == 10
+        orch.manifest = MagicMock(flags={"dataset": str(descriptor_yaml), "min_ratings": 7})
+        orch._restore_config_from_manifest()
+        assert config.dataset == str(descriptor_yaml)
+        assert config.min_ratings == 7
+
+    def test_resume_redrives_min_ratings_when_unpinned(self, tmp_path):
+        """A manifest lacking a pinned threshold re-derives it from the restored descriptor."""
+        descriptor_yaml = tmp_path / "tiny.yaml"
+        descriptor_yaml.write_text(_TINY_DESCRIPTOR_YAML, encoding="utf-8")
+        config = PipelineConfig(resume="some-run")
+        orch = PipelineOrchestrator(config)
+        orch.manifest = MagicMock(flags={"dataset": str(descriptor_yaml), "min_ratings": None})
+        orch._restore_config_from_manifest()
+        assert config.min_ratings == 7  # re-derived from the tiny descriptor primary_min_obs
+
+    def test_restore_config_noop_without_manifest(self, tmp_path):
+        """_restore_config_from_manifest returns immediately when no manifest is loaded."""
+        config = PipelineConfig()
+        orch = PipelineOrchestrator(config, output_base=tmp_path)
+        orch.manifest = None
+        orch._restore_config_from_manifest()  # no manifest -> no-op, no error
+        assert config.min_ratings == 10
+
 
 class TestPipelineConfig:
     """Tests for PipelineConfig dataclass."""
@@ -933,6 +997,48 @@ class TestPipelineConfigValidation:
         config = PipelineConfig(calibration_intervals=(0.5, 0.8, 0.95))
         assert config.calibration_intervals == (0.5, 0.8, 0.95)
 
+    def test_invalid_target_transform_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="target_transform"):
+            PipelineConfig(target_transform="bogus")
+
+    def test_invalid_likelihood_family_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="likelihood_family"):
+            PipelineConfig(likelihood_family="bogus")
+
+    def test_discretize_unsupported_family_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="discretize_observation"):
+            PipelineConfig(likelihood_family="beta", discretize_observation=True)
+
+    def test_invalid_debut_prev_score_source_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="debut_prev_score_source"):
+            PipelineConfig(debut_prev_score_source="bogus")
+
+    def test_invalid_latent_process_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="latent_process"):
+            PipelineConfig(latent_process="bogus")
+
+    def test_invalid_sigma_obs_prior_type_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="sigma_obs_prior_type"):
+            PipelineConfig(sigma_obs_prior_type="bogus")
+
+    def test_nonpositive_tau_entity_scale_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="tau_entity_scale"):
+            PipelineConfig(tau_entity_scale=0.0)
+
 
 class TestOrchestratorCommandString:
     """Additional tests for command string building."""
@@ -1012,6 +1118,22 @@ class TestOrchestratorCommandString:
         assert "--num-chains" not in cmd
         assert "--max-albums" not in cmd
         assert "--no-genre" not in cmd
+
+    def test_command_with_likelihood_and_dataset(self, tmp_path):
+        """Likelihood and dataset overrides appear in the command string."""
+        config = PipelineConfig(
+            likelihood_df=8.0,
+            likelihood_family="skew_normal",
+            discretize_observation=True,
+            dataset="aero",
+        )
+        orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
+        cmd = orchestrator._build_command_string()
+
+        assert "--likelihood-df 8.0" in cmd
+        assert "--likelihood-family skew_normal" in cmd
+        assert "--discretize-observation" in cmd
+        assert "--dataset aero" in cmd
 
 
 class TestOrchestratorResumeErrors:
@@ -1299,3 +1421,189 @@ class TestDefaultConfigCache:
         assert config2 is not None
         # They should be equal but not the same object
         assert config2.seed == config1.seed
+
+
+class TestResumeDescriptorDrift:
+    """Resume aborts when the descriptor changed since the original run."""
+
+    def test_resume_descriptor_hash_mismatch_raises(self, tmp_path):
+        import pytest
+
+        from panelcast.pipelines.errors import PipelineError
+
+        descriptor_yaml = tmp_path / "tiny.yaml"
+        descriptor_yaml.write_text(_TINY_DESCRIPTOR_YAML, encoding="utf-8")
+        config = PipelineConfig(resume="some-run")
+        orch = PipelineOrchestrator(config, output_base=tmp_path)
+        orch.manifest = MagicMock(
+            flags={"dataset": str(descriptor_yaml), "dataset_descriptor_hash": "stale-hash"}
+        )
+        with pytest.raises(PipelineError, match="descriptor changed"):
+            orch._restore_config_from_manifest()
+
+
+class TestCreateLatestLinkBranches:
+    """Exercises the symlink/junction branches of _create_latest_link directly."""
+
+    def _orch_with_run_dir(self, tmp_path):
+        orch = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)
+        orch.run_dir = tmp_path / "run"
+        orch.run_dir.mkdir()
+        return orch
+
+    def test_noop_without_run_dir(self, tmp_path):
+        orch = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)
+        orch.run_dir = None
+        orch._create_latest_link()  # returns immediately, no link created
+        assert not (tmp_path / "latest").exists()
+
+    def test_exists_oserror_then_unlink_failure_returns(self, tmp_path, monkeypatch):
+        """A broken NTFS link (OSError on exists) is treated as removable; unlink failure logs."""
+        import pathlib
+
+        orch = self._orch_with_run_dir(tmp_path)
+
+        def raise_oserror(self):
+            raise OSError("WinError 1920")
+
+        def raise_filenotfound(self):
+            raise FileNotFoundError("gone")
+
+        monkeypatch.setattr(pathlib.Path, "exists", raise_oserror)
+        monkeypatch.setattr(pathlib.Path, "unlink", raise_filenotfound)
+        orch._create_latest_link()  # OSError -> removable; unlink raises -> logged + return
+
+    def test_win32_symlink_path(self, tmp_path, monkeypatch):
+        orch = self._orch_with_run_dir(tmp_path)
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.sys.platform", "win32")
+        calls = {}
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.os.symlink",
+            lambda *a, **k: calls.setdefault("symlink", True),
+        )
+        orch._create_latest_link()
+        assert calls.get("symlink")
+
+    def test_win32_junction_fallback(self, tmp_path, monkeypatch):
+        orch = self._orch_with_run_dir(tmp_path)
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.sys.platform", "win32")
+
+        def no_privilege(*a, **k):
+            raise OSError("symlink privilege required")
+
+        calls = {}
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.os.symlink", no_privilege)
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.subprocess.run",
+            lambda *a, **k: calls.setdefault("mklink", True),
+        )
+        orch._create_latest_link()
+        assert calls.get("mklink")  # fell back to the directory junction
+
+    def test_win32_removes_existing_junction(self, tmp_path, monkeypatch):
+        orch = self._orch_with_run_dir(tmp_path)
+        (tmp_path / "latest").mkdir()  # an existing junction appears as a directory
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.sys.platform", "win32")
+        calls = {}
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.os.rmdir",
+            lambda p: calls.setdefault("rmdir", True),
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.os.symlink",
+            lambda *a, **k: calls.setdefault("symlink", True),
+        )
+        orch._create_latest_link()
+        assert calls.get("rmdir") and calls.get("symlink")
+
+    def test_win32_junction_rejects_unsafe_path(self, tmp_path, monkeypatch):
+        """A junction target with shell metacharacters is refused (no mklink)."""
+        orch = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)
+        orch.run_dir = tmp_path / "ru$n"  # '$' is a rejected metacharacter
+        orch.run_dir.mkdir()
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.sys.platform", "win32")
+
+        def no_privilege(*a, **k):
+            raise OSError("symlink privilege required")
+
+        calls = {}
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.os.symlink", no_privilege)
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.subprocess.run",
+            lambda *a, **k: calls.setdefault("mklink", True),
+        )
+        orch._create_latest_link()
+        assert "mklink" not in calls  # rejected before invoking mklink
+
+
+class TestExecuteStagesSkipDetection:
+    """Covers the skip-detection IO error handlers in _execute_stages."""
+
+    def test_latest_link_exists_oserror_is_swallowed(self, tmp_path, monkeypatch):
+        import pathlib
+
+        config = PipelineConfig(skip_existing=True)
+        orch = PipelineOrchestrator(config, output_base=tmp_path)
+        orch.run_dir = tmp_path / "run"
+        orch.run_dir.mkdir()
+
+        def raise_oserror(self):
+            raise OSError("WinError 1920")
+
+        monkeypatch.setattr(pathlib.Path, "exists", raise_oserror)
+        orch._execute_stages([])  # OSError on exists() -> link_exists False, no crash
+
+    def test_previous_manifest_load_oserror_is_swallowed(self, tmp_path, monkeypatch):
+        config = PipelineConfig(skip_existing=True)
+        orch = PipelineOrchestrator(config, output_base=tmp_path)
+        orch.run_dir = tmp_path / "run"
+        orch.run_dir.mkdir()
+        latest = tmp_path / "latest"
+        latest.mkdir()
+        (latest / "manifest.json").write_text("{}", encoding="utf-8")
+
+        def boom(path):
+            raise OSError("locked")
+
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.load_run_manifest", boom)
+        orch._execute_stages([])  # load raises OSError -> swallowed, previous stays None
+
+    def test_previous_manifest_load_generic_error_is_swallowed(self, tmp_path, monkeypatch):
+        config = PipelineConfig(skip_existing=True)
+        orch = PipelineOrchestrator(config, output_base=tmp_path)
+        orch.run_dir = tmp_path / "run"
+        orch.run_dir.mkdir()
+        latest = tmp_path / "latest"
+        latest.mkdir()
+        (latest / "manifest.json").write_text("{}", encoding="utf-8")
+
+        def boom(path):
+            raise ValueError("corrupt manifest")
+
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.load_run_manifest", boom)
+        orch._execute_stages([])  # generic error -> swallowed, previous stays None
+
+
+class TestHandleFailureExistingFailedDir:
+    """Covers replacing a pre-existing failed/<run> directory on re-failure."""
+
+    def test_existing_failed_dir_is_replaced(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.save_run_manifest", lambda m, d: None
+        )
+        orch = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)
+        orch.run_dir = tmp_path / "run"
+        orch.run_dir.mkdir()
+        (orch.run_dir / "new.txt").write_text("new", encoding="utf-8")
+        orch.manifest = MagicMock()
+        orch._start_time = 0.0
+        stale = tmp_path / "failed" / "run"
+        stale.mkdir(parents=True)
+        (stale / "old.txt").write_text("old", encoding="utf-8")
+
+        orch._handle_failure(RuntimeError("boom"), stage="data")
+
+        moved = tmp_path / "failed" / "run"
+        assert moved.exists()
+        assert (moved / "new.txt").exists()  # the fresh run replaced the stale failed dir
+        assert not (moved / "old.txt").exists()
