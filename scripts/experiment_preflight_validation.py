@@ -68,7 +68,7 @@ def prepare_mini_run_args(descriptor) -> dict:
     """Real training data shaped exactly like the production fit."""
     model_args, _feature_cols, _train_df = load_training_data(
         features_path=Path("data/features/train_features.parquet"),
-        splits_path=Path("data/splits/within_artist_temporal/train.parquet"),
+        splits_path=Path("data/splits/within_entity_temporal/train.parquet"),
         descriptor=descriptor,
     )
     artist_album_counts = model_args.pop("artist_album_counts")

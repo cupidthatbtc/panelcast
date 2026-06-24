@@ -63,10 +63,10 @@ def _make_metrics(**overrides) -> dict:
     }
     primary.update(overrides.get("primary_extra", {}))
     splits = {
-        "within_artist_temporal": primary,
-        "artist_disjoint": {"calibration": {"within_tolerance": True}},
+        "within_entity_temporal": primary,
+        "entity_disjoint": {"calibration": {"within_tolerance": True}},
     }
-    return {"primary_split": "within_artist_temporal", "splits": splits}
+    return {"primary_split": "within_entity_temporal", "splits": splits}
 
 
 def _make_diagnostics(**overrides) -> dict:
@@ -564,9 +564,9 @@ class TestBuildReadinessNew:
         """Non-dict calibration in primary_metrics should be handled."""
         payload = _build_publication_readiness(
             metrics={
-                "primary_split": "within_artist_temporal",
+                "primary_split": "within_entity_temporal",
                 "splits": {
-                    "within_artist_temporal": {"calibration": "bad_type"},
+                    "within_entity_temporal": {"calibration": "bad_type"},
                 },
             },
             diagnostics={"passed": True, "rhat_max": 1.001, "ess_bulk_min": 5000},

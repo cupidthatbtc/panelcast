@@ -87,6 +87,15 @@ def run(
             "earlier ones. Explicit CLI options always win over YAML."
         ),
     ),
+    preset: Optional[str] = typer.Option(
+        None,
+        "--preset",
+        help=(
+            "Named config preset {quick,dev,diagnostic,publication} — sugar for "
+            "--config configs/<preset>.yaml, layered first so any --config files "
+            "and explicit CLI options still win."
+        ),
+    ),
     seed: int = typer.Option(42, "--seed", help="Random seed for reproducibility"),
     skip_existing: bool = typer.Option(
         False,
@@ -304,6 +313,25 @@ def run(
             ),
         ),
     ] = 4.0,
+    likelihood_family: str = typer.Option(
+        "studentt",
+        "--likelihood-family",
+        help=(
+            "Observation likelihood: 'studentt' (default) or 'normal' (symmetric); "
+            "the skew candidates 'skew_studentt' / 'skew_normal' (sinh-arcsinh) and "
+            "'split_normal' (two-piece); or 'beta' (bounded mean-precision Beta)."
+        ),
+    ),
+    discretize_observation: bool = typer.Option(
+        False,
+        "--discretize-observation",
+        help=(
+            "Interval-censor the observation to integers: integer k contributes "
+            "log(F(k+0.5)-F(k-0.5)) and replicated draws are rounded (honest PPC "
+            "for integer-valued scores). Location-scale families only "
+            "(studentt, normal, skew_normal, split_normal); rejected for beta."
+        ),
+    ),
     val_albums: Annotated[
         int,
         typer.Option(
@@ -463,6 +491,17 @@ def run(
             f"Must be one of: {', '.join(valid_priors)}"
         )
         raise typer.Exit(code=1)
+
+    # Validate likelihood_family (single source of truth: the registry)
+    from panelcast.models.bayes.likelihoods import REGISTRY
+
+    valid_families = tuple(REGISTRY)
+    if likelihood_family not in valid_families:
+        typer.echo(
+            f"Error: Invalid --likelihood-family '{likelihood_family}'. "
+            f"Must be one of: {', '.join(valid_families)}"
+        )
+        raise typer.Exit(code=1)
     chain_method = chain_method_normalized  # Use normalized value downstream
 
     # Parse calibration interval levels
@@ -498,8 +537,12 @@ def run(
         console = Console()
 
         # Check if required data exists
+        from panelcast.data.split_types import SplitType, resolve_split_dir
+
         features_path = Path("data/features/train_features.parquet")
-        splits_path = Path("data/splits/within_artist_temporal/train.parquet")
+        splits_path = resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL) / (
+            "train.parquet"
+        )
 
         if not features_path.exists() or not splits_path.exists():
             console.print(
@@ -562,6 +605,8 @@ def run(
             "n_exponent": n_exponent,
             "learn_n_exponent": learn_n_exponent,
             "likelihood_df": likelihood_df,
+            "likelihood_family": likelihood_family,
+            "discretize_observation": discretize_observation,
             "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
         }
         # Mirror the production fit's memory gate in the calibration runs:
@@ -690,6 +735,8 @@ def run(
         n_exponent_beta=n_exponent_beta,
         n_exponent_prior=n_exponent_prior,
         likelihood_df=likelihood_df,
+        likelihood_family=likelihood_family,
+        discretize_observation=discretize_observation,
         val_albums=val_albums,
         min_train_albums=min_train_albums,
         calibration_intervals=calibration_levels,
@@ -704,12 +751,40 @@ def run(
         exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
     )
 
+    # Resolve --preset to a config file layered FIRST, so explicit --config
+    # files and CLI options still win (later layers override earlier ones).
+    effective_config_files: list[str] = []
+    if preset is not None:
+        from pathlib import Path
+
+        valid_presets = ("quick", "dev", "diagnostic", "publication")
+        if preset not in valid_presets:
+            typer.echo(
+                f"Error: unknown --preset '{preset}'. "
+                f"Choose one of: {', '.join(valid_presets)}"
+            )
+            raise typer.Exit(code=1)
+        preset_path = Path("configs") / f"{preset}.yaml"
+        if not preset_path.exists():
+            # Fall back to the repo-bundled configs (relative to this file) so
+            # --preset works when running from a separate domain directory
+            # (docs/PORTING.md), not only from the repo root.
+            bundled = Path(__file__).resolve().parents[2] / "configs" / f"{preset}.yaml"
+            if bundled.exists():
+                preset_path = bundled
+            else:
+                typer.echo(f"Error: preset config not found at {preset_path}.")
+                raise typer.Exit(code=1)
+        effective_config_files.append(str(preset_path))
+    if config_files:
+        effective_config_files.extend(config_files)
+
     try:
-        if config_files:
+        if effective_config_files:
             from panelcast.config.loader import load_yaml_config
             from panelcast.config.pipeline_yaml import apply_yaml_overrides
 
-            yaml_data = load_yaml_config(list(config_files))
+            yaml_data = load_yaml_config(effective_config_files)
             # Params set explicitly on the command line win over YAML. click's
             # parameter-source API lives in internals that have drifted across
             # click/typer versions, so compare the source by its enum member
@@ -1077,6 +1152,200 @@ def export_figures(
     typer.echo(f"Exported {len(results)} figures to {output_path}")
     for name, paths in results.items():
         typer.echo(f"  {name}: {', '.join(p.name for p in paths)}")
+
+
+@app.command("demo")
+def demo(
+    descriptor_path: str = typer.Option(
+        "examples/aerospace/descriptor.yaml",
+        "--descriptor",
+        help="Descriptor YAML for the demo dataset.",
+    ),
+    num_chains: int = typer.Option(1, "--num-chains", min=1, help="MCMC chains (default 1)."),
+    num_samples: int = typer.Option(
+        300, "--num-samples", min=50, help="Post-warmup samples per chain (default 300)."
+    ),
+    num_warmup: int = typer.Option(
+        300, "--num-warmup", min=50, help="Warmup iterations per chain (default 300)."
+    ),
+    seed: int = typer.Option(42, "--seed", help="Random seed."),
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG logging."),
+) -> None:
+    """Run the whole pipeline end-to-end on the bundled aerospace example.
+
+    A tiny, self-contained demonstration: airframes flying scored test flights,
+    selected entirely by a one-file descriptor with zero source changes. Runs
+    data → splits → features → train → evaluate → predict → report at small
+    scale and finishes with a generated model card under reports/.
+
+    Examples:
+        panelcast demo
+        panelcast demo --num-chains 2 --num-samples 500
+    """
+    from pathlib import Path
+
+    from panelcast.pipelines.orchestrator import PipelineConfig, run_pipeline
+
+    if not Path(descriptor_path).exists():
+        typer.echo(
+            f"Error: demo descriptor not found at {descriptor_path}.\n"
+            "Regenerate the example with: python scripts/generate_aero_example.py"
+        )
+        raise typer.Exit(code=1)
+
+    typer.echo(f"Running the panelcast demo on {descriptor_path} (tiny scale)...\n")
+
+    # Tiny, tolerant settings: this is a smoke demonstration, not a publication
+    # run, so convergence gates are relaxed and divergences are allowed.
+    config = PipelineConfig(
+        seed=seed,
+        dataset=descriptor_path,
+        num_chains=num_chains,
+        num_samples=num_samples,
+        num_warmup=num_warmup,
+        min_ratings=5,
+        max_albums=10,
+        min_albums_filter=2,
+        rhat_threshold=1.1,
+        ess_threshold=100,
+        allow_divergences=True,
+        strict=False,
+        verbose=verbose,
+        enforce_lockfile=False,
+    )
+    exit_code = run_pipeline(config)
+
+    if exit_code == 0:
+        typer.echo("\nDemo complete. Generated artifacts:")
+        for artifact in (
+            "reports/MODEL_CARD.md",
+            "reports/tables/metrics_summary.csv",
+            "outputs/evaluation/metrics.json",
+        ):
+            marker = "✓" if Path(artifact).exists() else "·"
+            typer.echo(f"  {marker} {artifact}")
+    raise typer.Exit(code=exit_code)
+
+
+@app.command("compare")
+def compare(
+    baselines: bool = typer.Option(
+        False,
+        "--baselines",
+        help="Fit the baseline predictors and emit the benchmark comparison table.",
+    ),
+    dataset: Optional[str] = typer.Option(
+        None,
+        "--dataset",
+        help="Dataset descriptor (bare name or YAML path; omit for AOTY defaults).",
+    ),
+    output_dir: str = typer.Option(
+        "reports/baselines", "--output", "-o", help="Directory for the comparison artifacts."
+    ),
+    num_samples: int = typer.Option(
+        1000, "--num-samples", min=2, help="Predictive samples per baseline for interval scoring."
+    ),
+    seed: int = typer.Option(0, "--seed", help="Random seed for predictive sampling."),
+    include_bayes: bool = typer.Option(
+        True,
+        "--bayes/--no-bayes",
+        help="Append the current Bayesian model's metrics from outputs/evaluation/metrics.json.",
+    ),
+) -> None:
+    """Benchmark simple baselines against the model on the existing splits.
+
+    Fits global-mean, entity-mean, last-score (persistence), ridge, and gradient
+    boosting baselines on the within-entity-temporal and entity-disjoint splits,
+    scores them through the same metrics/calibration/CRPS toolkit as the model,
+    and writes a populated comparison table (CSV + Markdown + JSON).
+
+    Requires the splits and features stages to have run (run them first with
+    `panelcast run --stages splits,features`).
+
+    Examples:
+        panelcast compare --baselines
+        panelcast compare --baselines --dataset aero --output reports/aero_baselines
+    """
+    from pathlib import Path
+
+    if not baselines:
+        typer.echo("Nothing to do. Pass --baselines to run the baseline benchmark.")
+        raise typer.Exit(code=0)
+
+    from panelcast.pipelines.compare_baselines import run_baseline_comparison
+
+    try:
+        result = run_baseline_comparison(
+            dataset=dataset,
+            n_samples=num_samples,
+            seed=seed,
+            output_dir=Path(output_dir),
+            include_bayes=include_bayes,
+        )
+    except FileNotFoundError as e:
+        typer.echo(
+            "Error: split/feature artifacts not found. Run "
+            "`panelcast run --stages splits,features` first.\n"
+            f"  ({e})"
+        )
+        raise typer.Exit(code=1) from e
+
+    typer.echo(result.table.to_string(index=False))
+    typer.echo("")
+    for path in result.artifacts:
+        typer.echo(f"  wrote {path}")
+
+
+@app.command("diagnose")
+def diagnose(
+    eval_dir: str = typer.Option(
+        "outputs/evaluation",
+        "--eval-dir",
+        help="Directory holding diagnostics.json / metrics.json from an evaluate run.",
+    ),
+    output_dir: str = typer.Option(
+        "reports/diagnostics", "--output", "-o", help="Directory for the diagnostics report."
+    ),
+) -> None:
+    """Summarize convergence + PPC over an existing evaluation run.
+
+    Re-presents the two things the review flagged — the convergence gate and the
+    posterior-predictive-check p-values — from artifacts the evaluate stage
+    already wrote. PPC statistics pinned near 0/1 are flagged as the signature of
+    likelihood misspecification. No model refit.
+
+    Examples:
+        panelcast diagnose
+        panelcast diagnose --eval-dir outputs/2026-06-23_192630/evaluation
+    """
+    from pathlib import Path
+
+    from panelcast.pipelines.diagnose import run_diagnose
+
+    try:
+        report = run_diagnose(eval_dir=Path(eval_dir), output_dir=Path(output_dir))
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(code=1) from e
+
+    typer.echo(f"Verdict: {report.verdict}\n")
+    c = report.convergence
+    if c:
+        rhat = c.get("rhat_max")
+        typer.echo("Convergence:")
+        typer.echo(f"  status:      {'PASS' if c.get('passed') else 'FAIL'}")
+        typer.echo(f"  R-hat (max): {rhat if rhat is not None else 'n/a (single chain)'}")
+        ess_min = c.get("ess_bulk_min", "?")
+        ess_thr = c.get("ess_threshold", "?")
+        typer.echo(f"  ESS bulk:    {ess_min} (>= {ess_thr})")
+        typer.echo(f"  divergences: {c.get('divergences', '?')}")
+    if report.ppc:
+        typer.echo("\nPPC (statistic: p-value [flag]):")
+        for row in report.ppc:
+            typer.echo(f"  {row['statistic']:<10} {row['p_value']:.3f}  [{row['flag']}]")
+    typer.echo("")
+    for path in report.artifacts:
+        typer.echo(f"  wrote {path}")
 
 
 def main() -> None:

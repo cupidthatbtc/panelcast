@@ -468,10 +468,15 @@ class TestCreateLatestLink:
     def test_latest_link_replaces_existing(self, tmp_path):
         """Existing latest link is replaced on new successful run."""
         with _mock_env()[0], _mock_env()[1]:
-            # First run
+            # Pin distinct run ids: the timestamp-based generator collides when
+            # both runs start within the same second (fast CI), making the two
+            # run dirs identical so the "latest moved" assertion spuriously fails.
             config1 = PipelineConfig()
             orch1 = PipelineOrchestrator(config1, output_base=tmp_path)
-            with patch("panelcast.pipelines.orchestrator.get_execution_order") as mock_order:
+            with (
+                patch("panelcast.pipelines.orchestrator.get_execution_order") as mock_order,
+                patch("panelcast.pipelines.orchestrator.generate_run_id", return_value="run1"),
+            ):
                 mock_order.return_value = []
                 orch1.run()
 
@@ -480,7 +485,10 @@ class TestCreateLatestLink:
             # Second run
             config2 = PipelineConfig()
             orch2 = PipelineOrchestrator(config2, output_base=tmp_path)
-            with patch("panelcast.pipelines.orchestrator.get_execution_order") as mock_order:
+            with (
+                patch("panelcast.pipelines.orchestrator.get_execution_order") as mock_order,
+                patch("panelcast.pipelines.orchestrator.generate_run_id", return_value="run2"),
+            ):
                 mock_order.return_value = []
                 orch2.run()
 

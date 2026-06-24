@@ -77,9 +77,14 @@ things you'd actually bring up when explaining the project.
 
 **Reliability diagram** — Plot of nominal quantile vs. empirical hit-rate. Perfect calibration = diagonal. Above diagonal = overconfident. Below = underconfident. The most direct visual test of calibration.
 
-**within_artist_temporal_split()** — Primary evaluation: hold out each artist's last album(s) for test. Tests the actual use case: "given an artist's history, predict their next album."
+**within_entity_temporal_split()** — Primary evaluation: hold out each artist's last album(s) for test. Tests the actual use case: "given an artist's history, predict their next album."
 
-**artist_disjoint_split()** — Secondary evaluation: no artist overlap between train and test. Tests cold-start: "can we predict for artists we've never seen?" Uses `predict_new_artist()` under the hood.
+**entity_disjoint_split()** — Secondary evaluation: no artist overlap between train and test. Tests cold-start: "can we predict for artists we've never seen?" Uses `predict_new_artist()` under the hood.
+
+> The split strategies were renamed artist → entity for domain portability. The
+> old names (`within_artist_temporal_split` / `artist_disjoint_split`, the
+> `within_artist_temporal` / `artist_disjoint` directory and manifest literals)
+> still resolve via thin aliases and `panelcast.data.split_types`.
 
 ---
 
@@ -266,9 +271,9 @@ highlights; this section is the complete inventory.
 
 ## Data Pipeline
 
-**within_artist_temporal_split()** — The PRIMARY evaluation strategy. Holds out each artist's last N albums for test, second-to-last N for validation, rest for training. Tests the core use case: "given an artist's history, predict their next album." Artists with too few albums are excluded entirely.
+**within_entity_temporal_split()** — The PRIMARY evaluation strategy. Holds out each artist's last N albums for test, second-to-last N for validation, rest for training. Tests the core use case: "given an artist's history, predict their next album." Artists with too few albums are excluded entirely.
 
-**artist_disjoint_split() / GroupShuffleSplit** — The SECONDARY evaluation strategy. Ensures no artist appears in both train and test. Tests cold-start prediction: "how well can we predict for artists we've never seen?" Uses sklearn's GroupShuffleSplit with Artist as the group key.
+**entity_disjoint_split() / GroupShuffleSplit** — The SECONDARY evaluation strategy. Ensures no artist appears in both train and test. Tests cold-start prediction: "how well can we predict for artists we've never seen?" Uses sklearn's GroupShuffleSplit with Artist as the group key.
 
 **clean_albums()** — Standardizes raw CSV data: parses dates, encodes collaborations, normalizes column names. The entry point for the data pipeline.
 

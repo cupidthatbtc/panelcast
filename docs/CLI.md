@@ -122,6 +122,14 @@ These features are **enabled by default**. Use these flags to disable them:
 | `--n-exponent-alpha` | `2.0` | ≥0.01 | Beta prior alpha parameter (only with `--n-exponent-prior beta`) |
 | `--n-exponent-beta` | `4.0` | ≥0.01 | Beta prior beta parameter (only with `--n-exponent-prior beta`) |
 
+#### Likelihood
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--likelihood-df` | `4.0` | Student-t degrees of freedom (`≥100` behaves as Normal) |
+| `--likelihood-family` | `studentt` | Observation likelihood: `studentt`, `normal`, `skew_studentt`, `skew_normal`, `split_normal`, or `beta`. See [`LIKELIHOOD_CANDIDATES.md`](LIKELIHOOD_CANDIDATES.md) |
+| `--discretize-observation` | `false` | Interval-censor the observation to integers (honest PPC for integer scores). Location-scale families only (`studentt`, `normal`, `skew_normal`, `split_normal`); rejected for `beta` / `skew_studentt` |
+
 #### Domain & Model Options
 
 | Option | Default | Description |
@@ -152,6 +160,24 @@ These features are **enabled by default**. Use these flags to disable them:
 | `--calibration-intervals` | `0.80,0.95` | | Comma-separated interval levels for calibration checks |
 | `--coverage-tolerance` | `0.03` | ≥0.0 | Allowed absolute coverage error |
 | `--prediction-interval` | `0.95` | 0.01–0.99 | Interval level for saved prediction bands |
+
+#### Config Presets
+
+`--preset` is sugar for `--config configs/<preset>.yaml`, layered **first** so
+any explicit `--config` files and CLI options still win. All 47 advanced flags
+remain available; presets just set defaults.
+
+| Preset | Shape | Use |
+|--------|-------|-----|
+| `quick` | 1 chain × 200, relaxed gates | Wiring/smoke checks (not for reported inference) |
+| `dev` | 2 chains × 500 | Fast iteration |
+| `diagnostic` | 4 chains × 1000 | Meaningful convergence + PPC diagnostics |
+| `publication` | 4 chains × 5000, warmup 3000 | The final publication run |
+
+```bash
+panelcast run --preset quick
+panelcast run --preset diagnostic --num-samples 2000   # CLI flag overrides the preset
+```
 
 For the full list, run `panelcast run --help`.
 
@@ -285,6 +311,70 @@ panelcast export-figures --run outputs/2026-01-19_143052
 
 ---
 
+### `demo` — End-to-End Demonstration
+
+Run the whole pipeline on the bundled synthetic aerospace example
+(`examples/aerospace/`) at tiny scale — a one-command way to see every stage
+execute with no external data. Finishes with a generated model card under
+`reports/`.
+
+```bash
+panelcast demo [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--descriptor` | `examples/aerospace/descriptor.yaml` | Descriptor YAML for the demo dataset |
+| `--num-chains` | `1` | MCMC chains |
+| `--num-samples` | `300` | Post-warmup samples per chain |
+| `--num-warmup` | `300` | Warmup iterations per chain |
+| `--seed` | `42` | Random seed |
+
+---
+
+### `compare` — Baseline Benchmark
+
+Fit the baseline predictors (global-mean, entity-mean, last-score, ridge, GBM)
+on the existing splits and emit a populated comparison table (CSV + Markdown +
+JSON) scored through the same metrics/calibration/CRPS toolkit as the model.
+Requires the splits and features stages to have run.
+
+```bash
+panelcast compare --baselines [OPTIONS]
+```
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--baselines` | | `false` | Run the baseline benchmark (required to do anything) |
+| `--dataset` | | built-in AOTY | Dataset descriptor (bare name or YAML path) |
+| `--output` | `-o` | `reports/baselines` | Output directory |
+| `--num-samples` | | `1000` | Predictive samples per baseline for interval scoring |
+| `--bayes` / `--no-bayes` | | on | Append the current model's metrics from `outputs/evaluation/metrics.json` |
+
+```bash
+panelcast compare --baselines
+panelcast compare --baselines --dataset examples/aerospace/descriptor.yaml
+```
+
+---
+
+### `diagnose` — Convergence + PPC Report
+
+Re-present an existing run's convergence gate and posterior-predictive-check
+p-values (PPC statistics pinned near 0/1 are flagged as the signature of
+likelihood misspecification). No model refit.
+
+```bash
+panelcast diagnose [OPTIONS]
+```
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--eval-dir` | | `outputs/evaluation` | Directory with `diagnostics.json` / `metrics.json` |
+| `--output` | `-o` | `reports/diagnostics` | Output directory for the report |
+
+---
+
 ## Environment Variables
 
 | Variable | Description |
@@ -345,6 +435,9 @@ When using `--preflight-only`:
 `panelcast` runtime behavior is driven by CLI flags, environment variables (for
 example `AOTY_DATASET_PATH`), and optional YAML configs:
 
+- `--preset {quick,dev,diagnostic,publication}` is sugar for `--config
+  configs/<preset>.yaml`, layered first (any `--config` files and CLI options
+  still win).
 - `--config` / `-c` loads one or more YAML files of `PipelineConfig` keys
   (repeatable; later files win). Explicit CLI options always override YAML.
 - `--dataset` loads a dataset descriptor (a bare name resolves to

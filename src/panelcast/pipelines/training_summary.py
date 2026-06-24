@@ -100,6 +100,10 @@ class TrainingSummary(BaseModel):
     # Raw-scale AR(1) centering value (None on legacy summaries -> consumers
     # default to 0.0, the uncentered form the model was trained with).
     ar_center_value: float | None = None
+    # Observation likelihood family (None on legacy summaries -> "studentt").
+    likelihood_family: str | None = None
+    # Whether the observation was interval-censored to integers (None/legacy -> False).
+    discretize_observation: bool | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
         """Serialize preserving declaration order.

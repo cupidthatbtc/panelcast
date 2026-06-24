@@ -11,7 +11,14 @@ test = "pytest tests/"
 test-cov = "pytest tests/ -m 'not slow and not e2e' --cov=src --cov-report=term"
 # Quick inner-loop selection without coverage instrumentation
 test-fast = "pytest tests/ -m 'not slow and not e2e'"
+# Tiny end-to-end smoke check (the CI PR smoke job)
+test-smoke = "pytest tests/ -m smoke"
+# Full tier: slow MCMC + e2e + domain portability (the nightly job)
+test-full = "pytest tests/ -m 'slow or e2e'"
 lint = "ruff check src/"
+# Type-check only the tightened boundary modules (per-module mypy overrides
+# in pyproject.toml re-enable a few codes there).
+typecheck = "mypy src/panelcast/config/gates.py src/panelcast/data/manifests.py src/panelcast/models/bayes/predict.py src/panelcast/pipelines/orchestrator.py"
 
 [dependencies]
 python = ">=3.11"
@@ -37,6 +44,7 @@ seaborn = ">=0.13"
 uncertainties = ">=3.1"
 pytest = ">=8.0"
 pytest-cov = ">=4.1"
+mypy = ">=1.8"
 ruff = "*"
 pip = ">=25.3,<26"
 

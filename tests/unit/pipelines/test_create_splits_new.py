@@ -70,11 +70,11 @@ class TestMainCliOutput:
                 return_value=artist_df,
             ),
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -102,13 +102,13 @@ class TestMainCliOutput:
         assert "Source:" in out
         assert "Rows:" in out
         assert "Artists:" in out
-        assert "Within-Artist Temporal Split:" in out
+        assert "Within-Entity Temporal Split:" in out
         assert "Train:" in out
         assert "Validation:" in out
         assert "Test:" in out
-        assert "Artists included:" in out
-        assert "Artists excluded:" in out
-        assert "Artist-Disjoint Split:" in out
+        assert "Entities included:" in out
+        assert "Entities excluded:" in out
+        assert "Entity-Disjoint Split:" in out
         assert "Output directory:" in out
 
     def test_main_shows_insufficient_albums_message(self, artist_df, capsys):
@@ -126,11 +126,11 @@ class TestMainCliOutput:
                 return_value=artist_df,
             ),
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -154,7 +154,7 @@ class TestMainCliOutput:
             main()
 
         out = capsys.readouterr().out
-        assert "insufficient albums" in out
+        assert "insufficient events" in out
 
 
 # ============================================================================
@@ -180,11 +180,11 @@ class TestSummaryArtistsExcluded:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -202,7 +202,7 @@ class TestSummaryArtistsExcluded:
 
         summary = result.summary
         expected_excluded = total_artists - train["Artist"].nunique()
-        assert summary["within_artist_temporal"]["artists_excluded"] == expected_excluded
+        assert summary["within_entity_temporal"]["artists_excluded"] == expected_excluded
 
 
 # ============================================================================
@@ -226,11 +226,11 @@ class TestSplitResultFields:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),

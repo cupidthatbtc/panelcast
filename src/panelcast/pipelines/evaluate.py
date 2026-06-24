@@ -21,6 +21,12 @@ from jax import random
 from numpyro.infer import Predictive, log_likelihood
 
 from panelcast.data.alignment import join_splits_with_features
+from panelcast.data.split_types import (
+    SplitType,
+    legacy_split_name,
+    resolve_split_dir,
+    resolve_split_type,
+)
 from panelcast.evaluation.calibration import (
     compute_coverage,
     compute_interval_score,
@@ -51,8 +57,8 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-PRIMARY_SPLIT = "within_artist_temporal"
-SECONDARY_SPLIT = "artist_disjoint"
+PRIMARY_SPLIT = str(SplitType.WITHIN_ENTITY_TEMPORAL.value)
+SECONDARY_SPLIT = str(SplitType.ENTITY_DISJOINT.value)
 
 
 def _json_safe(value: Any) -> Any:
@@ -380,12 +386,29 @@ def _prepare_test_model_args(
 
 
 def _resolve_feature_split_dir(split_name: str) -> Path:
-    """Resolve feature directory with backward compatibility fallback."""
+    """Resolve feature directory with backward compatibility fallback.
+
+    Prefers the canonical directory, falls back to a legacy-named directory if
+    only that exists, and finally to the flat ``data/features`` root for the
+    primary split (the legacy layout that mirrored primary features there).
+    Unknown split names (not a SplitType) are returned as-is so callers can
+    point at arbitrary directories.
+    """
     candidate = Path("data/features") / split_name
     if candidate.exists():
         return candidate
-    if split_name == PRIMARY_SPLIT:
-        return Path("data/features")
+    try:
+        split_type: SplitType | None = resolve_split_type(split_name)
+    except ValueError:
+        split_type = None
+    if split_type is not None:
+        legacy = legacy_split_name(split_type)
+        if legacy is not None:
+            legacy_path = Path("data/features") / legacy
+            if legacy_path.exists():
+                return legacy_path
+        if split_type is SplitType.WITHIN_ENTITY_TEMPORAL:
+            return Path("data/features")
     return candidate
 
 
@@ -499,6 +522,8 @@ def _run_new_artist_predictive(
         "seed": seed,
         "target_bounds": _summary_dataset(summary)["target_bounds"],
         "likelihood_df": float(summary.get("likelihood_df", 4.0)),
+        "likelihood_family": summary.get("likelihood_family") or "studentt",
+        "discretize_observation": bool(summary.get("discretize_observation", False)),
         "target_transform": summary.get("target_transform") or "identity",
         "logit_offset": float(summary.get("logit_offset") or 0.5),
         "ar_center": _ar_center_from_summary(summary),
@@ -831,7 +856,7 @@ def evaluate_models(ctx: StageContext) -> dict:
         from panelcast.evaluation.prior_predictive import run_prior_predictive
 
         # Build training model_args from training data
-        primary_split_dir_pp = Path("data/splits") / PRIMARY_SPLIT
+        primary_split_dir_pp = resolve_split_dir(Path("data/splits"), PRIMARY_SPLIT)
         primary_features_dir_pp = _resolve_feature_split_dir(PRIMARY_SPLIT)
         train_df_pp = pd.read_parquet(primary_split_dir_pp / "train.parquet")
         train_features_pp = pd.read_parquet(primary_features_dir_pp / "train_features.parquet")
@@ -947,7 +972,7 @@ def evaluate_models(ctx: StageContext) -> dict:
     split_artifacts: dict[str, dict[str, Any]] = {}
 
     # Primary split: known-artist posterior predictive
-    primary_split_dir = Path("data/splits") / PRIMARY_SPLIT
+    primary_split_dir = resolve_split_dir(Path("data/splits"), PRIMARY_SPLIT)
     primary_features_dir = _resolve_feature_split_dir(PRIMARY_SPLIT)
     primary_test_df = pd.read_parquet(primary_split_dir / "test.parquet")
     primary_train_df = pd.read_parquet(primary_split_dir / "train.parquet")
@@ -1072,7 +1097,7 @@ def evaluate_models(ctx: StageContext) -> dict:
 
     # Secondary split: artist-disjoint cold-start predictive path
     if ctx.evaluate_secondary_split:
-        secondary_split_dir = Path("data/splits") / SECONDARY_SPLIT
+        secondary_split_dir = resolve_split_dir(Path("data/splits"), SECONDARY_SPLIT)
         secondary_features_dir = _resolve_feature_split_dir(SECONDARY_SPLIT)
         secondary_test_path = secondary_split_dir / "test.parquet"
         secondary_feat_path = secondary_features_dir / "test_features.parquet"

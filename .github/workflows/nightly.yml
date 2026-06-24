@@ -1,0 +1,32 @@
+name: Nightly
+
+# Full test tier: the slow MCMC tests, the e2e suite, and the
+# domain-portability proof. Too expensive for every push/PR (real sampling),
+# so it runs on a schedule and on demand.
+on:
+  schedule:
+    - cron: "0 6 * * *"  # daily, 06:00 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@ba3bb36eb2066252b2363392b7739741bb777659  # v0.8.1
+        with:
+          cache: true
+
+      - name: Run slow + e2e + domain-portability suite
+        run: pixi run pytest tests/ -m "slow or e2e" -q

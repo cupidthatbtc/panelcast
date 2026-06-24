@@ -20,6 +20,7 @@ import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
+from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.models.bayes.diagnostics import check_convergence
 from panelcast.models.bayes.fit import MCMCConfig, fit_model
 from panelcast.models.bayes.io import save_model
@@ -363,7 +364,9 @@ def prepare_model_data(
         album_seq = album_seq[valid_mask]
         prev_score = prev_score[valid_mask]
         if np.ndim(ar_center_arr) > 0:
-            ar_center_arr = ar_center_arr[valid_mask]
+            # np.asarray is a no-op for the array branch (ndim > 0 here) but tells
+            # the type checker the value is indexable (mypy can't narrow on np.ndim).
+            ar_center_arr = np.asarray(ar_center_arr)[valid_mask]
 
     # Cast to int32 AFTER filtering (NaN-free at this point)
     n_reviews = n_reviews_raw.astype(np.int32)
@@ -404,6 +407,14 @@ def _apply_max_albums_cap(
     artist_album_counts: pd.Series,
 ) -> dict:
     """Apply max_albums cap to model arguments, keeping most recent albums.
+
+    CAP BEHAVIOR (max-events cap; domain-agnostic): an entity's events beyond
+    the most recent ``max_albums_cap`` are NOT dropped — they are collapsed onto
+    sequence position 1 (the initial entity effect). Every row still contributes
+    to the likelihood; only the time-varying latent it indexes changes. So the
+    cap bounds the random-walk trajectory length (and peak memory), it does not
+    subsample data. For AOTY the default is 50 albums/artist; a domain with
+    longer histories should raise ``--max-albums`` (see docs/EVALUATION_PROTOCOL.md).
 
     For artists with more than max_albums_cap albums, renumbers so that the
     most recent albums get distinct positions (1 to max_albums_cap) and
@@ -475,7 +486,8 @@ def train_models(
         features_path: Optional path to features parquet. Defaults to
             data/features/train_features.parquet.
         splits_path: Optional path to splits parquet. Defaults to
-            data/splits/within_artist_temporal/train.parquet.
+            data/splits/within_entity_temporal/train.parquet (resolving a
+            legacy-named directory if only that exists).
 
     Returns:
         Dictionary with training results and paths.
@@ -509,7 +521,9 @@ def train_models(
 
     # Load training data using shared function
     features_path = features_path or Path("data/features/train_features.parquet")
-    splits_path = splits_path or Path("data/splits/within_artist_temporal/train.parquet")
+    splits_path = splits_path or (
+        resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL) / "train.parquet"
+    )
 
     debut_prev_score_source = str(getattr(ctx, "debut_prev_score_source", "train_mean"))
     target_transform = str(getattr(ctx, "target_transform", "identity"))
@@ -652,6 +666,8 @@ def train_models(
         sigma_obs_prior_type=str(getattr(ctx, "sigma_obs_prior_type", "halfnormal")),
         heteroscedastic_entity_obs=bool(getattr(ctx, "heteroscedastic_entity_obs", False)),
         tau_entity_scale=float(getattr(ctx, "tau_entity_scale", 0.25)),
+        likelihood_family=str(getattr(ctx, "likelihood_family", "studentt")),
+        discretize_observation=bool(getattr(ctx, "discretize_observation", False)),
     )
 
     priors = locate_level_prior(
@@ -979,6 +995,8 @@ def train_models(
     # Raw-scale centering value; consumers re-apply the target transform.
     # The mode that produced it lives in priors.ar_center.
     summary["ar_center_value"] = ar_center_value
+    summary["likelihood_family"] = str(getattr(ctx, "likelihood_family", "studentt"))
+    summary["discretize_observation"] = bool(getattr(ctx, "discretize_observation", False))
     summary = TrainingSummary(**summary).to_json_dict()
 
     summary_path = model_dir / "training_summary.json"

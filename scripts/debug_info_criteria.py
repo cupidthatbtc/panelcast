@@ -37,6 +37,7 @@ def main() -> None:
     import arviz as az
     import pandas as pd
 
+    from panelcast.data.split_types import SplitType, resolve_split_dir
     from panelcast.pipelines.evaluate import (
         _compute_info_criteria,
         _extract_posterior_samples,
@@ -57,12 +58,11 @@ def main() -> None:
     summary = load_training_summary(models_dir / "training_summary.json").to_json_dict()
     prefix = summary["dataset"]["model_prefix"]
 
-    split_dir = Path("data/splits/within_artist_temporal")
+    split_dir = resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL)
+    feature_dir = resolve_split_dir(Path("data/features"), SplitType.WITHIN_ENTITY_TEMPORAL)
     test_df = pd.read_parquet(split_dir / "test.parquet")
     train_df = pd.read_parquet(split_dir / "train.parquet")
-    test_features = pd.read_parquet(
-        Path("data/features/within_artist_temporal/test_features.parquet")
-    )
+    test_features = pd.read_parquet(feature_dir / "test_features.parquet")
     val_df = None
     val_path = split_dir / "validation.parquet"
     if val_path.exists():

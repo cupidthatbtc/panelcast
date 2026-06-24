@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import structlog
 
+from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.evaluation.calibration import ReliabilityData
 from panelcast.models.bayes.io import load_manifest, load_model
 from panelcast.reporting.figures import (
@@ -46,7 +47,7 @@ if TYPE_CHECKING:
 
 log = structlog.get_logger()
 
-SECONDARY_SPLIT = "artist_disjoint"
+SECONDARY_SPLIT = str(SplitType.ENTITY_DISJOINT.value)
 
 
 @dataclass(frozen=True)
@@ -767,9 +768,11 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                     )
 
             # Try to load full replicated distributions from predictions
-            primary_split_name = metrics.get("primary_split", "within_artist_temporal")
+            primary_split_name = metrics.get(
+                "primary_split", str(SplitType.WITHIN_ENTITY_TEMPORAL.value)
+            )
             candidate_prediction_paths = [
-                eval_dir / primary_split_name / "predictions.json",
+                resolve_split_dir(eval_dir, primary_split_name) / "predictions.json",
                 eval_dir / "predictions.json",
             ]
             ppc_predictions_path = next((p for p in candidate_prediction_paths if p.exists()), None)
@@ -823,9 +826,11 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
     # Predictions scatter plot
     # =========================================================================
     try:
-        primary_split_name = metrics.get("primary_split", "within_artist_temporal")
+        primary_split_name = metrics.get(
+            "primary_split", str(SplitType.WITHIN_ENTITY_TEMPORAL.value)
+        )
         pred_candidates = [
-            eval_dir / primary_split_name / "predictions.json",
+            resolve_split_dir(eval_dir, primary_split_name) / "predictions.json",
             eval_dir / "predictions.json",
         ]
         pred_path = next((p for p in pred_candidates if p.exists()), None)

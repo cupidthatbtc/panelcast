@@ -22,8 +22,8 @@ Dataset and scope (defaults)
   pin it; renaming mid-stream risks silent breakage for zero scientific gain).
 
 Splits and leakage controls (defaults)
-- Primary split: within-artist temporal holdout (`within_artist_temporal`)
-- Secondary split: artist-disjoint cold-start split (`artist_disjoint`)
+- Primary split: within-artist temporal holdout (`within_entity_temporal`)
+- Secondary split: artist-disjoint cold-start split (`entity_disjoint`)
 - Split seed: `42` (split-seed sensitivity axis available via the opt-in
   sensitivity stage, seeds 42/43)
 - Temporal split params: `test_albums=1`, `val_albums=0` (default; the CLI

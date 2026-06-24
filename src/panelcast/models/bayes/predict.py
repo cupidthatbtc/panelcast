@@ -15,22 +15,38 @@ Key concepts:
 """
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, TypedDict
 
 import jax.numpy as jnp
 from jax import random
 from numpyro.infer import MCMC, Predictive
 
+from panelcast.models.bayes.likelihoods import REGISTRY
 from panelcast.models.bayes.model import compute_sigma_scaled, soft_clip  # noqa: F401
 from panelcast.models.bayes.transforms import get_transform
 
 __all__ = [
     "PredictionResult",
+    "NewArtistPrediction",
     "extract_posterior_samples",
     "generate_posterior_predictive",
     "predict_out_of_sample",
     "predict_new_artist",
 ]
+
+
+class NewArtistPrediction(TypedDict):
+    """Schema of the :func:`predict_new_artist` result dict.
+
+    All arrays share the prediction shape: ``(n_samples,)`` for a single event
+    or ``(n_samples, n_events)`` for several, except ``artist_effect`` which is
+    always ``(n_samples,)`` (one sampled population effect per posterior draw).
+    """
+
+    y: jnp.ndarray  # posterior predictive draws (with observation noise)
+    mu: jnp.ndarray  # mean predictions (no observation noise)
+    artist_effect: jnp.ndarray  # sampled population effects, (n_samples,)
+    sigma_scaled: jnp.ndarray  # per-observation noise scale
 
 
 @dataclass
@@ -265,7 +281,10 @@ def predict_new_artist(
     target_transform: str = "identity",
     logit_offset: float = 0.5,
     ar_center: float = 0.0,
-) -> dict[str, jnp.ndarray]:
+    likelihood_family: str = "studentt",
+    skew_tailweight: float = 1.0,
+    discretize_observation: bool = False,
+) -> NewArtistPrediction:
     """Predict for unseen artist using population distribution.
 
     For artists NOT seen during training, we cannot use their fitted artist
@@ -382,6 +401,19 @@ def predict_new_artist(
     beta = posterior_samples[f"{prefix}beta"]
     rho = posterior_samples[f"{prefix}rho"]
     sigma_obs = posterior_samples[f"{prefix}sigma_obs"]
+    # Resolve the family spec and read its global sample sites generically
+    # (present only for the matching family; missing ones surface as None and
+    # the spec's predict_draws raises a clear error).
+    try:
+        spec = REGISTRY[likelihood_family]
+    except KeyError:
+        raise ValueError(
+            f"Unknown likelihood_family: '{likelihood_family}'. "
+            f"Registered: {sorted(REGISTRY)}."
+        ) from None
+    family_sites = {
+        name: posterior_samples.get(f"{prefix}{name}") for name in spec.required_sites
+    }
 
     n_samples = mu_artist.shape[0]
 
@@ -409,12 +441,18 @@ def predict_new_artist(
         beta = beta[indices]
         rho = rho[indices]
         sigma_obs = sigma_obs[indices]
+        # Subsample the family-specific global sites alongside the shared ones.
+        family_sites = {
+            name: (None if arr is None else arr[indices])
+            for name, arr in family_sites.items()
+        }
         # Handle exponent samples based on learned vs fixed mode
         if has_learned_exponent:
             n_exponent_samples = posterior_samples[f"{prefix}n_exponent"]
             n_exponent_samples = n_exponent_samples[indices]
         elif has_fixed_exponent:
             # Create constant array matching subsampled sample count
+            assert fixed_n_exponent is not None  # implied by has_fixed_exponent
             n_exponent_samples = jnp.full((n_predictions,), fixed_n_exponent)
         else:
             n_exponent_samples = None
@@ -427,6 +465,7 @@ def predict_new_artist(
             n_exponent_samples = posterior_samples[f"{prefix}n_exponent"]
         elif has_fixed_exponent:
             # Create constant array matching full sample count
+            assert fixed_n_exponent is not None  # implied by has_fixed_exponent
             n_exponent_samples = jnp.full((n_samples,), fixed_n_exponent)
         else:
             n_exponent_samples = None
@@ -500,19 +539,21 @@ def predict_new_artist(
             f"to mu_pred shape {mu_pred.shape}"
         )
 
-    # Sample from the observation distribution. The likelihood is StudentT
-    # for df < 100 — drawing Normal noise here would understate predictive
-    # spread by sqrt(df/(df-2)) (~41% in SD at df=4) and shrink cold-start
-    # intervals. df >= 100 is treated as the Normal limit.
+    # Draw cold-start predictive samples through the family's spec (single source
+    # of truth shared with training). The spec returns y on the score scale
+    # (back-transformed where applicable); mu is back-transformed once here.
     rng_key, subkey = random.split(rng_key)
-    if likelihood_df >= 100:
-        noise = random.normal(subkey, mu_pred.shape)
-    else:
-        noise = random.t(subkey, likelihood_df, mu_pred.shape)
-    y_pred = mu_pred + sigma_scaled * noise
-
-    # Back-transform draws and locations to the score scale (identity: no-op).
-    y_pred = transform.inverse(y_pred)
+    y_pred = spec.predict_draws(
+        subkey,
+        mu_pred,
+        sigma_scaled,
+        sites=family_sites,
+        df=likelihood_df,
+        bounds=target_bounds,
+        skew_tailweight=skew_tailweight,
+        transform=transform,
+        discretize=discretize_observation,
+    )
     mu_pred = transform.inverse(mu_pred)
 
     # Squeeze if single album

@@ -71,7 +71,7 @@ class TestDataFeaturesIntegration:
             train,
             val,
             test,
-            artist_col="Artist",
+            entity_col="Artist",
             date_col="Release_Date_Parsed",
         )
 
@@ -320,24 +320,24 @@ class TestDataFeaturesIntegration:
         for block_meta in output.metadata["blocks"]:
             assert "block" in block_meta
 
-    def test_artist_disjoint_split_no_overlap(self):
+    def test_entity_disjoint_split_no_overlap(self):
         """Test artist-disjoint split has no artist overlap.
 
         Uses assert_no_artist_overlap to verify the split property.
         """
-        from panelcast.data.split import artist_disjoint_split
+        from panelcast.data.split import entity_disjoint_split
 
         df = generate_synthetic_albums(n_artists=20, albums_per_artist=4, seed=500)
-        train, val, test = artist_disjoint_split(
+        train, val, test = entity_disjoint_split(
             df,
-            artist_col="Artist",
+            entity_col="Artist",
             test_size=0.15,
             val_size=0.15,
             random_state=42,
         )
 
         # Should not raise if splits are disjoint
-        assert_no_artist_overlap(train, val, test, artist_col="Artist")
+        assert_no_artist_overlap(train, val, test, entity_col="Artist")
 
         # Verify no shared artists
         train_artists = set(train["Artist"])

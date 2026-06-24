@@ -112,7 +112,7 @@ class TestAeroStagesOnly:
         assert 0.0 < stats["global_mean_score"] < 10.0
 
     def test_temporal_split_orders_within_airframe(self, aero_stages_run):
-        split_dir = aero_stages_run / "data" / "splits" / "within_artist_temporal"
+        split_dir = aero_stages_run / "data" / "splits" / "within_entity_temporal"
         train = pd.read_parquet(split_dir / "train.parquet")
         test = pd.read_parquet(split_dir / "test.parquet")
         assert len(test) > 0
@@ -129,7 +129,7 @@ class TestAeroStagesOnly:
             aero_stages_run
             / "data"
             / "features"
-            / "within_artist_temporal"
+            / "within_entity_temporal"
             / "train_features.parquet"
         )
         for col in (

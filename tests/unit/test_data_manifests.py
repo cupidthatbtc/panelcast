@@ -24,7 +24,7 @@ def _sample_manifest(**overrides) -> SplitManifest:
     defaults = dict(
         version="v1",
         created_at="2026-01-01T00:00:00Z",
-        split_type="within_artist_temporal",
+        split_type="within_entity_temporal",
         parameters={"test_albums": 1, "val_albums": 1},
         source_dataset={"path": "data/processed/user_score_minratings_10.parquet", "sha256": "abc"},
         splits={
@@ -93,7 +93,7 @@ class TestSplitManifest:
         m = _sample_manifest()
         d = m.to_dict()
         assert d["version"] == "v1"
-        assert d["split_type"] == "within_artist_temporal"
+        assert d["split_type"] == "within_entity_temporal"
         assert "train" in d["splits"]
         assert d["splits"]["train"]["row_count"] == 10
 
@@ -209,7 +209,7 @@ class TestSaveManifest:
         save_manifest(manifest, tmp_path)
         data = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
         assert data["version"] == "v1"
-        assert data["split_type"] == "within_artist_temporal"
+        assert data["split_type"] == "within_entity_temporal"
 
 
 # =============================================================================
@@ -269,7 +269,7 @@ class TestCreateSplitAssignments:
         val = self._make_df(1)
         test = self._make_df(1)
         assignments = create_split_assignments(
-            train, val, test, split_type="within_artist_temporal"
+            train, val, test, split_type="within_entity_temporal"
         )
         splits = {a.split for a in assignments}
         assert splits == {"train", "validation", "test"}
@@ -279,7 +279,7 @@ class TestCreateSplitAssignments:
         val = self._make_df(1)
         test = self._make_df(1)
         assignments = create_split_assignments(
-            train, val, test, split_type="within_artist_temporal"
+            train, val, test, split_type="within_entity_temporal"
         )
         assert len(assignments) == 5
 
@@ -290,16 +290,16 @@ class TestCreateSplitAssignments:
         train = self._make_df(1)
         val = self._make_df(1)
         assignments = create_split_assignments(
-            train, val, test, split_type="within_artist_temporal"
+            train, val, test, split_type="within_entity_temporal"
         )
         test_assignments = [a for a in assignments if a.split == "test"]
         assert "Radiohead" in test_assignments[0].reason
 
-    def test_artist_disjoint_split_assigns_reasons(self):
+    def test_entity_disjoint_split_assigns_reasons(self):
         train = self._make_df(2, artist="A")
         val = self._make_df(1, artist="B")
         test = self._make_df(1, artist="C")
-        assignments = create_split_assignments(train, val, test, split_type="artist_disjoint")
+        assignments = create_split_assignments(train, val, test, split_type="entity_disjoint")
         test_assignments = [a for a in assignments if a.split == "test"]
         assert test_assignments[0].reason == "artist_in_test_group"
         val_assignments = [a for a in assignments if a.split == "validation"]
@@ -313,7 +313,7 @@ class TestCreateSplitAssignments:
         train = self._make_df(1)
         val = self._make_df(1)
         assignments = create_split_assignments(
-            train, val, test, split_type="within_artist_temporal"
+            train, val, test, split_type="within_entity_temporal"
         )
         test_a = [a for a in assignments if a.split == "test"]
         # Artist name truncated to 50 chars in reason
@@ -322,6 +322,6 @@ class TestCreateSplitAssignments:
     def test_empty_dataframes(self):
         empty = pd.DataFrame(columns=["original_row_id", "Artist", "Album"])
         assignments = create_split_assignments(
-            empty, empty, empty, split_type="within_artist_temporal"
+            empty, empty, empty, split_type="within_entity_temporal"
         )
         assert assignments == []

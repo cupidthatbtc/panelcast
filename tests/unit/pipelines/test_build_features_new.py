@@ -88,7 +88,7 @@ class TestBuildFeatures:
         splits_root = tmp_path / "data" / "splits"
         features_dir = tmp_path / "data" / "features"
 
-        for split_name in ["within_artist_temporal", "artist_disjoint"]:
+        for split_name in ["within_entity_temporal", "entity_disjoint"]:
             split_dir = splits_root / split_name
             split_dir.mkdir(parents=True, exist_ok=True)
             train.to_parquet(split_dir / "train.parquet")
@@ -110,8 +110,8 @@ class TestBuildFeatures:
         assert "blocks" in manifest
         assert "feature_names" in manifest
         assert "split_features" in manifest
-        assert "within_artist_temporal" in manifest["split_features"]
-        assert "artist_disjoint" in manifest["split_features"]
+        assert "within_entity_temporal" in manifest["split_features"]
+        assert "entity_disjoint" in manifest["split_features"]
 
         # Check that manifest was written to disk
         manifest_path = features_dir / "manifest.json"
@@ -125,7 +125,7 @@ class TestBuildFeatures:
         train, val, test = _make_split_dfs()
 
         splits_root = tmp_path / "data" / "splits"
-        for split_name in ["within_artist_temporal", "artist_disjoint"]:
+        for split_name in ["within_entity_temporal", "entity_disjoint"]:
             split_dir = splits_root / split_name
             split_dir.mkdir(parents=True, exist_ok=True)
             train.to_parquet(split_dir / "train.parquet")
@@ -150,7 +150,7 @@ class TestBuildFeatures:
 
         splits_root = tmp_path / "data" / "splits"
         features_dir = tmp_path / "data" / "features"
-        for split_name in ["within_artist_temporal", "artist_disjoint"]:
+        for split_name in ["within_entity_temporal", "entity_disjoint"]:
             split_dir = splits_root / split_name
             split_dir.mkdir(parents=True, exist_ok=True)
             train.to_parquet(split_dir / "train.parquet")
@@ -175,7 +175,7 @@ class TestBuildFeatures:
         train, val, test = _make_split_dfs()
 
         splits_root = tmp_path / "data" / "splits"
-        for split_name in ["within_artist_temporal", "artist_disjoint"]:
+        for split_name in ["within_entity_temporal", "entity_disjoint"]:
             split_dir = splits_root / split_name
             split_dir.mkdir(parents=True, exist_ok=True)
             train.to_parquet(split_dir / "train.parquet")
@@ -190,7 +190,7 @@ class TestBuildFeatures:
         ctx = _make_ctx(enable_genre=False)
         manifest = build_features(ctx)
 
-        for split_name in ["within_artist_temporal", "artist_disjoint"]:
+        for split_name in ["within_entity_temporal", "entity_disjoint"]:
             for fold in ["train", "validation", "test"]:
                 fold_info = manifest["split_features"][split_name][fold]
                 assert "n_reviews_min" in fold_info
@@ -204,7 +204,7 @@ class TestBuildFeatures:
         train, val, test = _make_split_dfs()
 
         splits_root = tmp_path / "data" / "splits"
-        for split_name in ["within_artist_temporal", "artist_disjoint"]:
+        for split_name in ["within_entity_temporal", "entity_disjoint"]:
             split_dir = splits_root / split_name
             split_dir.mkdir(parents=True, exist_ok=True)
             train.to_parquet(split_dir / "train.parquet")

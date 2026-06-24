@@ -184,9 +184,9 @@ class TestResolvePrimaryMetrics:
     def test_resolve_split_aware_payload(self):
         primary = {"point_metrics": {"rmse": 1.2, "mae": 0.8, "r2": 0.5}}
         metrics = {
-            "primary_split": "within_artist_temporal",
+            "primary_split": "within_entity_temporal",
             "splits": {
-                "within_artist_temporal": primary,
+                "within_entity_temporal": primary,
                 SECONDARY_SPLIT: {"point_metrics": {"rmse": 2.0, "mae": 1.5, "r2": 0.1}},
             },
         }
@@ -196,17 +196,17 @@ class TestResolvePrimaryMetrics:
         "metrics",
         [
             {},
-            {"primary_split": "within_artist_temporal"},
-            {"splits": {"within_artist_temporal": {"a": 1}}},
+            {"primary_split": "within_entity_temporal"},
+            {"splits": {"within_entity_temporal": {"a": 1}}},
             {
                 "primary_split": "missing",
-                "splits": {"within_artist_temporal": {"point_metrics": {"rmse": 1}}},
+                "splits": {"within_entity_temporal": {"point_metrics": {"rmse": 1}}},
             },
-            {"primary_split": 123, "splits": {"within_artist_temporal": {"a": 1}}},
+            {"primary_split": 123, "splits": {"within_entity_temporal": {"a": 1}}},
             {"primary_split": "x", "splits": []},
             {
-                "primary_split": "within_artist_temporal",
-                "splits": {"within_artist_temporal": []},
+                "primary_split": "within_entity_temporal",
+                "splits": {"within_entity_temporal": []},
             },
         ],
     )
@@ -422,10 +422,10 @@ class TestPublicationReadiness:
     def test_ready_when_all_critical_checks_pass(self):
         payload = _build_publication_readiness(
             metrics={
-                "primary_split": "within_artist_temporal",
+                "primary_split": "within_entity_temporal",
                 "splits": {
-                    "within_artist_temporal": {"calibration": {"within_tolerance": True}},
-                    "artist_disjoint": {"calibration": {"within_tolerance": True}},
+                    "within_entity_temporal": {"calibration": {"within_tolerance": True}},
+                    "entity_disjoint": {"calibration": {"within_tolerance": True}},
                 },
             },
             diagnostics={"passed": True, "rhat_max": 1.003, "ess_bulk_min": 1800},
@@ -439,9 +439,9 @@ class TestPublicationReadiness:
     def test_not_ready_for_single_chain_and_missing_secondary(self):
         payload = _build_publication_readiness(
             metrics={
-                "primary_split": "within_artist_temporal",
+                "primary_split": "within_entity_temporal",
                 "splits": {
-                    "within_artist_temporal": {"calibration": {"within_tolerance": False}},
+                    "within_entity_temporal": {"calibration": {"within_tolerance": False}},
                 },
             },
             diagnostics={"passed": False, "rhat_max": None, "ess_bulk_min": 1},
@@ -510,7 +510,7 @@ class TestPublicationReadiness:
         secondary_state,
     ):
         splits = {
-            "within_artist_temporal": {"calibration": {"within_tolerance": primary_within}},
+            "within_entity_temporal": {"calibration": {"within_tolerance": primary_within}},
         }
         if secondary_state == "pass":
             splits[SECONDARY_SPLIT] = {"calibration": {"within_tolerance": True}}
@@ -518,7 +518,7 @@ class TestPublicationReadiness:
             splits[SECONDARY_SPLIT] = {"calibration": {"within_tolerance": False}}
 
         payload = _build_publication_readiness(
-            metrics={"primary_split": "within_artist_temporal", "splits": splits},
+            metrics={"primary_split": "within_entity_temporal", "splits": splits},
             diagnostics={
                 "passed": diag_passed,
                 "rhat_max": rhat_max,
@@ -583,13 +583,13 @@ class TestPublicationReadiness:
         self, secondary_state, expected_recommended_failed
     ):
         splits = {
-            "within_artist_temporal": {"calibration": {"within_tolerance": True}},
+            "within_entity_temporal": {"calibration": {"within_tolerance": True}},
         }
         if secondary_state == "present":
             splits[SECONDARY_SPLIT] = {"calibration": {"within_tolerance": False}}
 
         payload = _build_publication_readiness(
-            metrics={"primary_split": "within_artist_temporal", "splits": splits},
+            metrics={"primary_split": "within_entity_temporal", "splits": splits},
             diagnostics={"passed": True, "rhat_max": 1.001, "ess_bulk_min": 4000},
             training_summary={"mcmc_config": {"num_chains": 4}},
             artifact_errors=[],
@@ -609,9 +609,9 @@ class TestPublicationReadiness:
     def test_readiness_flags_artifact_errors(self):
         payload = _build_publication_readiness(
             metrics={
-                "primary_split": "within_artist_temporal",
+                "primary_split": "within_entity_temporal",
                 "splits": {
-                    "within_artist_temporal": {"calibration": {"within_tolerance": True}},
+                    "within_entity_temporal": {"calibration": {"within_tolerance": True}},
                     SECONDARY_SPLIT: {"calibration": {"within_tolerance": True}},
                 },
             },
@@ -679,9 +679,9 @@ class TestHelperInterop:
     def test_parse_helpers_round_trip_into_model_card_like_shape(self):
         primary_metrics = _resolve_primary_metrics(
             {
-                "primary_split": "within_artist_temporal",
+                "primary_split": "within_entity_temporal",
                 "splits": {
-                    "within_artist_temporal": {
+                    "within_entity_temporal": {
                         "calibration": {
                             "coverages": {"0.95": {"nominal": 0.95, "empirical": 0.94}}
                         },

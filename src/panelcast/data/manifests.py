@@ -4,9 +4,35 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import pandas as pd
+
+from panelcast.data.split_types import SplitType, resolve_split_type
+
+
+class SourceDataset(TypedDict):
+    """The source-dataset provenance block of a split manifest."""
+
+    path: str
+    sha256: str
+    row_count: int
+    unique_artists: int
+
+
+class SplitParameters(TypedDict, total=False):
+    """Split parameters. The keys present depend on the split type.
+
+    within-entity temporal: ``test_albums`` / ``val_albums`` / ``min_train_albums``.
+    entity-disjoint: ``test_size`` / ``val_size`` / ``random_state``.
+    """
+
+    test_albums: int
+    val_albums: int
+    min_train_albums: int
+    test_size: float
+    val_size: float
+    random_state: int
 
 
 @dataclass
@@ -37,9 +63,9 @@ class SplitManifest:
 
     version: str
     created_at: str
-    split_type: str  # "within_artist_temporal" or "artist_disjoint"
-    parameters: dict[str, Any]
-    source_dataset: dict[str, Any]  # path, sha256, row_count, unique_artists
+    split_type: str  # SplitType value; legacy literals are resolved on load
+    parameters: SplitParameters
+    source_dataset: SourceDataset
     splits: dict[str, SplitStats]  # train, validation, test stats
     assignments: list[SplitAssignment] = field(default_factory=list)
     content_hash: str = ""  # Combined hash of all splits
@@ -54,7 +80,15 @@ class SplitManifest:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "SplitManifest":
-        """Create from dictionary."""
+        """Create from dictionary.
+
+        ``split_type`` is normalized through the legacy alias map, so a manifest
+        written with the old AOTY-flavored literals (``within_artist_temporal``
+        / ``artist_disjoint``) loads with the canonical role-based value.
+        """
+        d = dict(d)
+        if "split_type" in d:
+            d["split_type"] = str(resolve_split_type(d["split_type"]).value)
         d["splits"] = {k: SplitStats(**v) for k, v in d["splits"].items()}
         d["assignments"] = [SplitAssignment(**a) for a in d.get("assignments", [])]
         return cls(**d)
@@ -121,16 +155,16 @@ def create_split_assignments(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
     test_df: pd.DataFrame,
-    split_type: str,
-    artist_col: str = "Artist",
+    split_type: str | SplitType,
+    entity_col: str = "Artist",
 ) -> list[SplitAssignment]:
     """
     Create per-row split assignments with reasoning.
 
     Args:
         train_df, val_df, test_df: Split DataFrames
-        split_type: "within_artist_temporal" or "artist_disjoint"
-        artist_col: Column name for artist
+        split_type: SplitType (or a legacy literal, resolved via alias)
+        entity_col: Column name for the entity
 
     Returns:
         List of SplitAssignment objects
@@ -141,14 +175,14 @@ def create_split_assignments(
     def _bulk(df: pd.DataFrame, split: str, reason_prefix: str | None, reason: str | None):
         row_ids = df["original_row_id"].astype(int).tolist()
         if reason_prefix is not None:
-            artists = df[artist_col].astype(str).str[:50].tolist()
+            entities = df[entity_col].astype(str).str[:50].tolist()
             return [
                 SplitAssignment(
                     original_row_id=rid,
                     split=split,
-                    reason=f"{reason_prefix}{artist}",
+                    reason=f"{reason_prefix}{entity}",
                 )
-                for rid, artist in zip(row_ids, artists)
+                for rid, entity in zip(row_ids, entities)
             ]
         return [
             SplitAssignment(original_row_id=rid, split=split, reason=reason or "")
@@ -156,12 +190,12 @@ def create_split_assignments(
         ]
 
     assignments: list[SplitAssignment] = []
-    if split_type == "within_artist_temporal":
-        # For temporal splits, reason includes album position
+    if resolve_split_type(split_type) is SplitType.WITHIN_ENTITY_TEMPORAL:
+        # For temporal splits, reason includes event position
         assignments.extend(_bulk(test_df, "test", "last_album_for_", None))
         assignments.extend(_bulk(val_df, "validation", "second_last_album_for_", None))
         assignments.extend(_bulk(train_df, "train", "earlier_album_for_", None))
-    else:  # artist_disjoint
+    else:  # entity_disjoint
         assignments.extend(_bulk(test_df, "test", None, "artist_in_test_group"))
         assignments.extend(_bulk(val_df, "validation", None, "artist_in_validation_group"))
         assignments.extend(_bulk(train_df, "train", None, "artist_in_train_group"))

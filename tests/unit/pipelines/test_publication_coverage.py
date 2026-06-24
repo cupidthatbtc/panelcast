@@ -70,13 +70,13 @@ def _make_metrics(
             "n_obs": 100,
             "n_samples": 200,
         }
-    splits = {"within_artist_temporal": primary}
+    splits = {"within_entity_temporal": primary}
     if secondary_within_tolerance is not None:
-        splits["artist_disjoint"] = {
+        splits["entity_disjoint"] = {
             "calibration": {"within_tolerance": secondary_within_tolerance}
         }
     return {
-        "primary_split": "within_artist_temporal",
+        "primary_split": "within_entity_temporal",
         "splits": splits,
     }
 
@@ -566,7 +566,7 @@ class TestPublicationPPCDensityPlot:
     def test_ppc_with_missing_observed_skips_stat(self, tmp_path):
         """PPC stat with missing 'observed' should be skipped, not crash."""
         metrics = _make_metrics()
-        metrics["splits"]["within_artist_temporal"]["ppc"] = {
+        metrics["splits"]["within_entity_temporal"]["ppc"] = {
             "summary": {
                 "mean": {"p_value": 0.45},  # missing observed
                 "sd": {"observed": 8.0, "p_value": 0.52, "mc_se": 0.03},
@@ -589,7 +589,7 @@ class TestPublicationPPCDensityPlot:
     def test_ppc_mc_se_computed_from_n_samples(self, tmp_path):
         """When mc_se is None, it should be computed from p_value and n_samples."""
         metrics = _make_metrics()
-        metrics["splits"]["within_artist_temporal"]["ppc"] = {
+        metrics["splits"]["within_entity_temporal"]["ppc"] = {
             "summary": {
                 "mean": {
                     "observed": 75.0,
@@ -614,7 +614,7 @@ class TestPublicationPPCDensityPlot:
     def test_ppc_mc_se_fallback_zero_when_no_n_samples(self, tmp_path):
         """When mc_se is None and n_samples is 0, mc_se should default to 0."""
         metrics = _make_metrics()
-        metrics["splits"]["within_artist_temporal"]["ppc"] = {
+        metrics["splits"]["within_entity_temporal"]["ppc"] = {
             "summary": {
                 "mean": {
                     "observed": 75.0,
@@ -791,7 +791,7 @@ class TestPublicationOutputFiles:
         """Metrics table should skip RMSE/MAE/R2 when point metrics unavailable."""
         metrics = _make_metrics()
         # Remove point_metrics
-        del metrics["splits"]["within_artist_temporal"]["point_metrics"]
+        del metrics["splits"]["within_entity_temporal"]["point_metrics"]
         _write_json(tmp_path / "outputs/evaluation/metrics.json", metrics)
         _write_json(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics())
         _write_json(

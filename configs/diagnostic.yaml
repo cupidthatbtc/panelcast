@@ -1,0 +1,15 @@
+# Diagnostic preset: enough chains/samples for meaningful convergence + PPC
+# diagnostics, without the full publication cost.
+#
+# Four chains make R-hat and cross-chain ESS meaningful; 1000 post-warmup
+# samples give the PPC enough replicated draws to place its p-values. Sits
+# between `dev` (2x500, fast iteration) and `publication` (4x5000) on the cost
+# ladder. Pair with `panelcast diagnose` to read the resulting report.
+# Usage: panelcast run --preset diagnostic
+num_chains: 4
+num_samples: 1000
+num_warmup: 1000
+target_accept: 0.90
+rhat_threshold: 1.01
+ess_threshold: 400
+allow_divergences: false

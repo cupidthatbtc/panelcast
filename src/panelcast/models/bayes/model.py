@@ -41,6 +41,8 @@ import jax.numpy as jnp
 import numpyro
 import numpyro.distributions as dist
 from jax import lax
+from numpyro.distributions import constraints
+from numpyro.distributions.transforms import Transform
 from numpyro.handlers import reparam
 from numpyro.infer.reparam import LocScaleReparam
 
@@ -392,6 +394,51 @@ def _apply_target_transform(
     return transform.transform_mu(mu_raw)
 
 
+def _log_cosh(x: jnp.ndarray) -> jnp.ndarray:
+    """Numerically stable ``log(cosh(x))``."""
+    ax = jnp.abs(x)
+    return ax + jnp.log1p(jnp.exp(-2.0 * ax)) - jnp.log(2.0)
+
+
+class SinhArcsinhTransform(Transform):
+    """Jones-Pewsey sinh-arcsinh transform of a base real variable.
+
+    ``y = sinh((arcsinh(x) + skewness) * tailweight)``. With ``skewness = 0`` and
+    ``tailweight = 1`` this is the identity, so applying it to a StudentT base
+    and then locating/scaling nests the symmetric Student-t exactly. A nonzero
+    skewness tilts the density (negative -> longer left tail), giving the
+    skew-t needed for the left-skewed score distribution.
+    """
+
+    domain = constraints.real
+    codomain = constraints.real
+
+    def __init__(self, skewness, tailweight=1.0):
+        self.skewness = skewness
+        self.tailweight = tailweight
+        super().__init__()
+
+    def __call__(self, x):
+        return jnp.sinh((jnp.arcsinh(x) + self.skewness) * self.tailweight)
+
+    def _inverse(self, y):
+        return jnp.sinh(jnp.arcsinh(y) / self.tailweight - self.skewness)
+
+    def log_abs_det_jacobian(self, x, y, intermediates=None):
+        inner = (jnp.arcsinh(x) + self.skewness) * self.tailweight
+        return jnp.log(jnp.abs(self.tailweight)) + _log_cosh(inner) - 0.5 * jnp.log1p(x * x)
+
+    def tree_flatten(self):
+        return (self.skewness, self.tailweight), (("skewness", "tailweight"), {})
+
+    def __eq__(self, other):
+        return (
+            isinstance(other, SinhArcsinhTransform)
+            and self.tailweight == other.tailweight
+            and jnp.array_equal(self.skewness, other.skewness)
+        )
+
+
 def _sample_likelihood(
     prefix: str,
     mu: jnp.ndarray,
@@ -400,31 +447,42 @@ def _sample_likelihood(
     n_obs: int,
     likelihood_df: float,
     priors: PriorConfig,
+    target_bounds: tuple[float, float] = (0.0, 100.0),
+    n_reviews: jnp.ndarray | None = None,
 ) -> None:
-    """Sample the observation likelihood under the configured family.
+    """Dispatch the observation likelihood to the configured family's spec.
 
-    Families:
-        "studentt": StudentT(likelihood_df) for df < 100; the df >= 100
-            case degrades to Normal (numerically equivalent, legacy rule).
-        "normal": explicit Gaussian likelihood.
+    The family math lives in :mod:`panelcast.models.bayes.likelihoods` — one
+    self-contained ``LikelihoodSpec`` per family — so this seam only resolves the
+    family by name and forwards. ``{prefix}y`` is on the score scale under every
+    family, so evaluation, prediction, and the saved idata are untouched by the
+    choice. Student-t with ``df >= 100`` degrades to Normal (legacy rule).
     """
+    # Lazy import breaks the cycle: likelihoods.py imports SinhArcsinhTransform
+    # from this module, so this module must not import it at load time.
+    from panelcast.models.bayes.likelihoods import REGISTRY
+
     family = priors.likelihood_family
     if family == "studentt" and likelihood_df >= 100:
         family = "normal"
-    with numpyro.plate(f"{prefix}obs", n_obs):
-        if family == "studentt":
-            numpyro.sample(
-                f"{prefix}y",
-                dist.StudentT(likelihood_df, mu, sigma_scaled),
-                obs=y,
-            )
-        elif family == "normal":
-            numpyro.sample(f"{prefix}y", dist.Normal(mu, sigma_scaled), obs=y)
-        else:
-            raise ValueError(
-                f"Unknown likelihood_family: '{priors.likelihood_family}'. "
-                "Registered: ['studentt', 'normal']."
-            )
+    try:
+        spec = REGISTRY[family]
+    except KeyError:
+        raise ValueError(
+            f"Unknown likelihood_family: '{priors.likelihood_family}'. "
+            f"Registered: {sorted(REGISTRY)}."
+        ) from None
+    spec.sample_obs(
+        prefix,
+        mu,
+        sigma_scaled,
+        y,
+        n_obs,
+        likelihood_df,
+        priors,
+        target_bounds,
+        n_reviews,
+    )
 
 
 def make_score_model(score_type: str) -> Callable:
@@ -709,7 +767,17 @@ def make_score_model(score_type: str) -> Callable:
             )
 
         # === Likelihood (family seam) ===
-        _sample_likelihood(prefix, mu, sigma_scaled, y, len(artist_idx), likelihood_df, priors)
+        _sample_likelihood(
+            prefix,
+            mu,
+            sigma_scaled,
+            y,
+            len(artist_idx),
+            likelihood_df,
+            priors,
+            target_bounds=target_bounds,
+            n_reviews=n_reviews,
+        )
 
     # Apply non-centered reparameterization to init_artist_effect
     reparam_config = {

@@ -25,6 +25,7 @@ import numpy as np
 import pandas as pd
 import structlog
 
+from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.evaluation.cv import (
     LOOResult,
     add_log_likelihood_to_idata,
@@ -1019,7 +1020,7 @@ def run_split_seed_sensitivity(
     """
     import jax.numpy as jnp
 
-    from panelcast.data.split import artist_disjoint_split
+    from panelcast.data.split import entity_disjoint_split
     from panelcast.models.bayes.predict import predict_new_artist
     from panelcast.pipelines.training_summary import ar_center_on_model_scale
 
@@ -1048,9 +1049,9 @@ def run_split_seed_sensitivity(
 
     results: dict[str, dict] = {}
     for seed in seeds:
-        _, _, test_df = artist_disjoint_split(
+        _, _, test_df = entity_disjoint_split(
             source_df,
-            artist_col=entity_col,
+            entity_col=entity_col,
             test_size=test_size,
             val_size=val_size,
             random_state=seed,
@@ -1174,7 +1175,8 @@ def run_sensitivity_suite(ctx) -> dict:
     # Replicate the training-stage data prep (same gates as the fitted model).
     model_args, feature_cols, _train_df = load_training_data(
         features_path=Path("data/features/train_features.parquet"),
-        splits_path=Path("data/splits/within_artist_temporal/train.parquet"),
+        splits_path=resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL)
+        / "train.parquet",
         min_albums_filter=getattr(ctx, "min_albums_filter", 2),
         descriptor=descriptor,
         debut_prev_score_source=summary.get("debut_prev_score_source", "train_mean"),

@@ -127,7 +127,7 @@ descriptor's absolute path instead.
 **Known cosmetic limitation.** A few AOTY-derived names are still hard-coded for
 every domain: the predictions output column is literally `artist` (it holds your
 entity names regardless of domain), and the split directories are always
-`within_artist_temporal` and `artist_disjoint`. These are labels only — the
+`within_entity_temporal` and `entity_disjoint`. These are labels only — the
 values and behavior are correct for any domain; making them descriptor-driven is
 future work.
 

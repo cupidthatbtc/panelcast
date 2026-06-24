@@ -99,11 +99,11 @@ class TestCreateSplitsManifestAndHashing:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -137,11 +137,11 @@ class TestCreateSplitsManifestAndHashing:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -168,16 +168,16 @@ class TestCreateSplitsManifestAndHashing:
         assert "source" in data
         assert data["source"]["rows"] == len(multi_artist_df)
         assert data["source"]["artists"] == multi_artist_df["Artist"].nunique()
-        assert "within_artist_temporal" in data
-        assert "artist_disjoint" in data
-        assert "train_rows" in data["within_artist_temporal"]
-        assert "val_rows" in data["within_artist_temporal"]
-        assert "test_rows" in data["within_artist_temporal"]
-        assert "artists_included" in data["within_artist_temporal"]
-        assert "artists_excluded" in data["within_artist_temporal"]
-        assert "train_artists" in data["artist_disjoint"]
-        assert "val_artists" in data["artist_disjoint"]
-        assert "test_artists" in data["artist_disjoint"]
+        assert "within_entity_temporal" in data
+        assert "entity_disjoint" in data
+        assert "train_rows" in data["within_entity_temporal"]
+        assert "val_rows" in data["within_entity_temporal"]
+        assert "test_rows" in data["within_entity_temporal"]
+        assert "artists_included" in data["within_entity_temporal"]
+        assert "artists_excluded" in data["within_entity_temporal"]
+        assert "train_artists" in data["entity_disjoint"]
+        assert "val_artists" in data["entity_disjoint"]
+        assert "test_artists" in data["entity_disjoint"]
 
 
 # =============================================================================
@@ -203,11 +203,11 @@ class TestCreateSplitsSavesParquetFiles:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -224,7 +224,7 @@ class TestCreateSplitsSavesParquetFiles:
             result = create_splits(config)
 
         # Temporal split files
-        temporal_dir = config.output_dir / "within_artist_temporal"
+        temporal_dir = config.output_dir / "within_entity_temporal"
         assert (temporal_dir / "train.parquet").exists()
         assert (temporal_dir / "validation.parquet").exists()
         assert (temporal_dir / "test.parquet").exists()
@@ -244,11 +244,11 @@ class TestCreateSplitsSavesParquetFiles:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -264,7 +264,7 @@ class TestCreateSplitsSavesParquetFiles:
         ):
             result = create_splits(config)
 
-        disjoint_dir = config.output_dir / "artist_disjoint"
+        disjoint_dir = config.output_dir / "entity_disjoint"
         assert (disjoint_dir / "train.parquet").exists()
         assert (disjoint_dir / "validation.parquet").exists()
         assert (disjoint_dir / "test.parquet").exists()
@@ -293,11 +293,11 @@ class TestCreateSplitsResultFields:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -330,11 +330,11 @@ class TestCreateSplitsResultFields:
 
         with (
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -379,11 +379,11 @@ class TestMainCliEntryPoint:
                 return_value=multi_artist_df,
             ),
             patch(
-                "panelcast.pipelines.create_splits.within_artist_temporal_split",
+                "panelcast.pipelines.create_splits.within_entity_temporal_split",
                 return_value=(train, val, test),
             ),
             patch(
-                "panelcast.pipelines.create_splits.artist_disjoint_split",
+                "panelcast.pipelines.create_splits.entity_disjoint_split",
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
@@ -408,8 +408,8 @@ class TestMainCliEntryPoint:
 
         captured = capsys.readouterr()
         assert "SPLIT PIPELINE COMPLETE" in captured.out
-        assert "Within-Artist Temporal Split" in captured.out
-        assert "Artist-Disjoint Split" in captured.out
+        assert "Within-Entity Temporal Split" in captured.out
+        assert "Entity-Disjoint Split" in captured.out
 
 
 # =============================================================================

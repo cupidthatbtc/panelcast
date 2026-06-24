@@ -1,8 +1,18 @@
-> **WARNING — DIAGNOSTICS GATE**
+> **STATUS — real-data subset validated; full corpus still pending**
 >
-> - Convergence diagnostics **FAILED**.
->
-> This model card was generated from a run that does not meet publication-quality convergence standards. Interpret all results with caution.
+> - **Convergence is now demonstrated on real data.** A representative subset of
+>   the AOTY corpus (~800 artists / 5,182 albums, user-score skewness −2.08)
+>   **passes** the convergence gate at the publication configuration (4×5000):
+>   R-hat 1.00, bulk ESS 3,504, 0 divergences. See *Real-data subset validation*
+>   below.
+> - **The likelihood is still misspecified.** On the same real data the symmetric
+>   Student-t pins four PPC statistics (skewness, max, q50, q90) — an open
+>   modeling limitation, not a convergence problem.
+> - **Scale caveat.** Those numbers are from a ~5k-album SUBSET, **not** the full
+>   ~62k-album corpus. The *Model Architecture / Hyperparameters / Evaluation
+>   Results* snapshot further below predates this and is from a validation-scale
+>   (2×500) run that failed convergence; treat the *Real-data subset validation*
+>   section as the current real-data evidence and the rest as illustrative.
 
 # Model Card: panelcast — Hierarchical Bayesian Score Prediction
 
@@ -121,6 +131,36 @@ Prior distributions are weakly informative, chosen to regularize inference while
 
 ## Evaluation Results
 
+### Real-data subset validation (2026-06-23)
+
+The headline convergence gap is closed **on real data at reduced scale**. A
+representative subset of the full AOTY corpus — ~800 whole artists sampled with
+their full discographies (`scripts/make_aoty_subset.py`), 5,182 albums with ≥10
+user ratings across 653 multi-album artists, observed user-score skewness −2.08
+(the full corpus is −2.06) — was fit on GPU (RTX 5090) at the publication
+configuration (4 chains × 5,000, warmup 3,000, Student-t).
+
+- **Convergence gate: PASS** — R-hat (max) 1.00, bulk ESS 3,504 (≥ 400), 0
+  divergences, LOO Pareto-k all < 0.7.
+- **Predictive** (within-entity temporal test, n = 653): MAE 5.64, RMSE 8.26,
+  R² 0.42, CRPS 4.19; 80% coverage 0.856, 95% coverage 0.956 (within tolerance).
+- **PPC (still pinned):** skewness p = 0.991, max p = 1.000, q50 p = 0.007,
+  q90 p = 1.000 — the symmetric-likelihood / left-skewed-target mismatch
+  persists on real data (and sharpens with more draws, as expected). mean, sd,
+  min and q10 are interior.
+- **Baselines on the same real splits:** the model is competitive with ridge
+  (MAE 5.62) and behind gradient boosting (MAE 5.41) on point accuracy, but is
+  better calibrated than GBM (95% coverage 0.956 vs 0.899). Its edge is
+  calibrated uncertainty, not raw point accuracy. See `reports/baselines/`.
+- **Likelihood decision:** the bounded Beta candidate was tested on this real
+  subset and does **not** win — it pins more PPC statistics, mixes worse
+  (bulk ESS 304, 1 divergence), and yields an unreliable LOO (35 Pareto-k > 0.7).
+  The publication default reverted to Student-t. See
+  `docs/LIKELIHOOD_CANDIDATES.md`.
+
+This demonstrates the mechanism on **real, strongly left-skewed data**; it is a
+~5k-album subset, not the final full-corpus result.
+
 ### Convergence Diagnostics
 
 Convergence status: FAILED
@@ -164,8 +204,8 @@ Point prediction metrics:
 
 ## Limitations
 
-- **Convergence (compute-bounded, geometry fixed).** The historical sigma_artist ESS deficit was traced to a sampling-geometry confound: the uncentered AR(1) term absorbed the score level, ridge-coupling rho and mu_artist (corr -0.997). AR centering with a level-located mu_artist prior removed it (corr +0.016, debut AR terms exactly zero). Remaining R-hat/ESS shortfalls at cheap validation settings (2 chains x 500) are compute-bounded; the publication configuration (4 chains x 5000, warmup 3000, with the rw_raw collection exclusion required for 24 GB GPUs) extrapolates to ~4000 bulk ESS.
-- **Symmetric likelihood vs. left-skewed target.** The Student-t likelihood is symmetric, but observed user-score distribution has skewness ~= -1.79 (long left tail of poorly-received albums). This is a structural mismatch, not a fitting issue. PPC p-values pinned at 0.000/1.000 for sd, skewness, q50, q90, and max are the expected signature of this mismatch. The lightest candidate fix — an offset-logit target transform — was implemented and evaluated twice (pre- and post-AR-centering) and is HELD: its sampler geometry does not mix at validation settings (R-hat 1.27-1.37, bulk ESS 5-10) and its priors fail score-scale plausibility checks. Remaining candidates: (a) skew-Student-t likelihood; (b) Beta likelihood scaled to [0, 100]. Both are future work; the symmetric likelihood's point accuracy and 95% interval calibration are unaffected.
+- **Convergence (compute-bounded, geometry fixed).** The historical sigma_artist ESS deficit was traced to a sampling-geometry confound: the uncentered AR(1) term absorbed the score level, ridge-coupling rho and mu_artist (corr -0.997). AR centering with a level-located mu_artist prior removed it (corr +0.016, debut AR terms exactly zero). Remaining R-hat/ESS shortfalls at cheap validation settings (2 chains x 500) were compute-bounded; this is now **confirmed on real data**: at the publication configuration (4 chains x 5000, warmup 3000, with the rw_raw collection exclusion required for 24 GB GPUs) the ~5k-album subset reaches R-hat 1.00, bulk ESS 3,504 and 0 divergences — the gate passes. The full-corpus run remains future work.
+- **Symmetric likelihood vs. left-skewed target.** The Student-t likelihood is symmetric, but observed user-score distribution has skewness ~= -1.79 (long left tail of poorly-received albums). This is a structural mismatch, not a fitting issue. PPC p-values pinned at 0.000/1.000 for sd, skewness, q50, q90, and max are the expected signature of this mismatch. The lightest candidate fix — an offset-logit target transform — was implemented and evaluated twice (pre- and post-AR-centering) and is HELD: its sampler geometry does not mix at validation settings (R-hat 1.27-1.37, bulk ESS 5-10) and its priors fail score-scale plausibility checks. **Two more candidates are now implemented and selectable via `--likelihood-family`:** (a) `skew_studentt`, a sinh-arcsinh skew-t, and (b) `beta`, a mean-precision Beta on the score bounds. A controlled synthetic experiment (`scripts/experiment_likelihood_ppc.py`, left-skewed bounded panel) found **both mix well** (R-hat <= 1.02, no offset-logit-style failure) but with a clear structural split: `beta` predictions are bounded to [0, 100] **by construction** (the direct fix for the bounds-violating max/min mismatch — symmetric Student-t draws ranged [-579, 580] on the same data), while `skew_studentt` is a **documented negative result** (the skew on heavy Student-t tails explodes the right tail, [-3, 2784]). On the *synthetic* data `beta` was the recommended candidate — but that **did not survive real data**: on the AOTY subset (skew −2.08) `beta` pinned *more* PPC statistics than Student-t (six vs four), mixed worse, and broke LOO, so the publication default reverted to Student-t (see `docs/LIKELIHOOD_CANDIDATES.md`). The bounded-skew misspecification is therefore **confirmed on real data and unresolved** — none of the implemented candidates fixes it. A likely cause is that user scores are **integer-valued** (100% integers, range 1–94), so a continuous likelihood cannot reproduce the integer-heaped quantiles regardless of skew handling; a discretized/rounded observation layer or an aggregated-ratings (Beta-Binomial) likelihood is the natural next step. The symmetric likelihood's point accuracy and 95% interval calibration are unaffected.
 - **Soft-clip at [0, 100] interacts with symmetric tails.** Because the target is bounded but the likelihood is symmetric, soft_clip compresses both tails simultaneously. A logit-scale target would remove the clip, but the transform is held (see above); the clip stays.
 - **Trained on English-language reviews; may not generalize to other markets.**
 - Dynamic artist trajectories are learned only when an artist has at least 2 training albums (configurable via `dynamic.min_albums`).

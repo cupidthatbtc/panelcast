@@ -6,7 +6,7 @@ Sources:
   2. data/processed/cleaned_all.csv        — cleaning flags & derived cols (+11)
   3. data/processed/critic_score.csv        — membership flag
   4. data/processed/user_score_minratings_* — membership flags
-  5. data/splits/within_artist_temporal/    — train/test split assignment
+  5. data/splits/within_entity_temporal/    — train/test split assignment
   6. outputs/predictions/next_album_*.csv  — model predictions (pivoted)
   7. models/training_summary.json          — artist model index, global mean
   8. models/*.nc                           — posterior artist effects
@@ -20,6 +20,8 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+
+from panelcast.data.split_types import SplitType, resolve_split_dir
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -76,7 +78,7 @@ def load_subset_flags():
 
 
 def load_split_assignment():
-    splits_dir = ROOT / "data/splits/within_artist_temporal"
+    splits_dir = resolve_split_dir(ROOT / "data/splits", SplitType.WITHIN_ENTITY_TEMPORAL)
     url_col = "Album_URL"
     parts = []
     for name in ["train", "test", "validation"]:
@@ -458,7 +460,10 @@ def load_model_training_features():
         cd = idata.constant_data
 
         # Load the training split to get Album URLs for joining
-        train_path = ROOT / "data/splits/within_artist_temporal/train.parquet"
+        train_path = (
+            resolve_split_dir(ROOT / "data/splits", SplitType.WITHIN_ENTITY_TEMPORAL)
+            / "train.parquet"
+        )
         if not train_path.exists():
             print("  Model features: train split not found, skipping")
             return pd.DataFrame()

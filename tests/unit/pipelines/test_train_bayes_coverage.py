@@ -600,7 +600,7 @@ class TestTrainModelsSummaryOutput:
 
         # Create the default paths
         default_features = tmp_path / "data/features/train_features.parquet"
-        default_splits = tmp_path / "data/splits/within_artist_temporal/train.parquet"
+        default_splits = tmp_path / "data/splits/within_entity_temporal/train.parquet"
 
         # Write real parquets at default paths
         n = 9

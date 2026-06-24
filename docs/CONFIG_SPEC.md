@@ -6,7 +6,7 @@ Dataset
 - dataset.min_ratings: int (default 10)
 
 Splits
-- splits.strategy: string (within_artist_temporal | artist_disjoint)
+- splits.strategy: string (within_entity_temporal | entity_disjoint)
 - splits.group_col: string (default Artist)
 - splits.seed: int (default 42)
 - splits.train_frac: float (default 0.65)
@@ -38,6 +38,9 @@ Model
 - model.target_accept_prob: float
 - model.max_tree_depth: int
 - model.target_scale: string (standardized | raw)
+- model.likelihood_df: float (default 4.0; Student-t degrees of freedom, >=100 behaves as Normal)
+- model.likelihood_family: string (studentt | normal | skew_studentt | skew_normal | split_normal | beta; default studentt)
+- model.discretize_observation: bool (default false; interval-censor integer observations — location-scale families only, rejected for beta/skew_studentt)
 - model.priors.intercept_sd: float
 - model.priors.slope_sd: float
 - model.priors.group_sd: float

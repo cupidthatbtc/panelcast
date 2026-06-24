@@ -4,10 +4,13 @@ This is the data contract for the **bundled AOTY example domain**. The raw →
 canonical column mapping is descriptor-driven: AOTY uses the built-in defaults
 (below), and other domains (e.g. `aero`) define their own `raw_column_map`,
 bounds, and names in their descriptor YAML under `configs/datasets/`. The
-artifact names here — `user_score_minratings_*`, `within_artist_temporal`,
-`artist_disjoint` — are AOTY terminology: the processed-dataset names come from
-the descriptor's `processed_name_template`, and the split-directory names are
-fixed (see `docs/PORTING.md`). See `docs/EXTENSIBILITY.md` for retargeting.
+processed-dataset names here (`user_score_minratings_*`) come from the
+descriptor's `processed_name_template`; the split-directory names
+(`within_entity_temporal`, `entity_disjoint`) are fixed, role-based, and
+domain-agnostic (see `docs/PORTING.md`). Pre-rename artifacts written with the
+old AOTY-flavored split names (`within_artist_temporal`, `artist_disjoint`)
+still load via a backward-compatible alias. See `docs/EXTENSIBILITY.md` for
+retargeting.
 
 Raw CSV (actual columns from `all_albums_full.csv`)
 - Artist
@@ -87,8 +90,8 @@ Outputs (minimum)
 - `data/processed/user_score_minratings_25.parquet` (+ `.csv`)
 - `data/processed/critic_score.parquet` (+ `.csv`)
 - `data/audit/summary_<run_id>.json` and `data/audit/exclusions_<run_id>.jsonl`
-- `data/splits/within_artist_temporal/manifest.json`
-- `data/splits/artist_disjoint/manifest.json`
+- `data/splits/within_entity_temporal/manifest.json`
+- `data/splits/entity_disjoint/manifest.json`
 - `outputs/<run_id>/dataset_hash.txt`
 
 Target variable

@@ -16,6 +16,7 @@ import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.alignment import ROW_ID_COL
+from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.features.base import FeatureContext
 from panelcast.features.pipeline import FeaturePipeline
 from panelcast.features.registry import FeatureSpec, build_default_registry
@@ -215,7 +216,10 @@ def build_features(ctx: "StageContext") -> dict:
     splits_root = Path("data/splits")
     features_dir = Path("data/features")
     features_dir.mkdir(parents=True, exist_ok=True)
-    split_names = ["within_artist_temporal", "artist_disjoint"]
+    split_names = [
+        str(SplitType.WITHIN_ENTITY_TEMPORAL.value),
+        str(SplitType.ENTITY_DISJOINT.value),
+    ]
 
     # Create feature context
     feature_ctx = FeatureContext(
@@ -227,7 +231,9 @@ def build_features(ctx: "StageContext") -> dict:
     feature_names: list[str] = []
 
     for split_name in split_names:
-        split_dir = splits_root / split_name
+        # Read from the canonical directory, falling back to a legacy-named
+        # directory if only a pre-rename one exists on disk.
+        split_dir = resolve_split_dir(splits_root, split_name)
         feature_split_dir = features_dir / split_name
         feature_split_dir.mkdir(parents=True, exist_ok=True)
 
@@ -292,7 +298,7 @@ def build_features(ctx: "StageContext") -> dict:
         test_features.to_parquet(test_path, index=True)
 
         # Backward compatibility: root feature paths follow primary split.
-        if split_name == "within_artist_temporal":
+        if split_name == SplitType.WITHIN_ENTITY_TEMPORAL:
             train_features.to_parquet(features_dir / "train_features.parquet", index=True)
             val_features.to_parquet(features_dir / "validation_features.parquet", index=True)
             test_features.to_parquet(features_dir / "test_features.parquet", index=True)
@@ -344,7 +350,7 @@ def build_features(ctx: "StageContext") -> dict:
             "applies_to_splits": ["validation", "test"],
         },
         "split_features": split_manifests,
-        "legacy_primary_split": "within_artist_temporal",
+        "legacy_primary_split": str(SplitType.WITHIN_ENTITY_TEMPORAL.value),
     }
 
     manifest_path = features_dir / "manifest.json"

@@ -1,10 +1,27 @@
 # panelcast
 
 [![CI](https://github.com/cupidthatbtc/panelcast/actions/workflows/ci.yml/badge.svg)](https://github.com/cupidthatbtc/panelcast/actions/workflows/ci.yml)
+[![Nightly](https://github.com/cupidthatbtc/panelcast/actions/workflows/nightly.yml/badge.svg)](https://github.com/cupidthatbtc/panelcast/actions/workflows/nightly.yml)
 [![codecov](https://codecov.io/gh/cupidthatbtc/panelcast/branch/main/graph/badge.svg)](https://codecov.io/gh/cupidthatbtc/panelcast)
 ![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![pixi](https://img.shields.io/badge/pixi-package%20manager-brightgreen)](https://pixi.sh)
+![Status: experimental](https://img.shields.io/badge/status-experimental-orange)
+
+> **⚠️ Experimental — real-data validated on a subset; full corpus pending.**
+>
+> The reproducibility, diagnostics, and domain-portability scaffolding is the
+> finished part. The headline *statistical* result is now **partially
+> established on real data**: on a representative ~800-artist / ~5k-album AOTY
+> subset (skewness −2.08), the model **passes the convergence gate** at the
+> publication configuration (R-hat 1.00, bulk ESS 3,504, 0 divergences), and
+> the baseline benchmark runs on the same real splits. Still open: the
+> posterior-predictive p-values stay pinned at the extremes by a
+> symmetric-likelihood / left-skewed-target mismatch (a bounded-Beta candidate
+> was tested on real data and **rejected**), and this is a subset, not the full
+> ~62k-album corpus. See [`MODEL_CARD.md`](MODEL_CARD.md) and
+> [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md). Treat the
+> subset numbers as real but not final.
 
 **Hierarchical Bayesian prediction for bounded scores of events nested in entities over time — configured by one YAML descriptor.**
 
@@ -74,22 +91,27 @@ panelcast --help
 ## 60-second quickstart (aerospace example)
 
 Retarget the whole pipeline to a non-music domain with no code changes, using
-the bundled synthetic aerospace dataset:
+the bundled synthetic aerospace dataset (committed under `examples/aerospace/`:
+8 airframes flying ~39 sequential test flights scored 0–10):
 
 ```bash
-# 1. Generate the synthetic dataset (8 airframes, ~44 sequential test flights)
-python -c "import os; from tests.helpers.aero_data import make_aero_dataset; \
-os.makedirs('data/raw', exist_ok=True); \
-make_aero_dataset(seed=42).to_csv('data/raw/test_flights.csv', index=False)"
-
-# 2. Run the pipeline on that domain — selected entirely by the descriptor
-panelcast run --dataset aero --num-chains 1 --num-samples 300
+# Run the entire pipeline end-to-end on the example, at tiny scale
+panelcast demo
 ```
 
-`--dataset aero` resolves to `configs/datasets/aero.yaml`. That one file
-remaps the columns, switches the score bounds to [0, 10], drops the
-music-specific feature packs, and adds the domain's own numeric covariates —
-the model code is untouched.
+`demo` reads `examples/aerospace/descriptor.yaml` — one file that remaps the
+columns, switches the score bounds to [0, 10], drops the music-specific feature
+packs, and adds the domain's own numeric covariates — and runs data → splits →
+features → train → evaluate → predict → report, finishing with a generated
+model card under `reports/`. The model code is untouched.
+
+The committed CSV is regenerated from the shared synthetic generator with
+`python scripts/generate_aero_example.py`. To benchmark the model against simple
+baselines on the splits it just produced:
+
+```bash
+panelcast compare --baselines --dataset examples/aerospace/descriptor.yaml
+```
 
 To run the flagship AOTY domain instead, point at your data and omit `--dataset`:
 
@@ -125,10 +147,26 @@ See [`docs/CLI.md`](docs/CLI.md) for the complete command reference.
 - [`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md) — raw schema and cleaned artifacts
 - [`MODEL_CARD.md`](MODEL_CARD.md) — intended use, results, and limitations
 
-A note on results: the figures in `MODEL_CARD.md` should be treated as
-indicative until the full 4×5000 publication run (`configs/publication.yaml`) is
-executed. The code, the diagnostics, and the honest naming of what is and isn't
-resolved are the point.
+A note on results: at the publication configuration the model now **passes the
+convergence gate** on a real ~800-artist / ~5k-album AOTY subset (R-hat 1.00,
+bulk ESS 3,504, 0 divergences) under the default **Student-t** likelihood:
+
+```bash
+panelcast run --preset publication        # 4 chains × 5000, Student-t likelihood
+panelcast diagnose                        # convergence + PPC of that run
+panelcast compare --baselines             # the model vs. simple baselines
+```
+
+What's resolved: leak-safe splits with role-based names, an honest baseline
+comparison (`panelcast compare`) on the same real splits, and a convergent
+publication-scale fit on real data. Still open: the posterior-predictive
+p-values stay pinned at the extremes from a symmetric-likelihood /
+left-skewed-target mismatch — a bounded **Beta** candidate was tested on real
+data and **rejected** (see
+[`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md)) — and this is a
+subset, not the full ~62k-album corpus, which needs the full dataset and a GPU.
+The code, the diagnostics, and the honest naming of what is and isn't resolved
+are the point.
 
 ## License
 

@@ -28,6 +28,11 @@ Prior Roles:
 
 from dataclasses import dataclass
 
+# Beta boundary squeeze / mu-clip epsilon. Shared so inference
+# (PriorConfig.beta_boundary_eps default) and the prediction path
+# (likelihoods._beta_predict_draws) stay consistent at the default.
+DEFAULT_BETA_BOUNDARY_EPS = 1e-3
+
 
 @dataclass(frozen=True)
 class PriorConfig:
@@ -119,9 +124,39 @@ class PriorConfig:
     target_transform: str = "identity"
     # Half-count continuity offset for the offset-logit transform.
     logit_offset: float = 0.5
-    # Likelihood family: "studentt" (df from likelihood_df; df>=100 behaves
-    # as Normal) or "normal" (explicit Gaussian likelihood).
+    # Likelihood family. "studentt" (df from likelihood_df; df>=100 behaves as
+    # Normal) and "normal" are symmetric. The skew/bounded candidates target the
+    # left-skewed, bounded score distribution:
+    #   "skew_studentt" — a sinh-arcsinh skew-t: StudentT(df) pushed through a
+    #     sinh-arcsinh transform with a learned skewness, then located/scaled.
+    #   "beta" — the score rescaled to (0, 1) via target_bounds (boundary
+    #     squeeze) and modeled with a mean-precision Beta, affine-mapped back to
+    #     the score scale so {prefix}y stays on the natural scale.
     likelihood_family: str = "studentt"
+    # skew_studentt: skewness prior (sinh-arcsinh epsilon) and the fixed tail
+    # weight delta (1.0 = pure skew, no extra kurtosis beyond the StudentT base).
+    skew_loc: float = 0.0
+    skew_scale: float = 0.5
+    skew_tailweight: float = 1.0
+    # beta: Gamma(concentration, rate) prior on the Beta precision phi. The
+    # default Gamma(2, 0.1) has mean 20 (moderate precision on the (0,1) scale).
+    beta_precision_concentration: float = 2.0
+    beta_precision_rate: float = 0.1
+    # Boundary squeeze: observed scores are clamped this far inside the bounds so
+    # exact-boundary observations have finite Beta density.
+    beta_boundary_eps: float = DEFAULT_BETA_BOUNDARY_EPS
+    # split_normal: Normal(loc, scale) prior on the log scale-ratio
+    # log(sigma_R / sigma_L). 0 recovers a symmetric Normal; negative values
+    # lengthen the left tail (sigma_L > sigma_R). Adds site {prefix}split_log_ratio.
+    split_scale_ratio_loc: float = 0.0
+    split_scale_ratio_scale: float = 0.5
+    # Discretization toggle (orthogonal to the family; default off => legacy
+    # continuous likelihood, byte-identical RNG path). When True, the observation
+    # becomes interval-censored and integer-valued: integer k contributes
+    # log(F(k+0.5) - F(k-0.5)) and replicated draws are rounded. Only the
+    # location-scale families with a CDF (studentt, normal, skew_normal,
+    # split_normal) support it; beta / skew_studentt reject it with a clear error.
+    discretize_observation: bool = False
     # AR(1) centering mode: "global" (default) subtracts the training-mean
     # prev_score so debut AR terms are exactly zero and rho decorrelates
     # from mu_artist; "none" is the legacy uncentered form; "artist_running"

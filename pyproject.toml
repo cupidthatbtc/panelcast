@@ -72,6 +72,7 @@ gpu = [
 dev = [
   "pytest>=8.0",
   "pytest-cov>=4.1",
+  "mypy>=1.8",
 ]
 comparison = [
   "pymc>=5.13",
@@ -88,6 +89,7 @@ filterwarnings = [
 markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "e2e: marks tests as end-to-end tests",
+    "smoke: marks a fast end-to-end smoke check (the CI PR smoke job)",
 ]
 
 [tool.ruff]
@@ -122,6 +124,27 @@ check_untyped_defs = true  # Check type errors inside untyped functions
 strict = false
 # Ignore specific error codes that are too noisy for data science code
 disable_error_code = ["arg-type", "assignment", "return-value", "var-annotated", "misc", "union-attr", "operator", "attr-defined", "call-arg", "no-any-return"]
+
+# Boundary modules: re-enable a few of the globally-disabled codes so the typed
+# seams (config gates as Literals, the prediction-result and split-manifest
+# schemas) are actually checked. Scoped here, not globally — the data-science
+# core stays lenient.
+# Typed-schema modules: the Literal gates, the split-manifest TypedDicts, and the
+# prediction-result schema are checked strictly (incl. arg-type).
+[[tool.mypy.overrides]]
+module = [
+  "panelcast.config.gates",
+  "panelcast.data.manifests",
+  "panelcast.models.bayes.predict",
+]
+enable_error_code = ["arg-type", "return-value", "assignment"]
+
+# The orchestrator carries the PipelineConfig gate types; re-enable
+# return-value/assignment there (arg-type stays off — its run_dir/manifest
+# attributes are set-after-init Optionals, a separate refactor).
+[[tool.mypy.overrides]]
+module = ["panelcast.pipelines.orchestrator"]
+enable_error_code = ["return-value", "assignment"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

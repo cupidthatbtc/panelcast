@@ -506,7 +506,7 @@ class TestResolveFeatureSplitDir:
 
         # Don't create the split-specific dir
         result = (
-            _resolve_feature_split_dir.__wrapped__("within_artist_temporal")
+            _resolve_feature_split_dir.__wrapped__("within_entity_temporal")
             if hasattr(_resolve_feature_split_dir, "__wrapped__")
             else None
         )
@@ -516,7 +516,7 @@ class TestResolveFeatureSplitDir:
         # return Path("data/features")
         from panelcast.pipelines.evaluate import PRIMARY_SPLIT
 
-        assert PRIMARY_SPLIT == "within_artist_temporal"
+        assert PRIMARY_SPLIT == "within_entity_temporal"
 
 
 # ============================================================================
@@ -743,8 +743,8 @@ class TestEvaluateModelsExtended:
     def _setup_dirs_and_files(self, tmp_path, mock_summary, include_secondary=False):
         """Create the directory structure and parquet files needed by evaluate_models."""
         (tmp_path / "models").mkdir()
-        (tmp_path / "data" / "splits" / "within_artist_temporal").mkdir(parents=True)
-        (tmp_path / "data" / "features" / "within_artist_temporal").mkdir(parents=True)
+        (tmp_path / "data" / "splits" / "within_entity_temporal").mkdir(parents=True)
+        (tmp_path / "data" / "features" / "within_entity_temporal").mkdir(parents=True)
 
         train_df = pd.DataFrame(
             {
@@ -772,14 +772,14 @@ class TestEvaluateModelsExtended:
             }
         )
 
-        train_df.to_parquet(tmp_path / "data/splits/within_artist_temporal/train.parquet")
-        test_df.to_parquet(tmp_path / "data/splits/within_artist_temporal/test.parquet")
-        feat_df.to_parquet(tmp_path / "data/features/within_artist_temporal/test_features.parquet")
+        train_df.to_parquet(tmp_path / "data/splits/within_entity_temporal/train.parquet")
+        test_df.to_parquet(tmp_path / "data/splits/within_entity_temporal/test.parquet")
+        feat_df.to_parquet(tmp_path / "data/features/within_entity_temporal/test_features.parquet")
 
         if include_secondary:
-            sec_dir = tmp_path / "data" / "splits" / "artist_disjoint"
+            sec_dir = tmp_path / "data" / "splits" / "entity_disjoint"
             sec_dir.mkdir(parents=True)
-            sec_feat_dir = tmp_path / "data" / "features" / "artist_disjoint"
+            sec_feat_dir = tmp_path / "data" / "features" / "entity_disjoint"
             sec_feat_dir.mkdir(parents=True)
 
             sec_test_df = pd.DataFrame(
@@ -889,7 +889,7 @@ class TestEvaluateModelsExtended:
         ):
             result = evaluate_models(ctx)
 
-        ic = result["metrics"]["splits"]["within_artist_temporal"]["info_criteria"]
+        ic = result["metrics"]["splits"]["within_entity_temporal"]["info_criteria"]
         assert ic["status"] == "unavailable"
         assert "info boom" in ic["reason"]
 
@@ -992,10 +992,10 @@ class TestEvaluateModelsExtended:
             result = evaluate_models(ctx)
 
         splits = result["metrics"]["splits"]
-        assert "within_artist_temporal" in splits
-        assert "artist_disjoint" in splits
+        assert "within_entity_temporal" in splits
+        assert "entity_disjoint" in splits
         # Secondary split has unavailable info_criteria
-        assert splits["artist_disjoint"]["info_criteria"]["status"] == "unavailable"
+        assert splits["entity_disjoint"]["info_criteria"]["status"] == "unavailable"
 
     def test_secondary_split_missing_non_strict_warns(self, tmp_path, mock_summary):
         """Non-strict mode warns but continues when secondary artifacts missing."""
@@ -1045,7 +1045,7 @@ class TestEvaluateModelsExtended:
             result = evaluate_models(ctx)
 
         # Should succeed without secondary split in results
-        assert "artist_disjoint" not in result["metrics"]["splits"]
+        assert "entity_disjoint" not in result["metrics"]["splits"]
 
     def test_calibration_warning_non_strict(self, tmp_path, mock_summary):
         """Non-strict mode warns on calibration out-of-tolerance but continues."""
@@ -1133,7 +1133,7 @@ class TestEvaluateModelsExtended:
             # Should not raise despite bad calibration
             result = evaluate_models(ctx)
 
-        assert not result["metrics"]["splits"]["within_artist_temporal"]["calibration"][
+        assert not result["metrics"]["splits"]["within_entity_temporal"]["calibration"][
             "within_tolerance"
         ]
 
@@ -1213,11 +1213,11 @@ class TestEvaluateModelsExtended:
         assert (out_dir / "predictions.json").exists()
         assert (out_dir / "calibration.json").exists()
         # Split-specific directory
-        assert (out_dir / "within_artist_temporal" / "predictions.json").exists()
-        assert (out_dir / "within_artist_temporal" / "calibration.json").exists()
+        assert (out_dir / "within_entity_temporal" / "predictions.json").exists()
+        assert (out_dir / "within_entity_temporal" / "calibration.json").exists()
 
         # Verify metrics.json content
         with open(out_dir / "metrics.json") as f:
             metrics = json.load(f)
         assert metrics["schema_version"] == 2
-        assert metrics["primary_split"] == "within_artist_temporal"
+        assert metrics["primary_split"] == "within_entity_temporal"

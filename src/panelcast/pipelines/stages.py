@@ -100,6 +100,11 @@ class StageContext:
     n_exponent_prior: str = "logit-normal"
     # Likelihood configuration
     likelihood_df: float = 4.0
+    # Likelihood family: "studentt" (legacy) | "normal" | "skew_studentt" |
+    # "skew_normal" | "split_normal" | "beta"
+    likelihood_family: str = "studentt"
+    # Interval-censor the observation to integers (default off => continuous).
+    discretize_observation: bool = False
     # Debut prev_score fill source: "train_mean" | "dataset_stats" (legacy)
     debut_prev_score_source: str = "train_mean"
     # Target transform gate: "identity" (legacy) | "offset_logit"
@@ -457,14 +462,14 @@ def make_stage_splits(
         run_fn=_run_splits_stage,
         input_paths=[Path("data/processed") / f"{descriptor.processed_name(min_ratings)}.parquet"],
         output_paths=[
-            Path("data/splits/within_artist_temporal/train.parquet"),
-            Path("data/splits/within_artist_temporal/validation.parquet"),
-            Path("data/splits/within_artist_temporal/test.parquet"),
-            Path("data/splits/within_artist_temporal/manifest.json"),
-            Path("data/splits/artist_disjoint/train.parquet"),
-            Path("data/splits/artist_disjoint/validation.parquet"),
-            Path("data/splits/artist_disjoint/test.parquet"),
-            Path("data/splits/artist_disjoint/manifest.json"),
+            Path("data/splits/within_entity_temporal/train.parquet"),
+            Path("data/splits/within_entity_temporal/validation.parquet"),
+            Path("data/splits/within_entity_temporal/test.parquet"),
+            Path("data/splits/within_entity_temporal/manifest.json"),
+            Path("data/splits/entity_disjoint/train.parquet"),
+            Path("data/splits/entity_disjoint/validation.parquet"),
+            Path("data/splits/entity_disjoint/test.parquet"),
+            Path("data/splits/entity_disjoint/manifest.json"),
             Path("data/splits/pipeline_summary.json"),
         ],
         depends_on=["data"],
@@ -478,20 +483,20 @@ def make_stage_features() -> PipelineStage:
         description="Build feature matrices from split data",
         run_fn=_run_features_stage,
         input_paths=[
-            Path("data/splits/within_artist_temporal/train.parquet"),
-            Path("data/splits/within_artist_temporal/validation.parquet"),
-            Path("data/splits/within_artist_temporal/test.parquet"),
-            Path("data/splits/artist_disjoint/train.parquet"),
-            Path("data/splits/artist_disjoint/validation.parquet"),
-            Path("data/splits/artist_disjoint/test.parquet"),
+            Path("data/splits/within_entity_temporal/train.parquet"),
+            Path("data/splits/within_entity_temporal/validation.parquet"),
+            Path("data/splits/within_entity_temporal/test.parquet"),
+            Path("data/splits/entity_disjoint/train.parquet"),
+            Path("data/splits/entity_disjoint/validation.parquet"),
+            Path("data/splits/entity_disjoint/test.parquet"),
         ],
         output_paths=[
-            Path("data/features/within_artist_temporal/train_features.parquet"),
-            Path("data/features/within_artist_temporal/validation_features.parquet"),
-            Path("data/features/within_artist_temporal/test_features.parquet"),
-            Path("data/features/artist_disjoint/train_features.parquet"),
-            Path("data/features/artist_disjoint/validation_features.parquet"),
-            Path("data/features/artist_disjoint/test_features.parquet"),
+            Path("data/features/within_entity_temporal/train_features.parquet"),
+            Path("data/features/within_entity_temporal/validation_features.parquet"),
+            Path("data/features/within_entity_temporal/test_features.parquet"),
+            Path("data/features/entity_disjoint/train_features.parquet"),
+            Path("data/features/entity_disjoint/validation_features.parquet"),
+            Path("data/features/entity_disjoint/test_features.parquet"),
             Path("data/features/train_features.parquet"),
             Path("data/features/validation_features.parquet"),
             Path("data/features/test_features.parquet"),
@@ -527,14 +532,14 @@ def make_stage_evaluate() -> PipelineStage:
         input_paths=[
             Path("models/manifest.json"),
             Path("models/training_summary.json"),
-            Path("data/features/within_artist_temporal/test_features.parquet"),
-            Path("data/features/artist_disjoint/test_features.parquet"),
+            Path("data/features/within_entity_temporal/test_features.parquet"),
+            Path("data/features/entity_disjoint/test_features.parquet"),
         ],
         output_paths=[
             Path("outputs/evaluation/metrics.json"),
             Path("outputs/evaluation/diagnostics.json"),
-            Path("outputs/evaluation/within_artist_temporal/predictions.json"),
-            Path("outputs/evaluation/artist_disjoint/predictions.json"),
+            Path("outputs/evaluation/within_entity_temporal/predictions.json"),
+            Path("outputs/evaluation/entity_disjoint/predictions.json"),
         ],
         depends_on=["train"],
     )
@@ -549,7 +554,7 @@ def make_stage_predict() -> PipelineStage:
         input_paths=[
             Path("models/manifest.json"),
             Path("models/training_summary.json"),
-            Path("data/splits/within_artist_temporal/train.parquet"),
+            Path("data/splits/within_entity_temporal/train.parquet"),
             Path("data/features/train_features.parquet"),
         ],
         output_paths=[
@@ -600,7 +605,7 @@ def make_stage_sensitivity() -> PipelineStage:
         input_paths=[
             Path("models/training_summary.json"),
             Path("data/features/train_features.parquet"),
-            Path("data/splits/within_artist_temporal/train.parquet"),
+            Path("data/splits/within_entity_temporal/train.parquet"),
         ],
         output_paths=[
             Path("reports/sensitivity/sensitivity_results.json"),
