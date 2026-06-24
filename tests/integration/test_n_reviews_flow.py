@@ -151,3 +151,71 @@ class TestNReviewsDataFlow:
         # Shapes must match for element-wise operations
         assert y.shape == n_reviews.shape
         assert len(y) == n_obs
+
+
+class TestNReviewsInvalidPosition:
+    """Invalid review-count at first / middle / last event, plus all-invalid entity.
+
+    The uniform index filtering in prepare_model_data must drop exactly the
+    invalid row regardless of its position in an entity's history, and must
+    leave no stale entity index in the data arrays when an entity is wiped out.
+    """
+
+    def _panel(self, ratings_by_artist: dict[str, list[int]]):
+        rows = []
+        for artist, ratings in ratings_by_artist.items():
+            for i, r in enumerate(ratings):
+                rows.append(
+                    {
+                        "Artist": artist,
+                        "Album": f"{artist}{i}",
+                        "Year": 2010 + i,
+                        "User_Score": 60.0 + i,
+                        "User_Ratings": r,
+                        "Release_Date_Parsed": pd.Timestamp(f"20{10 + i:02d}-01-01"),
+                    }
+                )
+        df = pd.DataFrame(rows)
+        df["feat_1"] = np.random.RandomState(0).randn(len(df))
+        return df
+
+    @pytest.mark.parametrize("bad_pos", [0, 3, 7])
+    def test_invalid_review_count_at_any_position_drops_one_row(self, bad_pos):
+        """First (0), middle (3), and last (7) invalid events each drop one row."""
+        from panelcast.pipelines.train_bayes import prepare_model_data
+
+        ratings = [100, 200, 300, 400, 500, 600, 700, 800]
+        ratings[bad_pos] = 0  # invalidate one position
+        df = self._panel({"A": ratings})
+
+        result, valid_mask = prepare_model_data(df, ["feat_1"], min_albums_filter=1)
+
+        assert len(result["y"]) == len(ratings) - 1
+        assert (result["n_reviews"] > 0).all()
+        # The dropped score is exactly the one at the invalid position.
+        dropped_score = 60.0 + bad_pos
+        assert dropped_score not in set(np.asarray(result["y"]).tolist())
+        assert valid_mask.sum() == len(ratings) - 1
+
+    def test_all_invalid_entity_leaves_no_stale_index(self):
+        """An entity whose every event is invalid must vanish from artist_idx."""
+        from panelcast.pipelines.train_bayes import prepare_model_data
+
+        # A is large and valid; B is entirely invalid (stays < 50% of rows).
+        df = self._panel(
+            {
+                "A": [100, 200, 300, 400, 500, 600, 700, 800],
+                "B": [0, 0],
+            }
+        )
+        b_idx = sorted(df["Artist"].unique()).index("B")
+
+        result, _ = prepare_model_data(df, ["feat_1"], min_albums_filter=1)
+
+        # B's index is allocated in the mapping/n_artists, but NO surviving row
+        # references it — no stale entity index in the data arrays.
+        assert b_idx not in set(np.asarray(result["artist_idx"]).tolist())
+        assert int(result["artist_album_counts"].loc[b_idx]) == 0
+        assert len(result["y"]) == 8
+        # max index in the data is within range (no dangling reference).
+        assert int(np.asarray(result["artist_idx"]).max()) < result["n_artists"]

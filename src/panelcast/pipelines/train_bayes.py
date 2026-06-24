@@ -406,6 +406,14 @@ def _apply_max_albums_cap(
 ) -> dict:
     """Apply max_albums cap to model arguments, keeping most recent albums.
 
+    CAP BEHAVIOR (max-events cap; domain-agnostic): an entity's events beyond
+    the most recent ``max_albums_cap`` are NOT dropped — they are collapsed onto
+    sequence position 1 (the initial entity effect). Every row still contributes
+    to the likelihood; only the time-varying latent it indexes changes. So the
+    cap bounds the random-walk trajectory length (and peak memory), it does not
+    subsample data. For AOTY the default is 50 albums/artist; a domain with
+    longer histories should raise ``--max-albums`` (see docs/EVALUATION_PROTOCOL.md).
+
     For artists with more than max_albums_cap albums, renumbers so that the
     most recent albums get distinct positions (1 to max_albums_cap) and
     older albums share position 1.

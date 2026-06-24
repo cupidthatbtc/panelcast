@@ -16,6 +16,17 @@ Cross-validation
 - Secondary split sets `prev_score` to training global mean for every row (no held-out label usage)
 - Primary split fails fast if unknown artists appear in test data (no silent row dropping)
 
+History cap (`max_albums`)
+- `--max-albums` (default 50 for AOTY) caps the length of the time-varying
+  trajectory per entity. It is a max-EVENTS cap, not a row filter: an entity's
+  events beyond the most recent `max_albums` are NOT dropped — they collapse
+  onto sequence position 1 (the initial entity effect), so every row still
+  contributes to the likelihood. The cap bounds the random-walk trajectory
+  length (and peak GPU memory); distant positions carry little signal about the
+  current state because cumulative random-walk variance grows over steps.
+- Domains with longer histories than AOTY should raise `--max-albums`
+  accordingly. The cap is computed on training data only (no leakage).
+
 Diagnostics
 - R-hat <= 1.01 for all key parameters (`rhat_threshold`, default 1.01)
 - ESS >= 400 per chain (`ess_threshold`, default 400)
