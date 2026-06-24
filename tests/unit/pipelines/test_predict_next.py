@@ -539,6 +539,37 @@ class TestPredictNewArtists:
         for call in mock_predict.call_args_list:
             assert call.kwargs["prev_score"] == pytest.approx(74.25)
 
+    def test_cold_start_honors_trained_likelihood_family(
+        self, mock_posterior_samples, mock_summary
+    ):
+        """Cold-start must predict under the trained family, not the studentt default.
+
+        Regression for the bug where _predict_new_artists never forwarded
+        likelihood_family / discretize_observation, so a beta (or any
+        non-studentt) model silently predicted new entities under Student-t.
+        """
+        summary = dict(mock_summary)
+        summary["likelihood_family"] = "beta"
+        summary["discretize_observation"] = True
+
+        _, mock_predict = self._run(mock_posterior_samples, summary)
+
+        assert mock_predict.call_args_list  # both scenarios called
+        for call in mock_predict.call_args_list:
+            assert call.kwargs["likelihood_family"] == "beta"
+            assert call.kwargs["discretize_observation"] is True
+
+    def test_cold_start_defaults_to_studentt_when_unset(
+        self, mock_posterior_samples, mock_summary
+    ):
+        """Legacy summaries (no family keys) default to studentt, no discretization."""
+        # mock_summary has neither likelihood_family nor discretize_observation.
+        _, mock_predict = self._run(mock_posterior_samples, mock_summary)
+
+        for call in mock_predict.call_args_list:
+            assert call.kwargs["likelihood_family"] == "studentt"
+            assert call.kwargs["discretize_observation"] is False
+
 
 # ---------------------------------------------------------------------------
 # Tests for predict_next_albums (integration-level)
