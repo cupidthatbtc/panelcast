@@ -149,20 +149,42 @@ AOTY_DATASET_PATH=data/raw/aoty_subset.csv \
     --combos studentt,studentt+discretize,skew_normal,skew_normal+discretize,split_normal
 ```
 
-Run it from the GPU venv (`~/aoty-gpu`) after the data/splits/features stages
-exist on disk. The Student-t baseline (already on record) anchors the table:
+Run from the GPU venv (`~/aoty-gpu`) after the data/splits/features stages exist
+on disk. The continuous families were fit at diagnostic scale (4 chains × 1000);
+the result is a **clean negative**:
 
-| combo | conv | rhat | ess | div | ppc_pin | pinned | mae | rmse | cov95 | crps | k_max |
-|-------|------|------|-----|-----|---------|--------|-----|------|-------|------|-------|
-| studentt | PASS | 1.00 | 3504 | 0 | 4 | skewness,max,q50,q90 | 5.64 | 8.26 | 0.956 | 4.19 | 0.40 |
+| combo | rhat | ess | div | ppc_pin | pinned | skew p | mae | rmse | cov95 | crps | k_max |
+|-------|------|-----|-----|---------|--------|--------|-----|------|-------|------|-------|
+| `studentt` | 1.01 | **819** | 0 | **3** | max,q50,q90 | **0.99** | **5.64** | **8.27** | 0.957 | **4.19** | **0.55** |
+| `skew_normal` | 1.04 | 123 | 1 | 5 | mean,skewness,max,q10,q50 | **1.00** | 6.48 | 8.94 | 0.974 | 4.56 | — |
+| `split_normal` | 1.02 | 206 | 0 | 6 | mean,skewness,min,max,q10,q50 | **1.00** | 6.22 | 8.62 | 0.965 | 4.42 | 15.45 |
 
-**Success signal:** discretization should move `q50`/`q90` off the pins (interior
-p-values); `skew_normal` / `split_normal` should reduce the `skewness` pin
-*without* the `skew_studentt` `max` blow-up. The result is documented honestly
-either way — these are candidates under test, not a foregone adoption. (The GPU
-bake-off over the new combos is the remaining compute-bound step; the harness and
-the synthetic check, `scripts/experiment_likelihood_ppc.py` with the new families
-in its `FAMILIES`, run anywhere.)
+**Neither skew-light family helps.** The whole point of the second wave was to
+move the `skewness` PPC p-value off Student-t's 0.99 pin. Both candidates pin it
+*harder* — `skew_normal` and `split_normal` each land at exactly **1.00** and
+newly trip `skewness` as an extreme statistic (Student-t's 0.99 sits just under
+the >0.99 flag). They also pin *more* statistics overall (5 and 6 vs 3), mix worse
+(bulk ESS 123 / 206 vs 819), cost ~0.6–0.8 MAE, and — for `split_normal` — break
+LOO (Pareto-k 15.45). The learned skewness parameter does not relieve the
+left-skew misspecification on these bounded, integer scores; it concentrates the
+upper cluster and sharpens the pins, mirroring what `beta` did in the first wave.
+
+**Discretization diverges.** The `+discretize` combos are excluded from the table
+above because the interval-censored integer likelihood produces a pathological
+geometry: `studentt+discretize` posts 1000/1000 divergences (R-hat 3.05, MAE 47),
+`skew_normal+discretize` an R-hat of ~1.4e7. The tail log-difference
+`log(F(k+0.5) − F(k−0.5))` underflows and its gradient goes flat, and the
+`betainc`-based Student-t CDF compounds it. Tracked as
+[#4](https://github.com/cupidthatbtc/panelcast/issues/4) (log-space CDF / Student-t
+JVP, or switch to dequantization). The cheap, universal half — rounding `y_rep` in
+the PPC — is unaffected and stays on.
+
+**Verdict: `studentt` remains the default.** Across both waves (`beta`,
+`skew_normal`, `split_normal`, `discretize`) no implemented candidate moves the
+`skewness`/`max` pins toward the interior; every one trades worse convergence or
+point accuracy for the same or sharper pins. The bounded-skew misspecification is
+confirmed and remains an open limitation, now with the deferred candidates below
+(Beta-Binomial, mixture) as the next levers to try.
 
 ## Deferred candidates
 
