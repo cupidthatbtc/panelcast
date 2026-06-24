@@ -21,6 +21,9 @@ jobs:
       - name: Run linting
         run: pixi run lint
 
+      - name: Type-check boundary modules
+        run: pixi run typecheck
+
   test-fast:
     runs-on: ubuntu-latest
     needs: lint
