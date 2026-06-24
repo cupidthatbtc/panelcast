@@ -8,16 +8,20 @@
 [![pixi](https://img.shields.io/badge/pixi-package%20manager-brightgreen)](https://pixi.sh)
 ![Status: experimental](https://img.shields.io/badge/status-experimental-orange)
 
-> **⚠️ Experimental — infrastructure ahead of the demonstrated result.**
+> **⚠️ Experimental — real-data validated on a subset; full corpus pending.**
 >
 > The reproducibility, diagnostics, and domain-portability scaffolding is the
-> finished part. The headline *statistical* result is **not** yet established:
-> the documented model card is from a validation-scale run that **fails the
-> convergence gate**, and its posterior-predictive p-values are pinned at the
-> extremes by a symmetric-likelihood / left-skewed-target mismatch (see
-> [`MODEL_CARD.md`](MODEL_CARD.md)). Baseline comparisons and a skew/bounded
-> likelihood are in progress. Treat all reported numbers as indicative until
-> the full publication run (`configs/publication.yaml`) passes its gates.
+> finished part. The headline *statistical* result is now **partially
+> established on real data**: on a representative ~800-artist / ~5k-album AOTY
+> subset (skewness −2.08), the model **passes the convergence gate** at the
+> publication configuration (R-hat 1.00, bulk ESS 3,504, 0 divergences), and
+> the baseline benchmark runs on the same real splits. Still open: the
+> posterior-predictive p-values stay pinned at the extremes by a
+> symmetric-likelihood / left-skewed-target mismatch (a bounded-Beta candidate
+> was tested on real data and **rejected**), and this is a subset, not the full
+> ~62k-album corpus. See [`MODEL_CARD.md`](MODEL_CARD.md) and
+> [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md). Treat the
+> subset numbers as real but not final.
 
 **Hierarchical Bayesian prediction for bounded scores of events nested in entities over time — configured by one YAML descriptor.**
 

@@ -60,15 +60,17 @@ latent_process: rw
 debut_prev_score_source: train_mean
 likelihood_df: 4.0
 
-# Likelihood family. The symmetric Student-t pins the bounded/skew PPC
-# statistics (sd, skewness, q50, q90, max). The bounded mean-precision `beta`
-# likelihood is the leading candidate fix: in the controlled synthetic
-# experiment (scripts/experiment_likelihood_ppc.py; docs/LIKELIHOOD_CANDIDATES.md)
-# it mixed well (R-hat <= 1.02) and bounds predictions to the score range by
-# construction, while `skew_studentt` over-skewed and is held. The definitive
-# choice still needs the real AOTY data at this scale; flip to `studentt` for
-# the symmetric-likelihood baseline run.
-likelihood_family: beta
+# Likelihood family. The symmetric Student-t pins a few bounded/skew PPC
+# statistics (skewness, max, q50, q90), so the bounded mean-precision `beta`
+# likelihood was the leading candidate fix — it won the controlled *synthetic*
+# experiment (scripts/experiment_likelihood_ppc.py). That synthetic edge did
+# NOT survive the real data: on the ~800-artist / ~5k-album AOTY subset (skew
+# -2.08, diagnostic 4x1000), beta pinned MORE PPC statistics than Student-t
+# (skewness, min, max, q10, q50, q90 vs skewness, max, q50, q90), mixed worse
+# (bulk ESS 304 vs 795, 1 divergence vs 0) and produced an unreliable LOO (35
+# Pareto-k > 0.7 vs 0). Student-t is the honest default; `beta` stays available
+# via --likelihood-family but is not adopted. See docs/LIKELIHOOD_CANDIDATES.md.
+likelihood_family: studentt
 
 # Data/evaluation settings (defaults, restated for provenance)
 min_ratings: 10
