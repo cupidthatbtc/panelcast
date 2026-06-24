@@ -106,6 +106,7 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "n_exponent_prior": _spec("n_exponent_prior", "n_exponent_prior"),
     # Likelihood / model gates
     "likelihood_df": _spec("likelihood_df", "likelihood_df"),
+    "likelihood_family": _spec("likelihood_family", "likelihood_family"),
     "debut_prev_score_source": _spec("debut_prev_score_source", "debut_prev_score_source"),
     "target_transform": _spec("target_transform", "target_transform"),
     "logit_offset": _spec("logit_offset", None),

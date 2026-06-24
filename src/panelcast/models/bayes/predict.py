@@ -265,6 +265,8 @@ def predict_new_artist(
     target_transform: str = "identity",
     logit_offset: float = 0.5,
     ar_center: float = 0.0,
+    likelihood_family: str = "studentt",
+    skew_tailweight: float = 1.0,
 ) -> dict[str, jnp.ndarray]:
     """Predict for unseen artist using population distribution.
 
@@ -382,6 +384,9 @@ def predict_new_artist(
     beta = posterior_samples[f"{prefix}beta"]
     rho = posterior_samples[f"{prefix}rho"]
     sigma_obs = posterior_samples[f"{prefix}sigma_obs"]
+    # Family-specific global params (present only for the matching family).
+    skewness_samples = posterior_samples.get(f"{prefix}skewness")
+    phi_samples = posterior_samples.get(f"{prefix}phi")
 
     n_samples = mu_artist.shape[0]
 
@@ -409,6 +414,10 @@ def predict_new_artist(
         beta = beta[indices]
         rho = rho[indices]
         sigma_obs = sigma_obs[indices]
+        if skewness_samples is not None:
+            skewness_samples = skewness_samples[indices]
+        if phi_samples is not None:
+            phi_samples = phi_samples[indices]
         # Handle exponent samples based on learned vs fixed mode
         if has_learned_exponent:
             n_exponent_samples = posterior_samples[f"{prefix}n_exponent"]
@@ -500,20 +509,45 @@ def predict_new_artist(
             f"to mu_pred shape {mu_pred.shape}"
         )
 
-    # Sample from the observation distribution. The likelihood is StudentT
-    # for df < 100 — drawing Normal noise here would understate predictive
-    # spread by sqrt(df/(df-2)) (~41% in SD at df=4) and shrink cold-start
-    # intervals. df >= 100 is treated as the Normal limit.
+    # Sample from the observation distribution, dispatching on the likelihood
+    # family the model was trained under. The symmetric families (studentt /
+    # normal) draw on the model scale and back-transform; skew_studentt skews
+    # the StudentT base via sinh-arcsinh; beta draws a bounded Beta on the score
+    # bounds directly (so no back-transform of the draws is needed).
     rng_key, subkey = random.split(rng_key)
-    if likelihood_df >= 100:
-        noise = random.normal(subkey, mu_pred.shape)
+    low, high = float(target_bounds[0]), float(target_bounds[1])
+    span = high - low
+    if likelihood_family == "beta":
+        if phi_samples is None:
+            raise ValueError(
+                f"beta likelihood requires '{prefix}phi' in posterior_samples; "
+                "the model must have been trained with --likelihood-family beta."
+            )
+        eps = 1e-3
+        mu01 = jnp.clip((mu_pred - low) / span, eps, 1.0 - eps)
+        phi = phi_samples[:, None]
+        beta01 = random.beta(subkey, mu01 * phi, (1.0 - mu01) * phi)
+        y_pred = low + span * beta01
+        mu_pred = transform.inverse(mu_pred)
     else:
-        noise = random.t(subkey, likelihood_df, mu_pred.shape)
-    y_pred = mu_pred + sigma_scaled * noise
-
-    # Back-transform draws and locations to the score scale (identity: no-op).
-    y_pred = transform.inverse(y_pred)
-    mu_pred = transform.inverse(mu_pred)
+        if likelihood_df >= 100:
+            base_noise = random.normal(subkey, mu_pred.shape)
+        else:
+            # Student-t for df < 100 — drawing Normal noise would understate
+            # predictive spread by sqrt(df/(df-2)) (~41% in SD at df=4).
+            base_noise = random.t(subkey, likelihood_df, mu_pred.shape)
+        if likelihood_family == "skew_studentt":
+            if skewness_samples is None:
+                raise ValueError(
+                    f"skew_studentt likelihood requires '{prefix}skewness' in "
+                    "posterior_samples; train with --likelihood-family skew_studentt."
+                )
+            skew = skewness_samples[:, None]
+            base_noise = jnp.sinh((jnp.arcsinh(base_noise) + skew) * skew_tailweight)
+        y_pred = mu_pred + sigma_scaled * base_noise
+        # Back-transform draws and locations to the score scale (identity: no-op).
+        y_pred = transform.inverse(y_pred)
+        mu_pred = transform.inverse(mu_pred)
 
     # Squeeze if single album
     if single_album:

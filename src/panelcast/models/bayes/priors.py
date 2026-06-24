@@ -119,9 +119,27 @@ class PriorConfig:
     target_transform: str = "identity"
     # Half-count continuity offset for the offset-logit transform.
     logit_offset: float = 0.5
-    # Likelihood family: "studentt" (df from likelihood_df; df>=100 behaves
-    # as Normal) or "normal" (explicit Gaussian likelihood).
+    # Likelihood family. "studentt" (df from likelihood_df; df>=100 behaves as
+    # Normal) and "normal" are symmetric. The skew/bounded candidates target the
+    # left-skewed, bounded score distribution:
+    #   "skew_studentt" — a sinh-arcsinh skew-t: StudentT(df) pushed through a
+    #     sinh-arcsinh transform with a learned skewness, then located/scaled.
+    #   "beta" — the score rescaled to (0, 1) via target_bounds (boundary
+    #     squeeze) and modeled with a mean-precision Beta, affine-mapped back to
+    #     the score scale so {prefix}y stays on the natural scale.
     likelihood_family: str = "studentt"
+    # skew_studentt: skewness prior (sinh-arcsinh epsilon) and the fixed tail
+    # weight delta (1.0 = pure skew, no extra kurtosis beyond the StudentT base).
+    skew_loc: float = 0.0
+    skew_scale: float = 0.5
+    skew_tailweight: float = 1.0
+    # beta: Gamma(concentration, rate) prior on the Beta precision phi. The
+    # default Gamma(2, 0.1) has mean 20 (moderate precision on the (0,1) scale).
+    beta_precision_concentration: float = 2.0
+    beta_precision_rate: float = 0.1
+    # Boundary squeeze: observed scores are clamped this far inside the bounds so
+    # exact-boundary observations have finite Beta density.
+    beta_boundary_eps: float = 1e-3
     # AR(1) centering mode: "global" (default) subtracts the training-mean
     # prev_score so debut AR terms are exactly zero and rho decorrelates
     # from mu_artist; "none" is the legacy uncentered form; "artist_running"

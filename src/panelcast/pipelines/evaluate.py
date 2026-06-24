@@ -522,6 +522,7 @@ def _run_new_artist_predictive(
         "seed": seed,
         "target_bounds": _summary_dataset(summary)["target_bounds"],
         "likelihood_df": float(summary.get("likelihood_df", 4.0)),
+        "likelihood_family": summary.get("likelihood_family") or "studentt",
         "target_transform": summary.get("target_transform") or "identity",
         "logit_offset": float(summary.get("logit_offset") or 0.5),
         "ar_center": _ar_center_from_summary(summary),

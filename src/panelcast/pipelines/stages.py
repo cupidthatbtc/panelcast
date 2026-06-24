@@ -100,6 +100,8 @@ class StageContext:
     n_exponent_prior: str = "logit-normal"
     # Likelihood configuration
     likelihood_df: float = 4.0
+    # Likelihood family: "studentt" (legacy) | "normal" | "skew_studentt" | "beta"
+    likelihood_family: str = "studentt"
     # Debut prev_score fill source: "train_mean" | "dataset_stats" (legacy)
     debut_prev_score_source: str = "train_mean"
     # Target transform gate: "identity" (legacy) | "offset_logit"

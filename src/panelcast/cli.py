@@ -313,6 +313,15 @@ def run(
             ),
         ),
     ] = 4.0,
+    likelihood_family: str = typer.Option(
+        "studentt",
+        "--likelihood-family",
+        help=(
+            "Observation likelihood: 'studentt' (default) or 'normal' (symmetric), "
+            "or the skew/bounded candidates 'skew_studentt' (sinh-arcsinh skew-t) "
+            "and 'beta' (bounded mean-precision Beta on the score bounds)."
+        ),
+    ),
     val_albums: Annotated[
         int,
         typer.Option(
@@ -470,6 +479,15 @@ def run(
         typer.echo(
             f"Error: Invalid --n-exponent-prior '{n_exponent_prior}'. "
             f"Must be one of: {', '.join(valid_priors)}"
+        )
+        raise typer.Exit(code=1)
+
+    # Validate likelihood_family
+    valid_families = ("studentt", "normal", "skew_studentt", "beta")
+    if likelihood_family not in valid_families:
+        typer.echo(
+            f"Error: Invalid --likelihood-family '{likelihood_family}'. "
+            f"Must be one of: {', '.join(valid_families)}"
         )
         raise typer.Exit(code=1)
     chain_method = chain_method_normalized  # Use normalized value downstream
@@ -703,6 +721,7 @@ def run(
         n_exponent_beta=n_exponent_beta,
         n_exponent_prior=n_exponent_prior,
         likelihood_df=likelihood_df,
+        likelihood_family=likelihood_family,
         val_albums=val_albums,
         min_train_albums=min_train_albums,
         calibration_intervals=calibration_levels,

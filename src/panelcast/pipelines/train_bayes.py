@@ -656,6 +656,7 @@ def train_models(
         sigma_obs_prior_type=str(getattr(ctx, "sigma_obs_prior_type", "halfnormal")),
         heteroscedastic_entity_obs=bool(getattr(ctx, "heteroscedastic_entity_obs", False)),
         tau_entity_scale=float(getattr(ctx, "tau_entity_scale", 0.25)),
+        likelihood_family=str(getattr(ctx, "likelihood_family", "studentt")),
     )
 
     priors = locate_level_prior(
@@ -983,6 +984,7 @@ def train_models(
     # Raw-scale centering value; consumers re-apply the target transform.
     # The mode that produced it lives in priors.ar_center.
     summary["ar_center_value"] = ar_center_value
+    summary["likelihood_family"] = str(getattr(ctx, "likelihood_family", "studentt"))
     summary = TrainingSummary(**summary).to_json_dict()
 
     summary_path = model_dir / "training_summary.json"

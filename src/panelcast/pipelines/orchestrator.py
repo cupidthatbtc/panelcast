@@ -150,6 +150,9 @@ class PipelineConfig:
     n_exponent_prior: str = "logit-normal"
     # Likelihood configuration
     likelihood_df: float = 4.0
+    # Likelihood family gate: "studentt" (legacy) | "normal" | "skew_studentt"
+    # (sinh-arcsinh skew-t) | "beta" (bounded mean-precision Beta on [low, high]).
+    likelihood_family: str = "studentt"
     # Debut prev_score fill source: "train_mean" | "dataset_stats" (legacy)
     debut_prev_score_source: str = "train_mean"
     # Target transform gate: "identity" (legacy) | "offset_logit"
@@ -215,6 +218,11 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid target_transform: '{self.target_transform}'. "
                 "Must be 'identity' or 'offset_logit'."
+            )
+        if self.likelihood_family not in ("studentt", "normal", "skew_studentt", "beta"):
+            raise ValueError(
+                f"Invalid likelihood_family: '{self.likelihood_family}'. "
+                "Must be 'studentt', 'normal', 'skew_studentt', or 'beta'."
             )
         if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
             raise ValueError(
@@ -465,6 +473,7 @@ class PipelineOrchestrator:
                 "n_exponent_beta": self.config.n_exponent_beta,
                 "n_exponent_prior": self.config.n_exponent_prior,
                 "likelihood_df": self.config.likelihood_df,
+                "likelihood_family": self.config.likelihood_family,
                 "debut_prev_score_source": self.config.debut_prev_score_source,
                 "target_transform": self.config.target_transform,
                 "logit_offset": self.config.logit_offset,
@@ -514,6 +523,7 @@ class PipelineOrchestrator:
         "n_exponent_alpha",
         "n_exponent_beta",
         "likelihood_df",
+        "likelihood_family",
         "debut_prev_score_source",
         "target_transform",
         "logit_offset",
@@ -708,6 +718,8 @@ class PipelineOrchestrator:
                     parts.append(f"--n-exponent-beta {self.config.n_exponent_beta}")
         if self.config.likelihood_df != defaults.likelihood_df:
             parts.append(f"--likelihood-df {self.config.likelihood_df}")
+        if self.config.likelihood_family != defaults.likelihood_family:
+            parts.append(f"--likelihood-family {self.config.likelihood_family}")
         if self.config.calibration_intervals != defaults.calibration_intervals:
             interval_str = ",".join(f"{p:.4g}" for p in self.config.calibration_intervals)
             parts.append(f"--calibration-intervals {interval_str}")
@@ -836,6 +848,7 @@ class PipelineOrchestrator:
             n_exponent_beta=self.config.n_exponent_beta,
             n_exponent_prior=self.config.n_exponent_prior,
             likelihood_df=self.config.likelihood_df,
+            likelihood_family=self.config.likelihood_family,
             debut_prev_score_source=self.config.debut_prev_score_source,
             target_transform=self.config.target_transform,
             logit_offset=self.config.logit_offset,
