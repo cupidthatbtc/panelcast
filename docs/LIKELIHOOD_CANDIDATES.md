@@ -175,15 +175,32 @@ LOO (Pareto-k 15.45). The learned skewness parameter does not relieve the
 left-skew misspecification on these bounded, integer scores; it concentrates the
 upper cluster and sharpens the pins, mirroring what `beta` did in the first wave.
 
-**Discretization diverges.** The `+discretize` combos are excluded from the table
-above because the interval-censored integer likelihood produces a pathological
-geometry: `studentt+discretize` posts 1000/1000 divergences (R-hat 3.05, MAE 47),
-`skew_normal+discretize` an R-hat of ~1.4e7. The tail log-difference
-`log(F(k+0.5) − F(k−0.5))` underflows and its gradient goes flat, and the
-`betainc`-based Student-t CDF compounds it. Tracked as
-[#4](https://github.com/cupidthatbtc/panelcast/issues/4) (log-space CDF / Student-t
-JVP, or switch to dequantization). The cheap, universal half — rounding `y_rep` in
-the PPC — is unaffected and stays on.
+**Dequantization fixes the toggle ([#4](https://github.com/cupidthatbtc/panelcast/issues/4)).**
+The interval-censored `log(F(k+0.5) − F(k−0.5))` underflowed to a flat-gradient
+cliff — `studentt+discretize` posted 1000/1000 divergences (R-hat 3.05, MAE 47),
+`skew_normal+discretize` an R-hat of ~1.4e7. It is replaced by **dequantization**:
+condition the continuous base on `y + u`, `u ~ Uniform(−0.5, 0.5)` a single fixed
+jitter, and round on generation (the marginalized interval-CDF stays dormant
+behind `_DISCRETIZE_MODE`). The `+discretize` combos now run (fresh diagnostic
+4×1000; splits regenerated, so the Student-t baseline recomputes to ESS 779 / 4
+pins — within sampling noise of the published run, same integer-quantile pins):
+
+| combo | rhat | ess | div | ppc_pin | pinned | mae | rmse | cov95 | crps | k_max |
+|-------|------|-----|-----|---------|--------|-----|------|-------|------|-------|
+| `studentt` | 1.01 | 779 | 0 | 4 | skewness,max,q50,q90 | 5.64 | 8.27 | 0.957 | 4.19 | 0.67 |
+| `studentt+discretize` | 1.01 | 753 | **0** | **3** | skewness,max,q90 | **5.64** | 8.28 | 0.957 | 4.20 | 0.61 |
+| `skew_normal+discretize` | 1.03 | 86 | 0 | 6 | mean,skewness,max,q10,q50,q90 | 6.46 | 8.92 | 0.975 | 4.55 | — |
+| `split_normal+discretize` | 1.02 | 191 | 0 | 7 | mean,skewness,min,max,q10,q50,q90 | 6.21 | 8.61 | 0.969 | 4.42 | 15.91 |
+
+The numerics pathology is gone — **0 divergences** everywhere, R-hat ≤ 1.03, finite
+gradients (a `jax.grad` finiteness test guards the tails). And on `studentt` the
+median integer-heaping pin is relieved: **q50's p-value moves 0.009 → 0.082** (off
+the extreme list) and q10 0.062 → 0.167. But `q90` (1.00), `max` (1.00) and
+`skewness` (0.99) do not budge — they are the bounded left-skew misspecification,
+not an integer-grid artifact, so dequantization cannot touch them. The skew
+families re-pin everything (6–7 stats) at worse MAE/ESS, mirroring their continuous
+behavior. So heaping drives `q50` specifically (hypothesis confirmed there); the
+residual pins remain the deferred candidates' (Beta-Binomial, mixture) target.
 
 **Verdict: `studentt` remains the default.** Across both waves (`beta`,
 `skew_normal`, `split_normal`, `discretize`) no implemented candidate moves the
