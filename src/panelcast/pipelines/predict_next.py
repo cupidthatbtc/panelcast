@@ -40,6 +40,13 @@ log = structlog.get_logger()
 SCENARIOS_KNOWN = ["same", "population_mean", "artist_mean"]
 SCENARIOS_NEW = ["population", "debut_defaults"]
 
+# Generic (entity/event) artifact schema. The pipeline writes generic-named
+# artifacts as the canonical output and keeps the legacy AOTY-flavored names as
+# byte-identical copies for one release (dual-write, then deprecate). These maps
+# translate the internal legacy column/scenario names to the generic ones.
+_ENTITY_COLUMN_RENAME = {"artist": "entity", "n_training_albums": "n_training_events"}
+_ENTITY_SCENARIO_RENAME = {"artist_mean": "entity_mean"}
+
 
 def _extract_posterior_samples(idata: object) -> dict[str, jnp.ndarray]:
     """Backward-compatible wrapper for public posterior extraction helper."""
@@ -497,6 +504,18 @@ def predict_next_albums(ctx: StageContext) -> dict:
     output_dir = Path("outputs/predictions")
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Canonical generic-named artifacts (entity/event schema).
+    known_entity_df = known_df.rename(columns=_ENTITY_COLUMN_RENAME)
+    if "scenario" in known_entity_df.columns:
+        known_entity_df["scenario"] = known_entity_df["scenario"].replace(
+            _ENTITY_SCENARIO_RENAME
+        )
+    new_entity_df = new_df.rename(columns=_ENTITY_COLUMN_RENAME)
+    known_entity_df.to_csv(output_dir / "next_event_known_entities.csv", index=False)
+    new_entity_df.to_csv(output_dir / "next_event_new_entity.csv", index=False)
+
+    # Legacy AOTY-named copies, kept byte-identical for one release so existing
+    # consumers (publication tables, fan charts) keep working. Deprecate later.
     known_df.to_csv(output_dir / "next_album_known_artists.csv", index=False)
     new_df.to_csv(output_dir / "next_album_new_artist.csv", index=False)
 
@@ -564,8 +583,12 @@ def predict_next_albums(ctx: StageContext) -> dict:
     )
 
     return {
-        "known_predictions_path": str(output_dir / "next_album_known_artists.csv"),
-        "new_predictions_path": str(output_dir / "next_album_new_artist.csv"),
+        # Canonical generic-named artifacts.
+        "known_predictions_path": str(output_dir / "next_event_known_entities.csv"),
+        "new_predictions_path": str(output_dir / "next_event_new_entity.csv"),
+        # Legacy AOTY-named copies (dual-written for one release).
+        "known_predictions_legacy_path": str(output_dir / "next_album_known_artists.csv"),
+        "new_predictions_legacy_path": str(output_dir / "next_album_new_artist.csv"),
         "summary_path": str(output_dir / "prediction_summary.json"),
         "pred_summary": pred_summary,
     }

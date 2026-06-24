@@ -723,6 +723,13 @@ class TestPredictNextAlbums:
         assert isinstance(result, dict)
         assert "known_predictions_path" in result
         assert "new_predictions_path" in result
+        # Canonical paths now point at the generic-named artifacts.
+        assert result["known_predictions_path"].endswith("next_event_known_entities.csv")
+        assert result["new_predictions_path"].endswith("next_event_new_entity.csv")
+        # Legacy AOTY-named copies are still exposed for one release.
+        assert "known_predictions_legacy_path" in result
+        assert "new_predictions_legacy_path" in result
+        assert result["known_predictions_legacy_path"].endswith("next_album_known_artists.csv")
         assert "summary_path" in result
         assert "pred_summary" in result
 

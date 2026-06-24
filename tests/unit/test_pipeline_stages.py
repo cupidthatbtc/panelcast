@@ -324,6 +324,10 @@ class TestPipelineStages:
         assert "manifest.json" in input_names
         assert "training_summary.json" in input_names
         output_names = [p.name for p in predict_stage.output_paths]
+        # Canonical generic-named artifacts.
+        assert "next_event_known_entities.csv" in output_names
+        assert "next_event_new_entity.csv" in output_names
+        # Legacy AOTY-named copies, dual-written for one release.
         assert "next_album_known_artists.csv" in output_names
         assert "next_album_new_artist.csv" in output_names
         assert "prediction_summary.json" in output_names
