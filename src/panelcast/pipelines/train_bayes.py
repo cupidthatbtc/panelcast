@@ -364,7 +364,9 @@ def prepare_model_data(
         album_seq = album_seq[valid_mask]
         prev_score = prev_score[valid_mask]
         if np.ndim(ar_center_arr) > 0:
-            ar_center_arr = ar_center_arr[valid_mask]
+            # np.asarray is a no-op for the array branch (ndim > 0 here) but tells
+            # the type checker the value is indexable (mypy can't narrow on np.ndim).
+            ar_center_arr = np.asarray(ar_center_arr)[valid_mask]
 
     # Cast to int32 AFTER filtering (NaN-free at this point)
     n_reviews = n_reviews_raw.astype(np.int32)
