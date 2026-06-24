@@ -170,12 +170,15 @@ Two heavier candidates are deferred for follow-up (tracked as GitHub issues)
 rather than implemented now; the registry makes each a single new
 `LikelihoodSpec`:
 
-- **Beta-Binomial / aggregated-ratings likelihood** — model `User_Score` as the
-  mean of `n = User_Ratings` discrete ratings, so bounded support, left skew, and
-  n-dependent noise fall out of one generative story (`n_reviews` is already
-  threaded into `sample_obs`).
-- **Two-component mixture** — a dense 65–85 cluster plus a thin flop tail
-  (`MixtureSameFamily` with ordering/label-switching handling).
+- **Beta-Binomial / aggregated-ratings likelihood**
+  ([#2](https://github.com/cupidthatbtc/panelcast/issues/2)) — model `User_Score`
+  as the mean of `n = User_Ratings` discrete ratings, so bounded support, left
+  skew, and n-dependent noise fall out of one generative story (`n_reviews` is
+  already threaded into `sample_obs`).
+- **Two-component mixture**
+  ([#3](https://github.com/cupidthatbtc/panelcast/issues/3)) — a dense 65–85
+  cluster plus a thin flop tail (`MixtureSameFamily` with ordering/label-switching
+  handling).
 
 ## Adopting a candidate
 
