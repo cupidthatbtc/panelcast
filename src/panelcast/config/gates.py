@@ -1,0 +1,32 @@
+"""Literal type aliases for the pipeline's string-valued model gates.
+
+These name the closed sets of values that the ``PipelineConfig`` gates accept,
+so a typo (``"identiy"``) is a type error at the boundary rather than a runtime
+``ValueError`` deep in a fit. Runtime validation still lives in
+``PipelineConfig.__post_init__`` / the model factories — these are the
+type-checker's view of the same contract.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+TargetTransform = Literal["identity", "offset_logit"]
+LatentProcess = Literal["rw", "ar1"]
+SigmaObsPriorType = Literal["halfnormal", "lognormal"]
+ArCenter = Literal["global", "none", "artist_running"]
+DebutPrevScoreSource = Literal["train_mean", "dataset_stats"]
+NExponentPrior = Literal["logit-normal", "beta"]
+LikelihoodFamily = Literal["studentt", "normal", "skew_studentt", "beta"]
+ChainMethod = Literal["sequential", "vectorized", "parallel"]
+
+__all__ = [
+    "TargetTransform",
+    "LatentProcess",
+    "SigmaObsPriorType",
+    "ArCenter",
+    "DebutPrevScoreSource",
+    "NExponentPrior",
+    "LikelihoodFamily",
+    "ChainMethod",
+]

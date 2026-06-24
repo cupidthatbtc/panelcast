@@ -4,11 +4,35 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict
 
 import pandas as pd
 
 from panelcast.data.split_types import SplitType, resolve_split_type
+
+
+class SourceDataset(TypedDict):
+    """The source-dataset provenance block of a split manifest."""
+
+    path: str
+    sha256: str
+    row_count: int
+    unique_artists: int
+
+
+class SplitParameters(TypedDict, total=False):
+    """Split parameters. The keys present depend on the split type.
+
+    within-entity temporal: ``test_albums`` / ``val_albums`` / ``min_train_albums``.
+    entity-disjoint: ``test_size`` / ``val_size`` / ``random_state``.
+    """
+
+    test_albums: int
+    val_albums: int
+    min_train_albums: int
+    test_size: float
+    val_size: float
+    random_state: int
 
 
 @dataclass
@@ -40,8 +64,8 @@ class SplitManifest:
     version: str
     created_at: str
     split_type: str  # SplitType value; legacy literals are resolved on load
-    parameters: dict[str, Any]
-    source_dataset: dict[str, Any]  # path, sha256, row_count, unique_artists
+    parameters: SplitParameters
+    source_dataset: SourceDataset
     splits: dict[str, SplitStats]  # train, validation, test stats
     assignments: list[SplitAssignment] = field(default_factory=list)
     content_hash: str = ""  # Combined hash of all splits

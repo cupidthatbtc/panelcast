@@ -15,7 +15,7 @@ Key concepts:
 """
 
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, TypedDict
 
 import jax.numpy as jnp
 from jax import random
@@ -26,11 +26,26 @@ from panelcast.models.bayes.transforms import get_transform
 
 __all__ = [
     "PredictionResult",
+    "NewArtistPrediction",
     "extract_posterior_samples",
     "generate_posterior_predictive",
     "predict_out_of_sample",
     "predict_new_artist",
 ]
+
+
+class NewArtistPrediction(TypedDict):
+    """Schema of the :func:`predict_new_artist` result dict.
+
+    All arrays share the prediction shape: ``(n_samples,)`` for a single event
+    or ``(n_samples, n_events)`` for several, except ``artist_effect`` which is
+    always ``(n_samples,)`` (one sampled population effect per posterior draw).
+    """
+
+    y: jnp.ndarray  # posterior predictive draws (with observation noise)
+    mu: jnp.ndarray  # mean predictions (no observation noise)
+    artist_effect: jnp.ndarray  # sampled population effects, (n_samples,)
+    sigma_scaled: jnp.ndarray  # per-observation noise scale
 
 
 @dataclass
@@ -267,7 +282,7 @@ def predict_new_artist(
     ar_center: float = 0.0,
     likelihood_family: str = "studentt",
     skew_tailweight: float = 1.0,
-) -> dict[str, jnp.ndarray]:
+) -> NewArtistPrediction:
     """Predict for unseen artist using population distribution.
 
     For artists NOT seen during training, we cannot use their fitted artist
@@ -424,6 +439,7 @@ def predict_new_artist(
             n_exponent_samples = n_exponent_samples[indices]
         elif has_fixed_exponent:
             # Create constant array matching subsampled sample count
+            assert fixed_n_exponent is not None  # implied by has_fixed_exponent
             n_exponent_samples = jnp.full((n_predictions,), fixed_n_exponent)
         else:
             n_exponent_samples = None
@@ -436,6 +452,7 @@ def predict_new_artist(
             n_exponent_samples = posterior_samples[f"{prefix}n_exponent"]
         elif has_fixed_exponent:
             # Create constant array matching full sample count
+            assert fixed_n_exponent is not None  # implied by has_fixed_exponent
             n_exponent_samples = jnp.full((n_samples,), fixed_n_exponent)
         else:
             n_exponent_samples = None

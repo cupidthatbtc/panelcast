@@ -32,6 +32,16 @@ from rich.progress import (
 )
 
 from panelcast.config.descriptor import load_descriptor, resolve_descriptor_path
+from panelcast.config.gates import (
+    ArCenter,
+    ChainMethod,
+    DebutPrevScoreSource,
+    LatentProcess,
+    LikelihoodFamily,
+    NExponentPrior,
+    SigmaObsPriorType,
+    TargetTransform,
+)
 from panelcast.pipelines.errors import (
     ConvergenceError,
     EnvironmentError,
@@ -130,7 +140,7 @@ class PipelineConfig:
     num_warmup: int = 1000
     target_accept: float = 0.90
     max_tree_depth: int = 10
-    chain_method: str = "sequential"
+    chain_method: ChainMethod = "sequential"
     # Convergence thresholds
     rhat_threshold: float = 1.01
     ess_threshold: int = 400
@@ -147,24 +157,24 @@ class PipelineConfig:
     learn_n_exponent: bool = False
     n_exponent_alpha: float = 2.0
     n_exponent_beta: float = 4.0
-    n_exponent_prior: str = "logit-normal"
+    n_exponent_prior: NExponentPrior = "logit-normal"
     # Likelihood configuration
     likelihood_df: float = 4.0
     # Likelihood family gate: "studentt" (legacy) | "normal" | "skew_studentt"
     # (sinh-arcsinh skew-t) | "beta" (bounded mean-precision Beta on [low, high]).
-    likelihood_family: str = "studentt"
+    likelihood_family: LikelihoodFamily = "studentt"
     # Debut prev_score fill source: "train_mean" | "dataset_stats" (legacy)
-    debut_prev_score_source: str = "train_mean"
+    debut_prev_score_source: DebutPrevScoreSource = "train_mean"
     # Target transform gate: "identity" (legacy) | "offset_logit"
-    target_transform: str = "identity"
+    target_transform: TargetTransform = "identity"
     logit_offset: float = 0.5
     # AR(1) centering gate: "global" | "none" (legacy) | "artist_running"
-    ar_center: str = "global"
+    ar_center: ArCenter = "global"
     # Latent artist-effect process gate: "rw" (legacy) | "ar1" (experimental)
-    latent_process: str = "rw"
+    latent_process: LatentProcess = "rw"
     # sigma_obs prior family gate: "halfnormal" (legacy default) | "lognormal"
     # (removes the zero-boundary pile-up behind the econ variance-collapse).
-    sigma_obs_prior_type: str = "halfnormal"
+    sigma_obs_prior_type: SigmaObsPriorType = "halfnormal"
     # Entity-level observation overdispersion gate: False (legacy default,
     # bit-identical RNG path) | True (per-entity multiplicative noise inflation
     # widening intervals for noisy series). tau_entity_scale sets the prior
