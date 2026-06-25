@@ -688,6 +688,7 @@ def _evaluate_predictions(
     calibration_intervals: tuple[float, ...],
     coverage_tolerance: float,
     prediction_interval: float,
+    discretize: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Compute metrics and export payloads for one split."""
     y_pred_mean = np.mean(y_pred_samples, axis=0)
@@ -727,8 +728,9 @@ def _evaluate_predictions(
     )
     wis_value = float(wis_result.wis)
 
-    # Posterior predictive checks
-    ppc_result = compute_ppc_statistics(y_true, y_pred_samples)
+    # Round y_true to match the integer y_rep so the PPC compares on one grid.
+    ppc_y_true = np.round(y_true) if discretize else y_true
+    ppc_result = compute_ppc_statistics(ppc_y_true, y_pred_samples)
     ppc_payload = {
         "summary": ppc_result.summary,
         "n_samples": ppc_result.n_samples,
@@ -1008,12 +1010,14 @@ def evaluate_models(ctx: StageContext) -> dict:
     transform = _transform_from_summary(summary)
     if transform.name != "identity":
         primary_y_samples = np.asarray(transform.inverse(primary_y_samples))
+    discretize_obs = bool(summary.get("discretize_observation", False))
     primary_metrics, primary_predictions, primary_calibration = _evaluate_predictions(
         primary_y_true,
         primary_y_samples,
         calibration_intervals=intervals,
         coverage_tolerance=ctx.coverage_tolerance,
         prediction_interval=ctx.prediction_interval,
+        discretize=discretize_obs,
     )
     try:
         # Log-likelihood must be evaluated on the model scale; the ELPDs are
@@ -1124,6 +1128,7 @@ def evaluate_models(ctx: StageContext) -> dict:
                 calibration_intervals=intervals,
                 coverage_tolerance=ctx.coverage_tolerance,
                 prediction_interval=ctx.prediction_interval,
+                discretize=discretize_obs,
             )
             split_results[SECONDARY_SPLIT] = {
                 **secondary_metrics,

@@ -433,10 +433,11 @@ def run(
         False,
         "--discretize-observation",
         help=(
-            "Interval-censor the observation to integers: integer k contributes "
-            "log(F(k+0.5)-F(k-0.5)) and replicated draws are rounded (honest PPC "
-            "for integer-valued scores). Location-scale families only "
-            "(studentt, normal, skew_normal, split_normal); rejected for beta."
+            "Make the observation integer-aware via dequantization: condition on "
+            "y + u, u ~ Uniform(-0.5, 0.5) a single fixed jitter, and round "
+            "replicated draws (honest PPC for integer-valued scores). "
+            "Location-scale families only (studentt, normal, skew_normal, "
+            "split_normal); rejected for beta."
         ),
     ),
     val_albums: Annotated[
