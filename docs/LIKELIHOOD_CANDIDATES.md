@@ -208,8 +208,8 @@ residual pins remain the deferred candidates' (Beta-Binomial, mixture) target.
 `skewness`/`max` pins toward the interior; every one trades worse convergence or
 point accuracy for the same or sharper pins. The bounded-skew misspecification is
 confirmed and remains an open limitation. Beta-Binomial (issue #2) has since been
-implemented and tried (intractable uncapped — see below); the two-component
-mixture is the remaining lever.
+implemented and tried (converges with an effective-rater cap but re-pins like
+`beta` — see below); the two-component mixture is the remaining lever.
 
 ### Publication-scale confirmation
 
@@ -224,41 +224,54 @@ bounded-skew mismatch is a structural property of the likelihood, not a
 sample-count or convergence artifact. The remaining open item is full-corpus
 scale; the likelihood mismatch itself is the deferred candidates' target.
 
-## Beta-Binomial (issue #2) — implemented, intractable uncapped
+## Beta-Binomial (issue #2) — converges with an effective-rater cap, but re-pins
 
-The first deferred candidate is now implemented as the `beta_binomial` family:
+The first deferred candidate is implemented as the `beta_binomial` family:
 `User_Score` is modeled as the mean of `n = User_Ratings` integer ratings, the
 rating sum being `BetaBinomial(total = 100·n, a, b)` with a mean-precision
 parameterization kept on the score scale (`BetaBinomialScore`). Bounded support,
 left skew, and n-dependent noise all follow from one generative story, and it is
 gated behind a descriptor `n_obs_is_aggregation_count` flag so it is not offered
 where the observation count is not a rater count (e.g. the aerospace example's
-`Sensor_Samples`). It was put through the same subset bake-off (4 chains × 1000)
-against the `studentt` baseline and the bounded `beta`:
+`Sensor_Samples`).
 
-| combo | conv | rhat | ess | div | ppc_pin | pinned | mae | k_max |
-|-------|------|------|-----|-----|---------|--------|-----|-------|
-| `studentt` | FAIL | 1.01 | 754 | 0 | 3 | max,q50,q90 | 5.64 | 0.65 |
-| `beta` | FAIL | 1.02 | 236 | 0 | 6 | skewness,min,max,q10,q50,q90 | 5.67 | 2.75 |
-| `beta_binomial` | **did not converge** | — | — | — | — | — | — | — |
+**Uncapped it was intractable.** Subset albums carry up to ~23k ratings, so
+`total_count = 100·n` reaches ~2.3M and the float32 `BetaBinomial.log_prob`
+*surface* turns jagged at that scale. The gradient at any single point stays
+finite, but the second difference of `log_prob` over a fine `mu` grid (a proxy for
+numerical roughness) grows with `total_count`: ≈3.7 at n=10, ≈13 at n=200, ≈200 at
+n=5000, ≈570 at n=23000. NUTS cannot follow that roughness and maxes the tree
+depth (1023 leapfrog steps) on every iteration, never leaving warmup. (This
+corrects the earlier "catastrophic cancellation" framing — the gradient is finite;
+the surface is jagged.)
 
-**`beta_binomial` is intractable on real review-count data at this scale.** The
-sampler maxes out the NUTS tree depth (1023 leapfrog steps) on *every* iteration
-with the step size collapsed to ~1e-4, running ~5× slower than the other families
-(projected ~2 h for the four chains vs ~9 min each for `studentt`/`beta`) and never
-leaving warmup. The cause is the **over-confidence / float32-precision** failure the
-roadmap flagged: subset albums carry up to ~23k ratings, so `total_count = 100·n`
-reaches ~2.3M and `BetaBinomial.log_prob` differences `gammaln` values of order ~3e7
-in float32 — the catastrophic cancellation leaves a noisy gradient NUTS cannot
-follow. It is the same *kind* of negative as `beta`/`skew_normal` (the aggregated
-story does not, on these scores, relieve the bounded-skew pins) but it surfaces as
-non-convergence rather than sharper pins.
+**The fix is an effective-rater cap.** The per-observation Fisher information is set
+by the Beta overdispersion `phi`, not by `n` (the implied mu-sd floors near ~10
+regardless of `n`), so capping the rater count costs essentially no information
+while bounding `total_count` back into the float32-smooth range. The default
+`betabinom_max_n_reviews = 100` (→ `total_count ≤ 10000`) is applied on both the
+inference and cold-start paths. With it, `beta_binomial` mixes — same subset
+bake-off (4 chains × 1000) against the `studentt` baseline and the bounded `beta`:
 
-The open lever is a likelihood-side **`n_reviews` cap** — bound `total_count` to a
-precision-safe range (≈ ≤ 2e4, so the bulk of albums keep their exact aggregation
-count while only the mega-reviewed tail is clipped) — or a float64 log-density.
-Tracked on [#2](https://github.com/cupidthatbtc/panelcast/issues/2); the family
-ships available (`--likelihood-family beta_binomial`) but is **not adopted**.
+| combo | conv | rhat | ess | div | pins | mae |
+|-------|------|------|-----|-----|------|-----|
+| `studentt` | PASS | 1.01 | 754 | 0 | 3 (max,q50,q90) | 5.64 |
+| `beta` | PASS | 1.02 | 236 | 0 | 6 (skewness,min,max,q10,q50,q90) | 5.67 |
+| `beta_binomial` (uncapped) | **FAIL** | — | — | — | — | — |
+| `beta_binomial` (cap=100) | **PASS** | 1.01 | 499 | 0 | 6 (skewness,min,max,q10,q50,q90) | 5.65 |
+
+(Tree depth on the capped run: median 95 steps, max 127, 0 % at the 1023 wall.)
+
+**The verdict is a convergent negative.** Once it converges, `beta_binomial` pins
+exactly the same six PPC statistics as the continuous `beta`, at the same MAE — the
+aggregated-ratings story relieves the q90/max/skewness bounded-skew mismatch no more
+than `beta` did. That mismatch is now confirmed structural across three families
+(`beta`, `skew_normal`, `beta_binomial`); the two-component mixture (issue #3) is the
+remaining lever. `beta_binomial` ships available (`--likelihood-family
+beta_binomial`, default cap 100) but is **not adopted**. One operational caveat: its
+evaluation is slow, because generating PPC draws means sampling
+`BetaBinomial(total_count = 10000)` per observation on the CPU-pinned diagnostics
+path.
 
 ## Deferred candidates
 
@@ -281,8 +294,8 @@ panelcast run --likelihood-family studentt --discretize-observation
 # To reproduce the bounded-Beta comparison instead:
 panelcast run --likelihood-family beta
 
-# Beta-Binomial (aggregated ratings) is available but intractable uncapped at
-# scale (issue #2); it requires a true rater-count descriptor:
+# Beta-Binomial (aggregated ratings) converges with the default effective-rater
+# cap but re-pins like beta (issue #2); it requires a true rater-count descriptor:
 panelcast run --likelihood-family beta_binomial
 
 # Re-present the convergence + PPC of any run:
