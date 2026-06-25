@@ -33,6 +33,13 @@ from dataclasses import dataclass
 # (likelihoods._beta_predict_draws) stay consistent at the default.
 DEFAULT_BETA_BOUNDARY_EPS = 1e-3
 
+# Beta-Binomial effective-rater cap. The Beta overdispersion phi (not n) sets the
+# implied-score precision, so capping the rater count past ~1e4/span costs almost
+# no information while bounding total_count (= span*n) out of the range where the
+# float32 BetaBinomial.log_prob surface turns jagged and stalls NUTS. Shared so
+# inference (PriorConfig.betabinom_max_n_reviews) and the predict path agree.
+DEFAULT_BETABINOM_MAX_N = 100.0
+
 
 @dataclass(frozen=True)
 class PriorConfig:
@@ -152,6 +159,11 @@ class PriorConfig:
     # overdispersion phi (mirrors the Beta precision prior).
     betabinom_precision_concentration: float = 2.0
     betabinom_precision_rate: float = 0.1
+    # beta_binomial: cap on the effective rater count used in the likelihood (see
+    # DEFAULT_BETABINOM_MAX_N). Bounds total_count into the float32-smooth range so
+    # NUTS does not stall on mega-reviewed albums; the phi floor means ~no info is
+    # lost. Raise only if span*n stays below ~1e4 at your scale.
+    betabinom_max_n_reviews: float = DEFAULT_BETABINOM_MAX_N
     # split_normal: Normal(loc, scale) prior on the log scale-ratio
     # log(sigma_R / sigma_L). 0 recovers a symmetric Normal; negative values
     # lengthen the left tail (sigma_L > sigma_R). Adds site {prefix}split_log_ratio.
