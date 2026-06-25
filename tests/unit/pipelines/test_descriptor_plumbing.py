@@ -138,3 +138,35 @@ class TestResumeDescriptorGuard:
         assert (
             orch.manifest.flags["dataset_descriptor_hash"] == DatasetDescriptor().descriptor_hash()
         )
+
+
+class TestBetaBinomialGate:
+    """The orchestrator rejects beta_binomial on a non-aggregation descriptor."""
+
+    def _yaml(self, tmp_path, agg: bool) -> Path:
+        p = tmp_path / "ds.yaml"
+        p.write_text(
+            f"name: ds\nn_obs_is_aggregation_count: {str(agg).lower()}\n", encoding="utf-8"
+        )
+        return p
+
+    def test_gate_raises_for_non_aggregation_descriptor(self, tmp_path):
+        config = PipelineConfig(
+            likelihood_family="beta_binomial", dataset=str(self._yaml(tmp_path, agg=False))
+        )
+        with pytest.raises(ValueError, match="aggregation"):
+            PipelineOrchestrator(config)
+
+    def test_gate_allows_aggregation_descriptor(self, tmp_path):
+        config = PipelineConfig(
+            likelihood_family="beta_binomial", dataset=str(self._yaml(tmp_path, agg=True))
+        )
+        orch = PipelineOrchestrator(config)
+        assert orch.descriptor.n_obs_is_aggregation_count is True
+
+    def test_gate_ignores_other_families(self, tmp_path):
+        config = PipelineConfig(
+            likelihood_family="studentt", dataset=str(self._yaml(tmp_path, agg=False))
+        )
+        orch = PipelineOrchestrator(config)
+        assert orch.descriptor.n_obs_is_aggregation_count is False

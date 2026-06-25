@@ -49,6 +49,7 @@ __all__ = [
     "DequantizedDistribution",
     "RoundedDistribution",
     "SplitNormal",
+    "BetaBinomialScore",
     "REGISTRY",
 ]
 
@@ -121,6 +122,52 @@ class SplitNormal(dist.Distribution):
             jss.norm.cdf(value, loc=self.loc, scale=self.scale_right) - 0.5
         )
         return jnp.where(value < self.loc, left, right)
+
+
+class BetaBinomialScore(dist.Distribution):
+    """Aggregated-ratings likelihood, kept on the score scale.
+
+    Models the target as the mean of ``n_reviews`` integer ratings in
+    ``[low, low+span]``: the rating sum (in integer units of the span) is
+    ``BetaBinomial(total=round(span)*n_reviews, a, b)`` with ``a = p*phi``,
+    ``b = (1-p)*phi`` so the mean score is ``low + span*p``. ``sample`` returns
+    ``low + count/n_reviews`` and ``log_prob`` maps a score back to its integer
+    count, so ``{prefix}y`` stays on the natural score scale (evaluation/predict
+    untouched) while binomial sampling noise tightens the implied-score spread as
+    ``n_reviews`` grows. A discrete base ruled out a ``TransformedDistribution``
+    (its affine Jacobian would corrupt the PMF), hence this thin wrapper.
+    """
+
+    arg_constraints = {
+        "concentration1": constraints.positive,
+        "concentration0": constraints.positive,
+    }
+    support = constraints.real
+    reparametrized_params: list[str] = []
+
+    def __init__(self, concentration1, concentration0, n_reviews, low, span, *, validate_args=None):
+        self.concentration1 = concentration1
+        self.concentration0 = concentration0
+        self.low = float(low)
+        self.span = float(span)
+        self.n_reviews = jnp.asarray(n_reviews)
+        total = jnp.round(self.span * self.n_reviews).astype(jnp.int32)
+        # The score-scale wrapper owns the contract; skip the inner integer-support
+        # check so a rounded-float count never trips validation.
+        self._bb = dist.BetaBinomial(
+            concentration1, concentration0, total_count=total, validate_args=False
+        )
+        super().__init__(batch_shape=self._bb.batch_shape, validate_args=validate_args)
+
+    def sample(self, key, sample_shape=()):
+        count = self._bb.sample(key, sample_shape)
+        return self.low + count / self.n_reviews
+
+    def log_prob(self, value):
+        count = jnp.clip(
+            jnp.round((value - self.low) * self.n_reviews), 0, self._bb.total_count
+        )
+        return self._bb.log_prob(count)
 
 
 class RoundedDistribution(dist.Distribution):
@@ -328,6 +375,34 @@ def _beta_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews)
         numpyro.sample(f"{prefix}y", beta, obs=y_obs)
 
 
+def _beta_binomial_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews):
+    _reject_discretization(priors, "beta_binomial")
+    if priors.target_transform not in ("identity", None):
+        raise ValueError(
+            "likelihood_family='beta_binomial' requires target_transform='identity' "
+            f"(got '{priors.target_transform}'); the Beta-Binomial likelihood assumes "
+            "mu is on the score scale."
+        )
+    if n_reviews is None:
+        raise ValueError(
+            "likelihood_family='beta_binomial' needs n_reviews (the per-observation "
+            "aggregation count); the dataset must define an observation-count column "
+            "(descriptor.n_obs_col)."
+        )
+    low, high = float(bounds[0]), float(bounds[1])
+    span = high - low
+    eps = priors.beta_boundary_eps
+    p = jnp.clip((mu - low) / span, eps, 1.0 - eps)
+    phi = numpyro.sample(
+        f"{prefix}bb_phi",
+        dist.Gamma(priors.betabinom_precision_concentration, priors.betabinom_precision_rate),
+    )
+    bb = BetaBinomialScore(p * phi, (1.0 - p) * phi, n_reviews, low, span)
+    y_obs = None if y is None else jnp.clip(y, low, high)
+    with numpyro.plate(f"{prefix}obs", n_obs):
+        numpyro.sample(f"{prefix}y", bb, obs=y_obs)
+
+
 # ---------------------------------------------------------------------------
 # predict_draws (cold-start population path): one per family
 # ---------------------------------------------------------------------------
@@ -348,7 +423,8 @@ def _symmetric_draws(key, mu_pred, sigma_scaled, *, df, transform, skew, tailwei
 
 
 def _studentt_predict_draws(
-    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize
+    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
+    n_reviews=None,
 ):
     y = _symmetric_draws(
         key, mu_pred, sigma_scaled, df=df, transform=transform,
@@ -358,7 +434,8 @@ def _studentt_predict_draws(
 
 
 def _normal_predict_draws(
-    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize
+    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
+    n_reviews=None,
 ):
     # student_base=True preserves the pre-registry predictive base for "normal".
     y = _symmetric_draws(
@@ -369,7 +446,8 @@ def _normal_predict_draws(
 
 
 def _skew_studentt_predict_draws(
-    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize
+    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
+    n_reviews=None,
 ):
     skew = sites.get("skewness")
     if skew is None:
@@ -384,7 +462,8 @@ def _skew_studentt_predict_draws(
 
 
 def _skew_normal_predict_draws(
-    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize
+    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
+    n_reviews=None,
 ):
     skew = sites.get("skewness")
     if skew is None:
@@ -400,7 +479,8 @@ def _skew_normal_predict_draws(
 
 
 def _split_normal_predict_draws(
-    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize
+    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
+    n_reviews=None,
 ):
     log_ratio = sites.get("split_log_ratio")
     if log_ratio is None:
@@ -415,7 +495,8 @@ def _split_normal_predict_draws(
 
 
 def _beta_predict_draws(
-    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize
+    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
+    n_reviews=None,
 ):
     phi = sites.get("phi")
     if phi is None:
@@ -432,6 +513,30 @@ def _beta_predict_draws(
     phi = phi[:, None]
     beta01 = random.beta(key, mu01 * phi, (1.0 - mu01) * phi)
     return low + span * beta01
+
+
+def _beta_binomial_predict_draws(
+    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
+    n_reviews=None,
+):
+    phi = sites.get("bb_phi")
+    if phi is None:
+        raise ValueError(
+            "beta_binomial likelihood requires '{prefix}bb_phi' in posterior_samples; "
+            "the model must have been trained with --likelihood-family beta_binomial."
+        )
+    if n_reviews is None:
+        raise ValueError(
+            "beta_binomial cold-start prediction requires n_reviews_new (the new "
+            "event's aggregation count); none was provided."
+        )
+    low, high = float(bounds[0]), float(bounds[1])
+    span = high - low
+    eps = DEFAULT_BETA_BOUNDARY_EPS
+    p = jnp.clip((mu_pred - low) / span, eps, 1.0 - eps)
+    phi = phi[:, None]
+    n_int = jnp.maximum(jnp.round(jnp.asarray(n_reviews)), 1.0).astype(jnp.int32)
+    return BetaBinomialScore(p * phi, (1.0 - p) * phi, n_int, low, span).sample(key)
 
 
 # ---------------------------------------------------------------------------
@@ -497,5 +602,14 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         sample_obs=_split_normal_sample_obs,
         predict_draws=_split_normal_predict_draws,
         cdf=_splitnormal_cdf,
+    ),
+    "beta_binomial": LikelihoodSpec(
+        name="beta_binomial",
+        required_sites=("bb_phi",),
+        # Already discrete by construction — subsumes the discretization toggle.
+        supports_discretization=False,
+        sample_obs=_beta_binomial_sample_obs,
+        predict_draws=_beta_binomial_predict_draws,
+        cdf=None,
     ),
 }

@@ -132,6 +132,9 @@ class PriorConfig:
     #   "beta" — the score rescaled to (0, 1) via target_bounds (boundary
     #     squeeze) and modeled with a mean-precision Beta, affine-mapped back to
     #     the score scale so {prefix}y stays on the natural scale.
+    #   "beta_binomial" — the score modeled as the mean of n_obs aggregated
+    #     ratings (Beta-Binomial); bounded, left-skewed and n-dependent noise fall
+    #     out of one generative story. Inherently discrete (subsumes discretize).
     likelihood_family: str = "studentt"
     # skew_studentt: skewness prior (sinh-arcsinh epsilon) and the fixed tail
     # weight delta (1.0 = pure skew, no extra kurtosis beyond the StudentT base).
@@ -145,6 +148,10 @@ class PriorConfig:
     # Boundary squeeze: observed scores are clamped this far inside the bounds so
     # exact-boundary observations have finite Beta density.
     beta_boundary_eps: float = DEFAULT_BETA_BOUNDARY_EPS
+    # beta_binomial: Gamma(concentration, rate) prior on the Beta-Binomial
+    # overdispersion phi (mirrors the Beta precision prior).
+    betabinom_precision_concentration: float = 2.0
+    betabinom_precision_rate: float = 0.1
     # split_normal: Normal(loc, scale) prior on the log scale-ratio
     # log(sigma_R / sigma_L). 0 recovers a symmetric Normal; negative values
     # lengthen the left tail (sigma_L > sigma_R). Adds site {prefix}split_log_ratio.

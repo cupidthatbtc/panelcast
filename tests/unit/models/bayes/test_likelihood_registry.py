@@ -36,6 +36,8 @@ def _model_args(family: str, **prior_kw) -> dict:
         X=jnp.asarray(rng.standard_normal((N_OBS, N_FEAT)), dtype=jnp.float32),
         n_artists=N_ART,
         max_seq=int(album_seq.max()),
+        # beta_binomial needs it; the other families are homoscedastic here and ignore it.
+        n_reviews=jnp.full(N_OBS, 50, dtype=jnp.int32),
         priors=PriorConfig(likelihood_family=family, **prior_kw),
         target_bounds=(0.0, 100.0),
         likelihood_df=4.0,
@@ -123,7 +125,7 @@ class TestDiscretization:
             assert jnp.isfinite(g_mu), f"{name}: non-finite d log_prob / d mu at tail"
             assert jnp.isfinite(g_sigma), f"{name}: non-finite d log_prob / d sigma at tail"
 
-    @pytest.mark.parametrize("family", ("beta", "skew_studentt"))
+    @pytest.mark.parametrize("family", ("beta", "skew_studentt", "beta_binomial"))
     def test_discretization_rejected_for_unsupported(self, family):
         with pytest.raises(ValueError, match="discretiz"):
             trace(seed(make_score_model("user"), random.PRNGKey(0))).get_trace(
@@ -131,5 +133,5 @@ class TestDiscretization:
             )
 
     def test_non_discretizable_have_no_cdf(self):
-        for family in ("beta", "skew_studentt"):
+        for family in ("beta", "skew_studentt", "beta_binomial"):
             assert REGISTRY[family].cdf is None

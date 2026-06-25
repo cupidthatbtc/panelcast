@@ -426,7 +426,8 @@ def run(
         help=(
             "Observation likelihood: 'studentt' (default) or 'normal' (symmetric); "
             "the skew candidates 'skew_studentt' / 'skew_normal' (sinh-arcsinh) and "
-            "'split_normal' (two-piece); or 'beta' (bounded mean-precision Beta)."
+            "'split_normal' (two-piece); 'beta' (bounded mean-precision Beta); or "
+            "'beta_binomial' (target as the mean of n aggregated ratings)."
         ),
     ),
     discretize_observation: bool = typer.Option(

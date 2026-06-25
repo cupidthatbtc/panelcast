@@ -136,6 +136,11 @@ class DatasetDescriptor(BaseModel):
     target_bounds: tuple[float, float] = (0.0, 100.0)
     model_prefix: str = "user"
     n_obs_col: str = "User_Ratings"
+    # Whether n_obs_col counts independent raters whose mean IS the target (AOTY:
+    # User_Ratings raters average to User_Score). Gates the beta_binomial family,
+    # which only makes sense for a true aggregation count — not, e.g., a sensor
+    # sample count that doesn't average to the performance score.
+    n_obs_is_aggregation_count: bool = True
     # Secondary (dual-model) path; all None disables it for non-AOTY domains.
     secondary_target_col: str | None = "Critic_Score"
     secondary_prefix: str | None = "critic"

@@ -21,7 +21,8 @@ NExponentPrior = Literal["logit-normal", "beta"]
 # tests/unit/models/bayes/test_likelihood_registry.py (a Literal is a static
 # type and can't be derived from the runtime registry).
 LikelihoodFamily = Literal[
-    "studentt", "normal", "skew_studentt", "beta", "skew_normal", "split_normal"
+    "studentt", "normal", "skew_studentt", "beta", "skew_normal", "split_normal",
+    "beta_binomial",
 ]
 ChainMethod = Literal["sequential", "vectorized", "parallel"]
 

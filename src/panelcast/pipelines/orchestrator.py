@@ -337,6 +337,19 @@ class PipelineOrchestrator:
         # StageContext rather than re-deriving domain names from literals.
         self.descriptor = load_descriptor(config.dataset)
         self.descriptor_path = resolve_descriptor_path(config.dataset)
+        # beta_binomial models the target as the mean of n aggregated ratings, so
+        # it only makes sense when n_obs_col is a true count of independent raters.
+        if (
+            config.likelihood_family == "beta_binomial"
+            and not self.descriptor.n_obs_is_aggregation_count
+        ):
+            raise ValueError(
+                "likelihood_family='beta_binomial' models the target as the mean of "
+                f"n={self.descriptor.n_obs_col} aggregated ratings, but descriptor "
+                f"'{self.descriptor.name}' sets n_obs_is_aggregation_count=false "
+                f"({self.descriptor.n_obs_col} is not a count of independent raters). "
+                "Use an aggregation-count domain or a different likelihood_family."
+            )
         # Resolve the observation threshold: an explicit CLI/YAML value wins;
         # otherwise fall back to the descriptor's primary_min_obs so retargeted
         # domains don't need --min-ratings on the command line.

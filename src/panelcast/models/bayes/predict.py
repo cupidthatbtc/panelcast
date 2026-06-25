@@ -553,6 +553,7 @@ def predict_new_artist(
         skew_tailweight=skew_tailweight,
         transform=transform,
         discretize=discretize_observation,
+        n_reviews=n_reviews_new,
     )
     mu_pred = transform.inverse(mu_pred)
 
