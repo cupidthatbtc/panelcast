@@ -32,6 +32,7 @@ class TestDefaultEqualsAoty:
         assert d.target_bounds == (0.0, 100.0)
         assert d.model_prefix == "user"
         assert d.n_obs_col == "User_Ratings"
+        assert d.n_obs_is_aggregation_count is True
         assert d.secondary_target_col == "Critic_Score"
         assert d.secondary_prefix == "critic"
         assert d.secondary_n_obs_col == "Critic_Reviews"
@@ -81,6 +82,21 @@ class TestDefaultEqualsAoty:
 
     def test_module_level_default_instance(self):
         assert DEFAULT_DESCRIPTOR == DatasetDescriptor()
+
+
+class TestAggregationCountFlag:
+    def test_yaml_can_disable_aggregation_count(self, tmp_path):
+        yaml_path = tmp_path / "noagg.yaml"
+        yaml_path.write_text(
+            "name: noagg\nn_obs_is_aggregation_count: false\n", encoding="utf-8"
+        )
+        assert load_descriptor(yaml_path).n_obs_is_aggregation_count is False
+
+    def test_aero_example_disables_aggregation_count(self):
+        from pathlib import Path
+
+        aero = Path(__file__).resolve().parents[3] / "configs" / "datasets" / "aero.yaml"
+        assert load_descriptor(aero).n_obs_is_aggregation_count is False
 
 
 class TestValidation:

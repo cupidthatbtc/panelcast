@@ -14,6 +14,7 @@ selectable with `--likelihood-family`:
 | `skew_normal` | sinh-arcsinh skew-**normal**: same transform on a *Normal* base — the skew of `skew_studentt` without the heavy tail that exploded it | `{prefix}skewness` |
 | `split_normal` | Two-piece (Fechner) normal: separate left/right scales about `mu`; skew comes from σ_L ≠ σ_R, light tails on both sides | `{prefix}split_log_ratio` |
 | `beta` | Score rescaled to (0, 1) (boundary squeeze) and modeled with a mean-precision Beta, affine-mapped back to the score bounds | `{prefix}phi` |
+| `beta_binomial` | Score as the mean of `n` aggregated integer ratings — a score-scale `BetaBinomial(total = 100·n, a, b)`; inherently discrete (subsumes `--discretize-observation`). Gated to true rater-count domains | `{prefix}bb_phi` |
 
 `{prefix}y` stays on the natural score scale under every family, so evaluation,
 prediction, and the saved inference data are untouched by the choice.
@@ -206,8 +207,9 @@ residual pins remain the deferred candidates' (Beta-Binomial, mixture) target.
 `skew_normal`, `split_normal`, `discretize`) no implemented candidate moves the
 `skewness`/`max` pins toward the interior; every one trades worse convergence or
 point accuracy for the same or sharper pins. The bounded-skew misspecification is
-confirmed and remains an open limitation, now with the deferred candidates below
-(Beta-Binomial, mixture) as the next levers to try.
+confirmed and remains an open limitation. Beta-Binomial (issue #2) has since been
+implemented and tried (intractable uncapped — see below); the two-component
+mixture is the remaining lever.
 
 ### Publication-scale confirmation
 
@@ -222,17 +224,47 @@ bounded-skew mismatch is a structural property of the likelihood, not a
 sample-count or convergence artifact. The remaining open item is full-corpus
 scale; the likelihood mismatch itself is the deferred candidates' target.
 
+## Beta-Binomial (issue #2) — implemented, intractable uncapped
+
+The first deferred candidate is now implemented as the `beta_binomial` family:
+`User_Score` is modeled as the mean of `n = User_Ratings` integer ratings, the
+rating sum being `BetaBinomial(total = 100·n, a, b)` with a mean-precision
+parameterization kept on the score scale (`BetaBinomialScore`). Bounded support,
+left skew, and n-dependent noise all follow from one generative story, and it is
+gated behind a descriptor `n_obs_is_aggregation_count` flag so it is not offered
+where the observation count is not a rater count (e.g. the aerospace example's
+`Sensor_Samples`). It was put through the same subset bake-off (4 chains × 1000)
+against the `studentt` baseline and the bounded `beta`:
+
+| combo | conv | rhat | ess | div | ppc_pin | pinned | mae | k_max |
+|-------|------|------|-----|-----|---------|--------|-----|-------|
+| `studentt` | FAIL | 1.01 | 754 | 0 | 3 | max,q50,q90 | 5.64 | 0.65 |
+| `beta` | FAIL | 1.02 | 236 | 0 | 6 | skewness,min,max,q10,q50,q90 | 5.67 | 2.75 |
+| `beta_binomial` | **did not converge** | — | — | — | — | — | — | — |
+
+**`beta_binomial` is intractable on real review-count data at this scale.** The
+sampler maxes out the NUTS tree depth (1023 leapfrog steps) on *every* iteration
+with the step size collapsed to ~1e-4, running ~5× slower than the other families
+(projected ~2 h for the four chains vs ~9 min each for `studentt`/`beta`) and never
+leaving warmup. The cause is the **over-confidence / float32-precision** failure the
+roadmap flagged: subset albums carry up to ~23k ratings, so `total_count = 100·n`
+reaches ~2.3M and `BetaBinomial.log_prob` differences `gammaln` values of order ~3e7
+in float32 — the catastrophic cancellation leaves a noisy gradient NUTS cannot
+follow. It is the same *kind* of negative as `beta`/`skew_normal` (the aggregated
+story does not, on these scores, relieve the bounded-skew pins) but it surfaces as
+non-convergence rather than sharper pins.
+
+The open lever is a likelihood-side **`n_reviews` cap** — bound `total_count` to a
+precision-safe range (≈ ≤ 2e4, so the bulk of albums keep their exact aggregation
+count while only the mega-reviewed tail is clipped) — or a float64 log-density.
+Tracked on [#2](https://github.com/cupidthatbtc/panelcast/issues/2); the family
+ships available (`--likelihood-family beta_binomial`) but is **not adopted**.
+
 ## Deferred candidates
 
-Two heavier candidates are deferred for follow-up (tracked as GitHub issues)
-rather than implemented now; the registry makes each a single new
-`LikelihoodSpec`:
+One heavier candidate remains deferred for follow-up; the registry makes it a
+single new `LikelihoodSpec`:
 
-- **Beta-Binomial / aggregated-ratings likelihood**
-  ([#2](https://github.com/cupidthatbtc/panelcast/issues/2)) — model `User_Score`
-  as the mean of `n = User_Ratings` discrete ratings, so bounded support, left
-  skew, and n-dependent noise fall out of one generative story (`n_reviews` is
-  already threaded into `sample_obs`).
 - **Two-component mixture**
   ([#3](https://github.com/cupidthatbtc/panelcast/issues/3)) — a dense 65–85
   cluster plus a thin flop tail (`MixtureSameFamily` with ordering/label-switching
@@ -248,6 +280,10 @@ panelcast run --likelihood-family studentt --discretize-observation
 
 # To reproduce the bounded-Beta comparison instead:
 panelcast run --likelihood-family beta
+
+# Beta-Binomial (aggregated ratings) is available but intractable uncapped at
+# scale (issue #2); it requires a true rater-count descriptor:
+panelcast run --likelihood-family beta_binomial
 
 # Re-present the convergence + PPC of any run:
 panelcast diagnose

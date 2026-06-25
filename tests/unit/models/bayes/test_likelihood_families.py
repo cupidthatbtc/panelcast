@@ -27,6 +27,8 @@ def _model_args(family: str) -> dict:
         X=jnp.asarray(rng.standard_normal((N_OBS, N_FEATURES)), dtype=jnp.float32),
         n_artists=N_ARTISTS,
         max_seq=int(album_seq.max()),
+        # beta_binomial needs it; the other families are homoscedastic here and ignore it.
+        n_reviews=jnp.full(N_OBS, 50, dtype=jnp.int32),
         priors=PriorConfig(likelihood_family=family),
         target_bounds=(0.0, 100.0),
         likelihood_df=4.0,
@@ -71,6 +73,7 @@ class TestLikelihoodSites:
             ("beta", "user_phi"),
             ("skew_normal", "user_skewness"),
             ("split_normal", "user_split_log_ratio"),
+            ("beta_binomial", "user_bb_phi"),
         ],
     )
     def test_obs_site_and_family_param(self, family, extra):
@@ -189,3 +192,75 @@ class TestPredictNewArtistDispatch:
         )
         y = np.asarray(out["y"])
         assert np.array_equal(y, np.round(y))
+
+    def _bb_posterior(self):
+        return self._posterior(
+            extra={"user_bb_phi": jnp.asarray(np.abs(np.random.default_rng(3).normal(20, 2, 40)))}
+        )
+
+    def test_beta_binomial_prediction_bounded(self):
+        out = predict_new_artist(
+            self._bb_posterior(),
+            X_new=jnp.zeros(N_FEATURES),
+            prev_score=70.0,
+            n_reviews_new=jnp.asarray(50),
+            likelihood_family="beta_binomial",
+            target_bounds=(0.0, 100.0),
+            ar_center=70.0,
+        )
+        y = np.asarray(out["y"])
+        assert y.shape[0] == 40
+        assert y.min() >= 0.0 and y.max() <= 100.0
+
+    def test_beta_binomial_without_phi_raises(self):
+        with pytest.raises(ValueError, match="bb_phi"):
+            predict_new_artist(
+                self._posterior(),
+                X_new=jnp.zeros(N_FEATURES),
+                prev_score=70.0,
+                n_reviews_new=jnp.asarray(50),
+                likelihood_family="beta_binomial",
+            )
+
+    def test_beta_binomial_without_n_reviews_raises(self):
+        with pytest.raises(ValueError, match="n_reviews"):
+            predict_new_artist(
+                self._bb_posterior(),
+                X_new=jnp.zeros(N_FEATURES),
+                prev_score=70.0,
+                likelihood_family="beta_binomial",
+            )
+
+
+class TestBetaBinomialScore:
+    """Generative contract of the score-scale Beta-Binomial wrapper."""
+
+    def _dist(self, n_reviews, p=0.7, phi=30.0, low=0.0, span=100.0):
+        from panelcast.models.bayes.likelihoods import BetaBinomialScore
+
+        return BetaBinomialScore(p * phi, (1.0 - p) * phi, n_reviews, low, span)
+
+    def test_samples_stay_on_score_scale(self):
+        draws = np.asarray(self._dist(200).sample(random.PRNGKey(0), (20000,)))
+        assert draws.min() >= 0.0 and draws.max() <= 100.0
+
+    def test_mean_matches_mu(self):
+        draws = np.asarray(self._dist(200, p=0.7).sample(random.PRNGKey(0), (40000,)))
+        assert abs(float(draws.mean()) - 70.0) < 1.0
+
+    def test_variance_shrinks_with_more_reviews(self):
+        def var(n):
+            return float(np.var(np.asarray(self._dist(n).sample(random.PRNGKey(1), (40000,)))))
+
+        assert var(500) < var(5)
+
+    def test_log_prob_matches_betabinomial_count(self):
+        import numpyro.distributions as dist
+
+        low, span, n, p, phi = 0.0, 100.0, 50, 0.6, 25.0
+        total = int(round(span * n))
+        bb = dist.BetaBinomial(p * phi, (1.0 - p) * phi, total_count=total)
+        counts = jnp.array([0.0, 1500.0, 3000.0, float(total)])
+        scores = low + counts / n
+        d = self._dist(n, p=p, phi=phi)
+        assert jnp.allclose(d.log_prob(scores), bb.log_prob(counts), atol=1e-4)

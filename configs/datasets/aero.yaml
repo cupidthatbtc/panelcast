@@ -47,6 +47,9 @@ target_col: Perf_Score
 target_bounds: [0.0, 10.0]
 model_prefix: perf
 n_obs_col: Sensor_Samples
+# Sensor samples count telemetry points, not independent raters whose mean is the
+# score, so the beta_binomial likelihood is not meaningful here.
+n_obs_is_aggregation_count: false
 # No secondary (critic-score analogue) model in this domain.
 secondary_target_col: null
 secondary_prefix: null
