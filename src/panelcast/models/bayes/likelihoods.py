@@ -42,7 +42,11 @@ from numpyro.distributions.transforms import AffineTransform
 # tests rely on). model.py imports REGISTRY lazily, so this top-level import does
 # not create a cycle: by the time likelihoods.py is imported, model.py is loaded.
 from panelcast.models.bayes.model import SinhArcsinhTransform
-from panelcast.models.bayes.priors import DEFAULT_BETA_BOUNDARY_EPS, PriorConfig
+from panelcast.models.bayes.priors import (
+    DEFAULT_BETA_BOUNDARY_EPS,
+    DEFAULT_BETABINOM_MAX_N,
+    PriorConfig,
+)
 
 __all__ = [
     "LikelihoodSpec",
@@ -168,6 +172,15 @@ class BetaBinomialScore(dist.Distribution):
             jnp.round((value - self.low) * self.n_reviews), 0, self._bb.total_count
         )
         return self._bb.log_prob(count)
+
+
+def _cap_n_reviews(n_reviews, cap):
+    """Floor the rater count to [1, cap] (rounded) for the Beta-Binomial likelihood.
+
+    Bounding total_count keeps BetaBinomial.log_prob in the float32-smooth regime
+    NUTS can follow; the phi overdispersion floor means the cap costs ~no info.
+    """
+    return jnp.minimum(jnp.maximum(jnp.round(jnp.asarray(n_reviews)), 1.0), cap)
 
 
 class RoundedDistribution(dist.Distribution):
@@ -397,7 +410,8 @@ def _beta_binomial_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n
         f"{prefix}bb_phi",
         dist.Gamma(priors.betabinom_precision_concentration, priors.betabinom_precision_rate),
     )
-    bb = BetaBinomialScore(p * phi, (1.0 - p) * phi, n_reviews, low, span)
+    n_eff = _cap_n_reviews(n_reviews, priors.betabinom_max_n_reviews)
+    bb = BetaBinomialScore(p * phi, (1.0 - p) * phi, n_eff, low, span)
     y_obs = None if y is None else jnp.clip(y, low, high)
     with numpyro.plate(f"{prefix}obs", n_obs):
         numpyro.sample(f"{prefix}y", bb, obs=y_obs)
@@ -517,7 +531,7 @@ def _beta_predict_draws(
 
 def _beta_binomial_predict_draws(
     key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
-    n_reviews=None,
+    n_reviews=None, max_n_reviews=DEFAULT_BETABINOM_MAX_N,
 ):
     phi = sites.get("bb_phi")
     if phi is None:
@@ -535,8 +549,9 @@ def _beta_binomial_predict_draws(
     eps = DEFAULT_BETA_BOUNDARY_EPS
     p = jnp.clip((mu_pred - low) / span, eps, 1.0 - eps)
     phi = phi[:, None]
-    n_int = jnp.maximum(jnp.round(jnp.asarray(n_reviews)), 1.0).astype(jnp.int32)
-    return BetaBinomialScore(p * phi, (1.0 - p) * phi, n_int, low, span).sample(key)
+    # Mirror the inference-side cap so cold-start draws match the trained likelihood.
+    n_eff = _cap_n_reviews(n_reviews, max_n_reviews).astype(jnp.int32)
+    return BetaBinomialScore(p * phi, (1.0 - p) * phi, n_eff, low, span).sample(key)
 
 
 # ---------------------------------------------------------------------------

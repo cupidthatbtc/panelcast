@@ -231,6 +231,22 @@ class TestPredictNewArtistDispatch:
                 likelihood_family="beta_binomial",
             )
 
+    def test_beta_binomial_cold_start_caps_huge_n_reviews(self):
+        # A mega-reviewed event (n far above the cap) must still draw bounded scores
+        # rather than blow total_count into the float32-jagged regime.
+        out = predict_new_artist(
+            self._bb_posterior(),
+            X_new=jnp.zeros(N_FEATURES),
+            prev_score=70.0,
+            n_reviews_new=jnp.asarray(50_000),
+            likelihood_family="beta_binomial",
+            target_bounds=(0.0, 100.0),
+            ar_center=70.0,
+        )
+        y = np.asarray(out["y"])
+        assert y.shape[0] == 40
+        assert y.min() >= 0.0 and y.max() <= 100.0
+
 
 class TestBetaBinomialScore:
     """Generative contract of the score-scale Beta-Binomial wrapper."""
@@ -264,3 +280,32 @@ class TestBetaBinomialScore:
         scores = low + counts / n
         d = self._dist(n, p=p, phi=phi)
         assert jnp.allclose(d.log_prob(scores), bb.log_prob(counts), atol=1e-4)
+
+
+class TestBetaBinomialCap:
+    """The effective-rater cap that keeps Beta-Binomial out of the jagged regime."""
+
+    def test_cap_floors_above_passes_below_and_min_one(self):
+        from panelcast.models.bayes.likelihoods import _cap_n_reviews
+
+        out = np.asarray(
+            _cap_n_reviews(jnp.array([0.0, 0.4, 1.0, 50.0, 100.0, 23000.0]), 100.0)
+        )
+        assert out.tolist() == [1.0, 1.0, 1.0, 50.0, 100.0, 100.0]
+
+    def test_huge_n_reviews_capped_in_trace(self):
+        from panelcast.models.bayes.priors import DEFAULT_BETABINOM_MAX_N
+
+        model = make_score_model("user")
+        cap = int(DEFAULT_BETABINOM_MAX_N)
+        big = {**_model_args("beta_binomial"), "n_reviews": jnp.full(N_OBS, 50_000, jnp.int32)}
+        small = {**_model_args("beta_binomial"), "n_reviews": jnp.full(N_OBS, cap, jnp.int32)}
+        tc_big = np.asarray(
+            trace(seed(model, random.PRNGKey(0))).get_trace(y=None, **big)["user_y"]["fn"]._bb.total_count
+        )
+        tc_small = np.asarray(
+            trace(seed(model, random.PRNGKey(0))).get_trace(y=None, **small)["user_y"]["fn"]._bb.total_count
+        )
+        # span = 100 (target_bounds), so the capped total_count is round(100 * cap).
+        assert np.all(tc_big == round(100.0 * DEFAULT_BETABINOM_MAX_N))
+        assert np.array_equal(tc_big, tc_small)
