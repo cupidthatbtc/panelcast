@@ -91,9 +91,9 @@ and predictions all flow through the same stages with descriptor-derived
 names: `data/processed/perf_minobs_5.parquet`, posterior sites `perf_*`,
 predictions whose `artist` column holds your entity names (airframes).
 
-Pass `--min-ratings` (or a `--config` YAML with `min_ratings:`) matching the
-descriptor's `primary_min_obs` so the splits stage reads the primary
-processed dataset.
+`--min-ratings` defaults to the descriptor's `primary_min_obs`, so the splits
+stage reads the primary processed dataset with no extra flag; pass
+`--min-ratings` (or a `--config` YAML with `min_ratings:`) only to override it.
 
 Run each domain from its own working directory: the `data/`, `models/` and
 `outputs/` trees are per-cwd, so two domains never collide as long as you

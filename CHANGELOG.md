@@ -4,6 +4,69 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+Tracked for **0.3.0** (#14): remove the dual-written legacy `next_album_*`
+prediction artifacts and the deprecated split aliases
+(`within_artist_temporal_split`, `artist_disjoint_split`) now that their
+deprecation warning has shipped; single-source the version via
+`importlib.metadata`; and deep-generalize the AOTY-flavored historical docs.
+
+## [0.2.0] — 2026-06-25
+
+A backward-compatible feature and fix release. `studentt` stays the default
+likelihood and a parity test pins the original families bit-identical, so
+existing runs are unchanged; everything new is opt-in.
+
+### Added
+
+- **Likelihood registry.** Observation families are defined once in a
+  `REGISTRY` (`models/bayes/likelihoods.py`) and resolved by name across the
+  model and the cold-start prediction path; adding a family is a single entry.
+- **Opt-in likelihood families** via `--likelihood-family`: `skew_studentt`,
+  `beta`, `skew_normal`, `split_normal`, `beta_binomial`, and a two-component
+  `mixture`.
+- **`--discretize-observation`** — integer-aware dequantization for honest PPC
+  on integer-valued scores (replaces the diverging interval-CDF; #4).
+- **New CLI commands** — `diagnose` (model health), `compare --baselines`
+  (benchmark vs. the five non-Bayesian baselines on the real splits), and
+  `demo` (tiny synthetic end-to-end).
+- **`--preset`** — named configuration bundles (e.g. diagnostic, publication)
+  on `run` and the `stage` subcommands.
+- **Generic prediction artifacts** — `next_event_known_entities.csv` /
+  `next_event_new_entity.csv`.
+- **Baseline benchmark** — five non-Bayesian baselines scored through the same
+  metrics / calibration / CRPS / PPC toolkit as the model.
+- **Tiered CI** — lint and type-check → fast tests with coverage → a PR smoke
+  check, with the slow/e2e tiers on nightly.
+- **Coverage gate at 95%** (the fast suite sits at ~98%).
+
+### Changed
+
+- `--min-ratings` now defaults from the descriptor's `primary_min_obs`.
+- The `stage` subcommands accept `--dataset` / `--config` / `--preset`.
+- Split names are entity-prefixed (`within_entity_temporal`, `entity_disjoint`)
+  with backward-compatible aliases for legacy artifacts.
+- The legacy `next_album_*` prediction files are now dual-written alongside the
+  generic artifacts (deprecated; removal in 0.3.0).
+- Documentation synced; the Graphviz pipeline-diagram generator removed.
+
+### Fixed
+
+- Cold-start prediction honors the trained likelihood family.
+- Dequantization replaces the diverging interval-censored CDF discretization (#4).
+- Preflight reads the merged config; `resume` keeps `min_ratings`.
+- `last_score` baseline ordering; dependency upper-bound caps; CLI override
+  precedence over YAML; assorted test hardening.
+
+### Notes
+
+- The bounded-skew PPC limitation is **confirmed structural** across the five
+  families evaluated on real data — none moves the `skewness`/`max` pins (#3
+  downgraded, open). See [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md).
+- The legacy `next_album_*` artifacts and the split aliases are deprecated;
+  removal is tracked for 0.3.0 (#14).
+
 ## [0.1.0] — 2026-06-19
 
 First release under the **panelcast** name. The project was previously developed

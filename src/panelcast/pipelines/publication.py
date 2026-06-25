@@ -767,25 +767,6 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                         )
                     )
 
-            # Try to load full replicated distributions from predictions
-            primary_split_name = metrics.get(
-                "primary_split", str(SplitType.WITHIN_ENTITY_TEMPORAL.value)
-            )
-            candidate_prediction_paths = [
-                resolve_split_dir(eval_dir, primary_split_name) / "predictions.json",
-                eval_dir / "predictions.json",
-            ]
-            ppc_predictions_path = next((p for p in candidate_prediction_paths if p.exists()), None)
-            if ppc_predictions_path is not None:
-                try:
-                    with open(ppc_predictions_path, "r", encoding="utf-8") as f:
-                        _ = json.load(f)
-                    # Reconstruct y_rep from y_pred samples if available
-                    # For PPC plots, we need the replicated distribution
-                    # Fall back to summary-only plot if full samples unavailable
-                except (json.JSONDecodeError, KeyError):
-                    pass
-
             if ppc_stats:
                 n_obs_ppc = ppc_data.get("n_obs", 0)
                 n_samples_ppc = ppc_data.get("n_samples", 0)

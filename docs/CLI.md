@@ -99,7 +99,7 @@ panelcast run [OPTIONS]
 
 | Option | Default | Range | Description |
 |--------|---------|-------|-------------|
-| `--min-ratings` | `10` | ≥1 | Minimum user ratings per album |
+| `--min-ratings` | descriptor default | ≥1 | Minimum observations per event; defaults to the dataset descriptor's `primary_min_obs` (10 for AOTY) |
 | `--min-albums` | `2` | ≥1 | Minimum albums per artist for dynamic effects |
 
 #### Feature Ablation
@@ -127,8 +127,8 @@ These features are **enabled by default**. Use these flags to disable them:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--likelihood-df` | `4.0` | Student-t degrees of freedom (`≥100` behaves as Normal) |
-| `--likelihood-family` | `studentt` | Observation likelihood: `studentt`, `normal`, `skew_studentt`, `skew_normal`, `split_normal`, or `beta`. See [`LIKELIHOOD_CANDIDATES.md`](LIKELIHOOD_CANDIDATES.md) |
-| `--discretize-observation` | `false` | Interval-censor the observation to integers (honest PPC for integer scores). Location-scale families only (`studentt`, `normal`, `skew_normal`, `split_normal`); rejected for `beta` / `skew_studentt` |
+| `--likelihood-family` | `studentt` | Observation likelihood: `studentt`, `normal`, `skew_studentt`, `skew_normal`, `split_normal`, `beta`, `mixture`, or `beta_binomial`. See [`LIKELIHOOD_CANDIDATES.md`](LIKELIHOOD_CANDIDATES.md) |
+| `--discretize-observation` | `false` | Interval-censor the observation to integers (honest PPC for integer scores). Location-scale families only (`studentt`, `normal`, `skew_normal`, `split_normal`, `mixture`); rejected for `skew_studentt`, `beta`, `beta_binomial` (`beta_binomial` is already discrete) |
 
 #### Domain & Model Options
 
@@ -237,7 +237,7 @@ panelcast stage <STAGE> [OPTIONS]
 | `features` | Build feature matrices from split data |
 | `train` | Fit Bayesian models using NumPyro MCMC |
 | `evaluate` | Compute diagnostics, calibration metrics, LOO-CV |
-| `predict` | Generate next-event predictions for known and new entities (next album per artist on AOTY) |
+| `predict` | Generate next-event predictions for known and new entities; writes `next_event_known_entities.csv` / `next_event_new_entity.csv` (the AOTY flagship also writes legacy `next_album_*`, deprecated) |
 | `report` | Generate publication artifacts (figures, tables, model cards) |
 | `sensitivity` | Optional prior-variant / feature-ablation analysis (opt-in; run by name, not part of a default run) |
 

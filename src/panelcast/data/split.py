@@ -285,6 +285,13 @@ def within_artist_temporal_split(
     event_col: str | None = "Album",
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Deprecated alias for :func:`within_entity_temporal_split`."""
+    import warnings
+
+    warnings.warn(
+        "within_artist_temporal_split() is deprecated, use within_entity_temporal_split() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return within_entity_temporal_split(
         df,
         entity_col=artist_col,
@@ -304,6 +311,13 @@ def artist_disjoint_split(
     random_state: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """Deprecated alias for :func:`entity_disjoint_split`."""
+    import warnings
+
+    warnings.warn(
+        "artist_disjoint_split() is deprecated, use entity_disjoint_split() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return entity_disjoint_split(
         df,
         entity_col=artist_col,
