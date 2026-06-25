@@ -22,7 +22,7 @@ NExponentPrior = Literal["logit-normal", "beta"]
 # type and can't be derived from the runtime registry).
 LikelihoodFamily = Literal[
     "studentt", "normal", "skew_studentt", "beta", "skew_normal", "split_normal",
-    "beta_binomial",
+    "mixture", "beta_binomial",
 ]
 ChainMethod = Literal["sequential", "vectorized", "parallel"]
 

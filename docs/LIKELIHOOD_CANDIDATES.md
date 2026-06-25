@@ -15,6 +15,7 @@ selectable with `--likelihood-family`:
 | `split_normal` | Two-piece (Fechner) normal: separate left/right scales about `mu`; skew comes from σ_L ≠ σ_R, light tails on both sides | `{prefix}split_log_ratio` |
 | `beta` | Score rescaled to (0, 1) (boundary squeeze) and modeled with a mean-precision Beta, affine-mapped back to the score bounds | `{prefix}phi` |
 | `beta_binomial` | Score as the mean of `n` aggregated integer ratings — a score-scale `BetaBinomial(total = 100·n, a, b)`; inherently discrete (subsumes `--discretize-observation`). Gated to true rater-count domains | `{prefix}bb_phi` |
+| `mixture` | Two-component Normal mixture, mean-anchored to `mu` (a separation + the weight split the components about `mu`); targets a spike-plus-tail (dense cluster + thin flop tail) | `{prefix}mix_sep`, `{prefix}mix_weight`, `{prefix}mix_log_scale_ratio` |
 
 `{prefix}y` stays on the natural score scale under every family, so evaluation,
 prediction, and the saved inference data are untouched by the choice.
@@ -209,7 +210,8 @@ residual pins remain the deferred candidates' (Beta-Binomial, mixture) target.
 point accuracy for the same or sharper pins. The bounded-skew misspecification is
 confirmed and remains an open limitation. Beta-Binomial (issue #2) has since been
 implemented and tried (converges with an effective-rater cap but re-pins like
-`beta` — see below); the two-component mixture is the remaining lever.
+`beta` — see below), and the two-component mixture (issue #3) was tried last (its
+continuous form won't converge; the discretized form re-pins — see below).
 
 ### Publication-scale confirmation
 
@@ -266,22 +268,53 @@ bake-off (4 chains × 1000) against the `studentt` baseline and the bounded `bet
 exactly the same six PPC statistics as the continuous `beta`, at the same MAE — the
 aggregated-ratings story relieves the q90/max/skewness bounded-skew mismatch no more
 than `beta` did. That mismatch is now confirmed structural across three families
-(`beta`, `skew_normal`, `beta_binomial`); the two-component mixture (issue #3) is the
-remaining lever. `beta_binomial` ships available (`--likelihood-family
+(`beta`, `skew_normal`, `beta_binomial`); the two-component mixture (issue #3) does
+not relieve it either (see below). `beta_binomial` ships available (`--likelihood-family
 beta_binomial`, default cap 100) but is **not adopted**. One operational caveat: its
 evaluation is slow, because generating PPC draws means sampling
 `BetaBinomial(total_count = 10000)` per observation on the CPU-pinned diagnostics
 path.
 
-## Deferred candidates
+## Two-component mixture (issue #3) — continuous form won't converge; discretized re-pins
 
-One heavier candidate remains deferred for follow-up; the registry makes it a
-single new `LikelihoodSpec`:
+The last deferred candidate is the `mixture` family: a two-component Normal mixture
+for a *spike-plus-tail* score shape (a dense 65–85 cluster plus a thin flop tail). It
+is **mean-anchored** — a single positive separation `delta` (in σ units) and the
+mixing weight `w` place the components on opposite sides of `mu`
+(`loc_0 = mu − (1−w)·delta·σ`, `loc_1 = mu + w·delta·σ`), so the weighted mean is
+exactly `mu`. That keeps the overall level with `mu_artist` instead of a free offset
+center (an earlier ordered-offset parameterization left a `mu`↔offset location ridge
+that would not mix), and `delta > 0` orders the components so there is no
+label-switching. On a *synthetic*, cleanly bimodal panel it mixes perfectly
+(R-hat 1.00) and recovers both components, so the parameterization is sound.
 
-- **Two-component mixture**
-  ([#3](https://github.com/cupidthatbtc/panelcast/issues/3)) — a dense 65–85
-  cluster plus a thin flop tail (`MixtureSameFamily` with ordering/label-switching
-  handling).
+On the real subset (same diagnostic 4×1000 bake-off, vs the `studentt` baseline):
+
+| combo | conv | rhat | ess | div | pins | mae | k_max |
+|-------|------|------|-----|-----|------|-----|-------|
+| `studentt` | — | 1.01 | 789 | 0 | 4 (skewness,max,q50,q90) | 5.64 | 0.58 |
+| `mixture` | **FAIL** | **1.53** | **7** | 0 | 4 (skewness,max,q10,q50) | 5.93 | 2.04 |
+| `mixture+discretize` | PASS | 1.01 | 507 | 0 | 3 (skewness,max,q90) | 5.74 | 1.09 |
+
+**The continuous mixture does not converge on real data** (R-hat 1.53, bulk ESS 7,
+72 obs with Pareto-k > 0.7). Real AOTY scores are a bounded-skew *continuum*, not a
+clean two-component mixture, so the second component is weakly identified and the
+sampler cannot separate the two — the opposite of the synthetic case. Dequantizing
+the likelihood (`mixture+discretize`) regularizes it enough to converge (ESS 507), but
+it then **re-pins the structural statistics**: skewness 0.99 → 1.00, max 1.00, and
+q90 0.9998 all stay pinned; only **q50 is relieved (0.008 → 0.124)** — and that relief
+is the dequantization's (integer heaping), exactly what `studentt+discretize` already
+delivered, not the mixture component's. It costs ~0.1 MAE and ~280 bulk ESS vs
+`studentt` and weakens LOO (Pareto-k max 1.09 vs 0.58).
+
+**Verdict: a measured negative — `studentt` stays the default.** The two-component
+mixture relieves the q90/max/skewness bounded-skew pins no more than the four
+candidates before it, and its continuous form will not even converge on these scores.
+The bounded-skew misspecification is now confirmed structural across **five** families
+(`beta`, `skew_normal`, `split_normal`, `beta_binomial`, `mixture`). `mixture` ships
+available (`--likelihood-family mixture`) but is **not adopted**; issue #3 is
+downgraded to a documented limitation. The remaining open item is full-corpus scale,
+not likelihood adequacy.
 
 ## Adopting a candidate
 
@@ -297,6 +330,10 @@ panelcast run --likelihood-family beta
 # Beta-Binomial (aggregated ratings) converges with the default effective-rater
 # cap but re-pins like beta (issue #2); it requires a true rater-count descriptor:
 panelcast run --likelihood-family beta_binomial
+
+# Two-component mixture (issue #3): the continuous form won't converge on the real
+# scores; the discretized form converges but re-pins. Available, not adopted:
+panelcast run --likelihood-family mixture --discretize-observation
 
 # Re-present the convergence + PPC of any run:
 panelcast diagnose

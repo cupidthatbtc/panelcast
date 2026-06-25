@@ -54,6 +54,7 @@ __all__ = [
     "RoundedDistribution",
     "SplitNormal",
     "BetaBinomialScore",
+    "NormalMixture2",
     "REGISTRY",
 ]
 
@@ -126,6 +127,55 @@ class SplitNormal(dist.Distribution):
             jss.norm.cdf(value, loc=self.loc, scale=self.scale_right) - 0.5
         )
         return jnp.where(value < self.loc, left, right)
+
+
+class NormalMixture2(dist.Distribution):
+    """Two-component Normal mixture; ``w`` is the weight on the first component.
+
+    ``log_prob`` is the log-sum of the two weighted component densities; ``sample``
+    picks a component per draw (prob ``w`` for component 0) and shares one standard
+    normal across both branches. ``cdf`` is the weighted sum of the component CDFs
+    (closed form), so the family composes with the discretization toggle.
+    """
+
+    arg_constraints = {
+        "loc0": constraints.real,
+        "scale0": constraints.positive,
+        "loc1": constraints.real,
+        "scale1": constraints.positive,
+        "w": constraints.unit_interval,
+    }
+    support = constraints.real
+    reparametrized_params: list[str] = []
+
+    def __init__(self, loc0, scale0, loc1, scale1, w, *, validate_args=None):
+        self.loc0 = loc0
+        self.scale0 = scale0
+        self.loc1 = loc1
+        self.scale1 = scale1
+        self.w = w
+        batch_shape = lax.broadcast_shapes(
+            jnp.shape(loc0), jnp.shape(scale0),
+            jnp.shape(loc1), jnp.shape(scale1), jnp.shape(w),
+        )
+        super().__init__(batch_shape=batch_shape, validate_args=validate_args)
+
+    def log_prob(self, value):
+        lp0 = jnp.log(self.w) + jss.norm.logpdf(value, loc=self.loc0, scale=self.scale0)
+        lp1 = jnp.log1p(-self.w) + jss.norm.logpdf(value, loc=self.loc1, scale=self.scale1)
+        return jnp.logaddexp(lp0, lp1)
+
+    def sample(self, key, sample_shape=()):
+        k_pick, k_z = random.split(key)
+        shape = tuple(sample_shape) + self.batch_shape
+        pick0 = random.uniform(k_pick, shape) < self.w
+        z = random.normal(k_z, shape)
+        return jnp.where(pick0, self.loc0 + self.scale0 * z, self.loc1 + self.scale1 * z)
+
+    def cdf(self, value):
+        cdf0 = jss.norm.cdf(value, loc=self.loc0, scale=self.scale0)
+        cdf1 = jss.norm.cdf(value, loc=self.loc1, scale=self.scale1)
+        return self.w * cdf0 + (1.0 - self.w) * cdf1
 
 
 class BetaBinomialScore(dist.Distribution):
@@ -275,6 +325,17 @@ def _splitnormal_cdf(value, mu, sigma, df, params):
     return SplitNormal(mu, scale_left, scale_right).cdf(value)
 
 
+def _mixture_cdf(value, mu, sigma, df, params):
+    delta = params["mix_sep"]
+    w = params["mix_weight"]
+    log_sr = params["mix_log_scale_ratio"]
+    loc0 = mu - (1.0 - w) * delta * sigma
+    loc1 = mu + w * delta * sigma
+    scale0 = sigma * jnp.exp(0.5 * log_sr)
+    scale1 = sigma * jnp.exp(-0.5 * log_sr)
+    return NormalMixture2(loc0, scale0, loc1, scale1, w).cdf(value)
+
+
 def _emit_obs(prefix, base, n_obs, y, *, discretize, cdf_fn):
     """Emit the ``{prefix}y`` site, integer-aware when ``discretize`` is on.
 
@@ -361,6 +422,33 @@ def _split_normal_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_
         prefix, base, n_obs, y,
         discretize=priors.discretize_observation,
         cdf_fn=lambda v: _splitnormal_cdf(v, mu, sigma, df, params),
+    )
+
+
+def _mixture_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews):
+    # Anchor the mixture mean to mu: one positive separation (sigma units) and the
+    # weight place the components on opposite sides of mu so the weighted mean is
+    # exactly mu. The level then stays with mu_artist (no ridge against a free
+    # offset center) and the components stay ordered (delta>0 => loc_0 < loc_1).
+    delta = numpyro.sample(
+        f"{prefix}mix_sep", dist.LogNormal(priors.mix_sep_loc, priors.mix_sep_scale)
+    )
+    w = numpyro.sample(f"{prefix}mix_weight", dist.Beta(priors.mix_weight_a, priors.mix_weight_b))
+    log_sr = numpyro.sample(
+        f"{prefix}mix_log_scale_ratio",
+        dist.Normal(priors.mix_scale_ratio_loc, priors.mix_scale_ratio_scale),
+    )
+    sigma_b = jnp.broadcast_to(sigma, jnp.shape(mu))
+    loc0 = mu - (1.0 - w) * delta * sigma_b
+    loc1 = mu + w * delta * sigma_b
+    scale0 = sigma_b * jnp.exp(0.5 * log_sr)
+    scale1 = sigma_b * jnp.exp(-0.5 * log_sr)
+    base = NormalMixture2(loc0, scale0, loc1, scale1, w)
+    params = {"mix_sep": delta, "mix_weight": w, "mix_log_scale_ratio": log_sr}
+    _emit_obs(
+        prefix, base, n_obs, y,
+        discretize=priors.discretize_observation,
+        cdf_fn=lambda v: _mixture_cdf(v, mu, sigma_b, df, params),
     )
 
 
@@ -508,6 +596,29 @@ def _split_normal_predict_draws(
     return jnp.round(y) if discretize else y
 
 
+def _mixture_predict_draws(
+    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
+    n_reviews=None,
+):
+    delta = sites.get("mix_sep")
+    w = sites.get("mix_weight")
+    log_sr = sites.get("mix_log_scale_ratio")
+    if delta is None or w is None or log_sr is None:
+        raise ValueError(
+            "mixture likelihood requires '{prefix}mix_sep', '{prefix}mix_weight', "
+            "and '{prefix}mix_log_scale_ratio' in posterior_samples; train with "
+            "--likelihood-family mixture."
+        )
+    delta = delta[:, None]
+    w_col = w[:, None]
+    loc0 = mu_pred - (1.0 - w_col) * delta * sigma_scaled
+    loc1 = mu_pred + w_col * delta * sigma_scaled
+    scale0 = sigma_scaled * jnp.exp(0.5 * log_sr[:, None])
+    scale1 = sigma_scaled * jnp.exp(-0.5 * log_sr[:, None])
+    y = transform.inverse(NormalMixture2(loc0, scale0, loc1, scale1, w_col).sample(key))
+    return jnp.round(y) if discretize else y
+
+
 def _beta_predict_draws(
     key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
     n_reviews=None,
@@ -617,6 +728,14 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         sample_obs=_split_normal_sample_obs,
         predict_draws=_split_normal_predict_draws,
         cdf=_splitnormal_cdf,
+    ),
+    "mixture": LikelihoodSpec(
+        name="mixture",
+        required_sites=("mix_sep", "mix_weight", "mix_log_scale_ratio"),
+        supports_discretization=True,
+        sample_obs=_mixture_sample_obs,
+        predict_draws=_mixture_predict_draws,
+        cdf=_mixture_cdf,
     ),
     "beta_binomial": LikelihoodSpec(
         name="beta_binomial",

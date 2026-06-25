@@ -73,6 +73,7 @@ class TestLikelihoodSites:
             ("beta", "user_phi"),
             ("skew_normal", "user_skewness"),
             ("split_normal", "user_split_log_ratio"),
+            ("mixture", "user_mix_sep"),
             ("beta_binomial", "user_bb_phi"),
         ],
     )
@@ -178,6 +179,36 @@ class TestPredictNewArtistDispatch:
                 X_new=jnp.zeros(N_FEATURES),
                 prev_score=70.0,
                 likelihood_family="split_normal",
+            )
+
+    def _mixture_posterior(self):
+        rng = np.random.default_rng(7)
+        return self._posterior(
+            extra={
+                "user_mix_sep": jnp.asarray(rng.lognormal(0.0, 0.75, 40)),
+                "user_mix_weight": jnp.asarray(rng.beta(2.0, 2.0, 40)),
+                "user_mix_log_scale_ratio": jnp.asarray(rng.normal(0.0, 0.5, 40)),
+            }
+        )
+
+    def test_mixture_prediction_runs(self):
+        out = predict_new_artist(
+            self._mixture_posterior(),
+            X_new=jnp.zeros(N_FEATURES),
+            prev_score=70.0,
+            likelihood_family="mixture",
+            target_bounds=(0.0, 100.0),
+            ar_center=70.0,
+        )
+        assert np.asarray(out["y"]).shape[0] == 40
+
+    def test_mixture_without_site_raises(self):
+        with pytest.raises(ValueError, match="mix_sep"):
+            predict_new_artist(
+                self._posterior(),
+                X_new=jnp.zeros(N_FEATURES),
+                prev_score=70.0,
+                likelihood_family="mixture",
             )
 
     def test_discretized_prediction_is_integer(self):
@@ -309,3 +340,40 @@ class TestBetaBinomialCap:
         # span = 100 (target_bounds), so the capped total_count is round(100 * cap).
         assert np.all(tc_big == round(100.0 * DEFAULT_BETABINOM_MAX_N))
         assert np.array_equal(tc_big, tc_small)
+
+
+class TestNormalMixture2:
+    """Generative contract of the two-component Normal mixture."""
+
+    def _dist(self, w=0.3, loc0=40.0, scale0=12.0, loc1=80.0, scale1=4.0):
+        from panelcast.models.bayes.likelihoods import NormalMixture2
+
+        return NormalMixture2(loc0, scale0, loc1, scale1, w)
+
+    def test_log_prob_is_logaddexp_of_components(self):
+        import jax.scipy.stats as jss
+
+        v = jnp.linspace(0.0, 120.0, 25)
+        lp0 = jnp.log(0.3) + jss.norm.logpdf(v, loc=40.0, scale=12.0)
+        lp1 = jnp.log(0.7) + jss.norm.logpdf(v, loc=80.0, scale=4.0)
+        assert jnp.allclose(self._dist(w=0.3).log_prob(v), jnp.logaddexp(lp0, lp1), atol=1e-5)
+
+    def test_cdf_monotone_in_unit_interval(self):
+        c = self._dist().cdf(jnp.linspace(-50.0, 200.0, 200))
+        assert float(c.min()) >= 0.0 and float(c.max()) <= 1.0
+        assert bool(jnp.all(jnp.diff(c) >= -1e-6))
+
+    def test_weight_shifts_the_mean(self):
+        lo = np.asarray(self._dist(w=0.9).sample(random.PRNGKey(0), (40000,)))
+        hi = np.asarray(self._dist(w=0.1).sample(random.PRNGKey(0), (40000,)))
+        assert lo.mean() < hi.mean()
+
+    def test_sample_recovers_two_components(self):
+        # A well-separated 0.5/0.5 mixture is clearly bimodal: both centers heavily
+        # populated, the valley between them nearly empty.
+        d = self._dist(w=0.5, loc0=30.0, scale0=3.0, loc1=90.0, scale1=3.0)
+        draws = np.asarray(d.sample(random.PRNGKey(1), (40000,)))
+        near_lo = float(np.mean(np.abs(draws - 30.0) < 6.0))
+        near_hi = float(np.mean(np.abs(draws - 90.0) < 6.0))
+        near_mid = float(np.mean(np.abs(draws - 60.0) < 6.0))
+        assert near_lo > 0.3 and near_hi > 0.3 and near_mid < 0.02
