@@ -169,6 +169,21 @@ class PriorConfig:
     # lengthen the left tail (sigma_L > sigma_R). Adds site {prefix}split_log_ratio.
     split_scale_ratio_loc: float = 0.0
     split_scale_ratio_scale: float = 0.5
+    # mixture: two-component Normal mixture anchored so its mean is exactly mu, so
+    # the level stays with mu_artist (no location ridge between mu and a free offset
+    # center). A single separation delta in sigma units (LogNormal => positive, so
+    # loc_0 < loc_1 with no label-switching) splits the components about mu:
+    #   loc_0 = mu - (1-w)*delta*sigma   (lower / flop tail)
+    #   loc_1 = mu +     w*delta*sigma   (upper / dense cluster)
+    # mix_weight is the Beta weight on the lower component; per-component scales
+    # come from mix_log_scale_ratio (sigma*exp(+/-r/2)). Adds sites {prefix}mix_sep,
+    # {prefix}mix_weight, {prefix}mix_log_scale_ratio.
+    mix_sep_loc: float = 0.0
+    mix_sep_scale: float = 0.75
+    mix_weight_a: float = 2.0
+    mix_weight_b: float = 2.0
+    mix_scale_ratio_loc: float = 0.0
+    mix_scale_ratio_scale: float = 0.5
     # Discretization toggle (orthogonal to the family; default off => legacy
     # continuous likelihood, byte-identical RNG path). When True, the observation
     # becomes interval-censored and integer-valued: integer k contributes

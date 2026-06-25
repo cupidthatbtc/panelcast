@@ -157,7 +157,7 @@ class TestPriorConfigSerialization:
         assert restored == original
 
     def test_field_count(self):
-        """PriorConfig should have exactly 46 fields.
+        """PriorConfig should have exactly 52 fields.
 
         18 legacy + 11 seam knobs + 5 for the entity-overdispersion / lognormal
         sigma_obs upgrade (sigma_obs_prior_type, sigma_obs_lognormal_loc,
@@ -167,9 +167,11 @@ class TestPriorConfigSerialization:
         beta_boundary_eps) + 3 for the split-normal / discretization wave
         (split_scale_ratio_loc, split_scale_ratio_scale, discretize_observation)
         + 3 for the Beta-Binomial family (betabinom_precision_concentration,
-        betabinom_precision_rate, betabinom_max_n_reviews).
+        betabinom_precision_rate, betabinom_max_n_reviews) + 6 for the two-component
+        mixture (mix_sep_loc, mix_sep_scale, mix_weight_a, mix_weight_b,
+        mix_scale_ratio_loc, mix_scale_ratio_scale).
         """
-        assert len(fields(PriorConfig)) == 46
+        assert len(fields(PriorConfig)) == 52
 
 
 class TestSigmaRwPriorType:
