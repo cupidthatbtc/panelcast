@@ -110,7 +110,7 @@ select = ["E", "F", "I"]
 source = ["src"]
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 95
 precision = 1
 show_missing = false
 
