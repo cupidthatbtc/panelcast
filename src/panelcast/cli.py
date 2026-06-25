@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 # Quick preflight uses fixed estimates rather than loading actual data (~1s vs ~30-60s).
 # These are conservative defaults for the memory estimation formula.

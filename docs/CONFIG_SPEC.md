@@ -39,8 +39,8 @@ Model
 - model.max_tree_depth: int
 - model.target_scale: string (standardized | raw)
 - model.likelihood_df: float (default 4.0; Student-t degrees of freedom, >=100 behaves as Normal)
-- model.likelihood_family: string (studentt | normal | skew_studentt | skew_normal | split_normal | beta; default studentt)
-- model.discretize_observation: bool (default false; interval-censor integer observations — location-scale families only, rejected for beta/skew_studentt)
+- model.likelihood_family: string (studentt | normal | skew_studentt | skew_normal | split_normal | beta | mixture | beta_binomial; default studentt)
+- model.discretize_observation: bool (default false; interval-censor integer observations — location-scale families only (studentt, normal, skew_normal, split_normal, mixture), rejected for skew_studentt/beta/beta_binomial)
 - model.priors.intercept_sd: float
 - model.priors.slope_sd: float
 - model.priors.group_sd: float

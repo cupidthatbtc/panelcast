@@ -515,7 +515,7 @@ def predict_next_albums(ctx: StageContext) -> dict:
     new_entity_df.to_csv(output_dir / "next_event_new_entity.csv", index=False)
 
     # Legacy AOTY-named copies, kept byte-identical for one release so existing
-    # consumers (publication tables, fan charts) keep working. Deprecate later.
+    # consumers (publication tables, fan charts) keep working. Remove in 0.3.0.
     known_df.to_csv(output_dir / "next_album_known_artists.csv", index=False)
     new_df.to_csv(output_dir / "next_album_new_artist.csv", index=False)
 

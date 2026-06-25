@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from time import time
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import structlog
 from rich.progress import (
@@ -62,9 +62,6 @@ from panelcast.utils.git_state import capture_git_state
 from panelcast.utils.hashing import sha256_path
 from panelcast.utils.logging import is_interactive, setup_pipeline_logging
 from panelcast.utils.random import set_seeds
-
-if TYPE_CHECKING:
-    pass
 
 log = structlog.get_logger()
 

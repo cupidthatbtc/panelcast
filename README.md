@@ -17,9 +17,9 @@
 > publication configuration (R-hat 1.00, bulk ESS 3,134, 0 divergences), and
 > the baseline benchmark runs on the same real splits. Still open: the
 > posterior-predictive p-values stay pinned at the extremes by a
-> symmetric-likelihood / left-skewed-target mismatch (a bounded-Beta candidate
-> was tested on real data and **rejected**), and this is a subset, not the full
-> ~62k-album corpus. See [`MODEL_CARD.md`](MODEL_CARD.md) and
+> symmetric-likelihood / left-skewed-target mismatch (six likelihood families
+> plus a dequantization toggle were tried and **none resolves it**), and this is
+> a subset, not the full ~62k-album corpus. See [`MODEL_CARD.md`](MODEL_CARD.md) and
 > [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md). Treat the
 > subset numbers as real but not final.
 
@@ -61,8 +61,12 @@ Gaussian random walk; AR(1) event-to-event dependence; heteroscedastic
 observation noise scaled by observation count; non-centered parameterization
 (`LocScaleReparam`) plus a sigma-ref reparameterization to break the
 multiplicative funnel; Student-t likelihood with a soft-clip to the target
-bounds. Optional per-entity overdispersion with a lognormal variance prior is
-available behind a gate. Built on [NumPyro](https://num.pyro.ai/) / JAX.
+bounds. The default Student-t is one of eight selectable observation families
+(`--likelihood-family`: also `normal`, `skew_studentt`, `skew_normal`,
+`split_normal`, `beta`, `mixture`, `beta_binomial`), with an optional
+integer-aware dequantization toggle. Optional per-entity overdispersion with a
+lognormal variance prior is available behind a gate. Built on
+[NumPyro](https://num.pyro.ai/) / JAX.
 
 ## Install
 
@@ -161,8 +165,9 @@ What's resolved: leak-safe splits with role-based names, an honest baseline
 comparison (`panelcast compare`) on the same real splits, and a convergent
 publication-scale fit on real data. Still open: the posterior-predictive
 p-values stay pinned at the extremes from a symmetric-likelihood /
-left-skewed-target mismatch — a bounded **Beta** candidate was tested on real
-data and **rejected** (see
+left-skewed-target mismatch — six likelihood families (`beta`, `skew_studentt`,
+`skew_normal`, `split_normal`, `beta_binomial`, `mixture`) plus a dequantization
+toggle were tried and **none resolves it** (see
 [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md)) — and this is a
 subset, not the full ~62k-album corpus, which needs the full dataset and a GPU.
 The code, the diagnostics, and the honest naming of what is and isn't resolved

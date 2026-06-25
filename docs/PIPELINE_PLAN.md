@@ -88,7 +88,7 @@ Outputs (expected)
 - data/features/manifest.json
 - outputs/<run_id>/manifest.json
 - outputs/evaluation/metrics.json
-- outputs/predictions/next_album_known_artists.csv
+- outputs/predictions/next_event_known_entities.csv
 - reports/tables/*.csv
 - reports/figures/*.png
 - reports/MODEL_CARD.md
