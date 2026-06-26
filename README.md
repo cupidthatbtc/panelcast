@@ -68,6 +68,27 @@ integer-aware dequantization toggle. Optional per-entity overdispersion with a
 lognormal variance prior is available behind a gate. Built on
 [NumPyro](https://num.pyro.ai/) / JAX.
 
+## Example output
+
+The flagship AOTY model, fit on a ~5,000-album subset (within-artist temporal
+holdout). The pipeline's `report` stage renders these automatically.
+
+Predicted vs. actual on held-out next albums (95% interval), and interval
+calibration (predicted vs. empirical coverage, ~650 albums/bin):
+
+<img src="docs/images/aoty_predictions.png" width="48%"> <img src="docs/images/aoty_reliability.png" width="48%">
+
+What the model learned — posterior densities of the headline parameters (94% HDI):
+the average album sits near 71/100, and album-to-album dependence (`rho`) is weak
+once the artist level is centered out:
+
+<img src="docs/images/aoty_posterior.png" width="85%">
+
+Same model, different domain — the bundled aerospace example (airframes → scored
+test flights), produced by `panelcast demo` with no source changes:
+
+<img src="docs/images/aero_predictions.png" width="48%">
+
 ## Install
 
 **Prerequisites:** Python ≥ 3.11. [pixi](https://pixi.sh) is the supported
