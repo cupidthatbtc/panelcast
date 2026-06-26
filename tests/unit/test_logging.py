@@ -2,7 +2,6 @@
 
 import logging
 import sys
-import warnings
 from pathlib import Path
 from unittest.mock import patch
 
@@ -10,7 +9,6 @@ import pytest
 
 from panelcast.utils.logging import (
     is_interactive,
-    setup_logging,
     setup_pipeline_logging,
 )
 
@@ -109,22 +107,3 @@ class TestIsInteractive:
     def test_non_tty_returns_false(self, mock_stdout):
         mock_stdout.isatty.return_value = False
         assert is_interactive() is False
-
-
-class TestSetupLoggingDeprecated:
-    """Tests for deprecated setup_logging function."""
-
-    def test_emits_deprecation_warning(self):
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            setup_logging()
-            deprecation_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
-            assert len(deprecation_warnings) == 1
-            assert "setup_pipeline_logging" in str(deprecation_warnings[0].message)
-
-    def test_still_configures_logging(self):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            setup_logging()
-        root = logging.getLogger()
-        assert root.level == logging.DEBUG
