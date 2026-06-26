@@ -746,7 +746,7 @@ class TestAdditionalValidation:
         # Mock the logger to prevent TypeError from structlog-style kwargs
         # passed to stdlib logger.debug() in the broad except handler
         monkeypatch.setattr(
-            "panelcast.cli.logger",
+            "panelcast.cli.commands.logger",
             MagicMock(),
         )
 
