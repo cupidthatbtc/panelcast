@@ -604,7 +604,7 @@ def create_default_model_card_data(descriptor=None) -> ModelCardData:
     return ModelCardData(
         # Model identity
         model_name="AOTY Artist Score Prediction Model",
-        model_version="0.2.0",
+        model_version="0.2.1",
         model_type="Bayesian Hierarchical Regression with Time-Varying Effects",
         # Authors and dates
         authors=["AOTY Prediction Project"],
