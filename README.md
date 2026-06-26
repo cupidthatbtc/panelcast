@@ -76,13 +76,19 @@ holdout). The pipeline's `report` stage renders these automatically.
 Predicted vs. actual on held-out next albums (95% interval), and interval
 calibration (predicted vs. empirical coverage, ~650 albums/bin):
 
-<img src="docs/images/aoty_predictions.png" width="48%"> <img src="docs/images/aoty_reliability.png" width="48%">
+<img src="docs/images/aoty_predictions.png" height="300"> <img src="docs/images/aoty_reliability.png" height="300">
 
 What the model learned — posterior densities of the headline parameters (94% HDI):
 the average album sits near 71/100, and album-to-album dependence (`rho`) is weak
 once the artist level is centered out:
 
 <img src="docs/images/aoty_posterior.png" width="85%">
+
+Per-feature effects (standardized, 94% HDI): an artist's own prior average
+(`user_prior_mean`) dominates, while critic-rating volume and release recency pull
+the other way — both resolved well away from zero:
+
+<img src="docs/images/aoty_coefficients.png" width="60%">
 
 Same model, different domain — the bundled aerospace example (airframes → scored
 test flights), produced by `panelcast demo` with no source changes:
