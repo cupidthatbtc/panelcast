@@ -42,6 +42,7 @@ CELLS = (
 
 
 def _json_safe(obj):
+    """Recursively replace non-finite floats with None so json.dumps stays valid."""
     if isinstance(obj, dict):
         return {k: _json_safe(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple)):
@@ -52,6 +53,7 @@ def _json_safe(obj):
 
 
 def _run_cell(panelcast_bin: str, cell: dict, preset: str) -> int:
+    """Invoke `panelcast run` for one transform/latent cell; return its exit code."""
     cmd = [
         panelcast_bin,
         "run",
@@ -71,6 +73,7 @@ def _run_cell(panelcast_bin: str, cell: dict, preset: str) -> int:
 
 
 def _read_metrics(eval_dir: Path) -> dict:
+    """Pull the comparison fields from one evaluation run (best-effort)."""
     out: dict = {}
     diag_path = eval_dir / "diagnostics.json"
     metrics_path = eval_dir / "metrics.json"
@@ -106,6 +109,7 @@ def _read_metrics(eval_dir: Path) -> dict:
 
 
 def _fmt(v, spec: str = ".3g") -> str:
+    """Format one metric for the markdown table ('-' for missing)."""
     if v is None:
         return "-"
     if isinstance(v, bool):
@@ -139,6 +143,7 @@ _COLUMNS = [
 
 
 def _render_markdown(rows: list[dict]) -> str:
+    """Render the per-cell rows as the comparison markdown table."""
     head = "| " + " | ".join(label for _, label, _ in _COLUMNS) + " |"
     sep = "| " + " | ".join("---" for _ in _COLUMNS) + " |"
     lines = ["# Transform x latent-process bake-off (real subset, likelihood=studentt)", "", head, sep]
@@ -152,6 +157,7 @@ def _render_markdown(rows: list[dict]) -> str:
 
 
 def main() -> int:
+    """Run the 2x2 grid, snapshot each cell, and write the comparison artifacts."""
     default_bin = str(Path(sys.executable).parent / "panelcast")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--preset", default="diagnostic")
