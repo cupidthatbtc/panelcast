@@ -32,6 +32,7 @@ from panelcast.reporting.figures import (
     save_predictions_plot,
     save_reliability_plot,
     save_trace_plot,
+    select_artist_subsets,
     set_publication_style,
 )
 
@@ -513,3 +514,45 @@ class TestSaveArtistPredictionPlot:
                 output_dir=tmp_path,
                 filename_base="artist_bad",
             )
+
+
+class TestSelectArtistSubsets:
+    """Subset selection for the per-entity fan charts (generic entity schema)."""
+
+    @staticmethod
+    def _known_df():
+        # A: exact prediction, most prolific; B: worst residual; C: widest interval.
+        return pd.DataFrame(
+            {
+                "entity": ["A", "B", "C"],
+                "scenario": ["same", "same", "same"],
+                "pred_mean": [80.0, 60.0, 70.0],
+                "last_score": [80.0, 80.0, 75.0],
+                "pred_q05": [75.0, 55.0, 60.0],
+                "pred_q95": [85.0, 75.0, 90.0],
+                "n_training_events": [10, 6, 8],
+            }
+        )
+
+    def test_selects_by_each_criterion(self):
+        subsets = select_artist_subsets(self._known_df(), min_albums=5, n_per_category=2)
+        assert set(subsets) == {
+            "best_predicted",
+            "worst_predicted",
+            "most_prolific",
+            "high_uncertainty",
+        }
+        assert subsets["best_predicted"][0] == "A"  # zero residual
+        assert subsets["worst_predicted"][0] == "B"  # largest residual
+        assert subsets["most_prolific"][0] == "A"  # most training events
+        assert subsets["high_uncertainty"][0] == "C"  # widest 90% interval
+
+    def test_min_albums_filter_excludes_short_histories(self):
+        df = self._known_df()
+        df["n_training_events"] = [3, 2, 4]  # all below the threshold
+        assert select_artist_subsets(df, min_albums=5) == {}
+
+    def test_ignores_non_same_scenarios(self):
+        df = self._known_df()
+        df["scenario"] = "entity_mean"
+        assert select_artist_subsets(df, min_albums=5) == {}
