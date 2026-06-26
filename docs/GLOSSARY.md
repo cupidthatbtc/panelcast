@@ -82,9 +82,10 @@ things you'd actually bring up when explaining the project.
 **entity_disjoint_split()** — Secondary evaluation: no artist overlap between train and test. Tests cold-start: "can we predict for artists we've never seen?" Uses `predict_new_artist()` under the hood.
 
 > The split strategies were renamed artist → entity for domain portability. The
-> old names (`within_artist_temporal_split` / `artist_disjoint_split`, the
-> `within_artist_temporal` / `artist_disjoint` directory and manifest literals)
-> still resolve via thin aliases and `panelcast.data.split_types`.
+> old `within_artist_temporal` / `artist_disjoint` directory and manifest
+> literals still resolve via `panelcast.data.split_types`; the deprecated
+> function aliases (`within_artist_temporal_split` / `artist_disjoint_split`)
+> were removed in 0.3.0.
 
 ---
 

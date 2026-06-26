@@ -2,8 +2,8 @@
 
 The split strategies were renamed artist -> entity for domain portability.
 These tests pin the contract that old, AOTY-flavored identifiers still resolve:
-the function aliases, the manifest ``split_type`` normalization, and on-disk
-directory fallback.
+the manifest ``split_type`` normalization and on-disk directory fallback. (The
+deprecated function aliases were removed in 0.3.0.)
 """
 
 from __future__ import annotations
@@ -17,9 +17,7 @@ from panelcast.data.manifests import (
     create_split_assignments,
 )
 from panelcast.data.split import (
-    artist_disjoint_split,
     entity_disjoint_split,
-    within_artist_temporal_split,
     within_entity_temporal_split,
 )
 from panelcast.data.split_types import (
@@ -29,16 +27,6 @@ from panelcast.data.split_types import (
     resolve_split_type,
     split_dir_name,
 )
-
-
-def _temporal_df() -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "Artist": ["A"] * 4 + ["B"] * 3,
-            "Album": list(range(7)),
-            "Release_Date_Parsed": pd.date_range("2020", periods=7, freq="YS"),
-        }
-    )
 
 
 class TestResolveSplitType:
@@ -60,28 +48,6 @@ class TestResolveSplitType:
     def test_dir_name_helpers(self):
         assert split_dir_name("within_artist_temporal") == "within_entity_temporal"
         assert legacy_split_name(SplitType.ENTITY_DISJOINT) == "artist_disjoint"
-
-
-class TestFunctionAliases:
-    def test_within_entity_temporal_alias_matches(self):
-        df = _temporal_df()
-        new = within_entity_temporal_split(df, entity_col="Artist")
-        old = within_artist_temporal_split(df, artist_col="Artist")
-        for a, b in zip(new, old):
-            pd.testing.assert_frame_equal(a, b)
-
-    def test_entity_disjoint_alias_matches(self):
-        df = pd.DataFrame(
-            {
-                "Artist": [f"Artist_{i // 3}" for i in range(60)],
-                "Album": list(range(60)),
-                "Score": [70] * 60,
-            }
-        )
-        new = entity_disjoint_split(df, entity_col="Artist", random_state=7)
-        old = artist_disjoint_split(df, artist_col="Artist", random_state=7)
-        for a, b in zip(new, old):
-            pd.testing.assert_frame_equal(a, b)
 
 
 class TestManifestAliasResolution:

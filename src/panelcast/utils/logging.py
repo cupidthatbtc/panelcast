@@ -125,20 +125,3 @@ def is_interactive() -> bool:
         ...     # Use simpler output for CI
     """
     return sys.stdout.isatty()
-
-
-# Deprecated: kept for backwards compatibility
-def setup_logging() -> None:
-    """Deprecated: Use setup_pipeline_logging instead.
-
-    Kept for backwards compatibility. New code should use
-    setup_pipeline_logging(verbose=False) for equivalent behavior.
-    """
-    import warnings
-
-    warnings.warn(
-        "setup_logging() is deprecated, use setup_pipeline_logging() instead",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    setup_pipeline_logging(verbose=False)
