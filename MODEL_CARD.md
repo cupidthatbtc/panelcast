@@ -106,6 +106,10 @@ Prior distributions are weakly informative, chosen to regularize inference while
 
 ### Hyperparameters
 
+> Validation-scale snapshot (`num_chains` 2 / `num_samples` 500). The publication
+> configuration is 4 × 5,000 (warmup 3,000); for the converged real-data run see
+> *Real-data subset validation* below.
+
 | Parameter | Value |
 |-----------|-------|
 | mu_artist_loc | 0.0 |
@@ -161,19 +165,22 @@ configuration (4 chains × 5,000, warmup 3,000, Student-t).
 This demonstrates the mechanism on **real, strongly left-skewed data**; it is a
 ~5k-album subset, not the final full-corpus result.
 
-### Convergence Diagnostics
+### Convergence Diagnostics (superseded validation-scale snapshot)
 
-Convergence status: FAILED
+> **Superseded.** These numbers are from a validation-scale run (2 chains × 500),
+> retained only as the auto-generated snapshot. The current real-data verdict is
+> **PASS** at the publication configuration — see *Real-data subset validation*
+> above (R-hat 1.00, bulk ESS 3,134, 0 divergences).
+
+Convergence status (validation-scale): FAILED
 
 - R-hat (max): 1.0300 (threshold: < 1.01)
 - ESS bulk (min): 158
 - ESS tail (min): 158
 - Divergent transitions: 0
 
-These diagnostics are from a validation-scale run (2 chains x 500 samples), not
-the publication configuration (4 chains x 5000 samples, warmup 3000). The
-remaining R-hat/ESS shortfall is compute-bounded at validation settings — see
-Limitations.
+The R-hat/ESS shortfall here is compute-bounded at the 2 × 500 validation
+settings, not a model pathology — see Limitations.
 
 ### Calibration
 
