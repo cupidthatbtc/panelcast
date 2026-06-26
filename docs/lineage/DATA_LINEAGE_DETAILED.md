@@ -183,7 +183,6 @@ src/panelcast/
 │   ├── core.py                     # CoreNumericBlock
 │   ├── genre.py                    # GenreBlock, GenrePCABlock
 │   ├── temporal.py                 # TemporalBlock
-│   ├── descriptor_pca.py           # DescriptorPCABlock
 │   ├── pca.py                      # Shared PCA utilities
 │   └── errors.py                   # NotFittedError
 ├── models/
@@ -495,7 +494,6 @@ The `features/registry.py:build_default_registry()` registers these blocks:
 | `artist_history` | `ArtistHistoryBlock` | `features/artist.py` |
 | `genre` | `GenreBlock` | `features/genre.py` |
 | `genre_pca` | `GenrePCABlock` | `features/genre.py` |
-| `descriptor_pca` | `DescriptorPCABlock` | `features/descriptor_pca.py` |
 | `album_type` | `AlbumTypeBlock` | `features/album_type.py` |
 | `collaboration` | `CollaborationBlock` | `features/collaboration.py` |
 
@@ -1899,7 +1897,6 @@ Every file path referenced in this document should exist in the codebase:
 - [ ] `src/panelcast/features/core.py`
 - [ ] `src/panelcast/features/genre.py`
 - [ ] `src/panelcast/features/temporal.py`
-- [ ] `src/panelcast/features/descriptor_pca.py`
 - [ ] `src/panelcast/features/pca.py`
 - [ ] `src/panelcast/features/errors.py`
 - [ ] `src/panelcast/models/bayes/model.py`

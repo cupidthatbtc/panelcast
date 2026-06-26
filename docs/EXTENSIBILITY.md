@@ -62,7 +62,6 @@ Current block files
 - genre / genre_pca (aoty pack): `src/panelcast/features/genre.py`
 - album_type (aoty pack): `src/panelcast/features/album_type.py`
 - collaboration (aoty pack): `src/panelcast/features/collaboration.py`
-- descriptor_pca: stub, deliberately unregistered
 
 ## Guard rails
 

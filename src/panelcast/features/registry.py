@@ -71,9 +71,6 @@ def build_default_registry(descriptor: DatasetDescriptor | None = None) -> Featu
     ``descriptor.feature_packs`` add their domain-specific blocks. The legacy
     AOTY names (artist_history, artist_reputation) stay registered with fixed
     AOTY defaults for backwards compatibility.
-
-    DescriptorPCABlock remains a deliberately unregistered stub — it raises
-    NotImplementedError and must be implemented before registration.
     """
     descriptor = descriptor or DatasetDescriptor()
     registry = FeatureRegistry()
