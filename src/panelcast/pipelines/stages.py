@@ -560,9 +560,6 @@ def make_stage_predict() -> PipelineStage:
         output_paths=[
             Path("outputs/predictions/next_event_known_entities.csv"),
             Path("outputs/predictions/next_event_new_entity.csv"),
-            # Legacy AOTY-named copies, dual-written for one release.
-            Path("outputs/predictions/next_album_known_artists.csv"),
-            Path("outputs/predictions/next_album_new_artist.csv"),
             Path("outputs/predictions/prediction_summary.json"),
         ],
         depends_on=["evaluate"],

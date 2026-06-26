@@ -96,18 +96,18 @@ def load_split_assignment():
 
 
 def load_predictions():
-    pred_path = ROOT / "outputs/predictions/next_album_known_artists.csv"
+    pred_path = ROOT / "outputs/predictions/next_event_known_entities.csv"
     if not pred_path.exists():
         print("  Predictions: not found, skipping")
         return pd.DataFrame()
 
     preds = pd.read_csv(pred_path)
-    print(f"  Predictions: {len(preds):,} rows, {preds['artist'].nunique():,} artists")
+    print(f"  Predictions: {len(preds):,} rows, {preds['entity'].nunique():,} entities")
 
     scenario_map = {
         "same": "pred_same",
         "population_mean": "pred_popmean",
-        "artist_mean": "pred_artmean",
+        "entity_mean": "pred_entmean",
     }
     value_cols = [
         "pred_mean",
@@ -124,26 +124,26 @@ def load_predictions():
         subset = preds[preds["scenario"] == scenario].copy()
         rename = {col: f"{prefix}_{col.replace('pred_', '')}" for col in value_cols}
         subset = subset.rename(columns=rename)
-        subset = subset[["artist"] + list(rename.values())]
+        subset = subset[["entity"] + list(rename.values())]
         pivoted_parts.append(subset)
 
     result = pivoted_parts[0]
     for part in pivoted_parts[1:]:
-        result = result.merge(part, on="artist", how="outer")
+        result = result.merge(part, on="entity", how="outer")
 
     meta = (
-        preds.groupby("artist")
-        .first()[["last_score", "n_training_albums", "horizon_clamped"]]
+        preds.groupby("entity")
+        .first()[["last_score", "n_training_events", "horizon_clamped"]]
         .reset_index()
     )
     meta = meta.rename(
         columns={
             "last_score": "pred_last_score",
-            "n_training_albums": "pred_n_training_albums",
+            "n_training_events": "pred_n_training_events",
             "horizon_clamped": "pred_horizon_clamped",
         }
     )
-    result = result.merge(meta, on="artist", how="left")
+    result = result.merge(meta, on="entity", how="left")
     return result
 
 
@@ -905,8 +905,8 @@ def main():
 
     # 7) Join predictions
     if not predictions.empty:
-        merged = merged.merge(predictions, left_on="Artist", right_on="artist", how="left")
-        merged.drop(columns=["artist"], inplace=True)
+        merged = merged.merge(predictions, left_on="Artist", right_on="entity", how="left")
+        merged.drop(columns=["entity"], inplace=True)
         print(f"  After predictions: {len(merged):,} rows, {len(merged.columns)} cols")
 
     # 8) Join artist posteriors

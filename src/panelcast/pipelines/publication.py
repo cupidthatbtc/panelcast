@@ -660,7 +660,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
 
     # Prediction summary table
     try:
-        known_csv = Path("outputs/predictions/next_album_known_artists.csv")
+        known_csv = Path("outputs/predictions/next_event_known_entities.csv")
         if known_csv.exists():
             known_df = pd.read_csv(known_csv)
             # Create scenario comparison table
@@ -669,7 +669,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                 .agg(
                     mean_pred=("pred_mean", "mean"),
                     std_pred=("pred_mean", "std"),
-                    n_artists=("artist", "nunique"),
+                    n_artists=("entity", "nunique"),
                 )
                 .round(2)
             )
@@ -877,7 +877,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
     # Per-artist fan charts
     # =========================================================================
     try:
-        known_csv = Path("outputs/predictions/next_album_known_artists.csv")
+        known_csv = Path("outputs/predictions/next_event_known_entities.csv")
         pred_path_for_fans = next(
             (
                 p
@@ -923,7 +923,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                     )
                     # Use known predictions for fan chart samples (quantiles)
                     same_preds = known_df_fans[
-                        (known_df_fans["artist"] == artist) & (known_df_fans["scenario"] == "same")
+                        (known_df_fans["entity"] == artist) & (known_df_fans["scenario"] == "same")
                     ]
                     if same_preds.empty:
                         continue

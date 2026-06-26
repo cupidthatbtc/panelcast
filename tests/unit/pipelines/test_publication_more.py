@@ -572,7 +572,7 @@ def _make_known_artists_csv(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame(
         {
-            "artist": ["ArtistA", "ArtistA", "ArtistB", "ArtistB"],
+            "entity": ["ArtistA", "ArtistA", "ArtistB", "ArtistB"],
             "scenario": ["same", "better", "same", "better"],
             "pred_mean": [78.0, 82.0, 70.0, 74.0],
             "pred_q05": [65.0, 70.0, 58.0, 62.0],
@@ -619,7 +619,7 @@ class TestArtistFanCharts:
         _write_json(tmp_path / "models/training_summary.json", _make_training_summary())
 
         _make_known_artists_csv(
-            tmp_path / "outputs/predictions/next_album_known_artists.csv"
+            tmp_path / "outputs/predictions/next_event_known_entities.csv"
         )
         _make_train_parquet(
             tmp_path / "data/splits/within_entity_temporal/train.parquet"
@@ -677,7 +677,7 @@ class TestArtistFanCharts:
         _write_json(tmp_path / "models/training_summary.json", _make_training_summary())
 
         _make_known_artists_csv(
-            tmp_path / "outputs/predictions/next_album_known_artists.csv"
+            tmp_path / "outputs/predictions/next_event_known_entities.csv"
         )
         pred_path = tmp_path / "outputs/evaluation/within_entity_temporal/predictions.json"
         _make_predictions_json(pred_path)
@@ -702,7 +702,7 @@ class TestArtistFanCharts:
         _write_json(tmp_path / "models/training_summary.json", _make_training_summary())
 
         _make_known_artists_csv(
-            tmp_path / "outputs/predictions/next_album_known_artists.csv"
+            tmp_path / "outputs/predictions/next_event_known_entities.csv"
         )
         pred_path = tmp_path / "outputs/evaluation/within_entity_temporal/predictions.json"
         _make_predictions_json(pred_path)

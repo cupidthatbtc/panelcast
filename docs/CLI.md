@@ -237,7 +237,7 @@ panelcast stage <STAGE> [OPTIONS]
 | `features` | Build feature matrices from split data |
 | `train` | Fit Bayesian models using NumPyro MCMC |
 | `evaluate` | Compute diagnostics, calibration metrics, LOO-CV |
-| `predict` | Generate next-event predictions for known and new entities; writes `next_event_known_entities.csv` / `next_event_new_entity.csv` (the AOTY flagship also writes legacy `next_album_*`, deprecated) |
+| `predict` | Generate next-event predictions for known and new entities; writes `next_event_known_entities.csv` / `next_event_new_entity.csv` |
 | `report` | Generate publication artifacts (figures, tables, model cards) |
 | `sensitivity` | Optional prior-variant / feature-ablation analysis (opt-in; run by name, not part of a default run) |
 

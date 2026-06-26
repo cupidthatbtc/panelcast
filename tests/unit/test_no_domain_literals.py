@@ -7,14 +7,12 @@ parameter defaults that mirror them, legacy-summary fallbacks, the AOTY
 feature pack and presentation tooling. Any occurrence in a file outside the
 whitelist — or a whitelisted file going clean (shrink the list!) — fails.
 
-A second, lower-tier scan guards the *output-artifact* schema. The
-entity/event rename (issue 2b) gave the prediction artifacts generic names but
-keeps byte-identical AOTY-named copies for one release (dual-write), so the
-legacy schema literals (``artist_mean`` scenario, ``n_training_albums`` column,
-``next_album_*`` filenames) still live in the producer and its consumers. The
-LEGACY_ARTIFACT_ALLOWLIST pins exactly those files; when the legacy copies are
-dropped next release each file goes clean and the stale-entry test forces it
-out of the allowlist, ratcheting the legacy schema toward zero.
+A second, lower-tier scan guards the *output-artifact* schema. The prediction
+artifacts now use only the generic entity/event names; the legacy AOTY-named
+copies (``artist_mean`` scenario, ``n_training_albums`` column, ``next_album_*``
+filenames) have been dropped. The LEGACY_ARTIFACT_ALLOWLIST is therefore empty
+and any reappearance of those literals — in the producer, a consumer, or new
+code — fails the scan.
 """
 
 from __future__ import annotations
@@ -58,15 +56,8 @@ WHITELIST = {
 }
 
 
-# Files that legitimately still carry the legacy artifact schema during the
-# one-release dual-write window: the producer, the publication/figure consumers
-# that read the legacy CSV, and the stage that declares its output paths.
-LEGACY_ARTIFACT_ALLOWLIST = {
-    "pipelines/predict_next.py",  # dual-writes the legacy CSVs + rename maps
-    "pipelines/publication.py",  # reads next_album_known_artists.csv
-    "pipelines/stages.py",  # declares the legacy output paths
-    "reporting/figures.py",  # fan charts read n_training_albums / artist
-}
+# The dual-write window is closed: no file may carry the legacy artifact schema.
+LEGACY_ARTIFACT_ALLOWLIST: set[str] = set()
 
 
 def _occurrences(pattern: re.Pattern[str] = LITERAL_PATTERN) -> dict[str, list[int]]:

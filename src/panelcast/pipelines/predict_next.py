@@ -37,15 +37,8 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 # Scenario names
-SCENARIOS_KNOWN = ["same", "population_mean", "artist_mean"]
+SCENARIOS_KNOWN = ["same", "population_mean", "entity_mean"]
 SCENARIOS_NEW = ["population", "debut_defaults"]
-
-# Generic (entity/event) artifact schema. The pipeline writes generic-named
-# artifacts as the canonical output and keeps the legacy AOTY-flavored names as
-# byte-identical copies for one release (dual-write, then deprecate). These maps
-# translate the internal legacy column/scenario names to the generic ones.
-_ENTITY_COLUMN_RENAME = {"artist": "entity", "n_training_albums": "n_training_events"}
-_ENTITY_SCENARIO_RENAME = {"artist_mean": "entity_mean"}
 
 
 def _extract_posterior_samples(idata: object) -> dict[str, jnp.ndarray]:
@@ -68,7 +61,7 @@ def _predict_known_artists(
     Scenarios:
     - "same": Use the artist's last album's feature values
     - "population_mean": Use population mean features (zeros after z-scoring)
-    - "artist_mean": Use the artist's mean feature values
+    - "entity_mean": Use the artist's mean feature values
 
     Args:
         posterior_samples: Flattened posterior samples dict.
@@ -77,9 +70,9 @@ def _predict_known_artists(
         artist_mean_features: DataFrame with mean feature values per artist.
 
     Returns:
-        DataFrame with columns: artist, scenario, pred_mean, pred_std,
+        DataFrame with columns: entity, scenario, pred_mean, pred_std,
         pred_q05, pred_q25, pred_q50, pred_q75, pred_q95,
-        last_score, n_training_albums.
+        last_score, n_training_events.
     """
     artist_to_idx = summary["artist_to_idx"]
     max_seq = summary["max_seq"]
@@ -163,7 +156,7 @@ def _predict_known_artists(
                 n_reviews_list = []
                 valid_artists = []
                 last_scores = []
-                n_training_albums_list = []
+                n_training_events_list = []
                 horizon_clamped_flags = []
 
                 for artist in batch_artists:
@@ -189,7 +182,7 @@ def _predict_known_artists(
                     n_reviews_list.append(median_n_reviews)
                     valid_artists.append(artist)
                     last_scores.append(last_score)
-                    n_training_albums_list.append(n_albums)
+                    n_training_events_list.append(n_albums)
                     horizon_clamped_flags.append(horizon_clamped)
 
                     # Feature vector depends on scenario
@@ -197,7 +190,7 @@ def _predict_known_artists(
                         X_list.append(last_album_scaled.loc[artist].values.astype(np.float32))
                     elif scenario == "population_mean":
                         X_list.append(np.zeros(len(feature_cols), dtype=np.float32))
-                    elif scenario == "artist_mean":
+                    elif scenario == "entity_mean":
                         if artist_mean_scaled is not None and artist in artist_mean_scaled.index:
                             X_list.append(artist_mean_scaled.loc[artist].values.astype(np.float32))
                         else:
@@ -262,7 +255,7 @@ def _predict_known_artists(
                     samples = np.clip(y_pred[:, i], target_bounds[0], target_bounds[1])
                     results.append(
                         {
-                            "artist": artist,
+                            "entity": artist,
                             "scenario": scenario,
                             "pred_mean": float(np.mean(samples)),
                             "pred_std": float(np.std(samples)),
@@ -272,7 +265,7 @@ def _predict_known_artists(
                             "pred_q75": float(np.percentile(samples, 75)),
                             "pred_q95": float(np.percentile(samples, 95)),
                             "last_score": last_scores[i],
-                            "n_training_albums": n_training_albums_list[i],
+                            "n_training_events": n_training_events_list[i],
                             "horizon_clamped": horizon_clamped_flags[i],
                         }
                     )
@@ -504,20 +497,8 @@ def predict_next_albums(ctx: StageContext) -> dict:
     output_dir = Path("outputs/predictions")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Canonical generic-named artifacts (entity/event schema).
-    known_entity_df = known_df.rename(columns=_ENTITY_COLUMN_RENAME)
-    if "scenario" in known_entity_df.columns:
-        known_entity_df["scenario"] = known_entity_df["scenario"].replace(
-            _ENTITY_SCENARIO_RENAME
-        )
-    new_entity_df = new_df.rename(columns=_ENTITY_COLUMN_RENAME)
-    known_entity_df.to_csv(output_dir / "next_event_known_entities.csv", index=False)
-    new_entity_df.to_csv(output_dir / "next_event_new_entity.csv", index=False)
-
-    # Legacy AOTY-named copies, kept byte-identical for one release so existing
-    # consumers (publication tables, fan charts) keep working. Remove in 0.3.0.
-    known_df.to_csv(output_dir / "next_album_known_artists.csv", index=False)
-    new_df.to_csv(output_dir / "next_album_new_artist.csv", index=False)
+    known_df.to_csv(output_dir / "next_event_known_entities.csv", index=False)
+    new_df.to_csv(output_dir / "next_event_new_entity.csv", index=False)
 
     # Validate prediction bounds — log warnings but do NOT clip (hiding model issues)
     for label, df_check in [("known", known_df), ("new", new_df)]:
@@ -548,7 +529,7 @@ def predict_next_albums(ctx: StageContext) -> dict:
     n_horizon_clamped_artists = 0
     if "horizon_clamped" in known_df.columns and len(known_df) > 0:
         n_horizon_clamped_artists = int(
-            known_df.loc[known_df["horizon_clamped"], "artist"].nunique()
+            known_df.loc[known_df["horizon_clamped"], "entity"].nunique()
         )
 
     # Collect prediction-level stats for monitoring
@@ -583,12 +564,8 @@ def predict_next_albums(ctx: StageContext) -> dict:
     )
 
     return {
-        # Canonical generic-named artifacts.
         "known_predictions_path": str(output_dir / "next_event_known_entities.csv"),
         "new_predictions_path": str(output_dir / "next_event_new_entity.csv"),
-        # Legacy AOTY-named copies (dual-written for one release).
-        "known_predictions_legacy_path": str(output_dir / "next_album_known_artists.csv"),
-        "new_predictions_legacy_path": str(output_dir / "next_album_new_artist.csv"),
         "summary_path": str(output_dir / "prediction_summary.json"),
         "pred_summary": pred_summary,
     }
@@ -608,7 +585,7 @@ def predict_artist_next(
     the current model and training summary, rebuilds the artist's last-album
     and mean-feature metadata from the training split, and returns the
     per-scenario prediction rows (same columns as
-    outputs/predictions/next_album_known_artists.csv).
+    outputs/predictions/next_event_known_entities.csv).
 
     Args:
         artist: Entity name exactly as it appears in the training data.

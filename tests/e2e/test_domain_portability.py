@@ -206,7 +206,6 @@ class TestAeroTinyMcmc:
 
     def test_known_airframe_predictions_in_bounds(self, aero_full_run):
         pred_dir = aero_full_run / "outputs" / "predictions"
-        # Canonical generic-named artifact uses the entity/event schema.
         preds = pd.read_csv(pred_dir / "next_event_known_entities.csv")
         assert len(preds) > 0
         assert "entity" in preds.columns
@@ -216,10 +215,8 @@ class TestAeroTinyMcmc:
             assert preds[col].between(0.0, 10.0).all(), f"{col} outside aero bounds"
         assert preds["pred_mean"].notna().all()
 
-        # Legacy AOTY-named copy is still dual-written for one release.
-        legacy = pd.read_csv(pred_dir / "next_album_known_artists.csv")
-        assert "artist" in legacy.columns
-        assert len(legacy) == len(preds)
+        # The legacy AOTY-named copy has been dropped.
+        assert not (pred_dir / "next_album_known_artists.csv").exists()
 
 
 # ============================================================================

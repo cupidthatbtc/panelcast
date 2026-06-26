@@ -29,7 +29,7 @@ from panelcast.pipelines.predict_next import (
 
 def test_scenario_constants():
     """Scenario name constants are defined correctly."""
-    assert SCENARIOS_KNOWN == ["same", "population_mean", "artist_mean"]
+    assert SCENARIOS_KNOWN == ["same", "population_mean", "entity_mean"]
     assert SCENARIOS_NEW == ["population", "debut_defaults"]
 
 
@@ -244,7 +244,7 @@ class TestPredictKnownArtists:
         )
         assert isinstance(result, pd.DataFrame)
         expected_cols = {
-            "artist",
+            "entity",
             "scenario",
             "pred_mean",
             "pred_std",
@@ -254,7 +254,7 @@ class TestPredictKnownArtists:
             "pred_q75",
             "pred_q95",
             "last_score",
-            "n_training_albums",
+            "n_training_events",
             "horizon_clamped",
         }
         assert expected_cols.issubset(set(result.columns))
@@ -426,7 +426,7 @@ class TestPredictKnownArtists:
         )
         # Only 3 artists in last_album_info => 9 rows (3 artists x 3 scenarios)
         assert len(result) == 9
-        assert "ArtistD" not in result["artist"].values
+        assert "ArtistD" not in result["entity"].values
 
     def test_strict_raises_on_horizon_clamp(
         self,
@@ -638,7 +638,7 @@ class TestPredictNextAlbums:
         # Small DataFrames for known/new predictions
         known_df = pd.DataFrame(
             {
-                "artist": ["ArtistA"],
+                "entity": ["ArtistA"],
                 "scenario": ["same"],
                 "pred_mean": [75.0],
                 "pred_std": [5.0],
@@ -648,7 +648,7 @@ class TestPredictNextAlbums:
                 "pred_q75": [80.0],
                 "pred_q95": [85.0],
                 "last_score": [80.0],
-                "n_training_albums": [2],
+                "n_training_events": [2],
             }
         )
         new_df = pd.DataFrame(
@@ -723,13 +723,10 @@ class TestPredictNextAlbums:
         assert isinstance(result, dict)
         assert "known_predictions_path" in result
         assert "new_predictions_path" in result
-        # Canonical paths now point at the generic-named artifacts.
         assert result["known_predictions_path"].endswith("next_event_known_entities.csv")
         assert result["new_predictions_path"].endswith("next_event_new_entity.csv")
-        # Legacy AOTY-named copies are still exposed for one release.
-        assert "known_predictions_legacy_path" in result
-        assert "new_predictions_legacy_path" in result
-        assert result["known_predictions_legacy_path"].endswith("next_album_known_artists.csv")
+        assert "known_predictions_legacy_path" not in result
+        assert "new_predictions_legacy_path" not in result
         assert "summary_path" in result
         assert "pred_summary" in result
 
