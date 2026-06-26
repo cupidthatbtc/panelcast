@@ -63,6 +63,20 @@
     "name": "offset_logit_ar1",
     "transform": "offset_logit",
     "latent": "ar1",
-    "error": "fit in progress (pathologically slow; chain 1 ~2h, maxing tree depth) \u2014 row finalized on completion"
+    "passed": false,
+    "rhat_max": 1.01,
+    "ess_bulk_min": 477.0,
+    "divergences": 0,
+    "mae": 5.643451690673828,
+    "rmse": 8.171748161315918,
+    "r2": 0.4308794140815735,
+    "cov95": 0.9540581929555896,
+    "pit_dev": 0.047932618683001534,
+    "crps": 4.131418751631582,
+    "ppc_pinned": 4,
+    "ppc_pinned_names": "skewness,max,q10,q90",
+    "loo_elpd": -2431.731393814087,
+    "pareto_k_max": 0.6267253065125088,
+    "pareto_k_gt07": 0
   }
 ]

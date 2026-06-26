@@ -341,15 +341,16 @@ AOTY_DATASET_PATH=data/raw/aoty_subset.csv \
 | `identity` × `rw` (default) | identity | rw | 1.01 | **802** | 0 | max, q50, q90 (**3**) | 0.990 | 0.008 | **5.64** | 8.27 | 0.957 | 4.19 |
 | `identity` × `ar1` | identity | ar1 | 1.01 | 577 | 0 | skewness, max, q50, q90 (4) | 0.990 | 0.008 | 5.63 | 8.27 | 0.956 | 4.20 |
 | `offset_logit` × `rw` | offset_logit | rw | 1.01 | 649 | 0 | skewness, max, q10, q90 (4) | **1.000** | 0.057 | 5.66 | **8.19** | 0.960 | **4.13** |
-| `offset_logit` × `ar1` | offset_logit | ar1 | _fit in progress_ | — | — | — | — | — | — | — | — | — |
+| `offset_logit` × `ar1` | offset_logit | ar1 | 1.01 | 477 | 0 | skewness, max, q10, q90 (4) | **1.000** | 0.059 | 5.64 | **8.17** | 0.954 | **4.13** |
 
 (No cell clears the convergence gate at diagnostic scale — all are ESS-bound,
 exactly as the published Student-t default is until the 4×5000 publication run;
-the comparison here is *relative*. The `offset_logit × ar1` row is finalized in
-`.audit/transform_latent_bakeoff/comparison.md` once its fit completes — it is
-the slowest geometry of the grid by far: ~2 h per chain, maxing tree depth at
-every iteration, the compounded cost of `offset_logit`'s curvature and `ar1`'s
-extra latent coupling.)
+the comparison here is *relative*. `offset_logit × ar1` was the slowest geometry
+of the grid by far — ~2 h per chain, maxing tree depth at every iteration, the
+compounded cost of `offset_logit`'s curvature and `ar1`'s extra latent coupling —
+yet it converges (R-hat 1.01) to the **exact same four pins as `offset_logit × rw`**
+at the **worst bulk ESS of the grid (477)**: `ar1` buys nothing on top of the
+transform.)
 
 **`ar1` does not help (claim 3).** On the default transform it drops bulk ESS
 802 → 577, tips `skewness` over the >0.99 flag (0.990 → 0.99025 — within the
@@ -373,9 +374,10 @@ not pull the skew/max statistics to the interior.
 
 **Verdict: the review's `offset_logit × ar1` loophole is closed; default stays
 `identity × rw`.** The `skewness`/`max`/`q90` pins are unmoved by the transform
-(`offset_logit × rw`) and unhelped by the latent process (`ar1`), and the named
-combination is the most pathological geometry of the four — `ar1` compounds
-`offset_logit`'s cost rather than rescuing it. This is the same conclusion the
+(`offset_logit × rw`) and unhelped by the latent process (`ar1`): the named
+`offset_logit × ar1` combination converges to the **same four pins as
+`offset_logit × rw`** at the grid's worst ESS (477) and ~8 h of compute — `ar1`
+compounds `offset_logit`'s cost without touching the pins. This is the same conclusion the
 six likelihood families reached from the other direction: the bounded-skew
 mismatch is **structural**, not a transform-or-latent-process gap. Adopting
 `offset_logit` and/or `ar1` as a new default is **out of scope here** — it would

@@ -35,9 +35,10 @@ diagnostic 4×1000, same ~5k subset; `scripts/bakeoff_transform_latent.py`):
   1.000, `max` (0.9995) and `q90` (0.9995) stay pinned. It relieves the
   integer-heaping `q50` pin (0.008 → 0.057) only to **newly pin `q10`** (0.060 →
   0.003) — a reshuffle of the lower tail, not a fix for the bounded-skew triplet.
-- `offset_logit × ar1` (the named combination) is the most pathological geometry
-  of the grid (~2 h/chain, maxing tree depth); its row is finalized in the
-  comparison table on completion.
+- `offset_logit × ar1` (the named combination) was the most pathological geometry
+  of the grid (~2 h/chain, ~8 h total, maxing tree depth) yet still converges
+  (R-hat 1.01) to the **exact same four pins as `offset_logit × rw`** at the
+  grid's worst bulk ESS (477): `ar1` adds nothing on top of the transform.
 
 **Disposition: the loophole is closed.** No transform/latent cell pulls
 `skewness`/`max`/`q90` to the interior; the mismatch is structural, consistent
