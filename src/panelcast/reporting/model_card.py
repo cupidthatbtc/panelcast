@@ -25,6 +25,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from panelcast import __version__
+
 __all__ = [
     "ModelCardData",
     "generate_model_card",
@@ -604,7 +606,7 @@ def create_default_model_card_data(descriptor=None) -> ModelCardData:
     return ModelCardData(
         # Model identity
         model_name="AOTY Artist Score Prediction Model",
-        model_version="0.2.1",
+        model_version=__version__,
         model_type="Bayesian Hierarchical Regression with Time-Varying Effects",
         # Authors and dates
         authors=["AOTY Prediction Project"],
