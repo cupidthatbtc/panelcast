@@ -6,11 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-Tracked for **0.3.0** (#14): remove the dual-written legacy `next_album_*`
-prediction artifacts and the deprecated split aliases
-(`within_artist_temporal_split`, `artist_disjoint_split`) now that their
-deprecation warning has shipped; single-source the version via
-`importlib.metadata`; and deep-generalize the AOTY-flavored historical docs.
+### Removed
+
+- **BREAKING: legacy `next_album_*` prediction artifacts.** The predict stage
+  writes only the generic `next_event_known_entities.csv` /
+  `next_event_new_entity.csv` (columns `entity` / `n_training_events`, scenario
+  `entity_mean`); the dual-written AOTY-named copies are gone. Consumers that
+  read `next_album_known_artists.csv` / `next_album_new_artist.csv` must switch
+  to the generic names and the `entity` / `n_training_events` columns.
+
+Still tracked for **0.3.0** (#14): single-source the version via
+`importlib.metadata`, and deep-generalize the AOTY-flavored historical docs.
 
 ## [0.2.0] — 2026-06-25
 

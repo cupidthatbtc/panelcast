@@ -510,13 +510,13 @@ class TestPublicationPredictionTable:
             _make_training_summary(),
         )
         # Create the prediction CSV
-        known_csv = tmp_path / "outputs/predictions/next_album_known_artists.csv"
+        known_csv = tmp_path / "outputs/predictions/next_event_known_entities.csv"
         known_csv.parent.mkdir(parents=True, exist_ok=True)
         pred_df = pd.DataFrame(
             {
                 "scenario": ["optimistic", "optimistic", "pessimistic", "pessimistic"],
                 "pred_mean": [80.0, 82.0, 60.0, 62.0],
-                "artist": ["A", "B", "A", "B"],
+                "entity": ["A", "B", "A", "B"],
             }
         )
         pred_df.to_csv(known_csv, index=False)
@@ -551,7 +551,7 @@ class TestPublicationPredictionTable:
             _make_training_summary(),
         )
         # Create a malformed CSV
-        known_csv = tmp_path / "outputs/predictions/next_album_known_artists.csv"
+        known_csv = tmp_path / "outputs/predictions/next_event_known_entities.csv"
         known_csv.parent.mkdir(parents=True, exist_ok=True)
         # Missing required columns for groupby
         pd.DataFrame({"bad_column": [1, 2]}).to_csv(known_csv, index=False)

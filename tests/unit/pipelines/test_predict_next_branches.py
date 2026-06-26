@@ -180,8 +180,8 @@ class TestKnownArtistsBranches:
         ):
             result = _predict_known_artists(small_posterior, base_summary, last_album_info, partial_mean)
 
-        artist_mean_rows = result[result["scenario"] == "artist_mean"]
-        assert len(artist_mean_rows) == 2
+        entity_mean_rows = result[result["scenario"] == "entity_mean"]
+        assert len(entity_mean_rows) == 2
 
     def test_valid_artists_empty_batch_continue(self, small_posterior, base_summary, artist_mean_features):
         # All artists absent from last_album_info => no valid_artists => L207 continue
@@ -290,8 +290,8 @@ def _make_minimal_dfs():
 
 def _make_known_new_dfs():
     known_df = pd.DataFrame({
-        "artist": ["ArtistA", "ArtistA", "ArtistA"],
-        "scenario": ["same", "population_mean", "artist_mean"],
+        "entity": ["ArtistA", "ArtistA", "ArtistA"],
+        "scenario": ["same", "population_mean", "entity_mean"],
         "pred_mean": [75.0, 74.0, 73.0],
         "pred_std": [5.0, 5.0, 5.0],
         "pred_q05": [65.0, 64.0, 63.0],
@@ -300,7 +300,7 @@ def _make_known_new_dfs():
         "pred_q75": [80.0, 79.0, 78.0],
         "pred_q95": [85.0, 84.0, 83.0],
         "last_score": [80.0, 80.0, 80.0],
-        "n_training_albums": [2, 2, 2],
+        "n_training_events": [2, 2, 2],
         "horizon_clamped": [False, False, False],
     })
     new_df = pd.DataFrame({
@@ -508,7 +508,7 @@ class TestPredictArtistNext:
         mock_idata = MagicMock()
 
         known_df = pd.DataFrame({
-            "artist": ["ArtistA"],
+            "entity": ["ArtistA"],
             "scenario": ["same"],
             "pred_mean": [75.0],
             "pred_std": [5.0],
@@ -518,7 +518,7 @@ class TestPredictArtistNext:
             "pred_q75": [80.0],
             "pred_q95": [85.0],
             "last_score": [80.0],
-            "n_training_albums": [2],
+            "n_training_events": [2],
             "horizon_clamped": [False],
         })
 

@@ -833,9 +833,9 @@ def select_artist_subsets(
     Parameters
     ----------
     known_df : pd.DataFrame
-        Known-artist predictions with columns ``artist``, ``scenario``,
+        Known-artist predictions with columns ``entity``, ``scenario``,
         ``pred_mean``, ``pred_std``, ``pred_q05``, ``pred_q95``,
-        ``last_score``, ``n_training_albums``.
+        ``last_score``, ``n_training_events``.
     min_albums : int, default 5
         Minimum training albums for inclusion (fan charts with < 5
         points are uninformative).
@@ -849,7 +849,7 @@ def select_artist_subsets(
     """
     # Use the "same" scenario for per-artist metrics
     same = known_df[known_df["scenario"] == "same"].copy()
-    same = same[same["n_training_albums"] >= min_albums]
+    same = same[same["n_training_events"] >= min_albums]
     if same.empty:
         return {}
 
@@ -860,10 +860,10 @@ def select_artist_subsets(
     same["abs_resid"] = (same["pred_mean"] - same["last_score"]).abs()
 
     subsets: dict[str, list[str]] = {}
-    subsets["best_predicted"] = same.nsmallest(n_per_category, "abs_resid")["artist"].tolist()
-    subsets["worst_predicted"] = same.nlargest(n_per_category, "abs_resid")["artist"].tolist()
-    subsets["most_prolific"] = same.nlargest(n_per_category, "n_training_albums")["artist"].tolist()
-    subsets["high_uncertainty"] = same.nlargest(n_per_category, "ci_width")["artist"].tolist()
+    subsets["best_predicted"] = same.nsmallest(n_per_category, "abs_resid")["entity"].tolist()
+    subsets["worst_predicted"] = same.nlargest(n_per_category, "abs_resid")["entity"].tolist()
+    subsets["most_prolific"] = same.nlargest(n_per_category, "n_training_events")["entity"].tolist()
+    subsets["high_uncertainty"] = same.nlargest(n_per_category, "ci_width")["entity"].tolist()
     return subsets
 
 
