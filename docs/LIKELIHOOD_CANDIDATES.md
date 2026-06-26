@@ -316,6 +316,75 @@ available (`--likelihood-family mixture`) but is **not adopted**; issue #3 is
 downgraded to a documented limitation. The remaining open item is full-corpus scale,
 not likelihood adequacy.
 
+## Transform × latent process (offset_logit, ar1)
+
+The waves above vary the *likelihood*. A model-spec review raised a separate
+axis: the `offset_logit` target transform and the stationary `ar1` latent
+process. Both are implemented and gated, and both were already recorded as HELD
+— but every prior verdict tested **one axis at a time** (`offset_logit` was
+judged at cheap 2×500 settings with `latent_process=rw`; `ar1` was registered
+behind a LOO gate but never run in a real bake-off). The `offset_logit × ar1`
+combination — the one the review named as the un-tried in-tree fix — had **never
+actually been fit**. This closes that grid: the full 2×2 (`identity`/`offset_logit`
+× `rw`/`ar1`), likelihood fixed at `studentt`, at the diagnostic configuration
+(4 chains × 1000) on the same ~5k-album subset, driven by
+`scripts/bakeoff_transform_latent.py` and snapshotted under
+`.audit/transform_latent_bakeoff/`:
+
+```bash
+AOTY_DATASET_PATH=data/raw/aoty_subset.csv \
+    ~/aoty-gpu/bin/python scripts/bakeoff_transform_latent.py
+```
+
+| cell | transform | latent | rhat | ess | div | ppc pinned (p<0.01 / >0.99) | skew p | q50 p | mae | rmse | cov95 | crps |
+|------|-----------|--------|------|-----|-----|------------------------------|--------|-------|-----|------|-------|------|
+| `identity` × `rw` (default) | identity | rw | 1.01 | **802** | 0 | max, q50, q90 (**3**) | 0.990 | 0.008 | **5.64** | 8.27 | 0.957 | 4.19 |
+| `identity` × `ar1` | identity | ar1 | 1.01 | 577 | 0 | skewness, max, q50, q90 (4) | 0.990 | 0.008 | 5.63 | 8.27 | 0.956 | 4.20 |
+| `offset_logit` × `rw` | offset_logit | rw | 1.01 | 649 | 0 | skewness, max, q10, q90 (4) | **1.000** | 0.057 | 5.66 | **8.19** | 0.960 | **4.13** |
+| `offset_logit` × `ar1` | offset_logit | ar1 | 1.01 | 477 | 0 | skewness, max, q10, q90 (4) | **1.000** | 0.059 | 5.64 | **8.17** | 0.954 | **4.13** |
+
+(No cell clears the convergence gate at diagnostic scale — all are ESS-bound,
+exactly as the published Student-t default is until the 4×5000 publication run;
+the comparison here is *relative*. `offset_logit × ar1` was the slowest geometry
+of the grid by far — ~2 h per chain, maxing tree depth at every iteration, the
+compounded cost of `offset_logit`'s curvature and `ar1`'s extra latent coupling —
+yet it converges (R-hat 1.01) to the **exact same four pins as `offset_logit × rw`**
+at the **worst bulk ESS of the grid (477)**: `ar1` buys nothing on top of the
+transform.)
+
+**`ar1` does not help (claim 3).** On the default transform it drops bulk ESS
+802 → 577, tips `skewness` over the >0.99 flag (0.990 → 0.99025 — within the
+borderline noise the waves above already note), and leaves point accuracy and
+calibration unchanged (MAE 5.63 vs 5.64, identical RMSE/coverage). It buys no
+PPC or predictive improvement at a real mixing cost, so `latent_process = rw`
+stays the default; `ar1` remains gated for the LOO-clear-win condition that has
+not materialized.
+
+**`offset_logit` converges but does not move the structural pins (claim 1).**
+Unlike the cheap 2×500 HELD note (R-hat 1.27–1.37), `offset_logit × rw` *mixes*
+at diagnostic scale (R-hat 1.01, 0 divergences) — but ~10× slower (it maxes the
+tree depth) and **without resolving the mismatch the transform was meant to fix**.
+It centers `mean`/`sd` (p 0.86 → 0.52, 0.16 → 0.29) and relieves the integer-heaping
+`q50` pin (0.008 → 0.057), but `skewness` *worsens* to a hard 1.000, `max`
+(0.9995) and `q90` (0.9995) stay pinned, and it **newly pins `q10`** (0.060 →
+0.003). Net it pins four statistics instead of three, trading the lower-quantile
+pin from q50 to q10 while the bounded-skew triplet (`skewness`/`max`/`q90`) does
+not budge. The boundary-respecting transform reshuffles the lower tail; it does
+not pull the skew/max statistics to the interior.
+
+**Verdict: the review's `offset_logit × ar1` loophole is closed; default stays
+`identity × rw`.** The `skewness`/`max`/`q90` pins are unmoved by the transform
+(`offset_logit × rw`) and unhelped by the latent process (`ar1`): the named
+`offset_logit × ar1` combination converges to the **same four pins as
+`offset_logit × rw`** at the grid's worst ESS (477) and ~8 h of compute — `ar1`
+compounds `offset_logit`'s cost without touching the pins. This is the same conclusion the
+six likelihood families reached from the other direction: the bounded-skew
+mismatch is **structural**, not a transform-or-latent-process gap. Adopting
+`offset_logit` and/or `ar1` as a new default is **out of scope here** — it would
+re-baseline every published number and regenerate the golden fixtures, so it is
+gated as its own decision (see `docs/DECISIONS_TO_LOCK.md`). Per-point review
+disposition: `.audit/REVIEW_RESPONSE.md`.
+
 ## Adopting a candidate
 
 ```bash

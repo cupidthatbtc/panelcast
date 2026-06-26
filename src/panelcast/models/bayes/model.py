@@ -133,8 +133,13 @@ def compute_sigma_scaled(
     # exist — all observations share the same sigma_obs.  Adding a single-review
     # penalty would make the model internally inconsistent (claiming homoscedastic
     # while varying sigma).  To penalize single reviews, use heteroscedastic mode.
-    # TODO(model-v2): Consider unconditional single-review downweighting via
-    # observation weights rather than noise scaling.
+    # TODO(model-v2): single-review handling is asymmetric across the model.
+    # Response side: downweight n=1 albums via observation weights instead of
+    # noise scaling (above). Predictor side (worse): the AR(1) term regresses on
+    # the *observed* lagged score as if noise-free (`ar_term`, below) while that
+    # same score is the review-count-noisy response here, so conditioning on the
+    # noisy regressor attenuates rho. A latent-state AR is the principled fix.
+    # Tracked under issue #14 (model-v2).
     apply_penalty = jnp.logical_and(is_single_review, exponent > 0)
     sigma_scaled = jnp.where(apply_penalty, sigma_obs * single_review_multiplier, sigma_scaled)
 
@@ -649,8 +654,12 @@ def make_score_model(score_type: str) -> Callable:
             prefix, n_artists, max_seq, init_artist_effect, sigma_rw, priors
         )
 
-        # Index artist effects by album sequence and artist
-        # album_seq is 1-indexed, convert to 0-indexed
+        # album_seq is 1-indexed -> 0-indexed. Clipping at max_seq-1 reuses the
+        # final latent step for any album past the longest training trajectory,
+        # freezing the random walk there: prediction adds no further RW
+        # innovations beyond max_seq, so deep multi-step-ahead variance is
+        # understated by ~(h-max_seq)*sigma_rw^2. Immaterial for the one-step
+        # flagship use (next album).
         seq_idx = jnp.clip(album_seq - 1, 0, max_seq - 1).astype(jnp.int32)
         obs_artist_effect = artist_effects[seq_idx, artist_idx]
 

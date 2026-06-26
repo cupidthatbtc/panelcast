@@ -45,13 +45,19 @@ Feature scope (defaults)
 
 Bayesian modeling (adopted gates — validated on 2x500 cheap runs, 2026-06-10)
 - Sampler: NumPyro NUTS
-- `target_transform = identity` — offset_logit HELD: failed PPC/PIT/coverage
-  at cheap settings pre-centering; retried post-centering (see
-  `outputs/2026-06-10_131314` notes and the Phase-8 LOO comparison).
+- `target_transform = identity` — offset_logit HELD. At cheap 2×500 settings it
+  failed PPC/PIT/coverage and would not mix (R-hat 1.27–1.37). The diagnostic
+  transform×latent bake-off (`docs/LIKELIHOOD_CANDIDATES.md`,
+  `.audit/transform_latent_bakeoff/`) now shows offset_logit *does* mix at 4×1000
+  (R-hat 1.01) but ~10× slower, and still does not move the bounded-skew
+  skewness/max/q90 PPC pins — it relieves q50 only to newly pin q10. Held.
 - `ar_center = global` — ADOPTED: corr(rho, mu_artist) -0.997 -> +0.016,
   debut AR terms exactly zero, prior predictive flipped to passing.
 - `latent_process = rw` — ar1 registered behind a gate; adopt only if LOO
-  clearly wins.
+  clearly wins. The diagnostic transform×latent bake-off (above) shows it does
+  not: on the default transform ar1 drops bulk ESS 802 → 577 and pins one more
+  PPC statistic at identical point accuracy and calibration. Held; rw stays
+  default.
 - `artist_effect_param = noncentered`, `sigma_artist_prior_type = halfnormal`
   — won the 4-variant mixing bake-off
   (`outputs/experiments/sigma_artist_mixing.json`).
@@ -113,3 +119,11 @@ Reproducibility and artifacts
 - Root copy of model card: `MODEL_CARD.md`
 - Coverage gate: `fail_under = 80` (`pyproject.toml [tool.coverage.report]`;
   presentation/dev tooling omitted with rationale in `[tool.coverage.run]`)
+- The default model path is held **bit-identical** to the pre-refactor code
+  (parity-tested): every new transform / likelihood / latent-process option is
+  opt-in, so the published numbers and golden fixtures stay valid without
+  re-running. The trade-off (the model-spec review's reproducibility-capture
+  point) is that adopting a better default is not a one-line flip — it
+  re-baselines every published metric and regenerates the golden fixtures, so
+  any default change is gated as its own decision rather than bundled with the
+  experiment that motivates it.
