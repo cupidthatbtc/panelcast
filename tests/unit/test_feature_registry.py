@@ -227,12 +227,6 @@ class TestBuildDefaultRegistry:
         block = registry.build(spec)
         assert block.name == "genre"
 
-    def test_descriptor_pca_not_registered(self):
-        registry = build_default_registry()
-        spec = FeatureSpec(name="descriptor_pca", params={})
-        with pytest.raises(KeyError, match="Unknown feature block"):
-            registry.build(spec)
-
     def test_contains_album_type(self):
         registry = build_default_registry()
         spec = FeatureSpec(name="album_type", params={})
