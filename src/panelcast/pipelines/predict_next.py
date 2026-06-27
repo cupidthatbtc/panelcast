@@ -82,10 +82,11 @@ def _scenario_feature_vector(
         return last_album_scaled.loc[artist].values.astype(np.float32)
     if scenario == "population_mean":
         return np.zeros(n_features, dtype=np.float32)
-    # entity_mean
-    if artist_mean_scaled is not None and artist in artist_mean_scaled.index:
-        return artist_mean_scaled.loc[artist].values.astype(np.float32)
-    return np.zeros(n_features, dtype=np.float32)
+    if scenario == "entity_mean":
+        if artist_mean_scaled is not None and artist in artist_mean_scaled.index:
+            return artist_mean_scaled.loc[artist].values.astype(np.float32)
+        return np.zeros(n_features, dtype=np.float32)
+    raise ValueError(f"Unknown known-entity scenario: {scenario!r}")
 
 
 def _build_batch_scenario_args(

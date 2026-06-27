@@ -1042,7 +1042,7 @@ def _run_training_prior_predictive(
         )
         return prior_predictive_result
     except Exception as e:
-        log.warning("prior_predictive_failed", error=str(e))
+        log.warning("prior_predictive_failed", error=str(e), exc_info=True)
         return None
 
 
