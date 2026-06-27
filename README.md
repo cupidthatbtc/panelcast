@@ -96,11 +96,6 @@ headline parameters (4 chains, well-mixed), and their pairwise joint posterior
 
 <img src="docs/images/aoty_trace.png" height="320" alt="MCMC trace and per-chain density for the headline parameters, showing well-mixed chains"> <img src="docs/images/aoty_pairplot.png" height="320" alt="Pairwise joint posterior of the hyperparameters with no funnel geometry">
 
-Same model, different domain — the bundled aerospace example (airframes → scored
-test flights), produced by `panelcast demo` with no source changes:
-
-<img src="docs/images/aero_predictions.png" width="48%" alt="Aerospace example: predicted vs. actual test-flight scores">
-
 ## Install
 
 **Prerequisites:** Python ≥ 3.11. [pixi](https://pixi.sh) is the supported
