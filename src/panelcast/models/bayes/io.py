@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import subprocess
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -77,7 +77,7 @@ class ModelManifest:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ModelManifest":
+    def from_dict(cls, d: dict[str, Any]) -> ModelManifest:
         """Create from dictionary."""
         return cls(**d)
 
@@ -108,7 +108,7 @@ class ModelsManifest:
         }
 
     @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> "ModelsManifest":
+    def from_dict(cls, d: dict[str, Any]) -> ModelsManifest:
         """Create from dictionary."""
         return cls(
             version=d.get("version", "1.0"),
@@ -145,7 +145,7 @@ def generate_model_filename(model_type: str) -> str:
     str
         Filename with timestamp in format YYYYMMDD_HHMMSS.
     """
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     return f"{model_type}_{timestamp}.nc"
 
 
@@ -251,7 +251,7 @@ def save_model(
             mcmc_config = _to_python_native(raw)
     manifest = ModelManifest(
         version="1.0",
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
         model_type=model_type,
         filename=filename,
         mcmc_config=mcmc_config,
@@ -321,7 +321,7 @@ def load_manifest(output_dir: Path = Path("models")) -> ModelsManifest | None:
         return None
 
     try:
-        with open(manifest_path, "r", encoding="utf-8") as f:
+        with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, ValueError) as e:
         logger.warning("manifest_parse_failed", path=str(manifest_path), error=str(e))

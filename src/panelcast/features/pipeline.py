@@ -69,7 +69,7 @@ class FeaturePipeline:
                 "Call 'fit' with training data before using 'transform'."
             )
 
-    def fit(self, train_df: pd.DataFrame, ctx: FeatureContext) -> "FeaturePipeline":
+    def fit(self, train_df: pd.DataFrame, ctx: FeatureContext) -> FeaturePipeline:
         """Fit all blocks on training data only.
 
         Parameters

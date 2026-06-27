@@ -8,7 +8,7 @@ on training data only before transforming any split.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from .errors import NotFittedError
 
@@ -58,8 +58,8 @@ class BaseFeatureBlock:
     """
 
     name: str = "base"
-    requires: list[str] = []
-    required_columns: list[str] = []
+    requires: ClassVar[list[str]] = []
+    required_columns: ClassVar[list[str]] = []
 
     def __init__(self, params: dict[str, Any] | None = None) -> None:
         self.params = params or {}
@@ -108,7 +108,7 @@ class BaseFeatureBlock:
         if missing:
             raise ValueError(f"{self.name} missing required columns: {missing}")
 
-    def fit(self, df, ctx: FeatureContext) -> "BaseFeatureBlock":
+    def fit(self, df, ctx: FeatureContext) -> BaseFeatureBlock:
         """Fit the block on training data.
 
         Subclasses should override this method to learn statistics,
@@ -195,7 +195,7 @@ class FeatureBlock(Protocol):
         """Check if block has been fitted."""
         ...
 
-    def fit(self, df, ctx: FeatureContext) -> "FeatureBlock":
+    def fit(self, df, ctx: FeatureContext) -> FeatureBlock:
         """Fit the block on training data."""
         ...
 

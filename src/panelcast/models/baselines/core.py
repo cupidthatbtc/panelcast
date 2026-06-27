@@ -152,7 +152,7 @@ class Baseline:
         self.bounds = bounds
         self._sigma: float = _SIGMA_FLOOR
 
-    def fit(self, train: PanelData) -> "Baseline":  # pragma: no cover - overridden
+    def fit(self, train: PanelData) -> Baseline:  # pragma: no cover - overridden
         raise NotImplementedError
 
     def _point(self, test: PanelData) -> np.ndarray:  # pragma: no cover - overridden
@@ -169,7 +169,7 @@ class Baseline:
 class GlobalMeanBaseline(Baseline):
     name = "global_mean"
 
-    def fit(self, train: PanelData) -> "GlobalMeanBaseline":
+    def fit(self, train: PanelData) -> GlobalMeanBaseline:
         y = np.asarray(train.y, dtype=float)
         self._mean = float(np.nanmean(y)) if y.size else float(np.mean(self.bounds))
         self._sigma = _train_residual_sigma(y[~np.isnan(y)] - self._mean)
@@ -182,14 +182,14 @@ class GlobalMeanBaseline(Baseline):
 class EntityMeanBaseline(Baseline):
     name = "entity_mean"
 
-    def fit(self, train: PanelData) -> "EntityMeanBaseline":
+    def fit(self, train: PanelData) -> EntityMeanBaseline:
         y = np.asarray(train.y, dtype=float)
         ent = np.asarray(train.entity)
         valid = ~np.isnan(y)
         self._global = float(np.mean(y[valid])) if valid.any() else float(np.mean(self.bounds))
         sums: dict[object, float] = {}
         counts: dict[object, int] = {}
-        for e, yi in zip(ent[valid], y[valid]):
+        for e, yi in zip(ent[valid], y[valid], strict=True):
             sums[e] = sums.get(e, 0.0) + float(yi)
             counts[e] = counts.get(e, 0) + 1
         self._means = {e: sums[e] / counts[e] for e in sums}
@@ -213,14 +213,14 @@ class LastScoreBaseline(Baseline):
 
     name = "last_score"
 
-    def fit(self, train: PanelData) -> "LastScoreBaseline":
+    def fit(self, train: PanelData) -> LastScoreBaseline:
         y = np.asarray(train.y, dtype=float)
         valid = ~np.isnan(y)
         self._global = float(np.mean(y[valid])) if valid.any() else float(np.mean(self.bounds))
         ent = np.asarray(train.entity)
         sums: dict[object, float] = {}
         counts: dict[object, int] = {}
-        for e, yi in zip(ent[valid], y[valid]):
+        for e, yi in zip(ent[valid], y[valid], strict=True):
             sums[e] = sums.get(e, 0.0) + float(yi)
             counts[e] = counts.get(e, 0) + 1
         self._entity_mean = {e: sums[e] / counts[e] for e in sums}
@@ -247,7 +247,7 @@ class RidgeBaseline(Baseline):
         super().__init__(bounds)
         self.alpha = alpha
 
-    def fit(self, train: PanelData) -> "RidgeBaseline":
+    def fit(self, train: PanelData) -> RidgeBaseline:
         from sklearn.linear_model import Ridge
 
         y = np.asarray(train.y, dtype=float)
@@ -265,7 +265,7 @@ class RidgeBaseline(Baseline):
 class GBMBaseline(Baseline):
     name = "gbm"
 
-    def fit(self, train: PanelData) -> "GBMBaseline":
+    def fit(self, train: PanelData) -> GBMBaseline:
         from sklearn.ensemble import HistGradientBoostingRegressor
 
         y = np.asarray(train.y, dtype=float)

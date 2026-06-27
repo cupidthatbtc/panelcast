@@ -186,7 +186,7 @@ class ExtrapolationResult:
     available_gb: float
     total_gpu_gb: float
     headroom_percent: float
-    calibration: "CalibrationResult"
+    calibration: CalibrationResult
     from_cache: bool
     message: str
     suggestions: tuple[str, ...]

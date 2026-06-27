@@ -11,6 +11,8 @@ Computes temporal features that capture career trajectory context:
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from .base import BaseFeatureBlock, FeatureContext, FeatureOutput
 
 
@@ -44,7 +46,7 @@ class TemporalBlock(BaseFeatureBlock):
     """
 
     name = "temporal"
-    requires: list[str] = []
+    requires: ClassVar[list[str]] = []
 
     def __init__(
         self,
@@ -68,7 +70,7 @@ class TemporalBlock(BaseFeatureBlock):
             event_col,
         ]
 
-    def fit(self, df, ctx: FeatureContext) -> "TemporalBlock":
+    def fit(self, df, ctx: FeatureContext) -> TemporalBlock:
         """Fit the temporal block on training data.
 
         Validates required columns exist. This block is stateless,

@@ -23,7 +23,6 @@ from panelcast.reporting.figures import (
     get_trace_plot_vars,
     save_artist_prediction_plot,
     save_posterior_plot,
-    save_ppc_density_plot,
     save_predictions_plot,
     save_reliability_plot,
     save_trace_plot,
@@ -462,7 +461,7 @@ def _resolve_model_key(model_dir: Path) -> tuple[str, str]:
     summary_path = model_dir / "training_summary.json"
     if summary_path.exists():
         try:
-            with open(summary_path, "r", encoding="utf-8") as f:
+            with open(summary_path, encoding="utf-8") as f:
                 dataset_block = json.load(f).get("dataset") or {}
             prefix = dataset_block.get("model_prefix") or "user"
         except (json.JSONDecodeError, OSError) as e:
@@ -470,141 +469,139 @@ def _resolve_model_key(model_dir: Path) -> tuple[str, str]:
     return f"{prefix}_", f"{prefix}_score"
 
 
-def generate_publication_artifacts(ctx: StageContext) -> dict:
-    """Generate publication-ready artifacts.
+@dataclass
+class _PublicationInputs:
+    """Loaded-once inputs shared by every publication artifact helper."""
 
-    Creates tables, figures, and model documentation from the fitted
-    model and evaluation results.
+    ctx: StageContext
+    reports_dir: Path
+    figures_dir: Path
+    tables_dir: Path
+    eval_dir: Path
+    idata: az.InferenceData
+    site_prefix: str
+    metrics: dict[str, Any]
+    diagnostics: dict[str, Any]
+    training_summary: dict[str, Any]
+    primary_metrics: dict[str, Any]
+    primary_split_name: str
+    point_metrics: _PointMetricsLike | None
+    known_csv: Path
+    input_errors: list[dict[str, str]]
 
-    Args:
-        ctx: Stage context with run configuration.
 
-    Returns:
-        Dictionary with paths to generated artifacts.
+def _load_publication_inputs(ctx: StageContext) -> _PublicationInputs:
+    """Set up the output dirs and load the model + evaluation artifacts once.
+
+    Hoists primary_split_name and the deduplicated primary_metrics / point_metrics
+    so the per-artifact helpers don't recompute them. Raises only when no trained
+    model exists (the pipeline's one hard failure); a missing evaluation JSON is
+    recorded as a soft input error instead.
     """
     log.info("publication_pipeline_start")
 
-    # Set up output directories
     reports_dir = Path("reports")
     figures_dir = reports_dir / "figures"
     tables_dir = reports_dir / "tables"
-
     figures_dir.mkdir(parents=True, exist_ok=True)
     tables_dir.mkdir(parents=True, exist_ok=True)
 
-    # Load model
     model_dir = Path("models")
     manifest = load_manifest(model_dir)
-
     site_prefix, model_key = _resolve_model_key(model_dir)
     if manifest is None or model_key not in manifest.current:
         raise ValueError(f"No trained {model_key} model found")
-
-    model_filename = manifest.current[model_key]
-    model_path = model_dir / model_filename
-
+    model_path = model_dir / manifest.current[model_key]
     log.info("loading_model", path=str(model_path))
     idata = load_model(model_path)
 
-    # Load evaluation results
     eval_dir = Path("outputs/evaluation")
-    metrics_error: str | None = None
-    try:
-        with open(eval_dir / "metrics.json", "r", encoding="utf-8") as f:
-            metrics = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        metrics_error = str(e)
-        log.warning("could_not_load_metrics", error=metrics_error)
-        metrics = {}
+    input_errors: list[dict[str, str]] = []
 
-    diagnostics_error: str | None = None
-    try:
-        with open(eval_dir / "diagnostics.json", "r", encoding="utf-8") as f:
-            diagnostics = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        diagnostics_error = str(e)
-        log.warning("could_not_load_diagnostics", error=diagnostics_error)
-        diagnostics = {}
+    def _load_json(path: Path, log_event: str, artifact: str) -> dict[str, Any]:
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            log.warning(log_event, error=str(e))
+            input_errors.append({"artifact": artifact, "error": str(e)})
+            return {}
 
-    training_summary_error: str | None = None
-    try:
-        with open(model_dir / "training_summary.json", "r", encoding="utf-8") as f:
-            training_summary = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError) as e:
-        training_summary_error = str(e)
-        log.warning("could_not_load_training_summary", error=training_summary_error)
-        training_summary = {}
+    metrics = _load_json(eval_dir / "metrics.json", "could_not_load_metrics", "metrics_input")
+    diagnostics = _load_json(
+        eval_dir / "diagnostics.json", "could_not_load_diagnostics", "diagnostics_input"
+    )
+    training_summary = _load_json(
+        model_dir / "training_summary.json",
+        "could_not_load_training_summary",
+        "training_summary_input",
+    )
 
-    artifacts = {
-        "tables": [],
-        "figures": [],
-        "docs": [],
-        "errors": [],
-    }
-
-    if metrics_error is not None:
-        artifacts["errors"].append({"artifact": "metrics_input", "error": metrics_error})
-    if diagnostics_error is not None:
-        artifacts["errors"].append({"artifact": "diagnostics_input", "error": diagnostics_error})
-    if training_summary_error is not None:
-        artifacts["errors"].append(
-            {"artifact": "training_summary_input", "error": training_summary_error}
-        )
     primary_metrics = _resolve_primary_metrics(metrics) if isinstance(metrics, dict) else {}
+    primary_split_name = (
+        metrics.get("primary_split", str(SplitType.WITHIN_ENTITY_TEMPORAL.value))
+        if isinstance(metrics, dict)
+        else str(SplitType.WITHIN_ENTITY_TEMPORAL.value)
+    )
+    return _PublicationInputs(
+        ctx=ctx,
+        reports_dir=reports_dir,
+        figures_dir=figures_dir,
+        tables_dir=tables_dir,
+        eval_dir=eval_dir,
+        idata=idata,
+        site_prefix=site_prefix,
+        metrics=metrics,
+        diagnostics=diagnostics,
+        training_summary=training_summary,
+        primary_metrics=primary_metrics,
+        primary_split_name=primary_split_name,
+        point_metrics=_parse_point_metrics(primary_metrics),
+        known_csv=Path("outputs/predictions/next_event_known_entities.csv"),
+        input_errors=input_errors,
+    )
 
-    # =========================================================================
-    # Generate Tables
-    # =========================================================================
-    # Note: Each artifact uses broad exception handling intentionally.
-    # This is best-effort generation: log failures but continue to generate
-    # remaining artifacts. Failures in one artifact should not block others.
-    # =========================================================================
 
-    log.info("generating_tables")
-
-    # Coefficient table
+def _build_coefficient_table(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
         coef_df = create_coefficient_table(
-            idata,
-            var_names=_get_coefficient_var_names(idata, prefix=site_prefix),
+            inp.idata,
+            var_names=_get_coefficient_var_names(inp.idata, prefix=inp.site_prefix),
         )
-        coef_path = tables_dir / "coefficients"
+        coef_path = inp.tables_dir / "coefficients"
         export_table(coef_df, str(coef_path), caption="Model coefficient estimates")
         artifacts["tables"].append(str(coef_path) + ".csv")
         artifacts["tables"].append(str(coef_path) + ".tex")
         log.info("coefficient_table_saved", path=str(coef_path))
-    # Individual artifact failures are collected and reported at pipeline end.
     except Exception as e:
         log.exception("coefficient_table_failed")
         artifacts["errors"].append({"artifact": "coefficients_table", "error": str(e)})
 
-    # Diagnostics table
+
+def _build_diagnostics_table(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
-        diag_df = create_diagnostics_table(idata)
-        diag_path = tables_dir / "diagnostics"
+        diag_df = create_diagnostics_table(inp.idata)
+        diag_path = inp.tables_dir / "diagnostics"
         export_table(diag_df, str(diag_path), caption="Convergence diagnostics")
         artifacts["tables"].append(str(diag_path) + ".csv")
         artifacts["tables"].append(str(diag_path) + ".tex")
         log.info("diagnostics_table_saved", path=str(diag_path))
-    # Individual artifact failures are collected and reported at pipeline end.
     except Exception as e:
         log.exception("diagnostics_table_failed")
         artifacts["errors"].append({"artifact": "diagnostics_table", "error": str(e)})
 
-    # Metrics summary table
+
+def _build_metrics_summary_table(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
-        point_metrics = _parse_point_metrics(primary_metrics)
+        point_metrics = inp.point_metrics
 
         calibration_rows = []
         sharpness_rows = []
-        coverage_results = _parse_coverage_results(primary_metrics) or {}
+        coverage_results = _parse_coverage_results(inp.primary_metrics) or {}
         for prob, entry in sorted(coverage_results.items()):
             nominal_pct = prob * 100.0
             calibration_rows.append(
-                {
-                    "Metric": f"Coverage ({nominal_pct:.0f}%)",
-                    "Value": entry.empirical,
-                }
+                {"Metric": f"Coverage ({nominal_pct:.0f}%)", "Value": entry.empirical}
             )
             if entry.interval_width is not None:
                 sharpness_rows.append(
@@ -614,8 +611,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                     }
                 )
 
-        # WIS from calibration block
-        calibration_block = primary_metrics.get("calibration", {})
+        calibration_block = inp.primary_metrics.get("calibration", {})
         wis_value = (
             _safe_float(calibration_block.get("wis"))
             if isinstance(calibration_block, dict)
@@ -640,30 +636,21 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                 message="Skipping RMSE/MAE/R-squared rows due to missing metrics payload.",
             )
 
-        metrics_df = pd.DataFrame(
-            [
-                *metric_rows,
-                *calibration_rows,
-                *sharpness_rows,
-                *wis_rows,
-            ]
-        )
-        metrics_path = tables_dir / "metrics_summary"
+        metrics_df = pd.DataFrame([*metric_rows, *calibration_rows, *sharpness_rows, *wis_rows])
+        metrics_path = inp.tables_dir / "metrics_summary"
         export_table(metrics_df, str(metrics_path), caption="Model performance metrics")
         artifacts["tables"].append(str(metrics_path) + ".csv")
         artifacts["tables"].append(str(metrics_path) + ".tex")
         log.info("metrics_table_saved", path=str(metrics_path))
-    # Individual artifact failures are collected and reported at pipeline end.
     except Exception as e:
         log.exception("metrics_table_failed")
         artifacts["errors"].append({"artifact": "metrics_summary_table", "error": str(e)})
 
-    # Prediction summary table
+
+def _build_prediction_scenarios_table(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
-        known_csv = Path("outputs/predictions/next_event_known_entities.csv")
-        if known_csv.exists():
-            known_df = pd.read_csv(known_csv)
-            # Create scenario comparison table
+        if inp.known_csv.exists():
+            known_df = pd.read_csv(inp.known_csv)
             scenario_stats = (
                 known_df.groupby("scenario")
                 .agg(
@@ -673,8 +660,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                 )
                 .round(2)
             )
-
-            pred_table_path = tables_dir / "prediction_scenarios"
+            pred_table_path = inp.tables_dir / "prediction_scenarios"
             export_table(
                 scenario_stats,
                 str(pred_table_path),
@@ -683,140 +669,52 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
             artifacts["tables"].append(str(pred_table_path) + ".csv")
             artifacts["tables"].append(str(pred_table_path) + ".tex")
             log.info("prediction_table_saved", path=str(pred_table_path))
-    # Individual artifact failures are collected and reported at pipeline end.
     except Exception as e:
         log.exception("prediction_table_failed")
         artifacts["errors"].append({"artifact": "prediction_scenarios_table", "error": str(e)})
 
-    # =========================================================================
-    # Generate Figures
-    # =========================================================================
 
-    log.info("generating_figures")
-
-    # Trace plots
+def _save_trace_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
         pdf_path, png_path = save_trace_plot(
-            idata,
-            var_names=get_trace_plot_vars(idata, prefix=site_prefix),
-            output_dir=figures_dir,
+            inp.idata,
+            var_names=get_trace_plot_vars(inp.idata, prefix=inp.site_prefix),
+            output_dir=inp.figures_dir,
             filename_base="trace_plot",
         )
         artifacts["figures"].append(str(pdf_path))
         artifacts["figures"].append(str(png_path))
         log.info("trace_plot_saved", pdf=str(pdf_path), png=str(png_path))
-    # Individual artifact failures are collected and reported at pipeline end.
     except Exception as e:
         log.exception("trace_plot_failed")
         artifacts["errors"].append({"artifact": "trace_plot", "error": str(e)})
 
-    # Posterior plots
+
+def _save_posterior_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
         pdf_path, png_path = save_posterior_plot(
-            idata,
-            var_names=get_trace_plot_vars(idata, prefix=site_prefix),
-            output_dir=figures_dir,
+            inp.idata,
+            var_names=get_trace_plot_vars(inp.idata, prefix=inp.site_prefix),
+            output_dir=inp.figures_dir,
             filename_base="posterior_plot",
         )
         artifacts["figures"].append(str(pdf_path))
         artifacts["figures"].append(str(png_path))
         log.info("posterior_plot_saved", pdf=str(pdf_path), png=str(png_path))
-    # Individual artifact failures are collected and reported at pipeline end.
     except Exception as e:
         log.exception("posterior_plot_failed")
         artifacts["errors"].append({"artifact": "posterior_plot", "error": str(e)})
 
-    # PPC density plot
+
+def _save_predictions_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
-        ppc_data = primary_metrics.get("ppc")
-        if isinstance(ppc_data, dict) and "summary" in ppc_data:
-            from panelcast.evaluation.ppc import PPCResult, PPCStatistic
-
-            ppc_stats = []
-            for stat_name, stat_info in ppc_data["summary"].items():
-                if isinstance(stat_info, dict):
-                    observed = _safe_float(stat_info.get("observed"))
-                    p_value = _safe_float(stat_info.get("p_value"))
-                    mc_se = _safe_float(stat_info.get("mc_se"))
-                    if observed is None or p_value is None:
-                        log.warning(
-                            "ppc_stat_missing_fields",
-                            statistic=stat_name,
-                            observed_present=observed is not None,
-                            p_value_present=p_value is not None,
-                        )
-                        continue
-                    if mc_se is None:
-                        n_samples_for_se = ppc_data.get("n_samples", 0)
-                        try:
-                            n_samples_for_se = int(n_samples_for_se)
-                        except (TypeError, ValueError):
-                            n_samples_for_se = 0
-                        if n_samples_for_se > 0:
-                            mc_se = float(np.sqrt(p_value * (1 - p_value) / n_samples_for_se))
-                        else:
-                            mc_se = 0.0
-
-                    ppc_stats.append(
-                        PPCStatistic(
-                            name=stat_name,
-                            observed=observed,
-                            replicated_distribution=np.array([]),
-                            bayesian_p_value=p_value,
-                            mc_se=mc_se,
-                        )
-                    )
-
-            if ppc_stats:
-                n_obs_ppc = ppc_data.get("n_obs", 0)
-                n_samples_ppc = ppc_data.get("n_samples", 0)
-                try:
-                    n_obs_ppc = int(n_obs_ppc)
-                except (TypeError, ValueError):
-                    n_obs_ppc = 0
-                try:
-                    n_samples_ppc = int(n_samples_ppc)
-                except (TypeError, ValueError):
-                    n_samples_ppc = 0
-                ppc_result_obj = PPCResult(
-                    statistics=ppc_stats,
-                    n_obs=n_obs_ppc,
-                    n_samples=n_samples_ppc,
-                )
-                # Only generate plot if we have replicated distributions
-                has_distributions = any(len(s.replicated_distribution) > 0 for s in ppc_stats)
-                if has_distributions:
-                    pdf_path, png_path = save_ppc_density_plot(
-                        ppc_result_obj,
-                        output_dir=figures_dir,
-                        filename_base="ppc_density",
-                    )
-                    artifacts["figures"].append(str(pdf_path))
-                    artifacts["figures"].append(str(png_path))
-                    log.info("ppc_density_plot_saved", pdf=str(pdf_path), png=str(png_path))
-                else:
-                    log.info(
-                        "ppc_density_plot_skipped",
-                        reason="no replicated distributions in artifact",
-                    )
-    except Exception as e:
-        log.exception("ppc_density_plot_failed")
-        artifacts["errors"].append({"artifact": "ppc_density_plot", "error": str(e)})
-
-    # =========================================================================
-    # Predictions scatter plot
-    # =========================================================================
-    try:
-        primary_split_name = metrics.get(
-            "primary_split", str(SplitType.WITHIN_ENTITY_TEMPORAL.value)
-        )
         pred_candidates = [
-            resolve_split_dir(eval_dir, primary_split_name) / "predictions.json",
-            eval_dir / "predictions.json",
+            resolve_split_dir(inp.eval_dir, inp.primary_split_name) / "predictions.json",
+            inp.eval_dir / "predictions.json",
         ]
         pred_path = next((p for p in pred_candidates if p.exists()), None)
         if pred_path is not None:
-            with open(pred_path, "r", encoding="utf-8") as f:
+            with open(pred_path, encoding="utf-8") as f:
                 pred_data = json.load(f)
             interval_level = pred_data.get("interval_level", 0.90)
             pdf_path, png_path = save_predictions_plot(
@@ -824,7 +722,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                 y_pred_mean=np.array(pred_data["y_pred_mean"]),
                 y_pred_lower=np.array(pred_data["y_pred_lower"]),
                 y_pred_upper=np.array(pred_data["y_pred_upper"]),
-                output_dir=figures_dir,
+                output_dir=inp.figures_dir,
                 filename_base="predictions_primary",
                 ci_label=f"{interval_level * 100:.0f}% CI",
             )
@@ -837,20 +735,18 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
         log.exception("predictions_plot_failed")
         artifacts["errors"].append({"artifact": "predictions_plot", "error": str(e)})
 
-    # =========================================================================
-    # Reliability diagram (calibration plot)
-    # =========================================================================
+
+def _save_reliability_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
         cal_candidates = [
-            eval_dir / primary_split_name / "calibration.json",
-            eval_dir / "calibration.json",
+            resolve_split_dir(inp.eval_dir, inp.primary_split_name) / "calibration.json",
+            inp.eval_dir / "calibration.json",
         ]
         cal_path = next((p for p in cal_candidates if p.exists()), None)
         if cal_path is not None:
-            with open(cal_path, "r", encoding="utf-8") as f:
+            with open(cal_path, encoding="utf-8") as f:
                 cal_data = json.load(f)
             probs = np.array(cal_data["predicted_probs"])
-            # Use stored bin_edges if available, otherwise reconstruct from probs
             if "bin_edges" in cal_data:
                 bin_edges = np.array(cal_data["bin_edges"])
             else:
@@ -862,7 +758,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                 counts=np.array(cal_data["counts"]),
             )
             pdf_path, png_path = save_reliability_plot(
-                reliability, figures_dir, "reliability_primary"
+                reliability, inp.figures_dir, "reliability_primary"
             )
             artifacts["figures"].append(str(pdf_path))
             artifacts["figures"].append(str(png_path))
@@ -873,111 +769,173 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
         log.exception("reliability_plot_failed")
         artifacts["errors"].append({"artifact": "reliability_plot", "error": str(e)})
 
-    # =========================================================================
-    # Per-artist fan charts
-    # =========================================================================
+
+def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
-        known_csv = Path("outputs/predictions/next_event_known_entities.csv")
         pred_path_for_fans = next(
             (
                 p
                 for p in [
-                    eval_dir / primary_split_name / "predictions.json",
-                    eval_dir / "predictions.json",
+                    resolve_split_dir(inp.eval_dir, inp.primary_split_name) / "predictions.json",
+                    inp.eval_dir / "predictions.json",
                 ]
                 if p.exists()
             ),
             None,
         )
-        if known_csv.exists() and pred_path_for_fans is not None:
-            known_df_fans = pd.read_csv(known_csv)
-            subsets = select_artist_subsets(known_df_fans)
-            # Build set of unique artists across all categories
-            all_selected: dict[str, list[str]] = {}
-            for category, artists in subsets.items():
-                for a in artists:
-                    all_selected.setdefault(a, []).append(category)
-
-            # Load training data for actual scores
-            train_path = Path("data/splits") / primary_split_name / "train.parquet"
-            if train_path.exists():
-                from panelcast.config.descriptor import DatasetDescriptor
-
-                fan_descriptor = getattr(ctx, "descriptor", None) or DatasetDescriptor()
-                train_for_fans = pd.read_parquet(train_path)
-                sort_cols_fans = [fan_descriptor.entity_col]
-                if fan_descriptor.parsed_date_col in train_for_fans.columns:
-                    sort_cols_fans.append(fan_descriptor.parsed_date_col)
-                train_for_fans = train_for_fans.sort_values(sort_cols_fans)
-
-                for artist, categories in all_selected.items():
-                    artist_train = train_for_fans[
-                        train_for_fans[fan_descriptor.entity_col] == artist
-                    ]
-                    if len(artist_train) < 2:
-                        continue
-                    actual = artist_train[fan_descriptor.target_col].values
-                    has_album_col = fan_descriptor.event_col in artist_train.columns
-                    albums = (
-                        artist_train[fan_descriptor.event_col].tolist() if has_album_col else None
-                    )
-                    # Use known predictions for fan chart samples (quantiles)
-                    same_preds = known_df_fans[
-                        (known_df_fans["entity"] == artist) & (known_df_fans["scenario"] == "same")
-                    ]
-                    if same_preds.empty:
-                        continue
-                    # Build pseudo-samples from quantiles for the last point
-                    q_cols = ["pred_q05", "pred_q25", "pred_q50", "pred_q75", "pred_q95"]
-                    if not all(c in same_preds.columns for c in q_cols):
-                        continue
-                    pred_quantiles = same_preds[q_cols].values[0]
-                    # Build a fan: the observed trajectory (no predictive spread)
-                    # plus one appended forecast point carrying the quantile fan.
-                    pred_for_fan = np.tile(actual, (5, 1))
-                    pred_for_fan = np.column_stack([pred_for_fan, pred_quantiles[:, None]])
-                    # The appended column adds a forecast time point, so extend the
-                    # observed series and labels to match pred_for_fan's width: the
-                    # forecast slot has no observed value (NaN -> rendered as a gap).
-                    actual_for_fan = np.append(np.asarray(actual, dtype=float), np.nan)
-                    albums_for_fan = (list(albums) + ["next"]) if albums is not None else None
-
-                    safe_name = artist.replace("/", "_").replace(" ", "_")[:50]
-                    try:
-                        pdf_path, png_path = save_artist_prediction_plot(
-                            artist=artist,
-                            actual_scores=actual_for_fan,
-                            pred_samples=pred_for_fan,
-                            album_labels=albums_for_fan,
-                            output_dir=figures_dir,
-                            filename_base=f"artist_{safe_name}",
-                            categories=categories,
-                        )
-                        artifacts["figures"].append(str(pdf_path))
-                        artifacts["figures"].append(str(png_path))
-                    except Exception as e:
-                        log.warning("artist_fan_chart_failed", artist=artist, error=str(e))
-
-                log.info("artist_fan_charts_complete", n_artists=len(all_selected))
-            else:
-                log.warning("artist_fan_charts_skipped", reason="train.parquet not found")
-        else:
+        if not (inp.known_csv.exists() and pred_path_for_fans is not None):
             log.warning("artist_fan_charts_skipped", reason="required artifacts not found")
+            return
+
+        known_df_fans = pd.read_csv(inp.known_csv)
+        subsets = select_artist_subsets(known_df_fans)
+        all_selected: dict[str, list[str]] = {}
+        for category, artists in subsets.items():
+            for a in artists:
+                all_selected.setdefault(a, []).append(category)
+
+        train_path = Path("data/splits") / inp.primary_split_name / "train.parquet"
+        if not train_path.exists():
+            log.warning("artist_fan_charts_skipped", reason="train.parquet not found")
+            return
+
+        from panelcast.config.descriptor import DatasetDescriptor
+
+        fan_descriptor = getattr(inp.ctx, "descriptor", None) or DatasetDescriptor()
+        train_for_fans = pd.read_parquet(train_path)
+        sort_cols_fans = [fan_descriptor.entity_col]
+        if fan_descriptor.parsed_date_col in train_for_fans.columns:
+            sort_cols_fans.append(fan_descriptor.parsed_date_col)
+        train_for_fans = train_for_fans.sort_values(sort_cols_fans)
+
+        def _fan_chart_for_artist(artist: str, categories: list[str]) -> None:
+            artist_train = train_for_fans[train_for_fans[fan_descriptor.entity_col] == artist]
+            if len(artist_train) < 2:
+                return
+            actual = artist_train[fan_descriptor.target_col].values
+            has_album_col = fan_descriptor.event_col in artist_train.columns
+            albums = artist_train[fan_descriptor.event_col].tolist() if has_album_col else None
+            # Use known predictions for fan chart samples (quantiles)
+            same_preds = known_df_fans[
+                (known_df_fans["entity"] == artist) & (known_df_fans["scenario"] == "same")
+            ]
+            if same_preds.empty:
+                return
+            q_cols = ["pred_q05", "pred_q25", "pred_q50", "pred_q75", "pred_q95"]
+            if not all(c in same_preds.columns for c in q_cols):
+                return
+            pred_quantiles = same_preds[q_cols].values[0]
+            # Build a fan: the observed trajectory (no predictive spread) plus one
+            # appended forecast point carrying the quantile fan. The appended slot
+            # has no observed value (NaN -> rendered as a gap).
+            pred_for_fan = np.tile(actual, (5, 1))
+            pred_for_fan = np.column_stack([pred_for_fan, pred_quantiles[:, None]])
+            actual_for_fan = np.append(np.asarray(actual, dtype=float), np.nan)
+            albums_for_fan = (list(albums) + ["next"]) if albums is not None else None
+
+            safe_name = artist.replace("/", "_").replace(" ", "_")[:50]
+            try:
+                pdf_path, png_path = save_artist_prediction_plot(
+                    artist=artist,
+                    actual_scores=actual_for_fan,
+                    pred_samples=pred_for_fan,
+                    album_labels=albums_for_fan,
+                    output_dir=inp.figures_dir,
+                    filename_base=f"artist_{safe_name}",
+                    categories=categories,
+                )
+                artifacts["figures"].append(str(pdf_path))
+                artifacts["figures"].append(str(png_path))
+            except Exception as e:
+                # str(e) alone can be empty (e.g. MemoryError); record the type
+                # and traceback so the failure is diagnosable.
+                log.warning(
+                    "artist_fan_chart_failed",
+                    artist=artist,
+                    error_type=type(e).__name__,
+                    error=str(e),
+                    exc_info=True,
+                )
+                # Record per-artist failures so the readiness gate sees them; a
+                # run where every chart failed must not report ready.
+                artifacts["errors"].append(
+                    {"artifact": f"artist_fan_chart:{artist}", "error": str(e)}
+                )
+
+        for artist, categories in all_selected.items():
+            _fan_chart_for_artist(artist, categories)
+        log.info("artist_fan_charts_complete", n_artists=len(all_selected))
     except Exception as e:
         log.exception("artist_fan_charts_failed")
         artifacts["errors"].append({"artifact": "artist_fan_charts", "error": str(e)})
 
-    # =========================================================================
-    # Generate Model Card
-    # =========================================================================
 
-    log.info("generating_model_card")
+def _build_prior_justification(inp: _PublicationInputs) -> str | None:
+    """Best-effort prior-justification prose for the model card.
 
+    Returns None (logged) on any failure so the model card still writes.
+    """
     try:
-        # Create model card data (prose templated from the dataset descriptor)
-        model_card_data = create_default_model_card_data(getattr(ctx, "descriptor", None))
+        from panelcast.evaluation.prior_predictive import (
+            PriorPredictiveResult,
+            generate_prior_justification_text,
+        )
+        from panelcast.models.bayes.priors import PriorConfig
 
-        # Populate run-specific dataset and hyperparameter metadata when available.
+        priors_dict = inp.training_summary.get("priors")
+        if not isinstance(priors_dict, dict):
+            return None
+        priors = PriorConfig(**priors_dict)
+
+        pp_result = None
+        pp_path = inp.eval_dir / "prior_predictive.json"
+        if pp_path.exists():
+            try:
+                with open(pp_path, encoding="utf-8") as f:
+                    pp_data = json.load(f)
+                pp_result = PriorPredictiveResult(
+                    y_samples=np.array([]),
+                    summary=pp_data.get("summary", {}),
+                    reasonable=pp_data.get("reasonable", False),
+                    bounds=tuple(pp_data.get("bounds", (0, 100))),
+                    fraction_in_bounds=pp_data.get("fraction_in_bounds", 0.0),
+                    n_samples=pp_data.get("n_samples", 0),
+                    n_obs_original=pp_data.get("n_obs_original", 0),
+                    max_obs=pp_data.get("max_obs", 2000),
+                    seed=pp_data.get("seed", 42),
+                )
+            except (json.JSONDecodeError, KeyError) as e:
+                log.warning("prior_predictive_load_failed", error=str(e))
+
+        sensitivity_summary = None
+        oat_path = Path("outputs/sensitivity/oat_summary.csv")
+        if oat_path.exists():
+            try:
+                sensitivity_summary = pd.read_csv(oat_path)
+            except Exception as e:
+                log.warning(
+                    "oat_summary_load_failed",
+                    error_type=type(e).__name__,
+                    error=str(e),
+                    exc_info=True,
+                )
+
+        return generate_prior_justification_text(
+            priors,
+            prior_predictive_result=pp_result,
+            sensitivity_summary=sensitivity_summary,
+        )
+    except Exception as e:
+        log.warning("prior_justification_generation_failed", error=str(e))
+        return None
+
+
+def _generate_model_card(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
+    log.info("generating_model_card")
+    try:
+        model_card_data = create_default_model_card_data(getattr(inp.ctx, "descriptor", None))
+
+        training_summary = inp.training_summary
         n_obs = training_summary.get("n_observations")
         if isinstance(n_obs, int) and n_obs > 0:
             model_card_data.dataset_size = n_obs
@@ -1003,107 +961,119 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                 if key in mcmc_cfg:
                     model_card_data.hyperparameters[key] = mcmc_cfg[key]
 
-        primary_metrics = _resolve_primary_metrics(metrics)
-        convergence = _parse_convergence(diagnostics, metrics)
-        coverage_results = _parse_coverage_results(primary_metrics)
-        point_metrics = _parse_point_metrics(primary_metrics)
-        loo_result = _parse_loo_result(primary_metrics)
+        convergence = _parse_convergence(inp.diagnostics, inp.metrics)
+        coverage_results = _parse_coverage_results(inp.primary_metrics)
+        loo_result = _parse_loo_result(inp.primary_metrics)
 
-        # Extract PPC summary for model card
         ppc_summary = None
-        ppc_data = primary_metrics.get("ppc")
+        ppc_data = inp.primary_metrics.get("ppc")
         if isinstance(ppc_data, dict):
             ppc_summary = ppc_data.get("summary")
 
-        # Generate prior justification text
-        prior_justification = None
-        try:
-            from panelcast.evaluation.prior_predictive import (
-                PriorPredictiveResult,
-                generate_prior_justification_text,
-            )
-            from panelcast.models.bayes.priors import PriorConfig
-
-            priors_dict = training_summary.get("priors")
-            if isinstance(priors_dict, dict):
-                priors = PriorConfig(**priors_dict)
-
-                # Load prior predictive result if available
-                pp_result = None
-                pp_path = eval_dir / "prior_predictive.json"
-                if pp_path.exists():
-                    try:
-                        with open(pp_path, "r", encoding="utf-8") as f:
-                            pp_data = json.load(f)
-                        pp_result = PriorPredictiveResult(
-                            y_samples=np.array([]),
-                            summary=pp_data.get("summary", {}),
-                            reasonable=pp_data.get("reasonable", False),
-                            bounds=tuple(pp_data.get("bounds", (0, 100))),
-                            fraction_in_bounds=pp_data.get("fraction_in_bounds", 0.0),
-                            n_samples=pp_data.get("n_samples", 0),
-                            n_obs_original=pp_data.get("n_obs_original", 0),
-                            max_obs=pp_data.get("max_obs", 2000),
-                            seed=pp_data.get("seed", 42),
-                        )
-                    except (json.JSONDecodeError, KeyError) as e:
-                        log.warning("prior_predictive_load_failed", error=str(e))
-
-                # Load OAT sensitivity summary if available
-                sensitivity_summary = None
-                oat_path = Path("outputs/sensitivity/oat_summary.csv")
-                if oat_path.exists():
-                    try:
-                        sensitivity_summary = pd.read_csv(oat_path)
-                    except Exception as e:
-                        log.warning("oat_summary_load_failed", error=str(e))
-
-                prior_justification = generate_prior_justification_text(
-                    priors,
-                    prior_predictive_result=pp_result,
-                    sensitivity_summary=sensitivity_summary,
-                )
-        except Exception as e:
-            log.warning("prior_justification_generation_failed", error=str(e))
+        prior_justification = _build_prior_justification(inp)
 
         model_card_data = update_model_card_with_results(
             model_card_data,
-            idata=idata,
+            idata=inp.idata,
             convergence=convergence,
             coverage_results=coverage_results,
             loo_result=loo_result,
-            point_metrics=point_metrics,
+            point_metrics=inp.point_metrics,
             ppc_summary=ppc_summary,
             prior_justification=prior_justification,
         )
 
-        # Write model card
-        model_card_path = reports_dir / "MODEL_CARD.md"
+        model_card_path = inp.reports_dir / "MODEL_CARD.md"
         write_model_card(model_card_data, model_card_path)
         artifacts["docs"].append(str(model_card_path))
 
-        # Also copy to project root
         root_card_path = Path("MODEL_CARD.md")
         shutil.copy(model_card_path, root_card_path)
         artifacts["docs"].append(str(root_card_path))
 
         log.info("model_card_saved", path=str(model_card_path))
-    # Individual artifact failures are collected and reported at pipeline end.
     except Exception as e:
         log.exception("model_card_failed")
         artifacts["errors"].append({"artifact": "model_card", "error": str(e)})
 
+
+def _copy_artifacts_to_run_dir(
+    ctx: StageContext,
+    artifacts: dict[str, Any],
+    status_path: Path,
+    readiness_json_path: Path,
+    readiness_md_path: Path,
+) -> None:
+    run_reports_dir = ctx.run_dir / "reports"
+    run_reports_dir.mkdir(parents=True, exist_ok=True)
+
+    for fig_path in artifacts["figures"]:
+        if Path(fig_path).exists():
+            dest = run_reports_dir / "figures" / Path(fig_path).name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(fig_path, dest)
+
+    for table_path in artifacts["tables"]:
+        if Path(table_path).exists():
+            dest = run_reports_dir / "tables" / Path(table_path).name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(table_path, dest)
+
+    if status_path.exists():
+        shutil.copy(status_path, run_reports_dir / status_path.name)
+    if readiness_json_path.exists():
+        shutil.copy(readiness_json_path, run_reports_dir / readiness_json_path.name)
+    if readiness_md_path.exists():
+        shutil.copy(readiness_md_path, run_reports_dir / readiness_md_path.name)
+
+    log.info("artifacts_copied_to_run_dir", run_dir=str(ctx.run_dir))
+
+
+def generate_publication_artifacts(ctx: StageContext) -> dict:
+    """Generate publication-ready artifacts.
+
+    Creates tables, figures, and model documentation from the fitted
+    model and evaluation results.
+
+    Args:
+        ctx: Stage context with run configuration.
+
+    Returns:
+        Dictionary with paths to generated artifacts.
+    """
+    inp = _load_publication_inputs(ctx)
+
+    artifacts: dict[str, Any] = {
+        "tables": [],
+        "figures": [],
+        "docs": [],
+        "errors": list(inp.input_errors),
+    }
+
+    # Each artifact is best-effort: a helper logs and records its own failure in
+    # artifacts["errors"] but never blocks the others.
+    _build_coefficient_table(inp, artifacts)
+    _build_diagnostics_table(inp, artifacts)
+    _build_metrics_summary_table(inp, artifacts)
+    _build_prediction_scenarios_table(inp, artifacts)
+    _save_trace_plot(inp, artifacts)
+    _save_posterior_plot(inp, artifacts)
+    _save_predictions_plot(inp, artifacts)
+    _save_reliability_plot(inp, artifacts)
+    _save_artist_fan_charts(inp, artifacts)
+    _generate_model_card(inp, artifacts)
+
     readiness_payload = _build_publication_readiness(
-        metrics=metrics if isinstance(metrics, dict) else {},
-        diagnostics=diagnostics if isinstance(diagnostics, dict) else {},
-        training_summary=training_summary if isinstance(training_summary, dict) else {},
+        metrics=inp.metrics if isinstance(inp.metrics, dict) else {},
+        diagnostics=inp.diagnostics if isinstance(inp.diagnostics, dict) else {},
+        training_summary=inp.training_summary if isinstance(inp.training_summary, dict) else {},
         artifact_errors=artifacts["errors"],
         require_secondary_split=bool(getattr(ctx, "evaluate_secondary_split", True)),
     )
-    readiness_json_path = reports_dir / "publication_readiness.json"
+    readiness_json_path = inp.reports_dir / "publication_readiness.json"
     with open(readiness_json_path, "w", encoding="utf-8") as f:
         json.dump(readiness_payload, f, indent=2)
-    readiness_md_path = reports_dir / "PUBLICATION_READINESS.md"
+    readiness_md_path = inp.reports_dir / "PUBLICATION_READINESS.md"
     readiness_md_path.write_text(
         _render_publication_readiness_markdown(readiness_payload),
         encoding="utf-8",
@@ -1122,7 +1092,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
         "critical_readiness_failures": readiness_payload["critical_failed"],
         "recommended_readiness_failures": readiness_payload["recommended_failed"],
     }
-    status_path = reports_dir / "artifact_status.json"
+    status_path = inp.reports_dir / "artifact_status.json"
     with open(status_path, "w", encoding="utf-8") as f:
         json.dump(status_payload, f, indent=2)
     artifacts["status"] = str(status_path)
@@ -1144,36 +1114,10 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                 f"Publication readiness checks failed. See {readiness_json_path} for details."
             )
 
-    # =========================================================================
-    # Copy artifacts to run directory if available
-    # =========================================================================
-
     if ctx.run_dir and ctx.run_dir.exists():
-        run_reports_dir = ctx.run_dir / "reports"
-        run_reports_dir.mkdir(parents=True, exist_ok=True)
-
-        # Copy figures
-        for fig_path in artifacts["figures"]:
-            if Path(fig_path).exists():
-                dest = run_reports_dir / "figures" / Path(fig_path).name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy(fig_path, dest)
-
-        # Copy tables
-        for table_path in artifacts["tables"]:
-            if Path(table_path).exists():
-                dest = run_reports_dir / "tables" / Path(table_path).name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy(table_path, dest)
-
-        if status_path.exists():
-            shutil.copy(status_path, run_reports_dir / status_path.name)
-        if readiness_json_path.exists():
-            shutil.copy(readiness_json_path, run_reports_dir / readiness_json_path.name)
-        if readiness_md_path.exists():
-            shutil.copy(readiness_md_path, run_reports_dir / readiness_md_path.name)
-
-        log.info("artifacts_copied_to_run_dir", run_dir=str(ctx.run_dir))
+        _copy_artifacts_to_run_dir(
+            ctx, artifacts, status_path, readiness_json_path, readiness_md_path
+        )
 
     log.info(
         "publication_pipeline_complete",

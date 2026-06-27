@@ -186,7 +186,7 @@ def _transform_with_train_history(
     return target_features
 
 
-def build_features(ctx: "StageContext") -> dict:
+def build_features(ctx: StageContext) -> dict:
     """Build feature matrices for all splits.
 
     Fits feature pipeline on training data only, then transforms all splits

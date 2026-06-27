@@ -96,7 +96,10 @@ markers = [
 line-length = 100
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = ["E", "F", "I", "C901"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 22
 
 [tool.ruff.lint.per-file-ignores]
 # Imports at bottom required to avoid circular imports with submodules

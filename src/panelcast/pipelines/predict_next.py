@@ -8,6 +8,7 @@ Generates predictions for:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -44,6 +45,157 @@ SCENARIOS_NEW = ["population", "debut_defaults"]
 def _extract_posterior_samples(idata: object) -> dict[str, jnp.ndarray]:
     """Backward-compatible wrapper for public posterior extraction helper."""
     return extract_posterior_samples(idata)
+
+
+@dataclass(frozen=True)
+class _BatchScenarioArrays:
+    """Per-batch, per-scenario model inputs plus the bookkeeping the caller needs
+    to summarize each artist's predictive draws."""
+
+    artist_idx: np.ndarray
+    album_seq: np.ndarray
+    prev_score: np.ndarray
+    X: np.ndarray
+    n_reviews: np.ndarray
+    prev_meas_sigma: np.ndarray | None
+    valid_artists: list[str]
+    last_scores: list[float]
+    n_training_events: list[int]
+    horizon_clamped_flags: list[bool]
+
+
+def _scenario_feature_vector(
+    scenario: str,
+    artist: str,
+    *,
+    last_album_scaled: pd.DataFrame,
+    artist_mean_scaled: pd.DataFrame | None,
+    n_features: int,
+) -> np.ndarray:
+    """Standardized feature vector for one artist under one known-entity scenario.
+
+    "same" uses the entity's last-event features; "population_mean" is the
+    z-scored origin; "entity_mean" uses the entity's mean features when available
+    and otherwise falls back to the origin.
+    """
+    if scenario == "same":
+        return last_album_scaled.loc[artist].values.astype(np.float32)
+    if scenario == "population_mean":
+        return np.zeros(n_features, dtype=np.float32)
+    if scenario == "entity_mean":
+        if artist_mean_scaled is not None and artist in artist_mean_scaled.index:
+            return artist_mean_scaled.loc[artist].values.astype(np.float32)
+        return np.zeros(n_features, dtype=np.float32)
+    raise ValueError(f"Unknown known-entity scenario: {scenario!r}")
+
+
+def _build_batch_scenario_args(
+    batch_artists: list[str],
+    scenario: str,
+    *,
+    artist_to_idx: dict,
+    last_album_info: pd.DataFrame,
+    target_col: str,
+    feature_cols: list[str],
+    last_album_scaled: pd.DataFrame,
+    artist_mean_scaled: pd.DataFrame | None,
+    transform,
+    propagate_rw: bool,
+    max_seq: int,
+    min_albums_filter: int,
+    eiv_on: bool,
+    global_std: float,
+) -> _BatchScenarioArrays | None:
+    """Accumulate one batch's per-artist model inputs under one scenario.
+
+    Returns None when no artist in the batch has a last-event row to predict
+    from. Mirrors the legacy inline loop exactly: the same column reads and dtype
+    casts, the sub-threshold static-effect ``next_seq = 1`` override, the prev
+    score target-transform, and (with errors-in-variables on) the data-derived
+    prev_meas_sigma with zero/non-finite review counts pinned to 0.
+    """
+    artist_idxs = []
+    album_seqs = []
+    prev_scores = []
+    prev_nrevs = []
+    X_list = []
+    n_reviews_list = []
+    valid_artists = []
+    last_scores = []
+    n_training_events_list = []
+    horizon_clamped_flags = []
+
+    for artist in batch_artists:
+        idx = artist_to_idx[artist]
+        if artist not in last_album_info.index:
+            continue
+
+        info = last_album_info.loc[artist]
+        last_seq = int(info["album_seq"])
+        next_seq = (last_seq + 1) if propagate_rw else min(last_seq + 1, max_seq)
+        horizon_clamped = (not propagate_rw) and (last_seq + 1) > max_seq
+        last_score = float(info[target_col])
+        median_n_reviews = int(info["median_n_reviews"])
+        n_albums = int(info["n_albums"])
+        if n_albums < min_albums_filter:
+            # Match training behavior: artists below threshold use static effect.
+            next_seq = 1
+
+        artist_idxs.append(idx)
+        album_seqs.append(next_seq)
+        prev_scores.append(last_score)
+        # Measurement error of prev_score uses the last album's own review count;
+        # debut-free here (every known entity has >=1).
+        prev_nrevs.append(
+            float(info["n_reviews"])
+            if "n_reviews" in last_album_info.columns
+            else float(median_n_reviews)
+        )
+        n_reviews_list.append(median_n_reviews)
+        valid_artists.append(artist)
+        last_scores.append(last_score)
+        n_training_events_list.append(n_albums)
+        horizon_clamped_flags.append(horizon_clamped)
+
+        X_list.append(
+            _scenario_feature_vector(
+                scenario,
+                artist,
+                last_album_scaled=last_album_scaled,
+                artist_mean_scaled=artist_mean_scaled,
+                n_features=len(feature_cols),
+            )
+        )
+
+    if not valid_artists:
+        return None
+
+    prev_score_arr = np.array(prev_scores, dtype=np.float32)
+    if transform.name != "identity":
+        prev_score_arr = np.asarray(transform.forward(prev_score_arr), dtype=np.float32)
+
+    prev_meas_sigma = None
+    if eiv_on:
+        prev_nrev_arr = np.array(prev_nrevs, dtype=np.float64)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            prev_meas_sigma = np.where(
+                ~np.isfinite(prev_nrev_arr) | (prev_nrev_arr <= 0),
+                0.0,
+                global_std / np.sqrt(np.maximum(prev_nrev_arr, 1.0)),
+            ).astype(np.float32)
+
+    return _BatchScenarioArrays(
+        artist_idx=np.array(artist_idxs, dtype=np.int32),
+        album_seq=np.array(album_seqs, dtype=np.int32),
+        prev_score=prev_score_arr,
+        X=np.stack(X_list).astype(np.float32),
+        n_reviews=np.array(n_reviews_list, dtype=np.int32),
+        prev_meas_sigma=prev_meas_sigma,
+        valid_artists=valid_artists,
+        last_scores=last_scores,
+        n_training_events=n_training_events_list,
+        horizon_clamped_flags=horizon_clamped_flags,
+    )
 
 
 def _predict_known_entities(
@@ -174,80 +326,32 @@ def _predict_known_entities(
             batch_artists = artists[batch_start:batch_end]
 
             for scenario in SCENARIOS_KNOWN:
-                # Build model_args for this batch of artists (one obs per artist)
-                artist_idxs = []
-                album_seqs = []
-                prev_scores = []
-                prev_nrevs = []
-                X_list = []
-                n_reviews_list = []
-                valid_artists = []
-                last_scores = []
-                n_training_events_list = []
-                horizon_clamped_flags = []
-
-                for artist in batch_artists:
-                    idx = artist_to_idx[artist]
-
-                    if artist not in last_album_info.index:
-                        continue
-
-                    info = last_album_info.loc[artist]
-                    last_seq = int(info["album_seq"])
-                    next_seq = (last_seq + 1) if propagate_rw else min(last_seq + 1, max_seq)
-                    horizon_clamped = (not propagate_rw) and (last_seq + 1) > max_seq
-                    last_score = float(info[target_col])
-                    median_n_reviews = int(info["median_n_reviews"])
-                    n_albums = int(info["n_albums"])
-                    if n_albums < min_albums_filter:
-                        # Match training behavior: artists below threshold use static effect.
-                        next_seq = 1
-
-                    artist_idxs.append(idx)
-                    album_seqs.append(next_seq)
-                    prev_scores.append(last_score)
-                    # Measurement error of prev_score uses the last album's own
-                    # review count; debut-free here (every known entity has >=1).
-                    prev_nrevs.append(
-                        float(info["n_reviews"])
-                        if "n_reviews" in last_album_info.columns
-                        else float(median_n_reviews)
-                    )
-                    n_reviews_list.append(median_n_reviews)
-                    valid_artists.append(artist)
-                    last_scores.append(last_score)
-                    n_training_events_list.append(n_albums)
-                    horizon_clamped_flags.append(horizon_clamped)
-
-                    # Feature vector depends on scenario
-                    if scenario == "same":
-                        X_list.append(last_album_scaled.loc[artist].values.astype(np.float32))
-                    elif scenario == "population_mean":
-                        X_list.append(np.zeros(len(feature_cols), dtype=np.float32))
-                    elif scenario == "entity_mean":
-                        if artist_mean_scaled is not None and artist in artist_mean_scaled.index:
-                            X_list.append(artist_mean_scaled.loc[artist].values.astype(np.float32))
-                        else:
-                            X_list.append(np.zeros(len(feature_cols), dtype=np.float32))
-
-                if not valid_artists:
+                built = _build_batch_scenario_args(
+                    batch_artists,
+                    scenario,
+                    artist_to_idx=artist_to_idx,
+                    last_album_info=last_album_info,
+                    target_col=target_col,
+                    feature_cols=feature_cols,
+                    last_album_scaled=last_album_scaled,
+                    artist_mean_scaled=artist_mean_scaled,
+                    transform=transform,
+                    propagate_rw=propagate_rw,
+                    max_seq=max_seq,
+                    min_albums_filter=min_albums_filter,
+                    eiv_on=eiv_on,
+                    global_std=global_std,
+                )
+                if built is None:
                     continue
 
-                artist_idx_arr = np.array(artist_idxs, dtype=np.int32)
-                album_seq_arr = np.array(album_seqs, dtype=np.int32)
-                prev_score_arr = np.array(prev_scores, dtype=np.float32)
-                if transform.name != "identity":
-                    prev_score_arr = np.asarray(transform.forward(prev_score_arr), dtype=np.float32)
-                X_arr = np.stack(X_list).astype(np.float32)
-                n_reviews_arr = np.array(n_reviews_list, dtype=np.int32)
-
                 model_args = {
-                    "artist_idx": artist_idx_arr,
-                    "album_seq": album_seq_arr,
-                    "prev_score": prev_score_arr,
-                    "X": X_arr,
+                    "artist_idx": built.artist_idx,
+                    "album_seq": built.album_seq,
+                    "prev_score": built.prev_score,
+                    "X": built.X,
                     "y": None,
-                    "n_reviews": n_reviews_arr,
+                    "n_reviews": built.n_reviews,
                     "n_artists": summary["n_artists"],
                     "max_seq": model_max_seq,
                     "n_exponent": summary.get("n_exponent", 0.0),
@@ -260,13 +364,7 @@ def _predict_known_entities(
                     "ar_center": ar_center,
                 }
                 if eiv_on:
-                    prev_nrev_arr = np.array(prev_nrevs, dtype=np.float64)
-                    with np.errstate(invalid="ignore", divide="ignore"):
-                        model_args["prev_meas_sigma"] = np.where(
-                            ~np.isfinite(prev_nrev_arr) | (prev_nrev_arr <= 0),
-                            0.0,
-                            global_std / np.sqrt(np.maximum(prev_nrev_arr, 1.0)),
-                        ).astype(np.float32)
+                    model_args["prev_meas_sigma"] = built.prev_meas_sigma
 
                 # Run Predictive in chunks -- create once, replace posterior_samples
                 # per batch to preserve function identity and avoid JAX recompilation
@@ -293,7 +391,7 @@ def _predict_known_entities(
                     y_pred = np.asarray(transform.inverse(y_pred))
 
                 # Compute summary stats per artist
-                for i, artist in enumerate(valid_artists):
+                for i, artist in enumerate(built.valid_artists):
                     samples = np.clip(y_pred[:, i], target_bounds[0], target_bounds[1])
                     results.append(
                         {
@@ -306,9 +404,9 @@ def _predict_known_entities(
                             "pred_q50": float(np.percentile(samples, 50)),
                             "pred_q75": float(np.percentile(samples, 75)),
                             "pred_q95": float(np.percentile(samples, 95)),
-                            "last_score": last_scores[i],
-                            "n_training_events": n_training_events_list[i],
-                            "horizon_clamped": horizon_clamped_flags[i],
+                            "last_score": built.last_scores[i],
+                            "n_training_events": built.n_training_events[i],
+                            "horizon_clamped": built.horizon_clamped_flags[i],
                         }
                     )
 

@@ -4,7 +4,7 @@ import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd
 import structlog
@@ -49,7 +49,7 @@ class AuditLogger:
         logger.save()  # Writes JSONL and summary
     """
 
-    def __init__(self, output_dir: str | Path = "data/audit", run_id: Optional[str] = None):
+    def __init__(self, output_dir: str | Path = "data/audit", run_id: str | None = None):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -83,7 +83,7 @@ class AuditLogger:
         self,
         df: pd.DataFrame,
         reason: str,
-        value_col: Optional[str] = None,
+        value_col: str | None = None,
         *,
         entity_col: str = "Artist",
         event_col: str = "Album",
@@ -105,6 +105,7 @@ class AuditLogger:
             df[entity_col].tolist(),
             df[event_col].tolist(),
             values,
+            strict=True,
         ):
             self.log_exclusion(
                 row_id=int(row_id),

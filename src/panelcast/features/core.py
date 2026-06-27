@@ -77,7 +77,7 @@ class CoreNumericBlock(BaseFeatureBlock):
         numeric = df[self.columns].apply(pd.to_numeric, errors="coerce")
         return numeric.astype(float)
 
-    def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> "CoreNumericBlock":
+    def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> CoreNumericBlock:
         """Learn per-column imputation values from training data only."""
         self.validate_columns(df)
         numeric = self._coerce_numeric(df)

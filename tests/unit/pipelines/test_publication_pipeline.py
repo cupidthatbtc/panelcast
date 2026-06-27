@@ -418,4 +418,7 @@ def test_publication_ppc_summary_missing_fields_is_tolerated(tmp_path):
     ):
         artifacts = generate_publication_artifacts(ctx)
 
+    # The PPC summary is consumed only by the model card; no density plot is
+    # generated and a malformed summary never produces an error or figure.
     assert not any(err["artifact"] == "ppc_density_plot" for err in artifacts["errors"])
+    assert not any("ppc_density" in str(p) for p in artifacts["figures"])

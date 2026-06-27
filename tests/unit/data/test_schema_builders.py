@@ -212,7 +212,10 @@ def _outcome(schema: pa.DataFrameSchema, df: pd.DataFrame):
         return ("pass", None)
     except pa.errors.SchemaErrors as e:
         cases = e.failure_cases
-        return ("fail", sorted(zip(cases["check"].astype(str), cases["column"].astype(str))))
+        return (
+            "fail",
+            sorted(zip(cases["check"].astype(str), cases["column"].astype(str), strict=True)),
+        )
 
 
 class TestBehavioralEquivalence:

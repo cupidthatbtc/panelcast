@@ -67,7 +67,7 @@ class CollaborationBlock(BaseFeatureBlock):
             return tuple(custom_order)
         return DEFAULT_COLLAB_TYPES
 
-    def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> "CollaborationBlock":
+    def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> CollaborationBlock:
         """Learn collab_type vocabulary from training data.
 
         Parameters

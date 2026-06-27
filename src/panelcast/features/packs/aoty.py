@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from panelcast.features.registry import FeatureRegistry
 
 
-def register(registry: "FeatureRegistry") -> None:
+def register(registry: FeatureRegistry) -> None:
     """Register the music-domain blocks on a feature registry."""
     registry.register("genre", lambda params: GenreBlock(params))
     registry.register("genre_pca", lambda params: GenrePCABlock(params))  # Backwards compat

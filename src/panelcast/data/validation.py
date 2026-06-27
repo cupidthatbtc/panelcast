@@ -12,7 +12,7 @@ builders applied to the default (AOTY) descriptor, so existing imports keep
 working; frozen-oracle tests pin them to the original hand-written literals.
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 import pandas as pd
 import pandera.pandas as pa

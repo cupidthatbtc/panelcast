@@ -111,7 +111,8 @@ def measure_peak_gpu_bytes() -> int | None:
         if not stats or "peak_bytes_in_use" not in stats:
             return None
         return int(stats["peak_bytes_in_use"])
-    except Exception:  # pragma: no cover - defensive against backend quirks
+    except Exception as e:  # pragma: no cover - defensive against backend quirks
+        logger.debug("peak GPU bytes unavailable: %s", type(e).__name__, exc_info=True)
         return None
 
 

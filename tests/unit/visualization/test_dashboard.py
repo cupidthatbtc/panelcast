@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+from typing import ClassVar
 from unittest.mock import MagicMock
 
 import numpy as np
@@ -414,7 +415,7 @@ class TestCreateDashboardFiguresTracePlot:
             values = np.array([1.0, 2.0, 3.0])  # ndim == 1
 
         class FakePosterior:
-            data_vars = {"gamma": FakeVar()}
+            data_vars: ClassVar[dict] = {"gamma": FakeVar()}
 
             def __getitem__(self, key):
                 return FakeVar()

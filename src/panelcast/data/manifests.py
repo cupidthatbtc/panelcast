@@ -146,7 +146,7 @@ def load_manifest(filepath: Path) -> SplitManifest:
     Returns:
         SplitManifest object
     """
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         d = json.load(f)
     return SplitManifest.from_dict(d)
 
@@ -182,7 +182,7 @@ def create_split_assignments(
                     split=split,
                     reason=f"{reason_prefix}{entity}",
                 )
-                for rid, entity in zip(row_ids, entities)
+                for rid, entity in zip(row_ids, entities, strict=True)
             ]
         return [
             SplitAssignment(original_row_id=rid, split=split, reason=reason or "")

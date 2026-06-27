@@ -7,7 +7,7 @@ from training data only to prevent data leakage.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, ClassVar
 
 import numpy as np
 import pandas as pd
@@ -53,8 +53,8 @@ class GenreBlock(BaseFeatureBlock):
     """
 
     name = "genre"
-    requires: list[str] = []
-    required_columns: list[str] = ["Genres"]
+    requires: ClassVar[list[str]] = []
+    required_columns: ClassVar[list[str]] = ["Genres"]
 
     def __init__(self, params: dict[str, Any] | None = None) -> None:
         super().__init__(params)
@@ -74,7 +74,7 @@ class GenreBlock(BaseFeatureBlock):
         """Number of PCA components (None to skip PCA)."""
         return self.params.get("n_components", 30)
 
-    def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> "GenreBlock":
+    def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> GenreBlock:
         """Learn genre vocabulary and fit PCA from training data.
 
         Parameters

@@ -17,8 +17,8 @@ Usage:
     >>> comparison = aggregate_sensitivity_results(results, metric="elpd")
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 import arviz as az
 import numpy as np

@@ -164,7 +164,7 @@ class DatasetDescriptor(BaseModel):
     ablation_groups: dict[str, list[str]] = Field(default_factory=_default_ablation_groups)
 
     @model_validator(mode="after")
-    def _validate(self) -> "DatasetDescriptor":
+    def _validate(self) -> DatasetDescriptor:
         if self.primary_min_obs not in self.min_obs_thresholds:
             raise ValueError(
                 f"primary_min_obs={self.primary_min_obs} is not one of "

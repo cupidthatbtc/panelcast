@@ -499,8 +499,162 @@ def _apply_max_albums_cap(
     return model_args
 
 
+def _build_heteroscedastic_summary(
+    ctx: StageContext,
+    fit_result,
+    model_args: dict,
+    prefix: str,
+    n_ref,
+) -> dict:
+    """Summarize the heteroscedastic noise mode from the fitted posterior.
+
+    Pure read of ``fit_result.idata.posterior`` plus numpy/ArviZ; returns the
+    ``summary["heteroscedastic_mode"]`` payload for the learned, fixed, or
+    homoscedastic case and emits the same ``heteroscedastic_summary`` log line.
+    """
+    if ctx.learn_n_exponent:
+        # Extract n_exponent posterior
+        n_exp_samples = fit_result.idata.posterior[f"{prefix}_n_exponent"].values.flatten()
+        n_exp_mean = float(np.mean(n_exp_samples))
+        n_exp_std = float(np.std(n_exp_samples))
+
+        # Compute 94% HDI for n_exponent
+        hdi = az.hdi(fit_result.idata, var_names=[f"{prefix}_n_exponent"], hdi_prob=0.94)
+        hdi_low = float(hdi[f"{prefix}_n_exponent"].values[0])
+        hdi_high = float(hdi[f"{prefix}_n_exponent"].values[1])
+
+        # Get ESS and R-hat for n_exponent
+        n_exp_summary = az.summary(
+            fit_result.idata, var_names=[f"{prefix}_n_exponent"], kind="diagnostics"
+        )
+
+        # Check if sigma_ref mode is active (n_ref was passed to model)
+        use_sigma_ref = model_args.get("n_ref") is not None
+
+        # Compute effective sigma range using posterior mean exponent
+        n_reviews = model_args["n_reviews"]
+        sigma_obs_mean = float(fit_result.idata.posterior[f"{prefix}_sigma_obs"].mean())
+        sigma_at_max_n = float(
+            compute_sigma_scaled(
+                sigma_obs_mean, jnp.array(np.max(n_reviews)), jnp.array(n_exp_mean)
+            )
+        )
+        sigma_at_min_n = float(
+            compute_sigma_scaled(
+                sigma_obs_mean, jnp.array(np.min(n_reviews)), jnp.array(n_exp_mean)
+            )
+        )
+
+        # Reference scaling values for interpretation
+        ref_sqrt = 0.5  # Square-root scaling
+        ref_cube_root = 0.33  # Cube-root scaling
+        interpretation = (
+            "closer to cube-root scaling (0.33)"
+            if abs(n_exp_mean - ref_cube_root) < abs(n_exp_mean - ref_sqrt)
+            else "closer to square-root scaling (0.5)"
+        )
+
+        # Build heteroscedastic_mode dict (common fields)
+        hetero_dict = {
+            "mode": "learned",
+            "n_exponent_mean": n_exp_mean,
+            "n_exponent_std": n_exp_std,
+            "n_exponent_hdi_94": [hdi_low, hdi_high],
+            "n_exponent_ess_bulk": int(n_exp_summary["ess_bulk"].values[0]),
+            "n_exponent_r_hat": float(n_exp_summary["r_hat"].values[0]),
+            "interpretation": interpretation,
+            "reference_sqrt": ref_sqrt,
+            "reference_cube_root": ref_cube_root,
+            "sigma_scaled_range": {
+                "min": sigma_at_max_n,
+                "max": sigma_at_min_n,
+                "at_n_reviews_max": int(np.max(n_reviews)),
+                "at_n_reviews_min": int(np.min(n_reviews)),
+                "base_sigma_obs": sigma_obs_mean,
+            },
+        }
+
+        if use_sigma_ref:
+            # Sigma-ref mode: add sigma_ref stats and sigma_obs derived stats
+            sigma_ref_samples = fit_result.idata.posterior[f"{prefix}_sigma_ref"].values.flatten()
+            sigma_ref_hdi = az.hdi(
+                fit_result.idata,
+                var_names=[f"{prefix}_sigma_ref"],
+                hdi_prob=0.94,
+            )
+            sigma_ref_hdi_low = float(sigma_ref_hdi[f"{prefix}_sigma_ref"].values[0])
+            sigma_ref_hdi_high = float(sigma_ref_hdi[f"{prefix}_sigma_ref"].values[1])
+
+            sigma_obs_samples = fit_result.idata.posterior[f"{prefix}_sigma_obs"].values.flatten()
+
+            hetero_dict["parameterization"] = "sigma_ref"
+            hetero_dict["n_ref"] = n_ref
+            hetero_dict["n_ref_method"] = "median"
+            hetero_dict["sigma_ref"] = {
+                "mean": float(np.mean(sigma_ref_samples)),
+                "std": float(np.std(sigma_ref_samples)),
+                "hdi_94": [sigma_ref_hdi_low, sigma_ref_hdi_high],
+            }
+            hetero_dict["sigma_obs_derived"] = {
+                "mean": float(np.mean(sigma_obs_samples)),
+                "std": float(np.std(sigma_obs_samples)),
+            }
+        else:
+            hetero_dict["parameterization"] = "sigma_obs"
+
+        log.info(
+            "heteroscedastic_summary",
+            mode="learned",
+            parameterization="sigma_ref" if use_sigma_ref else "sigma_obs",
+            n_exponent_mean=round(n_exp_mean, 4),
+            n_exponent_hdi_94=[round(hdi_low, 4), round(hdi_high, 4)],
+            interpretation=interpretation,
+            sigma_range=[round(sigma_at_max_n, 4), round(sigma_at_min_n, 4)],
+        )
+        return hetero_dict
+
+    if ctx.n_exponent != 0.0:
+        # Fixed heteroscedastic mode
+        n_reviews = model_args["n_reviews"]
+        sigma_obs_mean = float(fit_result.idata.posterior[f"{prefix}_sigma_obs"].mean())
+        # Wrap numpy scalars in JAX arrays for compute_sigma_scaled compatibility
+        sigma_at_max_n = float(
+            compute_sigma_scaled(
+                sigma_obs_mean, jnp.array(np.max(n_reviews)), jnp.array(ctx.n_exponent)
+            )
+        )
+        sigma_at_min_n = float(
+            compute_sigma_scaled(
+                sigma_obs_mean, jnp.array(np.min(n_reviews)), jnp.array(ctx.n_exponent)
+            )
+        )
+
+        log.info(
+            "heteroscedastic_summary",
+            mode="fixed",
+            n_exponent=ctx.n_exponent,
+            sigma_range=[round(sigma_at_max_n, 4), round(sigma_at_min_n, 4)],
+        )
+        return {
+            "mode": "fixed",
+            "n_exponent": ctx.n_exponent,
+            "sigma_scaled_range": {
+                "min": sigma_at_max_n,
+                "max": sigma_at_min_n,
+                "at_n_reviews_max": int(np.max(n_reviews)),
+                "at_n_reviews_min": int(np.min(n_reviews)),
+                "base_sigma_obs": sigma_obs_mean,
+            },
+        }
+
+    # Homoscedastic mode (default)
+    return {
+        "mode": "homoscedastic",
+    }
+
+
 def train_models(
-    ctx: "StageContext",
+    ctx: StageContext,
     features_path: Path | None = None,
     splits_path: Path | None = None,
 ) -> dict:
@@ -891,145 +1045,9 @@ def train_models(
             recommendation="Consider running grid search fallback with fixed n_exponent values",
         )
 
-    # Add heteroscedastic noise details to summary
-    if ctx.learn_n_exponent:
-        # Extract n_exponent posterior
-        n_exp_samples = fit_result.idata.posterior[f"{prefix}_n_exponent"].values.flatten()
-        n_exp_mean = float(np.mean(n_exp_samples))
-        n_exp_std = float(np.std(n_exp_samples))
-
-        # Compute 94% HDI for n_exponent
-        hdi = az.hdi(fit_result.idata, var_names=[f"{prefix}_n_exponent"], hdi_prob=0.94)
-        hdi_low = float(hdi[f"{prefix}_n_exponent"].values[0])
-        hdi_high = float(hdi[f"{prefix}_n_exponent"].values[1])
-
-        # Get ESS and R-hat for n_exponent
-        n_exp_summary = az.summary(
-            fit_result.idata, var_names=[f"{prefix}_n_exponent"], kind="diagnostics"
-        )
-
-        # Check if sigma_ref mode is active (n_ref was passed to model)
-        use_sigma_ref = model_args.get("n_ref") is not None
-
-        # Compute effective sigma range using posterior mean exponent
-        n_reviews = model_args["n_reviews"]
-        sigma_obs_mean = float(fit_result.idata.posterior[f"{prefix}_sigma_obs"].mean())
-        sigma_at_max_n = float(
-            compute_sigma_scaled(
-                sigma_obs_mean, jnp.array(np.max(n_reviews)), jnp.array(n_exp_mean)
-            )
-        )
-        sigma_at_min_n = float(
-            compute_sigma_scaled(
-                sigma_obs_mean, jnp.array(np.min(n_reviews)), jnp.array(n_exp_mean)
-            )
-        )
-
-        # Reference scaling values for interpretation
-        ref_sqrt = 0.5  # Square-root scaling
-        ref_cube_root = 0.33  # Cube-root scaling
-        interpretation = (
-            "closer to cube-root scaling (0.33)"
-            if abs(n_exp_mean - ref_cube_root) < abs(n_exp_mean - ref_sqrt)
-            else "closer to square-root scaling (0.5)"
-        )
-
-        # Build heteroscedastic_mode dict (common fields)
-        hetero_dict = {
-            "mode": "learned",
-            "n_exponent_mean": n_exp_mean,
-            "n_exponent_std": n_exp_std,
-            "n_exponent_hdi_94": [hdi_low, hdi_high],
-            "n_exponent_ess_bulk": int(n_exp_summary["ess_bulk"].values[0]),
-            "n_exponent_r_hat": float(n_exp_summary["r_hat"].values[0]),
-            "interpretation": interpretation,
-            "reference_sqrt": ref_sqrt,
-            "reference_cube_root": ref_cube_root,
-            "sigma_scaled_range": {
-                "min": sigma_at_max_n,
-                "max": sigma_at_min_n,
-                "at_n_reviews_max": int(np.max(n_reviews)),
-                "at_n_reviews_min": int(np.min(n_reviews)),
-                "base_sigma_obs": sigma_obs_mean,
-            },
-        }
-
-        if use_sigma_ref:
-            # Sigma-ref mode: add sigma_ref stats and sigma_obs derived stats
-            sigma_ref_samples = fit_result.idata.posterior[f"{prefix}_sigma_ref"].values.flatten()
-            sigma_ref_hdi = az.hdi(
-                fit_result.idata,
-                var_names=[f"{prefix}_sigma_ref"],
-                hdi_prob=0.94,
-            )
-            sigma_ref_hdi_low = float(sigma_ref_hdi[f"{prefix}_sigma_ref"].values[0])
-            sigma_ref_hdi_high = float(sigma_ref_hdi[f"{prefix}_sigma_ref"].values[1])
-
-            sigma_obs_samples = fit_result.idata.posterior[f"{prefix}_sigma_obs"].values.flatten()
-
-            hetero_dict["parameterization"] = "sigma_ref"
-            hetero_dict["n_ref"] = n_ref
-            hetero_dict["n_ref_method"] = "median"
-            hetero_dict["sigma_ref"] = {
-                "mean": float(np.mean(sigma_ref_samples)),
-                "std": float(np.std(sigma_ref_samples)),
-                "hdi_94": [sigma_ref_hdi_low, sigma_ref_hdi_high],
-            }
-            hetero_dict["sigma_obs_derived"] = {
-                "mean": float(np.mean(sigma_obs_samples)),
-                "std": float(np.std(sigma_obs_samples)),
-            }
-        else:
-            hetero_dict["parameterization"] = "sigma_obs"
-
-        summary["heteroscedastic_mode"] = hetero_dict
-        log.info(
-            "heteroscedastic_summary",
-            mode="learned",
-            parameterization="sigma_ref" if use_sigma_ref else "sigma_obs",
-            n_exponent_mean=round(n_exp_mean, 4),
-            n_exponent_hdi_94=[round(hdi_low, 4), round(hdi_high, 4)],
-            interpretation=interpretation,
-            sigma_range=[round(sigma_at_max_n, 4), round(sigma_at_min_n, 4)],
-        )
-    elif ctx.n_exponent != 0.0:
-        # Fixed heteroscedastic mode
-        n_reviews = model_args["n_reviews"]
-        sigma_obs_mean = float(fit_result.idata.posterior[f"{prefix}_sigma_obs"].mean())
-        # Wrap numpy scalars in JAX arrays for compute_sigma_scaled compatibility
-        sigma_at_max_n = float(
-            compute_sigma_scaled(
-                sigma_obs_mean, jnp.array(np.max(n_reviews)), jnp.array(ctx.n_exponent)
-            )
-        )
-        sigma_at_min_n = float(
-            compute_sigma_scaled(
-                sigma_obs_mean, jnp.array(np.min(n_reviews)), jnp.array(ctx.n_exponent)
-            )
-        )
-
-        summary["heteroscedastic_mode"] = {
-            "mode": "fixed",
-            "n_exponent": ctx.n_exponent,
-            "sigma_scaled_range": {
-                "min": sigma_at_max_n,
-                "max": sigma_at_min_n,
-                "at_n_reviews_max": int(np.max(n_reviews)),
-                "at_n_reviews_min": int(np.min(n_reviews)),
-                "base_sigma_obs": sigma_obs_mean,
-            },
-        }
-        log.info(
-            "heteroscedastic_summary",
-            mode="fixed",
-            n_exponent=ctx.n_exponent,
-            sigma_range=[round(sigma_at_max_n, 4), round(sigma_at_min_n, 4)],
-        )
-    else:
-        # Homoscedastic mode (default)
-        summary["heteroscedastic_mode"] = {
-            "mode": "homoscedastic",
-        }
+    summary["heteroscedastic_mode"] = _build_heteroscedastic_summary(
+        ctx, fit_result, model_args, prefix, n_ref
+    )
 
     # Validate through the typed contract: declared fields serialize in the
     # historical key order, with schema_version + dataset appended at the end.
