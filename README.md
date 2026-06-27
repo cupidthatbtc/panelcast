@@ -186,7 +186,9 @@ See [`docs/CLI.md`](docs/CLI.md) for the complete command reference.
 - Convergence + PPC + coverage diagnostics as first-class, gating checks
 - Sensitivity matrix over priors, splits, and feature ablations
 - Publication-ready artifacts: tables, figures, model card, citations
-- Domain portability proven by an end-to-end test, not just asserted
+- Domain portability proven by an end-to-end test, not just asserted — the
+  *apparatus* (descriptor → pipeline) runs on a new domain with zero source
+  changes; predictive accuracy off the flagship domain is untested by construction
 
 ## Documentation
 
