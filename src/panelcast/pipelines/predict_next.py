@@ -81,6 +81,8 @@ def _predict_known_entities(
     propagate_rw = priors_obj.propagate_rw_horizon
     eiv_on = priors_obj.errors_in_variables
     global_std = float(summary.get("global_std_score") or 0.0)
+    if eiv_on and global_std <= 0.0:
+        log.warning("eiv_sigma_zero_legacy_summary", context="predict_next")
     feature_cols = summary["feature_cols"]
     ds_block = summary.get("dataset") or {}
     target_col = ds_block.get("target_col", "User_Score")

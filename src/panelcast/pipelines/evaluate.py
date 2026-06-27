@@ -439,6 +439,8 @@ def _prepare_test_model_args(
 
     if eiv_on:
         global_std = float(summary.get("global_std_score") or 0.0)
+        if global_std <= 0.0:
+            log.warning("eiv_sigma_zero_legacy_summary", context="primary_eval")
         prev_nrev = test_df["_prev_nrev"].to_numpy(dtype=float)
         with np.errstate(invalid="ignore", divide="ignore"):
             prev_meas_sigma = np.where(
@@ -1010,6 +1012,8 @@ def evaluate_models(ctx: StageContext) -> dict:
 
         if bool(getattr(train_model_args["priors"], "errors_in_variables", False)):
             global_std_pp = float(summary.get("global_std_score") or 0.0)
+            if global_std_pp <= 0.0:
+                log.warning("eiv_sigma_zero_legacy_summary", context="prior_predictive")
             prev_nrev_pp = (
                 train_df_pp.groupby(ds["entity_col"])[
                     "n_reviews" if "n_reviews" in train_df_pp.columns else ds["n_obs_col"]

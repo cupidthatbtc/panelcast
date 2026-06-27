@@ -85,6 +85,21 @@ class TestEivParityLock:
                 a, b, err_msg=f"forward draw differs for shared site {site!r}"
             )
 
+    def test_gate_off_ignores_prev_meas_sigma(self):
+        """With the gate off, prev_meas_sigma is never consumed: dropping it to
+        None leaves every forward draw bit-identical to passing a real array."""
+        with_sigma = _get_trace(PriorConfig())
+        args_none = _model_args(PriorConfig())
+        args_none["prev_meas_sigma"] = None
+        without_sigma = trace(seed(user_score_model, rng_seed=0)).get_trace(**args_none)
+        shared = _sample_sites(with_sigma) | _deterministic_sites(with_sigma)
+        for site in sorted(shared):
+            np.testing.assert_array_equal(
+                np.asarray(with_sigma[site]["value"]),
+                np.asarray(without_sigma[site]["value"]),
+                err_msg=f"gate-off draw differs for {site!r} when prev_meas_sigma is None",
+            )
+
     def test_debut_pinning_keeps_prev_latent_at_prev_score(self):
         """prev_meas_sigma == 0 (debuts) => prev_latent == prev_score, so the
         deterministic mu is identical to the gate-off mu regardless of the

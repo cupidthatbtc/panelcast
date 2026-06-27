@@ -2200,6 +2200,34 @@ class TestPrepareTestModelArgs:
         assert np.isfinite(sigma).all()
         assert (sigma > 0).all()
 
+    def test_eiv_missing_global_std_zeros_sigma(self):
+        """errors_in_variables against a legacy summary (no global_std_score) emits
+        an all-zero measurement scale (EIV no-op) instead of failing."""
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "B"],
+                "User_Score": [80.0, 82.0, 85.0],
+                "Album": ["a1", "a2", "b1"],
+                "n_reviews": [10, 40, 25],
+            }
+        )
+        test_features = pd.DataFrame({"f1": [1.0, 2.0, 3.0], "n_reviews": [10, 40, 25]})
+        summary = self._make_summary()  # no global_std_score -> legacy path
+        summary["priors"]["errors_in_variables"] = True
+        train_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "B", "B"],
+                "User_Score": [70.0, 75.0, 80.0, 82.0],
+                "n_reviews": [12, 15, 20, 22],
+            }
+        )
+
+        model_args, _ = _prepare_test_model_args(
+            test_df, test_features, summary, train_df=train_df
+        )
+        assert "prev_meas_sigma" in model_args
+        assert (model_args["prev_meas_sigma"] == 0.0).all()
+
     def test_overlap_columns_dropped(self):
         """Overlapping columns should be dropped from test_df."""
         test_df = pd.DataFrame(

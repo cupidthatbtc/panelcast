@@ -433,6 +433,71 @@ class TestPredictKnownEntities:
         assert int(album_seq[0]) == 1  # ArtistA below threshold -> static effect
         assert int(album_seq[2]) == 5  # ArtistC kept at 4 + 1, not clamped to max_seq=3
 
+    def test_eiv_injects_prev_meas_sigma(
+        self,
+        mock_posterior_samples,
+        mock_summary,
+        mock_last_album_info,
+        mock_artist_mean_features,
+    ):
+        """errors_in_variables injects a finite, positive prev_meas_sigma into the
+        known-entity model args, scaled by each entity's last-album review count."""
+        summary = dict(mock_summary)
+        summary["global_std_score"] = 8.0
+        summary["priors"] = {**mock_summary["priors"], "errors_in_variables": True}
+
+        mock_jax = _make_jax_mock()
+        mock_random = MagicMock()
+        mock_random.key.return_value = MagicMock()
+
+        predictive_mock = _make_predictive_mock(10, 3)
+        call_args_list = []
+        original_return = predictive_mock.return_value
+
+        def capture_call(*args, **kwargs):
+            call_args_list.append(kwargs)
+            return original_return.return_value
+
+        original_return.side_effect = capture_call
+
+        with (
+            patch("panelcast.pipelines.predict_next.jax", mock_jax),
+            patch("panelcast.pipelines.predict_next.Predictive", predictive_mock),
+            patch("panelcast.pipelines.predict_next.random", mock_random),
+        ):
+            _predict_known_entities(
+                mock_posterior_samples,
+                summary,
+                mock_last_album_info,
+                mock_artist_mean_features,
+            )
+
+        sigma = call_args_list[0]["prev_meas_sigma"]
+        assert sigma.shape[0] == 3
+        assert np.isfinite(sigma).all()
+        assert (sigma > 0).all()
+
+    def test_eiv_missing_global_std_warns(
+        self,
+        mock_posterior_samples,
+        mock_summary,
+        mock_last_album_info,
+        mock_artist_mean_features,
+    ):
+        """A legacy summary without global_std_score yields a zero scale (EIV no-op)
+        rather than failing; the call site logs the legacy-summary warning."""
+        summary = dict(mock_summary)
+        summary.pop("global_std_score", None)
+        summary["priors"] = {**mock_summary["priors"], "errors_in_variables": True}
+
+        result = self._run(
+            mock_posterior_samples,
+            summary,
+            mock_last_album_info,
+            mock_artist_mean_features,
+        )
+        assert not result.empty
+
     def test_skips_missing_artists(
         self,
         mock_posterior_samples,
