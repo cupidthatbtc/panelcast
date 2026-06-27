@@ -77,6 +77,12 @@ def _predict_known_entities(
     artist_to_idx = summary["artist_to_idx"]
     max_seq = summary["max_seq"]
     min_albums_filter = int(summary.get("min_albums_filter", 2))
+    priors_obj = PriorConfig(**summary["priors"])
+    propagate_rw = priors_obj.propagate_rw_horizon
+    eiv_on = priors_obj.errors_in_variables
+    global_std = float(summary.get("global_std_score") or 0.0)
+    if eiv_on and global_std <= 0.0:
+        log.warning("eiv_sigma_zero_legacy_summary", context="predict_next")
     feature_cols = summary["feature_cols"]
     ds_block = summary.get("dataset") or {}
     target_col = ds_block.get("target_col", "User_Score")
@@ -110,20 +116,40 @@ def _predict_known_entities(
         if int(last_album_info.loc[artist, "album_seq"]) + 1 > max_seq:
             horizon_clamped_artists.append(artist)
 
-    if horizon_clamped_artists:
-        msg = (
-            "Next-album prediction requires extrapolation beyond training sequence horizon "
-            f"for {len(horizon_clamped_artists)} artists (max_seq={max_seq}). "
-            "Increase --max-albums during training or disable --strict for exploratory runs."
-        )
-        if strict:
-            raise ValueError(msg)
-        log.warning(
-            "predict_horizon_clamped",
-            n_artists=len(horizon_clamped_artists),
-            max_seq=max_seq,
-            artists_sample=horizon_clamped_artists[:5],
-        )
+    # propagate_rw_horizon grows the trajectory to cover the deepest next_seq so
+    # re-sampled rw_raw accumulates the full innovations (no clamp); otherwise
+    # the legacy clamp at max_seq applies and deep extrapolation is flagged.
+    if propagate_rw:
+        deepest_next_seq = max_seq
+        for artist in horizon_clamped_artists:
+            info = last_album_info.loc[artist]
+            if int(info["n_albums"]) < min_albums_filter:
+                continue  # below threshold -> static effect (seq 1), never extrapolates
+            deepest_next_seq = max(deepest_next_seq, int(info["album_seq"]) + 1)
+        model_max_seq = deepest_next_seq
+        if horizon_clamped_artists:
+            log.info(
+                "predict_horizon_propagated",
+                n_artists=len(horizon_clamped_artists),
+                max_seq_train=max_seq,
+                model_max_seq=model_max_seq,
+            )
+    else:
+        model_max_seq = max_seq
+        if horizon_clamped_artists:
+            msg = (
+                "Next-album prediction requires extrapolation beyond training sequence horizon "
+                f"for {len(horizon_clamped_artists)} artists (max_seq={max_seq}). "
+                "Increase --max-albums during training or disable --strict for exploratory runs."
+            )
+            if strict:
+                raise ValueError(msg)
+            log.warning(
+                "predict_horizon_clamped",
+                n_artists=len(horizon_clamped_artists),
+                max_seq=max_seq,
+                artists_sample=horizon_clamped_artists[:5],
+            )
 
     # Precompute standardized scenario feature matrices once. The batch loop
     # previously re-checked column membership and re-standardized the same
@@ -152,6 +178,7 @@ def _predict_known_entities(
                 artist_idxs = []
                 album_seqs = []
                 prev_scores = []
+                prev_nrevs = []
                 X_list = []
                 n_reviews_list = []
                 valid_artists = []
@@ -167,8 +194,8 @@ def _predict_known_entities(
 
                     info = last_album_info.loc[artist]
                     last_seq = int(info["album_seq"])
-                    next_seq = min(last_seq + 1, max_seq)
-                    horizon_clamped = (last_seq + 1) > max_seq
+                    next_seq = (last_seq + 1) if propagate_rw else min(last_seq + 1, max_seq)
+                    horizon_clamped = (not propagate_rw) and (last_seq + 1) > max_seq
                     last_score = float(info[target_col])
                     median_n_reviews = int(info["median_n_reviews"])
                     n_albums = int(info["n_albums"])
@@ -179,6 +206,13 @@ def _predict_known_entities(
                     artist_idxs.append(idx)
                     album_seqs.append(next_seq)
                     prev_scores.append(last_score)
+                    # Measurement error of prev_score uses the last album's own
+                    # review count; debut-free here (every known entity has >=1).
+                    prev_nrevs.append(
+                        float(info["n_reviews"])
+                        if "n_reviews" in last_album_info.columns
+                        else float(median_n_reviews)
+                    )
                     n_reviews_list.append(median_n_reviews)
                     valid_artists.append(artist)
                     last_scores.append(last_score)
@@ -215,16 +249,24 @@ def _predict_known_entities(
                     "y": None,
                     "n_reviews": n_reviews_arr,
                     "n_artists": summary["n_artists"],
-                    "max_seq": max_seq,
+                    "max_seq": model_max_seq,
                     "n_exponent": summary.get("n_exponent", 0.0),
                     "learn_n_exponent": summary.get("learn_n_exponent", False),
                     "n_exponent_prior": summary.get("n_exponent_prior", "logit-normal"),
                     "n_ref": summary.get("n_ref"),
                     "likelihood_df": summary.get("likelihood_df", 4.0),
-                    "priors": PriorConfig(**summary["priors"]),
+                    "priors": priors_obj,
                     "target_bounds": target_bounds,
                     "ar_center": ar_center,
                 }
+                if eiv_on:
+                    prev_nrev_arr = np.array(prev_nrevs, dtype=np.float64)
+                    with np.errstate(invalid="ignore", divide="ignore"):
+                        model_args["prev_meas_sigma"] = np.where(
+                            ~np.isfinite(prev_nrev_arr) | (prev_nrev_arr <= 0),
+                            0.0,
+                            global_std / np.sqrt(np.maximum(prev_nrev_arr, 1.0)),
+                        ).astype(np.float32)
 
                 # Run Predictive in chunks -- create once, replace posterior_samples
                 # per batch to preserve function identity and avoid JAX recompilation

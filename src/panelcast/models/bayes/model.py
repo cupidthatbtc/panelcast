@@ -546,6 +546,7 @@ def make_score_model(score_type: str) -> Callable:
         likelihood_df: float = 4.0,
         target_bounds: tuple[float, float] = (0.0, 100.0),
         ar_center: float | jnp.ndarray = 0.0,
+        prev_meas_sigma: jnp.ndarray | None = None,
     ) -> None:
         """Centered parameterization of score model (internal).
 
@@ -597,6 +598,11 @@ def make_score_model(score_type: str) -> Callable:
                 training scale under a target transform). When the debut
                 prev_score fill equals ar_center, debut AR terms are
                 exactly zero and rho decorrelates from mu_artist.
+            prev_meas_sigma: Optional per-observation measurement-error scale
+                for the lagged score, on the same scale as prev_score. Required
+                when priors.errors_in_variables is True; ignored otherwise.
+                Debuts must be pinned to 0 so their de-noised regressor equals
+                the prev_score fill (keeping debut AR terms exactly zero).
 
         Model structure:
             - Population-level hyperpriors for artist effect distribution
@@ -679,9 +685,10 @@ def make_score_model(score_type: str) -> Callable:
         # === Mean prediction (target-transform seam) ===
         # identity: soft-clip into bounds (differentiable, NUTS-friendly);
         # offset_logit: mu stays unconstrained, the sigmoid back-transform
-        # guarantees bounds by construction.
+        # guarantees bounds by construction. The transform is RNG-free, so the
+        # mu call is deferred to just before the likelihood -- after the gated
+        # EIV resample below -- without perturbing any draw on the gate-off path.
         mu_raw = obs_artist_effect + X @ beta + ar_term
-        mu = _apply_target_transform(mu_raw, priors, target_bounds)
 
         # === Heteroscedastic mode validation ===
         # Note: When learn_n_exponent=True, n_exp is a traced JAX value and cannot
@@ -775,6 +782,30 @@ def make_score_model(score_type: str) -> Callable:
                 prefix, sigma_scaled, artist_idx, n_artists, priors
             )
 
+        # === Errors-in-variables on the AR regressor (gated; appended last) ===
+        # De-noise the lagged score the AR term regresses on. The new site lives
+        # ONLY here, after every existing site, so the gate-off draw sequence is
+        # bit-identical (NumPyro splits PRNG keys in site-execution order).
+        # Debuts carry prev_meas_sigma == 0, so prev_latent == prev_score there
+        # and debut AR terms stay exactly zero.
+        if priors.errors_in_variables:
+            if prev_meas_sigma is None:
+                raise ValueError(
+                    "errors_in_variables=True requires prev_meas_sigma "
+                    "(per-observation measurement-error scale for prev_score)."
+                )
+            prev_latent_raw = numpyro.sample(
+                f"{prefix}prev_latent_raw",
+                dist.Normal(0.0, 1.0).expand([len(artist_idx)]).to_event(1),
+            )
+            prev_latent = prev_score + prev_meas_sigma * prev_latent_raw
+            # Rebuild mu_raw with the latent regressor. Valid only because the base
+            # AR term is exactly rho * (prev_score - ar_center); if ar_term ever
+            # becomes compound, this substitution must be updated to match.
+            mu_raw = obs_artist_effect + X @ beta + rho * (prev_latent - ar_center)
+
+        mu = _apply_target_transform(mu_raw, priors, target_bounds)
+
         # === Likelihood (family seam) ===
         _sample_likelihood(
             prefix,
@@ -846,6 +877,9 @@ Args:
     ar_center: Centering value for the AR(1) term:
         ar_term = rho * (prev_score - ar_center). Default 0.0 keeps the
         legacy uncentered behavior. Must be on the model's training scale.
+    prev_meas_sigma: Per-observation measurement-error scale for prev_score,
+        required only when priors.errors_in_variables is True (debuts pinned
+        to 0). Ignored on the default (gate-off) path.
 
 Returns:
     None. Model samples are tracked by NumPyro internally.
@@ -857,6 +891,8 @@ Sample sites (all prefixed with "{prefix}"):
     - {prefix}rho: AR(1) coefficient
     - {prefix}init_artist_effect: Initial artist effects (partial pooling)
     - {prefix}rw_raw: Unit-normal random walk innovations (n_artists x max_seq-1)
+    - {prefix}prev_latent_raw: Unit-normal AR-regressor measurement-error
+        innovations, shape (n_obs,) (only when priors.errors_in_variables=True)
     - {prefix}beta: Fixed effect coefficients
     - {prefix}sigma_ref: Noise at reference review count (only when n_ref is
         provided and heteroscedastic mode active)

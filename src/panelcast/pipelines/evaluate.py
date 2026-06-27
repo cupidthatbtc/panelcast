@@ -248,6 +248,9 @@ def _prepare_test_model_args(
 
     max_albums = summary.get("max_albums", 50)
     max_seq_train = summary["max_seq"]
+    priors_obj = PriorConfig(**summary["priors"])
+    propagate_rw = priors_obj.propagate_rw_horizon
+    eiv_on = priors_obj.errors_in_variables
 
     test_counts = pd.Series(artist_idx).value_counts().sort_index()
     test_counts = test_counts.reindex(range(summary["n_artists"]), fill_value=0)
@@ -266,21 +269,36 @@ def _prepare_test_model_args(
     temp_args = _apply_max_albums_cap(temp_args, max_albums, artist_album_counts)
     album_seq = temp_args["album_seq"]
     n_horizon_clamped = int(np.sum(album_seq > max_seq_train))
-    if n_horizon_clamped > 0:
-        msg = (
-            "Primary split evaluation requires extrapolation beyond training horizon. "
-            f"n_rows_over_horizon={n_horizon_clamped}, max_seq_train={max_seq_train}. "
-            "Increase --max-albums or use a model variant that explicitly samples future "
-            "random-walk innovations."
-        )
-        if strict:
-            raise ValueError(msg)
-        log.warning(
-            "primary_eval_horizon_clamped",
-            n_rows_over_horizon=n_horizon_clamped,
-            max_seq_train=max_seq_train,
-        )
-    album_seq = np.minimum(album_seq, max_seq_train).astype(np.int32)
+    if propagate_rw:
+        # The variant the strict-mode guard advertises: keep the deep-horizon
+        # album_seq and grow the trajectory so re-sampled rw_raw accumulates the
+        # full innovations (deep intervals widen ~sqrt(h-max_seq)*sigma_rw).
+        album_seq = album_seq.astype(np.int32)
+        max_seq_eval = int(album_seq.max()) if len(album_seq) else max_seq_train
+        if n_horizon_clamped > 0:
+            log.info(
+                "primary_eval_horizon_propagated",
+                n_rows_over_horizon=n_horizon_clamped,
+                max_seq_train=max_seq_train,
+                max_seq_eval=max_seq_eval,
+            )
+    else:
+        if n_horizon_clamped > 0:
+            msg = (
+                "Primary split evaluation requires extrapolation beyond training horizon. "
+                f"n_rows_over_horizon={n_horizon_clamped}, max_seq_train={max_seq_train}. "
+                "Increase --max-albums or use a model variant that explicitly samples future "
+                "random-walk innovations (propagate_rw_horizon)."
+            )
+            if strict:
+                raise ValueError(msg)
+            log.warning(
+                "primary_eval_horizon_clamped",
+                n_rows_over_horizon=n_horizon_clamped,
+                max_seq_train=max_seq_train,
+            )
+        album_seq = np.minimum(album_seq, max_seq_train).astype(np.int32)
+        max_seq_eval = max_seq_train
 
     global_mean = summary["global_mean_score"]
     # Sequential prev_score: use the most recent known score before each test album.
@@ -307,14 +325,51 @@ def _prepare_test_model_args(
     else:
         base_prev = test_df[entity_col].map(train_artist_last_score).fillna(global_mean)
 
+    # Errors-in-variables: the de-noised AR regressor needs the review count of
+    # the album that SUPPLIED each prev_score (its measurement error). The
+    # boundary prev comes from the val/train last album; subsequent test albums
+    # carry the preceding test album's count. NaN where prev fell back to the
+    # global mean (no prior album) -> pinned to a zero measurement error below.
+    nrev_col_test: str | None = None
+    if eiv_on:
+        if "n_reviews" in test_df.columns:
+            nrev_col_test = "n_reviews"
+        elif n_obs_col in test_df.columns:
+            nrev_col_test = n_obs_col
+
+        def _last_nrev(df: pd.DataFrame | None) -> pd.Series:
+            if df is None or df.empty:
+                return pd.Series(dtype=float)
+            col = "n_reviews" if "n_reviews" in df.columns else n_obs_col
+            if col not in df.columns:
+                return pd.Series(dtype=float)
+            return df.groupby(entity_col)[col].last()
+
+        base_prev_nrev = test_df[entity_col].map(_last_nrev(val_df))
+        base_prev_nrev = base_prev_nrev.fillna(test_df[entity_col].map(_last_nrev(train_df)))
+
     prev_scores: list[float] = []
+    prev_nrevs: list[float] = []
     for _, group in test_df.groupby(entity_col, sort=False):
         first_idx = group.index[0]
         group_prev = [float(base_prev.loc[first_idx])]
+        if eiv_on:
+            group_nrev = [float(base_prev_nrev.loc[first_idx])]
         for j in range(1, len(group)):
             group_prev.append(float(group.iloc[j - 1][target_col]))
+            if eiv_on:
+                prev_row_nrev = (
+                    float(group.iloc[j - 1][nrev_col_test])
+                    if nrev_col_test is not None
+                    else float("nan")
+                )
+                group_nrev.append(prev_row_nrev)
         prev_scores.extend(group_prev)
+        if eiv_on:
+            prev_nrevs.extend(group_nrev)
     test_df["_prev_score"] = prev_scores
+    if eiv_on:
+        test_df["_prev_nrev"] = prev_nrevs
     n_multi = int((test_df.groupby(entity_col).size() > 1).sum())
     if n_multi > 0:
         log.info(
@@ -371,16 +426,29 @@ def _prepare_test_model_args(
         "y": None,
         "n_reviews": n_reviews,
         "n_artists": summary["n_artists"],
-        "max_seq": max_seq_train,
+        "max_seq": max_seq_eval,
         "n_exponent": summary.get("n_exponent", 0.0),
         "learn_n_exponent": summary.get("learn_n_exponent", False),
         "n_exponent_prior": summary.get("n_exponent_prior", "logit-normal"),
         "n_ref": summary.get("n_ref"),
         "likelihood_df": summary.get("likelihood_df", 4.0),
-        "priors": PriorConfig(**summary["priors"]),
+        "priors": priors_obj,
         "target_bounds": ds["target_bounds"],
         "ar_center": _ar_center_from_summary(summary),
     }
+
+    if eiv_on:
+        global_std = float(summary.get("global_std_score") or 0.0)
+        if global_std <= 0.0:
+            log.warning("eiv_sigma_zero_legacy_summary", context="primary_eval")
+        prev_nrev = test_df["_prev_nrev"].to_numpy(dtype=float)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            prev_meas_sigma = np.where(
+                np.isnan(prev_nrev) | (prev_nrev <= 0),
+                0.0,
+                global_std / np.sqrt(np.maximum(prev_nrev, 1.0)),
+            ).astype(np.float32)
+        test_model_args["prev_meas_sigma"] = prev_meas_sigma
 
     return test_model_args, y_true
 
@@ -591,6 +659,14 @@ def _compute_info_criteria(
     excluded_latents = [s for s in (rw_site,) if s not in posterior_samples]
     if gate_on and entity_site not in posterior_samples:
         excluded_latents.append(entity_site)
+    # The errors-in-variables regressor latent has no scalar companion site, so
+    # detect it from the priors carried in model_args. When on it is excluded
+    # from the saved fit (n_obs cardinality) -> marginalize by re-sampling its
+    # unit-normal prior, exactly as for rw_raw.
+    eiv_site = f"{prefix}_prev_latent_raw"
+    eiv_on = bool(getattr(model_args.get("priors"), "errors_in_variables", False))
+    if eiv_on and eiv_site not in posterior_samples:
+        excluded_latents.append(eiv_site)
     needs_latents = bool(excluded_latents)
     n_total = int(next(iter(posterior_samples.values())).shape[0])
 
@@ -933,6 +1009,24 @@ def evaluate_models(ctx: StageContext) -> dict:
             "target_bounds": ds["target_bounds"],
             "ar_center": _ar_center_from_summary(summary),
         }
+
+        if bool(getattr(train_model_args["priors"], "errors_in_variables", False)):
+            global_std_pp = float(summary.get("global_std_score") or 0.0)
+            if global_std_pp <= 0.0:
+                log.warning("eiv_sigma_zero_legacy_summary", context="prior_predictive")
+            prev_nrev_pp = (
+                train_df_pp.groupby(ds["entity_col"])[
+                    "n_reviews" if "n_reviews" in train_df_pp.columns else ds["n_obs_col"]
+                ]
+                .shift(1)
+                .to_numpy(dtype=float)
+            )
+            with np.errstate(invalid="ignore", divide="ignore"):
+                train_model_args["prev_meas_sigma"] = np.where(
+                    np.isnan(prev_nrev_pp) | (prev_nrev_pp <= 0),
+                    0.0,
+                    global_std_pp / np.sqrt(np.maximum(prev_nrev_pp, 1.0)),
+                ).astype(np.float32)
 
         prior_predictive_result = run_prior_predictive(
             make_score_model(prefix),

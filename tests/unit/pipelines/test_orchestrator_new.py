@@ -677,6 +677,26 @@ class TestSkipFlagDifferences:
         diffs = orchestrator._skip_flag_differences(prev)
         assert diffs == []
 
+    def test_default_off_flag_missing_in_previous_not_flagged(self, tmp_path):
+        """A default-off flag absent from a pre-existing manifest matches the
+        current default, so it does not spuriously disable skip_existing."""
+        config = PipelineConfig()
+        orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
+        orchestrator.manifest = MagicMock(flags={"seed": 42, "errors_in_variables": False})
+        prev = MagicMock(flags={"seed": 42})  # older manifest, predates the flag
+        diffs = orchestrator._skip_flag_differences(prev)
+        assert "errors_in_variables" not in diffs
+
+    def test_enabling_default_off_flag_is_flagged(self, tmp_path):
+        """Turning a default-off flag on is a real change even against an older
+        manifest that predates the flag."""
+        config = PipelineConfig()
+        orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
+        orchestrator.manifest = MagicMock(flags={"seed": 42, "errors_in_variables": True})
+        prev = MagicMock(flags={"seed": 42})
+        diffs = orchestrator._skip_flag_differences(prev)
+        assert "errors_in_variables" in diffs
+
 
 # ============================================================================
 # Resume from failed/ directory

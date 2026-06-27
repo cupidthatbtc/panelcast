@@ -118,6 +118,9 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "sigma_obs_prior_type": _spec("sigma_obs_prior_type", None),
     "heteroscedastic_entity_obs": _spec("heteroscedastic_entity_obs", None),
     "tau_entity_scale": _spec("tau_entity_scale", None),
+    # model-v2 gates (no CLI flags; configured per-domain via run_config.yaml).
+    "errors_in_variables": _spec("errors_in_variables", None),
+    "propagate_rw_horizon": _spec("propagate_rw_horizon", None),
     "exclude_rw_raw_from_collection": _spec(
         "exclude_rw_raw_from_collection", "exclude_rw_raw_from_collection"
     ),
