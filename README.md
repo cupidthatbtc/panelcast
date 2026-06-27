@@ -68,6 +68,27 @@ integer-aware dequantization toggle. Optional per-entity overdispersion with a
 lognormal variance prior is available behind a gate. Built on
 [NumPyro](https://num.pyro.ai/) / JAX.
 
+## How it compares — and what it's for
+
+On the ~5,000-album AOTY subset, against baselines fit on the same real splits
+(within-entity temporal holdout, N = 653):
+
+| | MAE | R² | 80% cov | 95% cov |
+|---|---:|---:|---:|---:|
+| gradient boosting | **5.41** | **0.486** | 0.770 | 0.899 |
+| ridge | 5.62 | 0.455 | 0.873 | 0.962 |
+| **panelcast** | 5.64 | 0.417 | 0.858 | 0.957 |
+| entity mean | 6.11 | 0.322 | 0.818 | 0.925 |
+
+The model is **mid-pack on point accuracy** — a gradient-boosted regressor beats it
+(MAE 5.41 vs 5.64) — but GBM gets there by **under-covering** (80%/95% interval
+coverage 0.77/0.90 vs the model's 0.86/0.96). The deliverable is *calibrated
+uncertainty* — intervals as a modeled quantity, an interpretable between-entity vs
+residual variance decomposition, and a generative model you can interrogate — **not**
+a point-accuracy score. If you only need a point estimate, a GBM is simpler and
+better. Full table, cold-start behaviour, and the R²-by-history gradient:
+[`docs/BASELINES.md`](docs/BASELINES.md).
+
 ## Example output
 
 The flagship AOTY model, fit on a ~5,000-album subset (within-artist temporal

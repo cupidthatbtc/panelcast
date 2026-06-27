@@ -158,8 +158,13 @@ configuration (4 chains × 5,000, warmup 3,000, Student-t).
   min and q10 are interior.
 - **Baselines on the same real splits:** the model is competitive with ridge
   (MAE 5.62) and behind gradient boosting (MAE 5.41) on point accuracy, but is
-  better calibrated than GBM (95% coverage 0.956 vs 0.899). Its edge is
-  calibrated uncertainty, not raw point accuracy. See `reports/baselines/`.
+  better calibrated than GBM (95% coverage 0.956 vs 0.899, and 80% 0.86 vs 0.77 —
+  GBM under-covers). Its edge is calibrated uncertainty and an interpretable
+  variance decomposition, not raw point accuracy. Cold-start (artist-disjoint) is
+  near-irreducible — every method, the model included, collapses to R² ≈ 0 for
+  never-seen entities — and within-entity R² runs from ≈0.49 on thin catalogs
+  *down* to ≈0.33 on deep ones. Full table and gradient:
+  [`docs/BASELINES.md`](docs/BASELINES.md).
 - **Likelihood decision:** the bounded Beta candidate was tested on this real
   subset and does **not** win — it pins more PPC statistics, mixes worse
   (bulk ESS 304, 1 divergence), and yields an unreliable LOO (35 Pareto-k > 0.7).
