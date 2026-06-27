@@ -105,6 +105,7 @@ class AuditLogger:
             df[entity_col].tolist(),
             df[event_col].tolist(),
             values,
+            strict=True,
         ):
             self.log_exclusion(
                 row_id=int(row_id),

@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import ClassVar
 
 import jax.numpy as jnp
 import jax.scipy.special as jsp
@@ -82,13 +83,13 @@ class SplitNormal(dist.Distribution):
     ``Normal(loc, sL)``.
     """
 
-    arg_constraints = {
+    arg_constraints: ClassVar[dict] = {
         "loc": constraints.real,
         "scale_left": constraints.positive,
         "scale_right": constraints.positive,
     }
     support = constraints.real
-    reparametrized_params: list[str] = []
+    reparametrized_params: ClassVar[list[str]] = []
 
     def __init__(self, loc, scale_left, scale_right, *, validate_args=None):
         self.loc = loc
@@ -138,7 +139,7 @@ class NormalMixture2(dist.Distribution):
     (closed form), so the family composes with the discretization toggle.
     """
 
-    arg_constraints = {
+    arg_constraints: ClassVar[dict] = {
         "loc0": constraints.real,
         "scale0": constraints.positive,
         "loc1": constraints.real,
@@ -146,7 +147,7 @@ class NormalMixture2(dist.Distribution):
         "w": constraints.unit_interval,
     }
     support = constraints.real
-    reparametrized_params: list[str] = []
+    reparametrized_params: ClassVar[list[str]] = []
 
     def __init__(self, loc0, scale0, loc1, scale1, w, *, validate_args=None):
         self.loc0 = loc0
@@ -192,12 +193,12 @@ class BetaBinomialScore(dist.Distribution):
     (its affine Jacobian would corrupt the PMF), hence this thin wrapper.
     """
 
-    arg_constraints = {
+    arg_constraints: ClassVar[dict] = {
         "concentration1": constraints.positive,
         "concentration0": constraints.positive,
     }
     support = constraints.real
-    reparametrized_params: list[str] = []
+    reparametrized_params: ClassVar[list[str]] = []
 
     def __init__(self, concentration1, concentration0, n_reviews, low, span, *, validate_args=None):
         self.concentration1 = concentration1
@@ -241,7 +242,7 @@ class RoundedDistribution(dist.Distribution):
     interval-censored likelihood (inference) and an integer generator (PPC).
     """
 
-    arg_constraints: dict = {}
+    arg_constraints: ClassVar[dict] = {}
     support = constraints.real
 
     def __init__(self, base, cdf_fn, *, validate_args=None):
@@ -270,7 +271,7 @@ class DequantizedDistribution(dist.Distribution):
     integer. Used with ``obs=y+u`` for inference and ``obs=None`` for generation.
     """
 
-    arg_constraints: dict = {}
+    arg_constraints: ClassVar[dict] = {}
     support = constraints.real
 
     def __init__(self, base, *, validate_args=None):

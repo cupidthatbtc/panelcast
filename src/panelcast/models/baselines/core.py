@@ -189,7 +189,7 @@ class EntityMeanBaseline(Baseline):
         self._global = float(np.mean(y[valid])) if valid.any() else float(np.mean(self.bounds))
         sums: dict[object, float] = {}
         counts: dict[object, int] = {}
-        for e, yi in zip(ent[valid], y[valid]):
+        for e, yi in zip(ent[valid], y[valid], strict=True):
             sums[e] = sums.get(e, 0.0) + float(yi)
             counts[e] = counts.get(e, 0) + 1
         self._means = {e: sums[e] / counts[e] for e in sums}
@@ -220,7 +220,7 @@ class LastScoreBaseline(Baseline):
         ent = np.asarray(train.entity)
         sums: dict[object, float] = {}
         counts: dict[object, int] = {}
-        for e, yi in zip(ent[valid], y[valid]):
+        for e, yi in zip(ent[valid], y[valid], strict=True):
             sums[e] = sums.get(e, 0.0) + float(yi)
             counts[e] = counts.get(e, 0) + 1
         self._entity_mean = {e: sums[e] / counts[e] for e in sums}

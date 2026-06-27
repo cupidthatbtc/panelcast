@@ -11,6 +11,8 @@ Computes temporal features that capture career trajectory context:
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 from .base import BaseFeatureBlock, FeatureContext, FeatureOutput
 
 
@@ -44,7 +46,7 @@ class TemporalBlock(BaseFeatureBlock):
     """
 
     name = "temporal"
-    requires: list[str] = []
+    requires: ClassVar[list[str]] = []
 
     def __init__(
         self,

@@ -182,7 +182,7 @@ def create_split_assignments(
                     split=split,
                     reason=f"{reason_prefix}{entity}",
                 )
-                for rid, entity in zip(row_ids, entities)
+                for rid, entity in zip(row_ids, entities, strict=True)
             ]
         return [
             SplitAssignment(original_row_id=rid, split=split, reason=reason or "")

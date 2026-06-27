@@ -496,7 +496,10 @@ def create_baseline_benchmark_table(
         "rmse": "RMSE",
         "r2": "R²",
         "crps": "CRPS",
-        **{key: f"{int(round(level * 100))}% Cov" for key, level in zip(cov_keys, levels)},
+        **{
+            key: f"{int(round(level * 100))}% Cov"
+            for key, level in zip(cov_keys, levels, strict=True)
+        },
         "width95": "95% Width",
         "ppc_skew_p": "PPC skew p",
         "runtime_s": "Runtime (s)",

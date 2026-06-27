@@ -1,5 +1,7 @@
 """Tests for FeaturePipeline class proving fit/transform separation prevents leakage."""
 
+from typing import ClassVar
+
 import pandas as pd
 import pytest
 
@@ -46,7 +48,7 @@ class MeanTrackingBlock(BaseFeatureBlock):
     """A block that learns mean during fit and returns it during transform."""
 
     name = "mean_tracking"
-    requires: list[str] = []
+    requires: ClassVar[list[str]] = []
 
     def __init__(self) -> None:
         super().__init__()

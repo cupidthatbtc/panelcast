@@ -6,6 +6,8 @@ using a frozen vocabulary learned from training data.
 
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pandas as pd
 
 from .base import BaseFeatureBlock, FeatureContext, FeatureOutput
@@ -41,8 +43,8 @@ class AlbumTypeBlock(BaseFeatureBlock):
     """
 
     name = "album_type"
-    requires: list[str] = []
-    required_columns: list[str] = ["Album_Type"]
+    requires: ClassVar[list[str]] = []
+    required_columns: ClassVar[list[str]] = ["Album_Type"]
 
     def fit(self, df, ctx: FeatureContext) -> AlbumTypeBlock:
         """Fit the album type block on training data.

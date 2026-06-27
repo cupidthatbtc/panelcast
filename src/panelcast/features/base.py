@@ -8,7 +8,7 @@ on training data only before transforming any split.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 from .errors import NotFittedError
 
@@ -58,8 +58,8 @@ class BaseFeatureBlock:
     """
 
     name: str = "base"
-    requires: list[str] = []
-    required_columns: list[str] = []
+    requires: ClassVar[list[str]] = []
+    required_columns: ClassVar[list[str]] = []
 
     def __init__(self, params: dict[str, Any] | None = None) -> None:
         self.params = params or {}

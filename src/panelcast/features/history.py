@@ -10,6 +10,7 @@ block retargets to any domain. Defaults are the AOTY literals; the
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import ClassVar
 
 import numpy as np
 import pandas as pd
@@ -60,7 +61,7 @@ class EntityHistoryBlock(BaseFeatureBlock):
     """
 
     name = "entity_history"
-    requires: list[str] = []
+    requires: ClassVar[list[str]] = []
 
     def __init__(
         self,
