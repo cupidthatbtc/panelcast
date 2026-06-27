@@ -8,6 +8,8 @@ Tests cover:
 - export_table for CSV and LaTeX output
 """
 
+from __future__ import annotations
+
 import tempfile
 from pathlib import Path
 
@@ -18,16 +20,14 @@ import pytest
 import xarray as xr
 
 from panelcast.reporting.tables import (
+    _escape_latex_param_name,
     _format_with_precision,
     create_coefficient_table,
     create_comparison_table,
     create_diagnostics_table,
+    create_sensitivity_summary_table,
     export_table,
 )
-
-# =============================================================================
-# Test Fixtures
-# =============================================================================
 
 
 def make_mock_idata(
@@ -140,11 +140,6 @@ def mock_coefficient_df():
     )
 
 
-# =============================================================================
-# Tests for _format_with_precision
-# =============================================================================
-
-
 class TestAdaptivePrecision:
     """Tests for adaptive precision formatting."""
 
@@ -198,11 +193,6 @@ class TestAdaptivePrecision:
         result = _format_with_precision(0.123456789, 0.000001, max_decimals=4)
         decimals = len(result.split(".")[-1])
         assert decimals <= 4
-
-
-# =============================================================================
-# Tests for create_coefficient_table
-# =============================================================================
 
 
 class TestCreateCoefficientTable:
@@ -305,11 +295,6 @@ class TestCreateCoefficientTable:
         assert len(result) == 3  # beta[0], beta[1], beta[2]
 
 
-# =============================================================================
-# Tests for create_diagnostics_table
-# =============================================================================
-
-
 class TestCreateDiagnosticsTable:
     """Tests for diagnostics table generation."""
 
@@ -395,11 +380,6 @@ class TestCreateDiagnosticsTable:
         assert isinstance(result_strict, pd.DataFrame)
 
 
-# =============================================================================
-# Tests for create_comparison_table
-# =============================================================================
-
-
 class TestCreateComparisonTable:
     """Tests for model comparison table generation."""
 
@@ -460,11 +440,6 @@ class TestCreateComparisonTable:
 
         assert isinstance(result, pd.DataFrame)
         assert "ELPD" in result.columns
-
-
-# =============================================================================
-# Tests for export_table
-# =============================================================================
 
 
 class TestExportTable:
@@ -576,11 +551,6 @@ class TestExportTable:
             assert all(p.exists() for p in paths)
 
 
-# =============================================================================
-# Integration Tests
-# =============================================================================
-
-
 class TestTableIntegration:
     """Integration tests for full table workflow."""
 
@@ -611,3 +581,445 @@ class TestTableIntegration:
             # Verify
             csv_df = pd.read_csv(output_path.with_suffix(".csv"), index_col=0)
             assert "Status" in csv_df.columns
+
+
+# --- from unit/test_reporting_tables_expanded.py ---
+
+
+def _make_idata(n_chains=4, n_draws=500, param_names=None):
+    """Helper to build mock InferenceData."""
+    if param_names is None:
+        param_names = ["mu", "sigma"]
+    np.random.seed(42)
+    posterior_dict = {}
+    for name in param_names:
+        posterior_dict[name] = xr.DataArray(
+            np.random.randn(n_chains, n_draws),
+            dims=["chain", "draw"],
+            coords={"chain": range(n_chains), "draw": range(n_draws)},
+        )
+    posterior = xr.Dataset(posterior_dict)
+    sample_stats = xr.Dataset(
+        {
+            "diverging": xr.DataArray(
+                np.zeros((n_chains, n_draws), dtype=bool),
+                dims=["chain", "draw"],
+            )
+        }
+    )
+    return az.InferenceData(posterior=posterior, sample_stats=sample_stats)
+
+
+class TestFormatWithPrecisionExpanded:
+    """Expanded edge-case tests for _format_with_precision."""
+
+    def test_negative_inf(self):
+        result = _format_with_precision(-np.inf, 0.1)
+        assert "inf" in result.lower()
+
+    def test_very_large_value(self):
+        result = _format_with_precision(1e10, 1e8)
+        assert "." in result or "e" in result.lower()
+
+    def test_very_small_value(self):
+        result = _format_with_precision(1e-8, 1e-10)
+        assert "." in result
+
+    def test_negative_value(self):
+        result = _format_with_precision(-3.14, 0.05)
+        assert result.startswith("-")
+
+    def test_exact_zero_value(self):
+        result = _format_with_precision(0.0, 0.01)
+        assert "0.00" in result
+
+    def test_min_greater_than_max_decimals(self):
+        """min_decimals > max_decimals: max should still cap."""
+        result = _format_with_precision(1.234, 0.001, min_decimals=6, max_decimals=3)
+        decimals = len(result.split(".")[-1])
+        assert decimals <= 6  # Implementation clamps at max of (min, capped)
+
+
+class TestEscapeLatexParamName:
+    """Tests for _escape_latex_param_name."""
+
+    def test_no_underscores(self):
+        assert _escape_latex_param_name("beta") == "beta"
+
+    def test_single_underscore(self):
+        assert _escape_latex_param_name("sigma_artist") == r"sigma\_artist"
+
+    def test_multiple_underscores(self):
+        result = _escape_latex_param_name("mu_artist_effect")
+        assert result == r"mu\_artist\_effect"
+
+    def test_brackets_unchanged(self):
+        assert _escape_latex_param_name("beta[0]") == "beta[0]"
+
+    def test_mixed(self):
+        result = _escape_latex_param_name("user_beta[0]")
+        assert result == r"user\_beta[0]"
+
+
+class TestCreateCoefficientTableExpanded:
+    """Expanded coefficient table tests."""
+
+    def test_many_parameters(self):
+        idata = _make_idata(param_names=["a", "b", "c", "d", "e"])
+        result = create_coefficient_table(idata)
+        assert len(result) == 5
+
+    def test_single_chain(self):
+        idata = _make_idata(n_chains=1)
+        result = create_coefficient_table(idata)
+        assert len(result) == 2
+
+    def test_few_draws(self):
+        idata = _make_idata(n_draws=20)
+        result = create_coefficient_table(idata)
+        assert len(result) == 2
+
+    def test_ci_lower_le_upper(self):
+        idata = _make_idata()
+        result = create_coefficient_table(idata, apply_precision=False)
+        for idx in result.index:
+            assert result.at[idx, "CI Lower"] <= result.at[idx, "CI Upper"]
+
+
+class TestCreateDiagnosticsTableExpanded:
+    """Expanded diagnostics table tests."""
+
+    def test_missing_posterior_raises(self):
+        idata = az.InferenceData()
+        with pytest.raises(ValueError, match="posterior"):
+            create_diagnostics_table(idata)
+
+    def test_var_names_filter(self):
+        idata = _make_idata(param_names=["alpha", "beta", "gamma"])
+        result = create_diagnostics_table(idata, var_names=["alpha"])
+        assert len(result) == 1
+        assert "alpha" in result.index
+
+    def test_single_chain_diagnostics(self):
+        """Single chain should still produce valid diagnostics table."""
+        idata = _make_idata(n_chains=1)
+        result = create_diagnostics_table(idata)
+        assert isinstance(result, pd.DataFrame)
+        assert "Status" in result.columns
+
+
+class TestCreateSensitivitySummaryTable:
+    """Tests for create_sensitivity_summary_table."""
+
+    @pytest.fixture
+    def oat_df(self):
+        return pd.DataFrame(
+            {
+                "variant": ["baseline", "high_sigma", "low_sigma"],
+                "parameter": ["sigma_artist", "sigma_artist", "sigma_artist"],
+                "multiplier": [1.0, 2.0, 0.5],
+                "elpd": [-1234.0, -1240.0, -1230.0],
+                "elpd_delta": [0.0, -6.0, 4.0],
+                "elpd_se": [12.0, 13.0, 11.0],
+                "convergence_flag": ["OK", "OK", "WARN"],
+            }
+        )
+
+    def test_returns_dataframe(self, oat_df):
+        result = create_sensitivity_summary_table(oat_df)
+        assert isinstance(result, pd.DataFrame)
+
+    def test_renames_columns(self, oat_df):
+        result = create_sensitivity_summary_table(oat_df)
+        assert "Variant" in result.columns
+        assert "Parameter" in result.columns
+
+    def test_dagger_for_non_ok(self, oat_df):
+        result = create_sensitivity_summary_table(oat_df)
+        statuses = result["Status"].tolist()
+        assert any("\u2020" in s for s in statuses)
+
+    def test_ok_no_dagger(self, oat_df):
+        result = create_sensitivity_summary_table(oat_df)
+        ok_rows = result[result["Status"] == "OK"]
+        for s in ok_rows["Status"]:
+            assert "\u2020" not in s
+
+    def test_numeric_formatting(self, oat_df):
+        result = create_sensitivity_summary_table(oat_df)
+        # ELPD values should be formatted as strings
+        for val in result["ELPD"]:
+            assert isinstance(val, str)
+
+    def test_none_elpd_becomes_dash(self):
+        df = pd.DataFrame(
+            {
+                "variant": ["test"],
+                "parameter": ["p"],
+                "multiplier": [1.0],
+                "elpd": [None],
+                "elpd_delta": [None],
+                "elpd_se": [None],
+                "convergence_flag": ["FAIL"],
+            }
+        )
+        result = create_sensitivity_summary_table(df)
+        assert "\u2014" in result["ELPD"].iloc[0]
+
+
+class TestExportTableExpanded:
+    """Expanded export table tests."""
+
+    def test_csv_only(self):
+        df = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = export_table(df, Path(tmpdir) / "t", formats=("csv",))
+            assert len(paths) == 1
+            assert paths[0].suffix == ".csv"
+
+    def test_tex_only(self):
+        df = pd.DataFrame({"A": [1, 2], "B": [3, 4]})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = export_table(df, Path(tmpdir) / "t", formats=("tex",))
+            assert len(paths) == 1
+            assert paths[0].suffix == ".tex"
+
+    def test_no_formats(self):
+        df = pd.DataFrame({"A": [1]})
+        with tempfile.TemporaryDirectory() as tmpdir:
+            paths = export_table(df, Path(tmpdir) / "t", formats=())
+            assert paths == []
+
+    def test_csv_roundtrip_preserves_data(self):
+        df = pd.DataFrame(
+            {"Estimate": [1.23, 4.56], "SE": [0.1, 0.2]},
+            index=["mu", "sigma"],
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "roundtrip"
+            export_table(df, out, formats=("csv",))
+            loaded = pd.read_csv(out.with_suffix(".csv"), index_col=0)
+            assert loaded.loc["mu", "Estimate"] == pytest.approx(1.23)
+
+    def test_latex_has_booktabs(self):
+        df = pd.DataFrame({"A": [1, 2]}, index=["x", "y"])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            out = Path(tmpdir) / "bt"
+            export_table(df, out, formats=("tex",))
+            content = (out.with_suffix(".tex")).read_text()
+            assert "\\begin{table}" in content
+
+
+# --- from unit/test_reporting_tables_new.py ---
+
+
+class TestFormatWithPrecision:
+    """Tests for _format_with_precision adaptive formatting."""
+
+    def test_normal_value(self):
+        """Normal value with normal uncertainty."""
+        result = _format_with_precision(1.234, 0.05)
+        assert "." in result
+        assert float(result) == pytest.approx(1.234, abs=0.01)
+
+    def test_non_finite_value(self):
+        """Non-finite value returns string representation."""
+        assert _format_with_precision(float("inf"), 0.1) == "inf"
+        assert _format_with_precision(float("-inf"), 0.1) == "-inf"
+        assert _format_with_precision(float("nan"), 0.1) == "nan"
+
+    def test_non_finite_uncertainty(self):
+        """Non-finite uncertainty falls back to min_decimals."""
+        result = _format_with_precision(1.234, float("inf"))
+        assert result == "1.23"  # Default min_decimals=2
+
+    def test_zero_uncertainty(self):
+        """Zero uncertainty falls back to min_decimals."""
+        result = _format_with_precision(1.234, 0.0)
+        assert result == "1.23"
+
+    def test_custom_min_decimals(self):
+        """min_decimals parameter is respected."""
+        result = _format_with_precision(1.234, float("inf"), min_decimals=4)
+        assert result == "1.2340"
+
+    def test_very_small_uncertainty(self):
+        """Very small uncertainty shows more decimal places."""
+        result = _format_with_precision(0.001234, 0.00005)
+        # Should have more than 2 decimals
+        decimal_places = len(result.split(".")[-1])
+        assert decimal_places >= 2
+
+    def test_large_uncertainty(self):
+        """Large uncertainty with min_decimals constraint."""
+        result = _format_with_precision(100.0, 50.0)
+        # Should still have at least min_decimals
+        decimal_places = len(result.split(".")[-1])
+        assert decimal_places >= 2
+
+
+class TestEscapeLatexParamName_new:
+    """Tests for _escape_latex_param_name."""
+
+    def test_underscore_escaped(self):
+        """Underscores are escaped for LaTeX."""
+        assert _escape_latex_param_name("sigma_artist") == r"sigma\_artist"
+
+    def test_no_special_chars(self):
+        """Names without special chars are unchanged."""
+        assert _escape_latex_param_name("beta") == "beta"
+
+    def test_brackets_preserved(self):
+        """Square brackets are preserved."""
+        assert _escape_latex_param_name("beta[0]") == "beta[0]"
+
+    def test_multiple_underscores(self):
+        """Multiple underscores all escaped."""
+        assert _escape_latex_param_name("a_b_c") == r"a\_b\_c"
+
+
+class TestExportTable_new:
+    """Tests for export_table function."""
+
+    @pytest.fixture
+    def sample_df(self):
+        """Sample DataFrame for export testing."""
+        return pd.DataFrame(
+            {"Estimate": ["1.23", "4.56"], "SE": ["0.05", "0.10"]},
+            index=["beta[0]", "beta[1]"],
+        )
+
+    def test_csv_only(self, sample_df, tmp_path):
+        """Export CSV only."""
+        base_path = tmp_path / "table"
+        paths = export_table(sample_df, base_path, formats=("csv",))
+        assert len(paths) == 1
+        assert paths[0].suffix == ".csv"
+        assert paths[0].exists()
+
+    def test_tex_only(self, sample_df, tmp_path):
+        """Export LaTeX only."""
+        base_path = tmp_path / "table"
+        paths = export_table(sample_df, base_path, formats=("tex",))
+        assert len(paths) == 1
+        assert paths[0].suffix == ".tex"
+        assert paths[0].exists()
+
+    def test_both_formats(self, sample_df, tmp_path):
+        """Export both CSV and LaTeX."""
+        base_path = tmp_path / "table"
+        paths = export_table(sample_df, base_path, formats=("csv", "tex"))
+        assert len(paths) == 2
+        suffixes = {p.suffix for p in paths}
+        assert ".csv" in suffixes
+        assert ".tex" in suffixes
+
+    def test_csv_content(self, sample_df, tmp_path):
+        """CSV content is valid."""
+        base_path = tmp_path / "table"
+        export_table(sample_df, base_path, formats=("csv",))
+        loaded = pd.read_csv(base_path.with_suffix(".csv"), index_col=0)
+        assert "Estimate" in loaded.columns
+        assert len(loaded) == 2
+
+    def test_tex_with_caption_and_label(self, sample_df, tmp_path):
+        """LaTeX output includes caption and label."""
+        base_path = tmp_path / "table"
+        export_table(
+            sample_df, base_path, formats=("tex",), caption="Test caption", label="tab:test"
+        )
+        content = (base_path.with_suffix(".tex")).read_text()
+        assert "Test caption" in content
+        assert "tab:test" in content
+
+    def test_tex_default_label(self, sample_df, tmp_path):
+        """LaTeX output derives label from filename when not specified."""
+        base_path = tmp_path / "coefficients"
+        export_table(sample_df, base_path, formats=("tex",))
+        content = (base_path.with_suffix(".tex")).read_text()
+        assert "tab:coefficients" in content
+
+    def test_creates_parent_directories(self, sample_df, tmp_path):
+        """Parent directories are created if they don't exist."""
+        base_path = tmp_path / "deep" / "nested" / "table"
+        paths = export_table(sample_df, base_path, formats=("csv",))
+        assert paths[0].exists()
+
+    def test_no_formats_returns_empty(self, sample_df, tmp_path):
+        """Empty formats tuple creates no files."""
+        base_path = tmp_path / "table"
+        paths = export_table(sample_df, base_path, formats=())
+        assert len(paths) == 0
+
+
+class TestCreateSensitivitySummaryTable_new:
+    """Tests for create_sensitivity_summary_table."""
+
+    def test_ok_convergence(self):
+        """OK convergence status is preserved."""
+        df = pd.DataFrame(
+            {
+                "variant": ["baseline"],
+                "parameter": ["sigma"],
+                "multiplier": [1.0],
+                "elpd": [-100.0],
+                "elpd_delta": [0.0],
+                "elpd_se": [5.0],
+                "convergence_flag": ["OK"],
+            }
+        )
+        result = create_sensitivity_summary_table(df)
+        assert result["Status"].iloc[0] == "OK"
+
+    def test_non_ok_convergence_gets_dagger(self):
+        """Non-OK convergence gets dagger symbol appended."""
+        df = pd.DataFrame(
+            {
+                "variant": ["test"],
+                "parameter": ["sigma"],
+                "multiplier": [2.0],
+                "elpd": [-120.0],
+                "elpd_delta": [-20.0],
+                "elpd_se": [8.0],
+                "convergence_flag": ["R-hat > 1.01"],
+            }
+        )
+        result = create_sensitivity_summary_table(df)
+        assert "\u2020" in result["Status"].iloc[0]  # dagger
+
+    def test_non_numeric_elpd_becomes_em_dash(self):
+        """Non-numeric ELPD values become em-dash."""
+        df = pd.DataFrame(
+            {
+                "variant": ["test"],
+                "parameter": ["sigma"],
+                "multiplier": [2.0],
+                "elpd": ["N/A"],
+                "elpd_delta": [None],
+                "elpd_se": [""],
+                "convergence_flag": ["OK"],
+            }
+        )
+        result = create_sensitivity_summary_table(df)
+        assert "\u2014" in str(result["ELPD"].iloc[0])  # em-dash
+
+    def test_column_rename(self):
+        """Columns are renamed for publication."""
+        df = pd.DataFrame(
+            {
+                "variant": ["baseline"],
+                "parameter": ["sigma"],
+                "multiplier": [1.0],
+                "elpd": [-100.0],
+                "elpd_delta": [0.0],
+                "elpd_se": [5.0],
+                "convergence_flag": ["OK"],
+            }
+        )
+        result = create_sensitivity_summary_table(df)
+        assert "Variant" in result.columns
+        assert "Parameter" in result.columns
+        assert "ELPD" in result.columns
+        assert "\u0394ELPD" in result.columns
+        assert "SE" in result.columns
+        assert "Status" in result.columns
