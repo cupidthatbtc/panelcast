@@ -543,6 +543,33 @@ class TestPredictKnownEntities:
                 strict=True,
             )
 
+    def test_below_threshold_entity_excluded_from_horizon_clamp(
+        self,
+        mock_posterior_samples,
+        mock_summary,
+        mock_last_album_info,
+        mock_artist_mean_features,
+    ):
+        """A below-min-albums entity is pinned to seq 1 (static effect) and never
+        extrapolates, so it must not count as horizon-clamped: no strict failure
+        and no per-row flag."""
+        summary = dict(mock_summary)
+        summary["max_seq"] = 4  # only ArtistC (seq 4 -> 5) would exceed the horizon
+        summary["min_albums_filter"] = 2
+
+        last_album_info = mock_last_album_info.copy()
+        last_album_info.loc["ArtistC", "n_albums"] = 1  # below threshold
+
+        # Before the fix the sub-threshold entity was counted and strict raised here.
+        result = self._run(
+            mock_posterior_samples,
+            summary,
+            last_album_info,
+            mock_artist_mean_features,
+            strict=True,
+        )
+        assert not result.loc[result["entity"] == "ArtistC", "horizon_clamped"].any()
+
 
 class TestPredictNewEntities:
     """Tests for _predict_new_entities with mocked JAX and predict_new_entity."""

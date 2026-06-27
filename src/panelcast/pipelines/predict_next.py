@@ -132,14 +132,17 @@ def _build_batch_scenario_args(
 
         info = last_album_info.loc[artist]
         last_seq = int(info["album_seq"])
-        next_seq = (last_seq + 1) if propagate_rw else min(last_seq + 1, max_seq)
-        horizon_clamped = (not propagate_rw) and (last_seq + 1) > max_seq
         last_score = float(info[target_col])
         median_n_reviews = int(info["median_n_reviews"])
         n_albums = int(info["n_albums"])
-        if n_albums < min_albums_filter:
+        below_threshold = n_albums < min_albums_filter
+        next_seq = (last_seq + 1) if propagate_rw else min(last_seq + 1, max_seq)
+        if below_threshold:
             # Match training behavior: artists below threshold use static effect.
             next_seq = 1
+        # Sub-threshold entities are pinned to seq 1, so they never extrapolate
+        # past the horizon and must not count as clamped.
+        horizon_clamped = (not propagate_rw) and not below_threshold and (last_seq + 1) > max_seq
 
         artist_idxs.append(idx)
         album_seqs.append(next_seq)
@@ -265,7 +268,10 @@ def _predict_known_entities(
     for artist in artists:
         if artist not in last_album_info.index:
             continue
-        if int(last_album_info.loc[artist, "album_seq"]) + 1 > max_seq:
+        info = last_album_info.loc[artist]
+        if int(info["n_albums"]) < min_albums_filter:
+            continue  # below threshold -> static effect (seq 1), never extrapolates
+        if int(info["album_seq"]) + 1 > max_seq:
             horizon_clamped_artists.append(artist)
 
     # propagate_rw_horizon grows the trajectory to cover the deepest next_seq so
@@ -274,10 +280,9 @@ def _predict_known_entities(
     if propagate_rw:
         deepest_next_seq = max_seq
         for artist in horizon_clamped_artists:
-            info = last_album_info.loc[artist]
-            if int(info["n_albums"]) < min_albums_filter:
-                continue  # below threshold -> static effect (seq 1), never extrapolates
-            deepest_next_seq = max(deepest_next_seq, int(info["album_seq"]) + 1)
+            deepest_next_seq = max(
+                deepest_next_seq, int(last_album_info.loc[artist, "album_seq"]) + 1
+            )
         model_max_seq = deepest_next_seq
         if horizon_clamped_artists:
             log.info(
