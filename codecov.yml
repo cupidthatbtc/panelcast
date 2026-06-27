@@ -8,3 +8,7 @@ coverage:
       default:
         target: 90%
         threshold: 1%
+        # Advisory, not blocking: opt-in model-v2 paths (EIV / RW-horizon
+        # propagation) run only under the slow suite, which PR CI deselects, so
+        # diff coverage understates them. Project coverage (95%) stays a hard gate.
+        informational: true
