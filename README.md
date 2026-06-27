@@ -90,6 +90,12 @@ the other way — both resolved well away from zero:
 
 <img src="docs/images/aoty_coefficients.png" width="60%" alt="Per-feature standardized coefficient estimates with 94% HDIs">
 
+Convergence and posterior geometry — per-chain traces and densities for the
+headline parameters (4 chains, well-mixed), and their pairwise joint posterior
+(round contours, no funnels — the non-centered parameterization doing its job):
+
+<img src="docs/images/aoty_trace.png" height="320" alt="MCMC trace and per-chain density for the headline parameters, showing well-mixed chains"> <img src="docs/images/aoty_pairplot.png" height="320" alt="Pairwise joint posterior of the hyperparameters with no funnel geometry">
+
 Same model, different domain — the bundled aerospace example (airframes → scored
 test flights), produced by `panelcast demo` with no source changes:
 
