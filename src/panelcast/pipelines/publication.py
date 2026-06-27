@@ -23,7 +23,6 @@ from panelcast.reporting.figures import (
     get_trace_plot_vars,
     save_artist_prediction_plot,
     save_posterior_plot,
-    save_ppc_density_plot,
     save_predictions_plot,
     save_reliability_plot,
     save_trace_plot,
@@ -726,82 +725,11 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
         log.exception("posterior_plot_failed")
         artifacts["errors"].append({"artifact": "posterior_plot", "error": str(e)})
 
-    # PPC density plot
-    try:
-        ppc_data = primary_metrics.get("ppc")
-        if isinstance(ppc_data, dict) and "summary" in ppc_data:
-            from panelcast.evaluation.ppc import PPCResult, PPCStatistic
-
-            ppc_stats = []
-            for stat_name, stat_info in ppc_data["summary"].items():
-                if isinstance(stat_info, dict):
-                    observed = _safe_float(stat_info.get("observed"))
-                    p_value = _safe_float(stat_info.get("p_value"))
-                    mc_se = _safe_float(stat_info.get("mc_se"))
-                    if observed is None or p_value is None:
-                        log.warning(
-                            "ppc_stat_missing_fields",
-                            statistic=stat_name,
-                            observed_present=observed is not None,
-                            p_value_present=p_value is not None,
-                        )
-                        continue
-                    if mc_se is None:
-                        n_samples_for_se = ppc_data.get("n_samples", 0)
-                        try:
-                            n_samples_for_se = int(n_samples_for_se)
-                        except (TypeError, ValueError):
-                            n_samples_for_se = 0
-                        if n_samples_for_se > 0:
-                            mc_se = float(np.sqrt(p_value * (1 - p_value) / n_samples_for_se))
-                        else:
-                            mc_se = 0.0
-
-                    ppc_stats.append(
-                        PPCStatistic(
-                            name=stat_name,
-                            observed=observed,
-                            replicated_distribution=np.array([]),
-                            bayesian_p_value=p_value,
-                            mc_se=mc_se,
-                        )
-                    )
-
-            if ppc_stats:
-                n_obs_ppc = ppc_data.get("n_obs", 0)
-                n_samples_ppc = ppc_data.get("n_samples", 0)
-                try:
-                    n_obs_ppc = int(n_obs_ppc)
-                except (TypeError, ValueError):
-                    n_obs_ppc = 0
-                try:
-                    n_samples_ppc = int(n_samples_ppc)
-                except (TypeError, ValueError):
-                    n_samples_ppc = 0
-                ppc_result_obj = PPCResult(
-                    statistics=ppc_stats,
-                    n_obs=n_obs_ppc,
-                    n_samples=n_samples_ppc,
-                )
-                # Only generate plot if we have replicated distributions
-                has_distributions = any(len(s.replicated_distribution) > 0 for s in ppc_stats)
-                if has_distributions:
-                    pdf_path, png_path = save_ppc_density_plot(
-                        ppc_result_obj,
-                        output_dir=figures_dir,
-                        filename_base="ppc_density",
-                    )
-                    artifacts["figures"].append(str(pdf_path))
-                    artifacts["figures"].append(str(png_path))
-                    log.info("ppc_density_plot_saved", pdf=str(pdf_path), png=str(png_path))
-                else:
-                    log.info(
-                        "ppc_density_plot_skipped",
-                        reason="no replicated distributions in artifact",
-                    )
-    except Exception as e:
-        log.exception("ppc_density_plot_failed")
-        artifacts["errors"].append({"artifact": "ppc_density_plot", "error": str(e)})
+    # The PPC density plot is intentionally not generated: evaluate.py persists
+    # only the PPC summary (p-values), never the replicated draws, so there is
+    # nothing to plot. The p-value summary is still surfaced in the model card
+    # below. Wiring the plot back is cheap if wanted: persist each statistic's
+    # T(y_rep) vector in evaluate.py's ppc_payload (~256 KB) and feed it here.
 
     # =========================================================================
     # Predictions scatter plot

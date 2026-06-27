@@ -1246,12 +1246,16 @@ class TestPublicationPredictionTable:
 
 
 class TestPublicationPPCDensityPlot:
-    def test_ppc_with_missing_observed_skips_stat(self, tmp_path):
-        """PPC stat with missing 'observed' should be skipped, not crash."""
+    """The PPC density plot is intentionally not generated -- evaluate.py persists
+    only the PPC summary (p-values), never the replicated draws. These guard the
+    no-plot contract: a PPC summary in the metrics runs cleanly and still feeds the
+    model card, but produces no ppc_density figure and no ppc_density_plot error."""
+
+    def test_ppc_summary_present_produces_no_density_plot(self, tmp_path):
         metrics = _make_metrics()
         metrics["splits"]["within_entity_temporal"]["ppc"] = {
             "summary": {
-                "mean": {"p_value": 0.45},  # missing observed
+                "mean": {"observed": 75.0, "p_value": 0.45, "mc_se": 0.03},
                 "sd": {"observed": 8.0, "p_value": 0.52, "mc_se": 0.03},
             },
             "n_obs": 100,
@@ -1259,94 +1263,28 @@ class TestPublicationPPCDensityPlot:
         }
         _write_json(tmp_path / "outputs/evaluation/metrics.json", metrics)
         _write_json(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics())
-        _write_json(
-            tmp_path / "models/training_summary.json",
-            _make_training_summary(),
-        )
-        ctx = _setup_ctx(strict=False)
-        patches = _base_patches(tmp_path)
-        artifacts = _run_with_patches(tmp_path, ctx, patches)
-        # Should not crash
-        assert not any(e["artifact"] == "ppc_density_plot" for e in artifacts["errors"])
-
-    def test_ppc_mc_se_computed_from_n_samples(self, tmp_path):
-        """When mc_se is None, it should be computed from p_value and n_samples."""
-        metrics = _make_metrics()
-        metrics["splits"]["within_entity_temporal"]["ppc"] = {
-            "summary": {
-                "mean": {
-                    "observed": 75.0,
-                    "p_value": 0.5,
-                    "mc_se": None,
-                },
-            },
-            "n_obs": 100,
-            "n_samples": 400,
-        }
-        _write_json(tmp_path / "outputs/evaluation/metrics.json", metrics)
-        _write_json(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics())
-        _write_json(
-            tmp_path / "models/training_summary.json",
-            _make_training_summary(),
-        )
+        _write_json(tmp_path / "models/training_summary.json", _make_training_summary())
         ctx = _setup_ctx(strict=False)
         patches = _base_patches(tmp_path)
         artifacts = _run_with_patches(tmp_path, ctx, patches)
         assert not any(e["artifact"] == "ppc_density_plot" for e in artifacts["errors"])
+        assert not any("ppc_density" in Path(p).name for p in artifacts["figures"])
 
-    def test_ppc_mc_se_fallback_zero_when_no_n_samples(self, tmp_path):
-        """When mc_se is None and n_samples is 0, mc_se should default to 0."""
+    def test_ppc_summary_missing_fields_does_not_crash(self, tmp_path):
         metrics = _make_metrics()
         metrics["splits"]["within_entity_temporal"]["ppc"] = {
-            "summary": {
-                "mean": {
-                    "observed": 75.0,
-                    "p_value": 0.5,
-                    "mc_se": None,
-                },
-            },
+            "summary": {"mean": {"p_value": 0.45}},  # missing observed / mc_se
             "n_obs": 100,
             "n_samples": 0,
         }
         _write_json(tmp_path / "outputs/evaluation/metrics.json", metrics)
         _write_json(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics())
-        _write_json(
-            tmp_path / "models/training_summary.json",
-            _make_training_summary(),
-        )
+        _write_json(tmp_path / "models/training_summary.json", _make_training_summary())
         ctx = _setup_ctx(strict=False)
         patches = _base_patches(tmp_path)
         artifacts = _run_with_patches(tmp_path, ctx, patches)
         assert not any(e["artifact"] == "ppc_density_plot" for e in artifacts["errors"])
-
-    def test_ppc_density_plot_failure_recorded(self, tmp_path):
-        """PPC density plot failure should be recorded as error."""
-        metrics = _make_metrics(include_ppc=True)
-        _write_json(tmp_path / "outputs/evaluation/metrics.json", metrics)
-        _write_json(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics())
-        _write_json(
-            tmp_path / "models/training_summary.json",
-            _make_training_summary(),
-        )
-        ctx = _setup_ctx(strict=False)
-        # Make the PPC import fail
-        patches = _base_patches(tmp_path)
-
-        def _broken_import(*args, **kwargs):
-            raise ImportError("no ppc module")
-
-        with patch(
-            "panelcast.pipelines.publication._safe_float",
-            side_effect=RuntimeError("force ppc error"),
-        ):
-            # This will make the entire PPC block fail
-            pass
-
-        # Instead use a more targeted approach: patch the ppc module import
-        # to cause failure inside the try block
-        artifacts = _run_with_patches(tmp_path, ctx, patches)
-        # PPC with no replicated distributions should skip plot generation gracefully
-        assert not any(e["artifact"] == "ppc_density_plot" for e in artifacts["errors"])
+        assert not any("ppc_density" in Path(p).name for p in artifacts["figures"])
 
 
 class TestPublicationRunDirCopy:
@@ -1899,137 +1837,6 @@ class TestParseCoverageResultsLegacySkip:
         # The 0.90 key should come from the legacy coverage_90 entry, not "coverages"
         prob = 90.0 / 100.0
         assert prob in result
-
-
-class TestPPCDensityPlotWithDistributions:
-    def test_ppc_density_plot_called_when_distributions_present(self, tmp_path):
-        """save_ppc_density_plot should be called when a stat has replicated data.
-
-        PPCResult/PPCStatistic are imported locally inside generate_publication_artifacts,
-        so we patch them at their source module. We make PPCStatistic always return a fake
-        stat with a non-empty replicated_distribution so has_distributions is True.
-        """
-        from panelcast.evaluation.ppc import PPCResult, PPCStatistic
-
-        fake_stat = PPCStatistic(
-            name="mean",
-            observed=75.0,
-            replicated_distribution=np.array([74.0, 75.0, 76.0]),
-            bayesian_p_value=0.45,
-            mc_se=0.02,
-        )
-        fake_ppc_result = PPCResult(statistics=[fake_stat], n_obs=100, n_samples=200)
-
-        called = {}
-
-        def _fake_ppc_density(ppc_result, *, output_dir, filename_base):
-            called["ppc_result"] = ppc_result
-            pdf = output_dir / f"{filename_base}.pdf"
-            png = output_dir / f"{filename_base}.png"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            pdf.write_text("pdf", encoding="utf-8")
-            png.write_text("png", encoding="utf-8")
-            return pdf, png
-
-        _write_json_more(
-            tmp_path / "outputs/evaluation/metrics.json", _make_metrics_more(include_ppc=True)
-        )
-        _write_json_more(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics_more())
-        _write_json_more(tmp_path / "models/training_summary.json", _make_training_summary_more())
-
-        ctx = _setup_ctx_more(strict=False)
-        patches = _base_patches_more(
-            tmp_path,
-            save_ppc_density_plot=patch(
-                "panelcast.pipelines.publication.save_ppc_density_plot",
-                side_effect=_fake_ppc_density,
-            ),
-        )
-        # Patch PPCResult and PPCStatistic at the source module so the local import
-        # inside generate_publication_artifacts picks up the patched versions.
-        with (
-            patch("panelcast.evaluation.ppc.PPCStatistic", side_effect=lambda **kw: fake_stat),
-            patch("panelcast.evaluation.ppc.PPCResult", return_value=fake_ppc_result),
-        ):
-            artifacts = _run_with_patches_more(tmp_path, ctx, patches)
-
-        assert "ppc_result" in called
-        from pathlib import Path as _Path
-
-        pdf_entries = [
-            p for p in artifacts["figures"] if "ppc_density" in _Path(p).name and ".pdf" in p
-        ]
-        assert len(pdf_entries) == 1
-
-    def test_ppc_density_plot_skipped_when_no_distributions(self, tmp_path):
-        """Pipeline should log skip (not error) when no replicated distributions."""
-        _write_json_more(
-            tmp_path / "outputs/evaluation/metrics.json", _make_metrics_more(include_ppc=True)
-        )
-        _write_json_more(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics_more())
-        _write_json_more(tmp_path / "models/training_summary.json", _make_training_summary_more())
-
-        ctx = _setup_ctx_more(strict=False)
-        patches = _base_patches_more(tmp_path)
-        artifacts = _run_with_patches_more(tmp_path, ctx, patches)
-
-        # No ppc_density error recorded (skipped cleanly)
-        error_artifacts = [e["artifact"] for e in artifacts["errors"]]
-        assert "ppc_density_plot" not in error_artifacts
-        # And no ppc_density filename was added (filter by basename to avoid tmp_path match)
-        from pathlib import Path as _Path
-
-        ppc_figs = [p for p in artifacts["figures"] if "ppc_density" in _Path(p).name]
-        assert len(ppc_figs) == 0
-
-
-class TestPPCNSamplesIntCast:
-    def test_n_samples_non_int_string_defaults_to_zero(self, tmp_path):
-        """n_samples that can't be cast to int should default to 0 (mc_se → 0.0)."""
-        # mc_se is None so the code tries to compute it from n_samples.
-        # n_samples = "bad" -> cast fails -> defaults to 0 -> mc_se = 0.0
-        ppc_override = {
-            "summary": {
-                "mean": {"observed": 75.0, "p_value": 0.45},  # mc_se missing → triggers cast
-            },
-            "n_obs": 100,
-            "n_samples": "bad",  # non-castable
-        }
-        _write_json_more(
-            tmp_path / "outputs/evaluation/metrics.json",
-            _make_metrics_more(ppc_override=ppc_override),
-        )
-        _write_json_more(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics_more())
-        _write_json_more(tmp_path / "models/training_summary.json", _make_training_summary_more())
-
-        ctx = _setup_ctx_more(strict=False)
-        patches = _base_patches_more(tmp_path)
-        artifacts = _run_with_patches_more(tmp_path, ctx, patches)
-        # Should not crash; ppc_density_plot should be skipped (no distributions)
-        error_names = [e["artifact"] for e in artifacts["errors"]]
-        assert "ppc_density_plot" not in error_names
-
-    def test_n_obs_non_int_string_defaults_to_zero(self, tmp_path):
-        """n_obs that can't be cast to int should default to 0 safely."""
-        ppc_override = {
-            "summary": {
-                "mean": {"observed": 75.0, "p_value": 0.45, "mc_se": 0.02},
-            },
-            "n_obs": "not-a-number",
-            "n_samples": 200,
-        }
-        _write_json_more(
-            tmp_path / "outputs/evaluation/metrics.json",
-            _make_metrics_more(ppc_override=ppc_override),
-        )
-        _write_json_more(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics_more())
-        _write_json_more(tmp_path / "models/training_summary.json", _make_training_summary_more())
-
-        ctx = _setup_ctx_more(strict=False)
-        patches = _base_patches_more(tmp_path)
-        artifacts = _run_with_patches_more(tmp_path, ctx, patches)
-        error_names = [e["artifact"] for e in artifacts["errors"]]
-        assert "ppc_density_plot" not in error_names
 
 
 class TestPredictionsScatterPlot:
