@@ -605,14 +605,24 @@ class PipelineOrchestrator:
     SKIP_FLAG_IGNORE = frozenset({"skip_existing", "dry_run", "verbose", "resume"})
 
     def _skip_flag_differences(self, previous_manifest: RunManifest) -> list[str]:
-        """Return output-affecting flag keys that changed since previous run."""
+        """Return output-affecting flag keys that changed since previous run.
+
+        A key absent from either manifest falls back to the current default, so a
+        manifest written before a flag existed doesn't read as a change against
+        that flag's default (an older run on the default path is unchanged).
+        """
         if self.manifest is None:
             return []
 
+        defaults = _get_default_config()
         current_flags = self.manifest.flags
         previous_flags = previous_manifest.flags
         keys = sorted((set(current_flags) | set(previous_flags)) - set(self.SKIP_FLAG_IGNORE))
-        return [key for key in keys if current_flags.get(key) != previous_flags.get(key)]
+
+        def value(flags: dict, key: str):
+            return flags.get(key, getattr(defaults, key, None))
+
+        return [key for key in keys if value(current_flags, key) != value(previous_flags, key)]
 
     def _setup_resume(self) -> None:
         """Set up for resuming a previous run."""
