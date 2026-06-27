@@ -157,7 +157,7 @@ class TestPriorConfigSerialization:
         assert restored == original
 
     def test_field_count(self):
-        """PriorConfig should have exactly 52 fields.
+        """PriorConfig should have exactly 54 fields.
 
         18 legacy + 11 seam knobs + 5 for the entity-overdispersion / lognormal
         sigma_obs upgrade (sigma_obs_prior_type, sigma_obs_lognormal_loc,
@@ -169,9 +169,35 @@ class TestPriorConfigSerialization:
         + 3 for the Beta-Binomial family (betabinom_precision_concentration,
         betabinom_precision_rate, betabinom_max_n_reviews) + 6 for the two-component
         mixture (mix_sep_loc, mix_sep_scale, mix_weight_a, mix_weight_b,
-        mix_scale_ratio_loc, mix_scale_ratio_scale).
+        mix_scale_ratio_loc, mix_scale_ratio_scale) + 2 for the model-v2 gates
+        (errors_in_variables, propagate_rw_horizon).
         """
-        assert len(fields(PriorConfig)) == 52
+        assert len(fields(PriorConfig)) == 54
+
+
+class TestModelV2Gates:
+    """Errors-in-variables and long-horizon RW propagation gates (model-v2)."""
+
+    def test_defaults_off(self):
+        p = PriorConfig()
+        assert p.errors_in_variables is False
+        assert p.propagate_rw_horizon is False
+
+    def test_roundtrip(self):
+        p = PriorConfig(errors_in_variables=True, propagate_rw_horizon=True)
+        restored = PriorConfig(**asdict(p))
+        assert restored == p
+        assert restored.errors_in_variables is True
+        assert restored.propagate_rw_horizon is True
+
+    def test_backward_compat_without_v2_keys(self):
+        """A priors dict predating model-v2 deserializes with both gates off."""
+        d = asdict(PriorConfig())
+        d.pop("errors_in_variables")
+        d.pop("propagate_rw_horizon")
+        p = PriorConfig(**d)
+        assert p.errors_in_variables is False
+        assert p.propagate_rw_horizon is False
 
 
 class TestSigmaRwPriorType:

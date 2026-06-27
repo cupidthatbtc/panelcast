@@ -104,6 +104,10 @@ class TrainingSummary(BaseModel):
     likelihood_family: str | None = None
     # Whether the observation was interval-censored to integers (None/legacy -> False).
     discretize_observation: bool | None = None
+    # Training-split score std on the model scale; the errors-in-variables path
+    # derives prev_meas_sigma = global_std_score / sqrt(prev_n_reviews) at
+    # predict/eval time (None on legacy summaries -> EIV unavailable downstream).
+    global_std_score: float | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
         """Serialize preserving declaration order.

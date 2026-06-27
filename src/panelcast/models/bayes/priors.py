@@ -243,6 +243,24 @@ class PriorConfig:
     # noise by ~28%), so the gate widens intervals without overwhelming the
     # base sigma_obs.
     tau_entity_scale: float = 0.25
+    # Errors-in-variables on the AR(1) regressor (default off => legacy path,
+    # bit-identical RNG). When True the model de-noises the lagged score it
+    # regresses on with a measurement-error latent: prev_latent = prev_score +
+    # prev_meas_sigma * z, z ~ Normal(0, 1), then ar_term = rho * (prev_latent
+    # - ar_center). prev_meas_sigma is a fixed, data-derived lag (std/sqrt(n))
+    # supplied as a model arg, so there is no funnel. The single new site
+    # ({prefix}prev_latent_raw, cardinality n_obs) is created ONLY on this
+    # branch and AFTER every existing site, so the gate-off draw sequence -- and
+    # every published number -- stays bit-identical. Debuts are pinned
+    # (prev_meas_sigma = 0) so debut AR terms stay exactly zero.
+    errors_in_variables: bool = False
+    # Propagate the random-walk past the training horizon at prediction time
+    # (default off => legacy clamp). When True the evaluate/predict stages drop
+    # the album_seq clamp at max_seq_train and pass max_seq = album_seq.max(),
+    # so the re-sampled rw_raw trajectory accumulates the full h-1 innovations
+    # and deep-extrapolation intervals widen by ~sqrt(h - max_seq) * sigma_rw.
+    # Pure prediction-path knob: no model.py change, training stays identical.
+    propagate_rw_horizon: bool = False
 
 
 def priors_for_transform(target_transform: str = "identity", **overrides) -> PriorConfig:

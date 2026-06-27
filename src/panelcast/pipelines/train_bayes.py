@@ -273,6 +273,21 @@ def prepare_model_data(
     train_df["prev_score"] = train_df["prev_score"].fillna(global_mean)
     prev_score = train_df["prev_score"].values
 
+    # Lagged review count for the errors-in-variables measurement-error scale
+    # (prev_meas_sigma = global_std_score / sqrt(prev_n_reviews), built below).
+    # Debuts (no prior album) lag to NaN and are pinned to 0 so their de-noised
+    # regressor stays at the debut fill and debut AR terms remain exactly zero.
+    if "n_reviews" in train_df.columns:
+        _nrev_lag_col: str | None = "n_reviews"
+    elif n_obs_col in train_df.columns:
+        _nrev_lag_col = n_obs_col
+    else:
+        _nrev_lag_col = None
+    if _nrev_lag_col is not None:
+        prev_n_reviews = train_df.groupby(entity_col)[_nrev_lag_col].shift(1).to_numpy(dtype=float)
+    else:
+        prev_n_reviews = np.full(len(train_df), np.nan)
+
     # AR(1) centering: ar_term = rho * (prev_score - center). "global" shares
     # the debut-fill value, so debut AR terms vanish exactly and rho stops
     # absorbing the overall score level.
@@ -320,6 +335,16 @@ def prepare_model_data(
         if ar_center != "none":
             ar_center_arr = np.asarray(transform.forward(ar_center_arr), dtype=np.float32)
 
+    # Errors-in-variables measurement-error scale, on the model scale (matches
+    # prev_score after any transform). Fixed and data-derived -> no funnel.
+    global_std_score = float(np.std(y)) if len(y) else 0.0
+    with np.errstate(invalid="ignore", divide="ignore"):
+        prev_meas_sigma = np.where(
+            np.isnan(prev_n_reviews) | (prev_n_reviews <= 0),
+            0.0,
+            global_std_score / np.sqrt(np.maximum(prev_n_reviews, 1.0)),
+        ).astype(np.float32)
+
     # Extract n_reviews for heteroscedastic noise
     # Keep as raw values (may be float with NaN) for proper NaN detection before int cast
     if "n_reviews" in train_df.columns:
@@ -363,6 +388,7 @@ def prepare_model_data(
         artist_idx = artist_idx[valid_mask]
         album_seq = album_seq[valid_mask]
         prev_score = prev_score[valid_mask]
+        prev_meas_sigma = prev_meas_sigma[valid_mask]
         if np.ndim(ar_center_arr) > 0:
             # np.asarray is a no-op for the array branch (ndim > 0 here) but tells
             # the type checker the value is indexable (mypy can't narrow on np.ndim).
@@ -388,6 +414,7 @@ def prepare_model_data(
         "artist_idx": artist_idx,
         "album_seq": album_seq,
         "prev_score": prev_score,
+        "prev_meas_sigma": prev_meas_sigma,
         "X": X,
         "y": y,
         "n_reviews": n_reviews,
@@ -395,6 +422,7 @@ def prepare_model_data(
         "artist_album_counts": artist_album_counts,
         "artist_to_idx": artist_to_idx,
         "global_mean_score": global_mean,
+        "global_std_score": global_std_score,
         "ar_center": ar_center_arr,
         "ar_center_value": ar_center_value,
     }
@@ -554,6 +582,12 @@ def train_models(
     artist_album_counts = model_args.pop("artist_album_counts")
     artist_to_idx = model_args.pop("artist_to_idx")
     global_mean_score = model_args.pop("global_mean_score")
+    # prepare_model_data always supplies this; fall back to the score std for
+    # hand-built model_args (test fixtures that bypass prepare_model_data).
+    global_std_score = model_args.pop(
+        "global_std_score",
+        float(np.std(model_args["y"])) if model_args.get("y") is not None else 0.0,
+    )
     ar_center_value = model_args.pop("ar_center_value")
 
     # Apply max_albums cap from CLI/config (uses most recent albums per artist)
@@ -668,6 +702,8 @@ def train_models(
         tau_entity_scale=float(getattr(ctx, "tau_entity_scale", 0.25)),
         likelihood_family=str(getattr(ctx, "likelihood_family", "studentt")),
         discretize_observation=bool(getattr(ctx, "discretize_observation", False)),
+        errors_in_variables=bool(getattr(ctx, "errors_in_variables", False)),
+        propagate_rw_horizon=bool(getattr(ctx, "propagate_rw_horizon", False)),
     )
 
     priors = locate_level_prior(
@@ -699,6 +735,13 @@ def train_models(
         idata_excludes.append(f"{prefix}_entity_obs_raw")
         if exclude_rw_raw_from_collection:
             collection_excludes.append(f"{prefix}_entity_obs_raw")
+    # The errors-in-variables regressor latent is an n_obs-cardinality unit
+    # normal like rw_raw: always drop it from the saved fit (re-sampled from its
+    # prior when marginalized in evaluate). Created only on the gate-on branch.
+    if bool(getattr(ctx, "errors_in_variables", False)):
+        idata_excludes.append(f"{prefix}_prev_latent_raw")
+        if exclude_rw_raw_from_collection:
+            collection_excludes.append(f"{prefix}_prev_latent_raw")
     if entity_obs_on:
         log.info(
             "entity_obs_raw_storage",
@@ -803,6 +846,7 @@ def train_models(
         "max_seq": model_args["max_seq"],
         "max_albums": ctx.max_albums,
         "global_mean_score": float(global_mean_score),
+        "global_std_score": float(global_std_score),
         "feature_cols": feature_cols,
         "n_exponent": ctx.n_exponent,
         "learn_n_exponent": ctx.learn_n_exponent,

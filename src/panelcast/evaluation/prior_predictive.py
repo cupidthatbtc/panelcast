@@ -176,10 +176,12 @@ def run_prior_predictive(
                     args[key] = val[sampled_indices]
                 elif val.ndim == 2 and val.shape[0] == n_obs_original:
                     args[key] = val[sampled_indices]
-        # Also subsample n_reviews if present
-        if "n_reviews" in args and hasattr(args["n_reviews"], "shape"):
-            if len(args["n_reviews"]) == n_obs_original:
-                args["n_reviews"] = args["n_reviews"][sampled_indices]
+        # Also subsample the per-observation noise arrays if present (n_reviews
+        # and the errors-in-variables measurement-error scale must stay aligned).
+        for extra_key in ("n_reviews", "prev_meas_sigma"):
+            arr = args.get(extra_key)
+            if arr is not None and hasattr(arr, "shape") and len(arr) == n_obs_original:
+                args[extra_key] = arr[sampled_indices]
         logger.info(
             "Prior predictive subsampled observations: %d -> %d",
             n_obs_original,

@@ -330,6 +330,52 @@ class TestModelStructure:
             assert site in samples, f"Missing sample site: {site}"
 
 
+class TestErrorsInVariablesSites:
+    """The errors-in-variables gate adds {prefix}prev_latent_raw iff on.
+
+    Fast forward-trace contract (mirrors test_latent_ar1's phi-site checks); the
+    parity proof and MCMC behavior live in test_fit_eiv.py.
+    """
+
+    def _args(self, priors: PriorConfig) -> dict:
+        n_obs, n_artists, n_features = 20, 4, 2
+        rng = np.random.default_rng(0)
+        return {
+            "artist_idx": jnp.array([i % n_artists for i in range(n_obs)], dtype=jnp.int32),
+            "album_seq": jnp.array([(i // n_artists) + 1 for i in range(n_obs)], dtype=jnp.int32),
+            "prev_score": jnp.full(n_obs, 70.0, dtype=jnp.float32),
+            "X": jnp.asarray(rng.normal(size=(n_obs, n_features)), dtype=jnp.float32),
+            "y": jnp.asarray(rng.normal(70.0, 5.0, n_obs), dtype=jnp.float32),
+            "n_artists": n_artists,
+            "max_seq": 5,
+            "priors": priors,
+            "prev_meas_sigma": jnp.full(n_obs, 1.5, dtype=jnp.float32),
+        }
+
+    def test_gate_off_has_no_prev_latent_site(self):
+        from numpyro.handlers import seed, trace
+
+        tr = trace(seed(user_score_model, rng_seed=0)).get_trace(**self._args(PriorConfig()))
+        assert "user_prev_latent_raw" not in tr
+
+    def test_gate_on_adds_prev_latent_site(self):
+        from numpyro.handlers import seed, trace
+
+        tr = trace(seed(user_score_model, rng_seed=0)).get_trace(
+            **self._args(PriorConfig(errors_in_variables=True))
+        )
+        assert "user_prev_latent_raw" in tr
+        assert np.asarray(tr["user_prev_latent_raw"]["value"]).shape == (20,)
+
+    def test_gate_on_requires_prev_meas_sigma(self):
+        from numpyro.handlers import seed, trace
+
+        args = self._args(PriorConfig(errors_in_variables=True))
+        args.pop("prev_meas_sigma")
+        with pytest.raises(ValueError, match="prev_meas_sigma"):
+            trace(seed(user_score_model, rng_seed=0)).get_trace(**args)
+
+
 class TestSigmaRwPriorType:
     """Tests for LogNormal vs HalfNormal sigma_rw prior."""
 

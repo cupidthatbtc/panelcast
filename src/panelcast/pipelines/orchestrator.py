@@ -185,6 +185,14 @@ class PipelineConfig:
     # HalfNormal scale on the entity-noise dispersion.
     heteroscedastic_entity_obs: bool = False
     tau_entity_scale: float = 0.25
+    # Errors-in-variables gate (model-v2): de-noise the AR(1) lagged regressor
+    # with a measurement-error latent so rho de-attenuates. Default off => legacy
+    # bit-identical path. No CLI flag; configured via run_config.yaml.
+    errors_in_variables: bool = False
+    # Long-horizon random-walk variance gate (model-v2): at prediction time drop
+    # the album_seq clamp at max_seq_train so deep-extrapolation intervals widen.
+    # Default off => legacy clamp. No CLI flag.
+    propagate_rw_horizon: bool = False
     # Opt-in in-sampler exclusion of the rw_raw tensor: never store its draws
     # on device during sampling (~96% peak-GPU cut at production settings;
     # posterior parity for all other sites guarded by tests).
@@ -525,6 +533,8 @@ class PipelineOrchestrator:
                 "sigma_obs_prior_type": self.config.sigma_obs_prior_type,
                 "heteroscedastic_entity_obs": self.config.heteroscedastic_entity_obs,
                 "tau_entity_scale": self.config.tau_entity_scale,
+                "errors_in_variables": self.config.errors_in_variables,
+                "propagate_rw_horizon": self.config.propagate_rw_horizon,
                 "exclude_rw_raw_from_collection": self.config.exclude_rw_raw_from_collection,
                 "val_albums": self.config.val_albums,
                 "min_train_albums": self.config.min_train_albums,
@@ -576,6 +586,8 @@ class PipelineOrchestrator:
         "sigma_obs_prior_type",
         "heteroscedastic_entity_obs",
         "tau_entity_scale",
+        "errors_in_variables",
+        "propagate_rw_horizon",
         "exclude_rw_raw_from_collection",
         "max_albums",
         "min_ratings",
@@ -914,6 +926,8 @@ class PipelineOrchestrator:
             sigma_obs_prior_type=self.config.sigma_obs_prior_type,
             heteroscedastic_entity_obs=self.config.heteroscedastic_entity_obs,
             tau_entity_scale=self.config.tau_entity_scale,
+            errors_in_variables=self.config.errors_in_variables,
+            propagate_rw_horizon=self.config.propagate_rw_horizon,
             exclude_rw_raw_from_collection=self.config.exclude_rw_raw_from_collection,
             val_albums=self.config.val_albums,
             min_train_albums=self.config.min_train_albums,

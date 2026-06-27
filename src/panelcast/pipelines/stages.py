@@ -119,6 +119,10 @@ class StageContext:
     # Entity-level observation overdispersion gate (default off => legacy path)
     heteroscedastic_entity_obs: bool = False
     tau_entity_scale: float = 0.25
+    # Errors-in-variables on the AR(1) regressor (model-v2; default off)
+    errors_in_variables: bool = False
+    # Propagate the random walk past the training horizon at predict time (model-v2)
+    propagate_rw_horizon: bool = False
     # Opt-in in-sampler exclusion of the rw_raw tensor (peak-GPU cut)
     exclude_rw_raw_from_collection: bool = False
     # Split configuration
