@@ -15,10 +15,6 @@ from panelcast.evaluation.metrics import (
     posterior_mean,
 )
 
-# ============================================================================
-# Test Fixtures
-# ============================================================================
-
 
 @pytest.fixture
 def rng():
@@ -70,11 +66,6 @@ def point_prediction_imperfect():
     # Errors: -2, +2, -2, +2, -2 -> MAE = 2.0
     y_pred = np.array([52.0, 58.0, 72.0, 78.0, 92.0])
     return y_true, y_pred
-
-
-# ============================================================================
-# Tests for compute_crps
-# ============================================================================
 
 
 class TestComputeCRPS:
@@ -154,11 +145,6 @@ class TestComputeCRPS:
 
         with pytest.raises(ValueError, match="observations"):
             compute_crps(y_true, y_samples)
-
-
-# ============================================================================
-# Tests for compute_point_metrics
-# ============================================================================
 
 
 class TestComputePointMetrics:
@@ -302,11 +288,6 @@ class TestComputePointMetrics:
         assert np.isclose(result_under.mean_bias, -2.0)
 
 
-# ============================================================================
-# Tests for posterior_mean
-# ============================================================================
-
-
 class TestPosteriorMean:
     """Tests for the posterior_mean helper function."""
 
@@ -359,3 +340,196 @@ class TestPosteriorMean:
         expected = np.array([1.0, 2.0, 3.0])
 
         np.testing.assert_array_almost_equal(result, expected)
+
+
+# --- from unit/test_metrics_expanded.py ---
+
+
+class TestCRPSResultDataclass:
+    """Tests for CRPSResult dataclass."""
+
+    def test_fields_accessible(self):
+        values = np.array([0.5, 1.0])
+        result = CRPSResult(crps_values=values, mean_crps=0.75, n_obs=2)
+        assert result.n_obs == 2
+        assert result.mean_crps == 0.75
+        np.testing.assert_array_equal(result.crps_values, values)
+
+    def test_n_obs_matches_values_length(self):
+        values = np.array([0.1, 0.2, 0.3, 0.4])
+        result = CRPSResult(crps_values=values, mean_crps=0.25, n_obs=4)
+        assert result.n_obs == len(result.crps_values)
+
+
+class TestPointMetricsDataclass:
+    """Tests for PointMetrics dataclass."""
+
+    def test_all_fields(self):
+        result = PointMetrics(
+            mae=2.0,
+            rmse=2.5,
+            r2=0.85,
+            median_ae=1.8,
+            n_observations=100,
+            mean_bias=-0.3,
+        )
+        assert result.mae == 2.0
+        assert result.rmse == 2.5
+        assert result.r2 == 0.85
+        assert result.median_ae == 1.8
+        assert result.n_observations == 100
+        assert result.mean_bias == -0.3
+
+    def test_zero_metrics(self):
+        result = PointMetrics(
+            mae=0.0,
+            rmse=0.0,
+            r2=1.0,
+            median_ae=0.0,
+            n_observations=5,
+            mean_bias=0.0,
+        )
+        assert result.mae == 0.0
+        assert result.r2 == 1.0
+
+
+class TestComputeCRPSEdgeCases:
+    """Edge case tests for compute_crps."""
+
+    def test_single_observation(self):
+        y_true = np.array([50.0])
+        y_samples = np.random.default_rng(42).normal(50, 1, (100, 1))
+        result = compute_crps(y_true, y_samples)
+        assert result.n_obs == 1
+        assert result.crps_values.shape == (1,)
+
+    def test_single_sample(self):
+        y_true = np.array([50.0, 60.0, 70.0])
+        y_samples = np.array([[50.0, 60.0, 70.0]])  # (1, 3)
+        result = compute_crps(y_true, y_samples)
+        assert result.n_obs == 3
+
+    def test_constant_predictions(self):
+        y_true = np.array([50.0, 60.0, 70.0])
+        # All samples are the same value
+        y_samples = np.full((100, 3), 55.0)
+        result = compute_crps(y_true, y_samples)
+        # CRPS should equal the absolute error for constant predictions
+        assert result.crps_values[0] == pytest.approx(5.0)
+        assert result.crps_values[1] == pytest.approx(5.0)
+        assert result.crps_values[2] == pytest.approx(15.0)
+
+
+class TestComputePointMetricsEdgeCases:
+    """Edge case tests for compute_point_metrics."""
+
+    def test_single_observation(self):
+        y_true = np.array([50.0])
+        y_pred = np.array([52.0])
+        result = compute_point_metrics(y_true, y_pred)
+        assert result.mae == pytest.approx(2.0)
+        assert result.rmse == pytest.approx(2.0)
+        assert result.n_observations == 1
+
+    def test_large_errors(self):
+        y_true = np.array([0.0, 0.0, 0.0])
+        y_pred = np.array([1000.0, -1000.0, 500.0])
+        result = compute_point_metrics(y_true, y_pred)
+        assert result.mae > 0
+        assert result.rmse >= result.mae
+
+    def test_negative_bias(self):
+        y_true = np.array([10.0, 20.0, 30.0])
+        y_pred = np.array([5.0, 15.0, 25.0])
+        result = compute_point_metrics(y_true, y_pred)
+        assert result.mean_bias == pytest.approx(-5.0)
+
+    def test_zero_bias(self):
+        y_true = np.array([10.0, 20.0])
+        y_pred = np.array([15.0, 15.0])  # +5, -5 = 0 bias
+        result = compute_point_metrics(y_true, y_pred)
+        assert result.mean_bias == pytest.approx(0.0)
+
+
+class TestPosteriorMeanEdgeCases:
+    """Edge case tests for posterior_mean."""
+
+    def test_two_samples(self):
+        y_samples = np.array([[10.0, 20.0], [30.0, 40.0]])
+        result = posterior_mean(y_samples)
+        np.testing.assert_array_almost_equal(result, [20.0, 30.0])
+
+    def test_large_n_samples(self):
+        rng = np.random.default_rng(42)
+        y_samples = rng.normal(50, 1, (10000, 5))
+        result = posterior_mean(y_samples)
+        assert result.shape == (5,)
+        # With many samples, mean should be close to 50
+        np.testing.assert_allclose(result, 50.0, atol=0.1)
+
+
+# --- from unit/test_metrics_new.py ---
+
+
+class TestComputePointMetricsNaN:
+    """Cover NaN validation paths."""
+
+    def test_nan_in_y_true_raises(self):
+        """NaN in y_true should raise ValueError."""
+        y_true = np.array([50.0, float("nan"), 70.0])
+        y_pred = np.array([50.0, 60.0, 70.0])
+        with pytest.raises(ValueError, match="NaN"):
+            compute_point_metrics(y_true, y_pred)
+
+    def test_nan_in_y_pred_raises(self):
+        """NaN in y_pred_mean should raise ValueError."""
+        y_true = np.array([50.0, 60.0, 70.0])
+        y_pred = np.array([50.0, float("nan"), 70.0])
+        with pytest.raises(ValueError, match="NaN"):
+            compute_point_metrics(y_true, y_pred)
+
+
+class TestComputePointMetricsValidation:
+    """Cover validation error paths."""
+
+    def test_y_pred_2d_raises(self):
+        """2D y_pred_mean should raise ValueError."""
+        y_true = np.array([50.0, 60.0])
+        y_pred = np.array([[50.0], [60.0]])
+        with pytest.raises(ValueError, match="y_pred_mean must be 1D"):
+            compute_point_metrics(y_true, y_pred)
+
+    def test_length_mismatch_raises(self):
+        """Length mismatch between y_true and y_pred should raise."""
+        y_true = np.array([50.0, 60.0, 70.0])
+        y_pred = np.array([50.0, 60.0])
+        with pytest.raises(ValueError, match="observations"):
+            compute_point_metrics(y_true, y_pred)
+
+
+class TestComputeCrpsListInput:
+    """Cover automatic conversion from lists."""
+
+    def test_list_inputs(self):
+        """Lists should be converted to arrays."""
+        y_true = [50.0, 60.0, 70.0]
+        y_samples = [[48.0, 58.0, 68.0], [52.0, 62.0, 72.0]]
+        result = compute_crps(y_true, y_samples)
+        assert result.n_obs == 3
+        assert result.crps_values.shape == (3,)
+
+
+class TestPosteriorMean3D:
+    """Cover 3D input validation."""
+
+    def test_3d_input_raises(self):
+        """3D input should raise ValueError."""
+        y_samples = np.ones((10, 5, 3))
+        with pytest.raises(ValueError, match="y_samples must be 2D"):
+            posterior_mean(y_samples)
+
+    def test_0d_input_raises(self):
+        """0D input should raise ValueError."""
+        y_samples = np.array(5.0)
+        with pytest.raises(ValueError, match="y_samples must be 2D"):
+            posterior_mean(y_samples)
