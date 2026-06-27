@@ -842,7 +842,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
     # =========================================================================
     try:
         cal_candidates = [
-            eval_dir / primary_split_name / "calibration.json",
+            resolve_split_dir(eval_dir, primary_split_name) / "calibration.json",
             eval_dir / "calibration.json",
         ]
         cal_path = next((p for p in cal_candidates if p.exists()), None)
@@ -882,7 +882,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
             (
                 p
                 for p in [
-                    eval_dir / primary_split_name / "predictions.json",
+                    resolve_split_dir(eval_dir, primary_split_name) / "predictions.json",
                     eval_dir / "predictions.json",
                 ]
                 if p.exists()
