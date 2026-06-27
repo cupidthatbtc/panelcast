@@ -474,7 +474,7 @@ def predict_next_events(ctx: StageContext) -> dict:
     # Compute artist mean features
     artist_mean_features = train_df.groupby(entity_col)[feature_cols].mean()
 
-    # Generate known artist predictions
+    # Generate known entity predictions
     log.info("predicting_known_artists", n_artists=len(summary["artist_to_idx"]))
     known_df = _predict_known_entities(
         posterior_samples,
@@ -488,7 +488,7 @@ def predict_next_events(ctx: StageContext) -> dict:
     )
     log.info("known_predictions_complete", n_rows=len(known_df))
 
-    # Generate new artist predictions
+    # Generate new entity predictions
     log.info("predicting_new_artists")
     new_df = _predict_new_entities(posterior_samples, summary, seed=seed)
     log.info("new_predictions_complete", n_rows=len(new_df))

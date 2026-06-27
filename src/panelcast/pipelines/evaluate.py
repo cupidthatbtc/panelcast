@@ -1135,7 +1135,7 @@ def evaluate_models(ctx: StageContext) -> dict:
                 "n_test": int(len(secondary_y_true)),
                 "info_criteria": {
                     "status": "unavailable",
-                    "reason": "artist-disjoint evaluation uses new-artist predictive path",
+                    "reason": "entity-disjoint evaluation uses new-entity predictive path",
                 },
             }
             split_artifacts[SECONDARY_SPLIT] = {

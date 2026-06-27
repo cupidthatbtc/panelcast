@@ -30,6 +30,8 @@ from panelcast.models.bayes.io import load_manifest, load_model
 from panelcast.models.bayes.model import make_score_model
 from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_entity
 from panelcast.models.bayes.priors import PriorConfig
+from panelcast.models.bayes.transforms import get_transform
+from panelcast.pipelines.training_summary import ar_center_on_model_scale
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -136,6 +138,14 @@ def predict_known_entity(
 ) -> np.ndarray:
     """Run prediction for a known entity at given sequence/prev_score."""
     cols = descriptor_cols(summary)
+    ds = summary.get("dataset") or {}
+    target_bounds = tuple(ds.get("target_bounds", (0.0, 100.0)))
+    ar_center = ar_center_on_model_scale(summary)
+    transform = get_transform(
+        summary.get("target_transform") or "identity",
+        target_bounds=target_bounds,
+        offset=float(summary.get("logit_offset") or 0.5),
+    )
     scaler = summary["feature_scaler"]
     X_mean = np.array(scaler["mean"], dtype=np.float32)
     X_std = np.array(scaler["std"], dtype=np.float32)
@@ -149,10 +159,15 @@ def predict_known_entity(
     n_reviews_col = _pick_col(entity_train, cols["n_obs"])
     n_reviews = int(entity_train[n_reviews_col].median()) if n_reviews_col else 100
 
+    # prev_score enters the AR(1) term on the model scale, same as training.
+    prev = float(prev_score)
+    if transform.name != "identity":
+        prev = float(np.asarray(transform.forward(prev)))
+
     model_args = {
         "artist_idx": np.array([summary["artist_to_idx"][entity]], dtype=np.int32),
         "album_seq": np.array([min(seq, summary["max_seq"])], dtype=np.int32),
-        "prev_score": np.array([prev_score], dtype=np.float32),
+        "prev_score": np.array([prev], dtype=np.float32),
         "X": X_scaled.reshape(1, -1),
         "y": None,
         "n_reviews": np.array([n_reviews], dtype=np.int32),
@@ -164,6 +179,8 @@ def predict_known_entity(
         "n_ref": summary.get("n_ref"),
         "likelihood_df": trained_df,
         "priors": priors,
+        "target_bounds": target_bounds,
+        "ar_center": ar_center,
     }
 
     n_samples = next(iter(posterior_samples.values())).shape[0]
@@ -182,7 +199,10 @@ def predict_known_entity(
             y_key = next(k for k in preds if k.endswith("_y"))
             y_chunks.append(np.asarray(preds[y_key]).ravel())
 
-    return np.concatenate(y_chunks)
+    y = np.concatenate(y_chunks)
+    if transform.name != "identity":
+        y = np.asarray(transform.inverse(y))
+    return y
 
 
 def predict_new_entity_score(
@@ -192,6 +212,10 @@ def predict_new_entity_score(
 ) -> np.ndarray:
     """Predict for an entity not in training data."""
     cols = descriptor_cols(summary)
+    ds = summary.get("dataset") or {}
+    target_bounds = tuple(ds.get("target_bounds", (0.0, 100.0)))
+    target_transform = summary.get("target_transform") or "identity"
+    logit_offset = float(summary.get("logit_offset") or 0.5)
     n_features = len(summary["feature_cols"])
     X_new = jnp.zeros(n_features)
 
@@ -199,12 +223,23 @@ def predict_new_entity_score(
     n_exp = summary.get("n_exponent", 0.0)
     has_hetero = learn_n or n_exp != 0.0
 
+    prev = float(prev_score)
+    if target_transform != "identity":
+        prev = float(np.asarray(get_transform(target_transform, target_bounds, logit_offset).forward(prev)))
+
     kwargs: dict = {
         "posterior_samples": {k: jnp.asarray(v) for k, v in posterior_samples.items()},
         "X_new": X_new,
-        "prev_score": prev_score,
+        "prev_score": prev,
         "prefix": f"{cols['prefix']}_",
         "seed": 42,
+        "target_bounds": target_bounds,
+        "likelihood_df": float(summary.get("likelihood_df", 4.0)),
+        "target_transform": target_transform,
+        "logit_offset": logit_offset,
+        "ar_center": ar_center_on_model_scale(summary),
+        "likelihood_family": summary.get("likelihood_family") or "studentt",
+        "discretize_observation": bool(summary.get("discretize_observation")),
     }
     if has_hetero:
         kwargs["n_reviews_new"] = jnp.array([summary["n_reviews_stats"]["median"]])

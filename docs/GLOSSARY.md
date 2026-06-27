@@ -77,15 +77,13 @@ things you'd actually bring up when explaining the project.
 
 **Reliability diagram** — Plot of nominal quantile vs. empirical hit-rate. Perfect calibration = diagonal. Above diagonal = overconfident. Below = underconfident. The most direct visual test of calibration.
 
-**within_entity_temporal_split()** — Primary evaluation: hold out each artist's last album(s) for test. Tests the actual use case: "given an artist's history, predict their next album."
+**within_entity_temporal_split()** — Primary evaluation: hold out each entity's last event(s) for test. Tests the actual use case: "given an entity's history, predict its next event."
 
 **entity_disjoint_split()** — Secondary evaluation: no entity overlap between train and test. Tests cold-start: "can we predict for entities we've never seen?" Uses `predict_new_entity()` under the hood.
 
-> The split strategies were renamed artist → entity for domain portability. The
-> old `within_artist_temporal` / `artist_disjoint` directory and manifest
-> literals still resolve via `panelcast.data.split_types`; the deprecated
-> function aliases (`within_artist_temporal_split` / `artist_disjoint_split`)
-> were removed in 0.3.0.
+> The split strategies use entity terms for domain portability. The old
+> `within_artist_temporal` / `artist_disjoint` directory and manifest literals
+> still resolve via `panelcast.data.split_types`.
 
 ---
 

@@ -489,7 +489,7 @@ def predict_new_entity(
         if single_album and n_reviews_new.shape[0] == 1:
             n_reviews_new = n_reviews_new[0]  # Scalar for broadcasting
 
-    # Sample new artist effect from population distribution
+    # Sample new entity effect from population distribution
     rng_key, subkey = random.split(rng_key)
     new_artist_effect = mu_artist + sigma_artist * random.normal(subkey, (n_samples,))
 

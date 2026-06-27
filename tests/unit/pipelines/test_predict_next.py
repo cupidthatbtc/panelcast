@@ -1,4 +1,4 @@
-"""Tests for next-album prediction pipeline.
+"""Tests for next-event prediction pipeline.
 
 Exercises real data transformation logic in predict_next.py while only mocking
 external dependencies (JAX devices, NumPyro Predictive, file I/O, idata loading).
