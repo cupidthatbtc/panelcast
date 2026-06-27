@@ -884,7 +884,15 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                         artifacts["figures"].append(str(pdf_path))
                         artifacts["figures"].append(str(png_path))
                     except Exception as e:
-                        log.warning("artist_fan_chart_failed", artist=artist, error=str(e))
+                        # str(e) alone can be empty (e.g. MemoryError); record the
+                        # type and traceback so the failure is diagnosable.
+                        log.warning(
+                            "artist_fan_chart_failed",
+                            artist=artist,
+                            error_type=type(e).__name__,
+                            error=str(e),
+                            exc_info=True,
+                        )
                         # Record per-artist failures so the readiness gate sees them;
                         # a run where every chart failed must not report ready.
                         artifacts["errors"].append(
@@ -989,7 +997,12 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                     try:
                         sensitivity_summary = pd.read_csv(oat_path)
                     except Exception as e:
-                        log.warning("oat_summary_load_failed", error=str(e))
+                        log.warning(
+                            "oat_summary_load_failed",
+                            error_type=type(e).__name__,
+                            error=str(e),
+                            exc_info=True,
+                        )
 
                 prior_justification = generate_prior_justification_text(
                     priors,
