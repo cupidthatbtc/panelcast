@@ -1,0 +1,4 @@
+# model-v2 bake-off: both opt-in gates ON, layered over --preset publication.
+# Used by the v1-vs-v2 subset bake-off; not part of the published config set.
+errors_in_variables: true
+propagate_rw_horizon: true
