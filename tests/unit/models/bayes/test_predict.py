@@ -3,7 +3,7 @@
 Tests target missed lines/branches:
 - extract_posterior_samples: empty posterior, < 2 dims, single var
 - generate_posterior_predictive: y_key fallback branches, return_mu paths
-- predict_new_artist: heteroscedastic branches (learned vs fixed exponent),
+- predict_new_entity: heteroscedastic branches (learned vs fixed exponent),
   n_predictions subsampling, multi-album predictions, ValueError for missing n_reviews
 - predict_out_of_sample: delegation to generate_posterior_predictive
 """
@@ -22,7 +22,7 @@ from panelcast.models.bayes.predict import (
     PredictionResult,
     extract_posterior_samples,
     generate_posterior_predictive,
-    predict_new_artist,
+    predict_new_entity,
     predict_out_of_sample,
 )
 
@@ -63,7 +63,7 @@ def _make_idata_like(var_dict):
 
 @pytest.fixture
 def basic_posterior_samples():
-    """Minimal posterior samples dict for predict_new_artist."""
+    """Minimal posterior samples dict for predict_new_entity."""
     n_samples = 20
     n_features = 3
     return {
@@ -135,13 +135,13 @@ class TestExtractPosteriorSamples:
             extract_posterior_samples(idata)
 
 
-class TestPredictNewArtistHomoscedastic:
-    """Tests for predict_new_artist in homoscedastic mode."""
+class TestPredictNewEntityHomoscedastic:
+    """Tests for predict_new_entity in homoscedastic mode."""
 
     def test_single_album_basic(self, basic_posterior_samples):
         """Single album prediction returns expected keys and shapes."""
         X_new = jnp.array([1.0, 0.5, -0.3])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_posterior_samples,
             X_new,
             prev_score=50.0,
@@ -161,7 +161,7 @@ class TestPredictNewArtistHomoscedastic:
         """Multi-album prediction returns (n_samples, n_albums) shapes."""
         X_new = jnp.ones((3, 3)) * 0.5
         prev_scores = jnp.array([50.0, 60.0, 70.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_posterior_samples,
             X_new,
             prev_score=prev_scores,
@@ -174,7 +174,7 @@ class TestPredictNewArtistHomoscedastic:
     def test_debut_album_prev_score_zero(self, basic_posterior_samples):
         """Debut album with prev_score=0 should work fine."""
         X_new = jnp.array([0.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_posterior_samples,
             X_new,
             prev_score=0.0,
@@ -186,7 +186,7 @@ class TestPredictNewArtistHomoscedastic:
     def test_n_predictions_subsampling(self, basic_posterior_samples):
         """n_predictions < n_samples should subsample the posterior."""
         X_new = jnp.array([1.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_posterior_samples,
             X_new,
             prev_score=50.0,
@@ -201,7 +201,7 @@ class TestPredictNewArtistHomoscedastic:
     def test_n_predictions_larger_than_samples(self, basic_posterior_samples):
         """n_predictions >= n_samples should use all samples."""
         X_new = jnp.array([1.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_posterior_samples,
             X_new,
             prev_score=50.0,
@@ -214,7 +214,7 @@ class TestPredictNewArtistHomoscedastic:
     def test_sigma_scaled_equals_sigma_obs_homoscedastic(self, basic_posterior_samples):
         """In homoscedastic mode, sigma_scaled should be sigma_obs."""
         X_new = jnp.array([1.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_posterior_samples,
             X_new,
             prev_score=50.0,
@@ -228,14 +228,14 @@ class TestPredictNewArtistHomoscedastic:
         )
 
 
-class TestPredictNewArtistHeteroscedastic:
-    """Tests for predict_new_artist with heteroscedastic noise."""
+class TestPredictNewEntityHeteroscedastic:
+    """Tests for predict_new_entity with heteroscedastic noise."""
 
     def test_learned_exponent_requires_n_reviews(self, posterior_samples_with_learned_exponent):
         """Learned exponent in posterior without n_reviews_new should raise."""
         X_new = jnp.array([1.0, 0.0, 0.0])
         with pytest.raises(ValueError, match="n_reviews_new is required"):
-            predict_new_artist(
+            predict_new_entity(
                 posterior_samples_with_learned_exponent,
                 X_new,
                 prev_score=50.0,
@@ -245,7 +245,7 @@ class TestPredictNewArtistHeteroscedastic:
     def test_learned_exponent_with_n_reviews(self, posterior_samples_with_learned_exponent):
         """Learned exponent with n_reviews_new should produce valid predictions."""
         X_new = jnp.array([1.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             posterior_samples_with_learned_exponent,
             X_new,
             prev_score=50.0,
@@ -260,7 +260,7 @@ class TestPredictNewArtistHeteroscedastic:
         """Fixed non-zero exponent without n_reviews_new should raise."""
         X_new = jnp.array([1.0, 0.0, 0.0])
         with pytest.raises(ValueError, match="n_reviews_new is required"):
-            predict_new_artist(
+            predict_new_entity(
                 basic_posterior_samples,
                 X_new,
                 prev_score=50.0,
@@ -271,7 +271,7 @@ class TestPredictNewArtistHeteroscedastic:
     def test_fixed_exponent_with_n_reviews(self, basic_posterior_samples):
         """Fixed exponent with n_reviews_new should work."""
         X_new = jnp.array([1.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_posterior_samples,
             X_new,
             prev_score=50.0,
@@ -285,7 +285,7 @@ class TestPredictNewArtistHeteroscedastic:
     def test_fixed_exponent_zero_is_homoscedastic(self, basic_posterior_samples):
         """fixed_n_exponent=0.0 should behave like homoscedastic."""
         X_new = jnp.array([1.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_posterior_samples,
             X_new,
             prev_score=50.0,
@@ -306,7 +306,7 @@ class TestPredictNewArtistHeteroscedastic:
         X_new = jnp.ones((2, 3)) * 0.5
         prev_scores = jnp.array([50.0, 60.0])
         n_reviews = jnp.array([100, 200])
-        result = predict_new_artist(
+        result = predict_new_entity(
             posterior_samples_with_learned_exponent,
             X_new,
             prev_score=prev_scores,
@@ -322,7 +322,7 @@ class TestPredictNewArtistHeteroscedastic:
         X_new = jnp.ones((2, 3)) * 0.5
         prev_scores = jnp.array([50.0, 60.0])
         n_reviews = jnp.array([100, 200])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_posterior_samples,
             X_new,
             prev_score=prev_scores,
@@ -336,7 +336,7 @@ class TestPredictNewArtistHeteroscedastic:
     def test_n_predictions_with_learned_exponent(self, posterior_samples_with_learned_exponent):
         """Subsampling with learned exponent should subsample exponent too."""
         X_new = jnp.array([1.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             posterior_samples_with_learned_exponent,
             X_new,
             prev_score=50.0,
@@ -350,7 +350,7 @@ class TestPredictNewArtistHeteroscedastic:
     def test_n_predictions_with_fixed_exponent(self, basic_posterior_samples):
         """Subsampling with fixed exponent creates constant array of correct size."""
         X_new = jnp.array([1.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_posterior_samples,
             X_new,
             prev_score=50.0,
@@ -366,7 +366,7 @@ class TestPredictNewArtistHeteroscedastic:
         """Error message should mention 'learned' when exponent is in posterior."""
         X_new = jnp.array([1.0, 0.0, 0.0])
         with pytest.raises(ValueError, match="learned"):
-            predict_new_artist(
+            predict_new_entity(
                 posterior_samples_with_learned_exponent,
                 X_new,
                 prev_score=50.0,
@@ -377,7 +377,7 @@ class TestPredictNewArtistHeteroscedastic:
         """Error message should mention 'fixed' when using fixed_n_exponent."""
         X_new = jnp.array([1.0, 0.0, 0.0])
         with pytest.raises(ValueError, match="fixed"):
-            predict_new_artist(
+            predict_new_entity(
                 basic_posterior_samples,
                 X_new,
                 prev_score=50.0,
@@ -386,8 +386,8 @@ class TestPredictNewArtistHeteroscedastic:
             )
 
 
-class TestPredictNewArtistPrefix:
-    """Tests for predict_new_artist with different prefixes."""
+class TestPredictNewEntityPrefix:
+    """Tests for predict_new_entity with different prefixes."""
 
     def test_critic_prefix(self):
         """Should work with critic_ prefix."""
@@ -401,7 +401,7 @@ class TestPredictNewArtistPrefix:
             "critic_sigma_obs": jnp.ones(n_samples) * 2.0,
         }
         X_new = jnp.array([0.5, -0.5])
-        result = predict_new_artist(
+        result = predict_new_entity(
             samples,
             X_new,
             prev_score=65.0,
@@ -748,13 +748,13 @@ def basic_samples():
     }
 
 
-class TestPredictNewArtistFixedNone:
+class TestPredictNewEntityFixedNone:
     """Cover fixed_n_exponent=None explicitly."""
 
     def test_none_fixed_exponent_is_homoscedastic(self, basic_samples):
         """fixed_n_exponent=None should be homoscedastic."""
         X_new = jnp.array([1.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_samples,
             X_new,
             prev_score=50.0,
@@ -767,7 +767,7 @@ class TestPredictNewArtistFixedNone:
         np.testing.assert_allclose(result["sigma_scaled"], 3.0, atol=1e-5)
 
 
-class TestPredictNewArtistMultiAlbumHeteroscedastic:
+class TestPredictNewEntityMultiAlbumHeteroscedastic:
     """Cover multi-album with n_reviews and fixed exponent."""
 
     def test_multi_album_fixed_exponent_shapes(self, basic_samples):
@@ -776,7 +776,7 @@ class TestPredictNewArtistMultiAlbumHeteroscedastic:
         prev_scores = jnp.array([50.0, 60.0, 70.0, 80.0])
         n_reviews = jnp.array([10, 50, 100, 500])
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_samples,
             X_new,
             prev_score=prev_scores,
@@ -805,7 +805,7 @@ class TestPredictNewArtistMultiAlbumHeteroscedastic:
         prev_scores = jnp.array([50.0, 60.0])
         n_reviews = jnp.array([100, 200])
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             samples,
             X_new,
             prev_score=prev_scores,
@@ -820,12 +820,12 @@ class TestPredictNewArtistMultiAlbumHeteroscedastic:
         assert result["sigma_scaled"].shape == (10, 2)
 
 
-class TestPredictNewArtistNReviewsNone:
+class TestPredictNewEntityNReviewsNone:
     """Cover n_reviews_new=None with no exponent (homoscedastic)."""
 
     def test_homoscedastic_no_n_reviews(self, basic_samples):
         X_new = jnp.array([1.0, 0.0, 0.0])
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_samples,
             X_new,
             prev_score=0.0,
@@ -837,7 +837,7 @@ class TestPredictNewArtistNReviewsNone:
         assert result["y"].shape == (20,)
 
 
-class TestPredictNewArtistMultiAlbumPrevScore:
+class TestPredictNewEntityMultiAlbumPrevScore:
     """Cover multi-album prev_score array handling."""
 
     def test_multi_album_with_array_prev_score(self, basic_samples):
@@ -845,7 +845,7 @@ class TestPredictNewArtistMultiAlbumPrevScore:
         X_new = jnp.ones((3, 3)) * 0.5
         prev_scores = jnp.array([0.0, 50.0, 70.0])
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             basic_samples,
             X_new,
             prev_score=prev_scores,

@@ -288,7 +288,7 @@ class TestNormalPredictDrawsDiscretize:
     """_normal_predict_draws discretize branch — lines 543-547."""
 
     def test_normal_predict_discretize_returns_integers(self):
-        from panelcast.models.bayes.predict import predict_new_artist
+        from panelcast.models.bayes.predict import predict_new_entity
         rng = np.random.default_rng(9)
         post = {
             "user_mu_artist": jnp.asarray(rng.normal(0, 1, 40)),
@@ -297,7 +297,7 @@ class TestNormalPredictDrawsDiscretize:
             "user_rho": jnp.asarray(rng.normal(0, 0.2, 40)),
             "user_sigma_obs": jnp.asarray(np.abs(rng.normal(8, 1, 40))),
         }
-        out = predict_new_artist(
+        out = predict_new_entity(
             post,
             X_new=jnp.zeros(N_FEAT),
             prev_score=70.0,
@@ -314,7 +314,7 @@ class TestSkewStudenttPredictMissingSite:
     """_skew_studentt_predict_draws missing site — line 556."""
 
     def test_skew_studentt_predict_missing_skewness_raises(self):
-        from panelcast.models.bayes.predict import predict_new_artist
+        from panelcast.models.bayes.predict import predict_new_entity
         rng = np.random.default_rng(10)
         post = {
             "user_mu_artist": jnp.asarray(rng.normal(0, 1, 20)),
@@ -324,7 +324,7 @@ class TestSkewStudenttPredictMissingSite:
             "user_sigma_obs": jnp.asarray(np.abs(rng.normal(8, 1, 20))),
         }
         with pytest.raises(ValueError, match="skewness"):
-            predict_new_artist(
+            predict_new_entity(
                 post,
                 X_new=jnp.zeros(N_FEAT),
                 prev_score=70.0,
@@ -338,7 +338,7 @@ class TestSkewNormalPredictMissingSite:
     """_skew_normal_predict_draws missing site — line 572."""
 
     def test_skew_normal_predict_missing_skewness_raises(self):
-        from panelcast.models.bayes.predict import predict_new_artist
+        from panelcast.models.bayes.predict import predict_new_entity
         rng = np.random.default_rng(11)
         post = {
             "user_mu_artist": jnp.asarray(rng.normal(0, 1, 20)),
@@ -348,7 +348,7 @@ class TestSkewNormalPredictMissingSite:
             "user_sigma_obs": jnp.asarray(np.abs(rng.normal(8, 1, 20))),
         }
         with pytest.raises(ValueError, match="skewness"):
-            predict_new_artist(
+            predict_new_entity(
                 post,
                 X_new=jnp.zeros(N_FEAT),
                 prev_score=70.0,

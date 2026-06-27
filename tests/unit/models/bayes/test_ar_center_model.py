@@ -13,7 +13,7 @@ from numpyro.handlers import seed, trace
 from numpyro.infer.util import log_density
 
 from panelcast.models.bayes.model import user_score_model
-from panelcast.models.bayes.predict import predict_new_artist
+from panelcast.models.bayes.predict import predict_new_entity
 
 
 def _debut_model_args(center: float) -> dict:
@@ -101,7 +101,7 @@ class TestDebutArTermIsZero:
         assert _logden(args_no_kwarg, params) == pytest.approx(baseline, rel=1e-6)
 
 
-class TestPredictNewArtistArCenter:
+class TestPredictNewEntityArCenter:
     def _samples(self, rho: float, n: int = 500) -> dict:
         return {
             "user_mu_artist": jnp.zeros(n),
@@ -115,7 +115,7 @@ class TestPredictNewArtistArCenter:
         """rho large, prev_score == center: prediction ignores rho entirely."""
         from panelcast.models.bayes.transforms import get_transform
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             self._samples(rho=0.9),
             X_new=jnp.zeros(2),
             prev_score=75.0,
@@ -129,7 +129,7 @@ class TestPredictNewArtistArCenter:
         assert np.allclose(mu, expected, atol=1e-3)
 
         # Contrast: the uncentered form puts rho * 75 into the mean instead.
-        legacy = predict_new_artist(
+        legacy = predict_new_entity(
             self._samples(rho=0.9),
             X_new=jnp.zeros(2),
             prev_score=75.0,
@@ -140,14 +140,14 @@ class TestPredictNewArtistArCenter:
         assert np.allclose(np.asarray(legacy["mu"]), 0.9 * 75.0, atol=0.1)
 
     def test_center_zero_reproduces_legacy(self):
-        legacy = predict_new_artist(
+        legacy = predict_new_entity(
             self._samples(rho=0.5),
             X_new=jnp.zeros(2),
             prev_score=60.0,
             prefix="user_",
             seed=2,
         )
-        explicit = predict_new_artist(
+        explicit = predict_new_entity(
             self._samples(rho=0.5),
             X_new=jnp.zeros(2),
             prev_score=60.0,

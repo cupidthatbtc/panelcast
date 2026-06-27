@@ -1038,10 +1038,10 @@ class TestConvergenceNonStrict:
             orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
             exit_code = orchestrator.run()
 
-            # Note: Due to a known issue with run_result being unbound after
-            # non-strict convergence catch, this currently results in exit 1.
-            # The convergence warning is still logged (coverage for lines 803-811).
-            assert exit_code in (0, 1)
+            # Non-strict mode must *catch* the ConvergenceError (not let it
+            # propagate) and report a non-zero exit rather than crashing.
+            assert exit_code == 1
+            assert mock_stage.run_fn.called
 
 
 # ============================================================================
@@ -1398,7 +1398,7 @@ class TestStageRunFunctions:
         assert result == {"metrics": "computed"}
 
     def test_run_predict_stage(self, tmp_path, monkeypatch):
-        """_run_predict_stage calls predict_next_albums correctly."""
+        """_run_predict_stage calls predict_next_events correctly."""
         from panelcast.pipelines.stages import _run_predict_stage
 
         ctx = self._make_ctx(tmp_path)
@@ -1409,7 +1409,7 @@ class TestStageRunFunctions:
             return {"predictions": "done"}
 
         monkeypatch.setattr(
-            "panelcast.pipelines.predict_next.predict_next_albums",
+            "panelcast.pipelines.predict_next.predict_next_events",
             fake_predict,
         )
 

@@ -10,7 +10,7 @@ from numpyro.handlers import seed, trace
 from numpyro.infer import Predictive
 
 from panelcast.models.bayes.model import SinhArcsinhTransform, make_score_model
-from panelcast.models.bayes.predict import predict_new_artist
+from panelcast.models.bayes.predict import predict_new_entity
 from panelcast.models.bayes.priors import PriorConfig
 
 N_OBS, N_FEATURES, N_ARTISTS = 50, 3, 5
@@ -96,7 +96,7 @@ class TestLikelihoodSites:
         assert PriorConfig().likelihood_family == "studentt"
 
 
-class TestPredictNewArtistDispatch:
+class TestPredictNewEntityDispatch:
     def _posterior(self, n=40, extra=None):
         rng = np.random.default_rng(2)
         post = {
@@ -112,7 +112,7 @@ class TestPredictNewArtistDispatch:
 
     def test_beta_prediction_bounded(self):
         post = self._posterior(extra={"user_phi": jnp.asarray(np.abs(np.random.default_rng(3).normal(20, 2, 40)))})
-        out = predict_new_artist(
+        out = predict_new_entity(
             post,
             X_new=jnp.zeros(N_FEATURES),
             prev_score=70.0,
@@ -125,7 +125,7 @@ class TestPredictNewArtistDispatch:
 
     def test_skew_prediction_runs(self):
         post = self._posterior(extra={"user_skewness": jnp.asarray(np.random.default_rng(4).normal(-0.5, 0.1, 40))})
-        out = predict_new_artist(
+        out = predict_new_entity(
             post,
             X_new=jnp.zeros(N_FEATURES),
             prev_score=70.0,
@@ -137,7 +137,7 @@ class TestPredictNewArtistDispatch:
 
     def test_beta_without_phi_raises(self):
         with pytest.raises(ValueError, match="phi"):
-            predict_new_artist(
+            predict_new_entity(
                 self._posterior(),
                 X_new=jnp.zeros(N_FEATURES),
                 prev_score=70.0,
@@ -148,7 +148,7 @@ class TestPredictNewArtistDispatch:
         post = self._posterior(
             extra={"user_skewness": jnp.asarray(np.random.default_rng(4).normal(-0.5, 0.1, 40))}
         )
-        out = predict_new_artist(
+        out = predict_new_entity(
             post,
             X_new=jnp.zeros(N_FEATURES),
             prev_score=70.0,
@@ -162,7 +162,7 @@ class TestPredictNewArtistDispatch:
         post = self._posterior(
             extra={"user_split_log_ratio": jnp.asarray(np.random.default_rng(4).normal(-0.3, 0.1, 40))}
         )
-        out = predict_new_artist(
+        out = predict_new_entity(
             post,
             X_new=jnp.zeros(N_FEATURES),
             prev_score=70.0,
@@ -174,7 +174,7 @@ class TestPredictNewArtistDispatch:
 
     def test_split_normal_without_site_raises(self):
         with pytest.raises(ValueError, match="split_log_ratio"):
-            predict_new_artist(
+            predict_new_entity(
                 self._posterior(),
                 X_new=jnp.zeros(N_FEATURES),
                 prev_score=70.0,
@@ -192,7 +192,7 @@ class TestPredictNewArtistDispatch:
         )
 
     def test_mixture_prediction_runs(self):
-        out = predict_new_artist(
+        out = predict_new_entity(
             self._mixture_posterior(),
             X_new=jnp.zeros(N_FEATURES),
             prev_score=70.0,
@@ -204,7 +204,7 @@ class TestPredictNewArtistDispatch:
 
     def test_mixture_without_site_raises(self):
         with pytest.raises(ValueError, match="mix_sep"):
-            predict_new_artist(
+            predict_new_entity(
                 self._posterior(),
                 X_new=jnp.zeros(N_FEATURES),
                 prev_score=70.0,
@@ -212,7 +212,7 @@ class TestPredictNewArtistDispatch:
             )
 
     def test_discretized_prediction_is_integer(self):
-        out = predict_new_artist(
+        out = predict_new_entity(
             self._posterior(),
             X_new=jnp.zeros(N_FEATURES),
             prev_score=70.0,
@@ -230,7 +230,7 @@ class TestPredictNewArtistDispatch:
         )
 
     def test_beta_binomial_prediction_bounded(self):
-        out = predict_new_artist(
+        out = predict_new_entity(
             self._bb_posterior(),
             X_new=jnp.zeros(N_FEATURES),
             prev_score=70.0,
@@ -245,7 +245,7 @@ class TestPredictNewArtistDispatch:
 
     def test_beta_binomial_without_phi_raises(self):
         with pytest.raises(ValueError, match="bb_phi"):
-            predict_new_artist(
+            predict_new_entity(
                 self._posterior(),
                 X_new=jnp.zeros(N_FEATURES),
                 prev_score=70.0,
@@ -255,7 +255,7 @@ class TestPredictNewArtistDispatch:
 
     def test_beta_binomial_without_n_reviews_raises(self):
         with pytest.raises(ValueError, match="n_reviews"):
-            predict_new_artist(
+            predict_new_entity(
                 self._bb_posterior(),
                 X_new=jnp.zeros(N_FEATURES),
                 prev_score=70.0,
@@ -265,7 +265,7 @@ class TestPredictNewArtistDispatch:
     def test_beta_binomial_cold_start_caps_huge_n_reviews(self):
         # A mega-reviewed event (n far above the cap) must still draw bounded scores
         # rather than blow total_count into the float32-jagged regime.
-        out = predict_new_artist(
+        out = predict_new_entity(
             self._bb_posterior(),
             X_new=jnp.zeros(N_FEATURES),
             prev_score=70.0,

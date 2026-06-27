@@ -385,10 +385,10 @@ def _run_evaluate_stage(ctx: StageContext):
 
 
 def _run_predict_stage(ctx: StageContext):
-    """Run next-album prediction stage."""
-    from panelcast.pipelines.predict_next import predict_next_albums
+    """Run next-event prediction stage."""
+    from panelcast.pipelines.predict_next import predict_next_events
 
-    return predict_next_albums(ctx)
+    return predict_next_events(ctx)
 
 
 def _run_report_stage(ctx: StageContext):
@@ -546,10 +546,10 @@ def make_stage_evaluate() -> PipelineStage:
 
 
 def make_stage_predict() -> PipelineStage:
-    """Create next-album prediction stage."""
+    """Create next-event prediction stage."""
     return PipelineStage(
         name="predict",
-        description="Generate next-album predictions for known and new artists",
+        description="Generate next-event predictions for known and new entities",
         run_fn=_run_predict_stage,
         input_paths=[
             Path("models/manifest.json"),

@@ -1,7 +1,7 @@
 """Tests for heteroscedastic prediction functionality.
 
 Verifies that:
-1. predict_new_artist accepts n_reviews_new parameter
+1. predict_new_entity accepts n_reviews_new parameter
 2. Prediction intervals differ by review count (heteroscedastic behavior)
 3. ValueError raised when n_reviews_new missing for learned exponent model
 4. sigma_scaled included in prediction output
@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from panelcast.models.bayes.predict import predict_new_artist
+from panelcast.models.bayes.predict import predict_new_entity
 
 
 class TestPredictHeteroscedastic:
@@ -48,7 +48,7 @@ class TestPredictHeteroscedastic:
         prev_score = 0.0
 
         # Should work without n_reviews_new for homoscedastic model
-        result = predict_new_artist(
+        result = predict_new_entity(
             homoscedastic_posterior_samples,
             X_new,
             prev_score,
@@ -68,7 +68,7 @@ class TestPredictHeteroscedastic:
         prev_score = 0.0
 
         with pytest.raises(ValueError, match="n_reviews_new is required"):
-            predict_new_artist(
+            predict_new_entity(
                 heteroscedastic_posterior_samples,
                 X_new,
                 prev_score,
@@ -82,7 +82,7 @@ class TestPredictHeteroscedastic:
         prev_score = 0.0
         n_reviews = jnp.array([100])
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             heteroscedastic_posterior_samples,
             X_new,
             prev_score,
@@ -105,7 +105,7 @@ class TestPredictHeteroscedastic:
         prev_score = jnp.zeros(n_albums)
         n_reviews = jnp.array([10, 50, 100, 500, 1000])
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             heteroscedastic_posterior_samples,
             X_new,
             prev_score,
@@ -124,7 +124,7 @@ class TestPredictHeteroscedastic:
         # Different review counts: 10 vs 1000
         n_reviews = jnp.array([10, 1000])
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             heteroscedastic_posterior_samples,
             X_new,
             prev_score,
@@ -148,7 +148,7 @@ class TestPredictHeteroscedastic:
         prev_score = jnp.zeros(2)
         n_reviews = jnp.array([10, 1000])
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             heteroscedastic_posterior_samples,
             X_new,
             prev_score,
@@ -174,7 +174,7 @@ class TestPredictHeteroscedastic:
         n_reviews = jnp.array([100])
         n_predictions = 50
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             heteroscedastic_posterior_samples,
             X_new,
             prev_score,
@@ -193,7 +193,7 @@ class TestPredictHeteroscedastic:
         prev_score = 0.0
         n_reviews = jnp.array([100])
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             homoscedastic_posterior_samples,  # No n_exponent in posterior
             X_new,
             prev_score,
@@ -215,7 +215,7 @@ class TestPredictHeteroscedastic:
         prev_score = 0.0
 
         with pytest.raises(ValueError, match="n_reviews_new is required"):
-            predict_new_artist(
+            predict_new_entity(
                 homoscedastic_posterior_samples,
                 X_new,
                 prev_score,
@@ -230,7 +230,7 @@ class TestPredictHeteroscedastic:
         prev_score = jnp.zeros(2)
         n_reviews = jnp.array([10, 1000])
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             homoscedastic_posterior_samples,
             X_new,
             prev_score,
@@ -254,7 +254,7 @@ class TestPredictHeteroscedastic:
         prev_score = 0.0
 
         # fixed_n_exponent=0 should NOT require n_reviews_new
-        result = predict_new_artist(
+        result = predict_new_entity(
             homoscedastic_posterior_samples,
             X_new,
             prev_score,
@@ -273,7 +273,7 @@ class TestPredictHeteroscedastic:
         n_reviews = jnp.array([100])
         n_predictions = 50
 
-        result = predict_new_artist(
+        result = predict_new_entity(
             homoscedastic_posterior_samples,
             X_new,
             prev_score,

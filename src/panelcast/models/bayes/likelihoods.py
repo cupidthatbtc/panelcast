@@ -10,8 +10,8 @@ Each family is one self-contained :class:`LikelihoodSpec`:
   toggle to build an interval-censored likelihood. ``None`` for families that
   cannot be discretized (e.g. ``beta``).
 
-The model's likelihood seam (``model._sample_likelihood``) and the new-artist
-prediction dispatch (``predict.predict_new_artist``) both resolve a family by
+The model's likelihood seam (``model._sample_likelihood``) and the new-entity
+prediction dispatch (``predict.predict_new_entity``) both resolve a family by
 name through :data:`REGISTRY`, so adding a family is a single new entry here
 instead of edits scattered across ``model.py`` and ``predict.py``.
 

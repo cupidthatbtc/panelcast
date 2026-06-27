@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] — 2026-06-27
 
 ### Removed
 
@@ -15,8 +15,28 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   read `next_album_known_artists.csv` / `next_album_new_artist.csv` must switch
   to the generic names and the `entity` / `n_training_events` columns.
 
-Still tracked for **0.3.0** (#14): single-source the version via
-`importlib.metadata`, and deep-generalize the AOTY-flavored historical docs.
+### Changed
+
+- **BREAKING: AOTY-internal symbols renamed to entity/event terms.**
+  `models.bayes.predict_new_artist` → `predict_new_entity` (and its result type
+  `NewArtistPrediction` → `NewEntityPrediction`); the predict pipeline stage
+  `predict_next_albums` → `predict_next_events`, with the internal helpers
+  `_predict_known_artists` / `_predict_new_artists` →
+  `_predict_known_entities` / `_predict_new_entities`; and the single-entity
+  convenience wrapper `predict_artist_next` → `predict_entity_next`. No
+  compatibility aliases — import the new names. Model-parameter site names
+  (`mu_artist`, `artist_idx`, …) are intentionally unchanged.
+- Generalized the remaining AOTY-flavored docs to entity/event language
+  (`PIPELINE_PLAN.md`, `GLOSSARY.md`, `EVALUATION_PROTOCOL.md`).
+- The prediction explorer script reads its column names and model prefix from the
+  trained descriptor and is renamed `scripts/predict_artist.py` →
+  `scripts/predict_entity.py`.
+
+### Notes
+
+- Full-corpus (~62k-album) publication-scale validation is **not** included; it
+  needs more GPU than is available locally (>24 GB even with
+  `--exclude-rw-raw-from-collection`) and is tracked separately (#15).
 
 ## [0.2.0] — 2026-06-25
 

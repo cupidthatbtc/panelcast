@@ -1,13 +1,15 @@
 # Pipeline Plan (Publication-Focused)
 
-This plan defines the full rebuild for Bayesian artist-level prediction.
+This plan defines the full rebuild for Bayesian entity-level prediction. It is
+written against the AOTY example domain, where an entity is an artist and an
+event is an album; the structural steps apply to any domain's entities/events.
 
 Phase 0 - Governance and Guardrails
-- Define the prediction target: next album user score for an artist.
+- Define the prediction target: next event score for an entity (AOTY: next album user score for an artist).
 - Lock leakage rules (see docs/LEAKAGE_CONTROLS.md).
 - Define split policy:
-  - Primary: within-artist temporal holdout (last album per artist).
-  - Secondary: artist-group split (no artist overlap).
+  - Primary: within-entity temporal holdout (last event per entity).
+  - Secondary: entity-disjoint split (no entity overlap).
 - Define the minimal publication metrics and diagnostics.
 
 Phase 1 - Data Ingestion
@@ -38,8 +40,8 @@ Phase 3b - Feature Block Assembly
 - Save manifest with block metadata and feature names.
 
 Phase 4 - Leakage-Safe Splits
-- Primary: within-artist temporal holdout (last album per artist with >=2 albums).
-- Secondary: artist-group split (no artist overlap, fixed seed).
+- Primary: within-entity temporal holdout (last event per entity with >=2 events).
+- Secondary: entity-disjoint split (no entity overlap, fixed seed).
 - Store split manifests in data/splits for both strategies.
 - Use train-only statistics for imputation and scaling.
 - For time-based checks: train on early years, test on later years.
@@ -62,7 +64,7 @@ Phase 7 - Diagnostics and Model Comparison
 - Flag NaN or divergent samples and record failure modes.
 
 Phase 8 - Prediction Output
-- For each artist, predict next album score with credible intervals.
+- For each entity, predict the next event score with credible intervals.
 - Output predictions with uncertainty and metadata.
 - Store in `outputs/predictions/` and summarize in `reports/`.
 

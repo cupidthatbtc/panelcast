@@ -176,7 +176,7 @@ class TestRunNewArtistPredictive:
         }
 
     def test_1d_output_reshaped_to_2d(self, summary):
-        # predict_new_artist returning shape (n_obs,) must be reshaped to (n_obs, 1)
+        # predict_new_entity returning shape (n_obs,) must be reshaped to (n_obs, 1)
         # — lines 541-542.
         posterior = self._minimal_posterior()
         X = np.zeros((3, 2), dtype=np.float32)
@@ -184,7 +184,7 @@ class TestRunNewArtistPredictive:
         n_rev = np.ones(3, dtype=np.int32)
 
         fake_pred = {"y": np.ones(3, dtype=np.float32)}  # 1-D
-        with patch("panelcast.pipelines.evaluate.predict_new_artist", return_value=fake_pred):
+        with patch("panelcast.pipelines.evaluate.predict_new_entity", return_value=fake_pred):
             y = _run_new_artist_predictive(posterior, summary, X, prev, n_rev, seed=0)
 
         assert y.ndim == 2
@@ -197,7 +197,7 @@ class TestRunNewArtistPredictive:
         n_rev = np.ones(3, dtype=np.int32)
 
         fake_pred = {"y": np.ones((4, 3), dtype=np.float32)}  # already 2-D
-        with patch("panelcast.pipelines.evaluate.predict_new_artist", return_value=fake_pred):
+        with patch("panelcast.pipelines.evaluate.predict_new_entity", return_value=fake_pred):
             y = _run_new_artist_predictive(posterior, summary, X, prev, n_rev, seed=0)
 
         assert y.shape == (4, 3)
@@ -217,7 +217,7 @@ class TestRunNewArtistPredictive:
             captured.update(kwargs)
             return {"y": np.ones((4, 2), dtype=np.float32)}
 
-        with patch("panelcast.pipelines.evaluate.predict_new_artist", side_effect=fake_predict):
+        with patch("panelcast.pipelines.evaluate.predict_new_entity", side_effect=fake_predict):
             _run_new_artist_predictive(posterior, s, X, prev, n_rev, seed=0)
 
         assert "n_reviews_new" in captured
@@ -241,7 +241,7 @@ class TestRunNewArtistPredictive:
             captured.update(kwargs)
             return {"y": np.ones((4, 2), dtype=np.float32)}
 
-        with patch("panelcast.pipelines.evaluate.predict_new_artist", side_effect=fake_predict):
+        with patch("panelcast.pipelines.evaluate.predict_new_entity", side_effect=fake_predict):
             _run_new_artist_predictive(posterior, s, X, prev, n_rev, seed=0)
 
         assert "n_reviews_new" in captured
@@ -777,9 +777,13 @@ class TestEvaluateModelsTransformPaths:
         ):
             return evaluate_models(ctx)
 
-    def test_non_identity_transform_lines_1012_and_1027(self, tmp_path, summary):
-        # With logit transform, lines 1012 (inverse) and 1027 (forward) both
-        # execute; just confirm the pipeline completes without error.
+    def test_non_identity_transform_back_transforms_predictions(self, tmp_path, summary):
+        # The predictive samples are mocked on the model (logit) scale near 0.
+        # With offset_logit, the inverse transform must map them back to the
+        # score scale (~midpoint of [0, 100]); skipping it would leave the
+        # written predictions near 0.
+        import json
+
         from panelcast.models.bayes.transforms import get_transform
 
         t = get_transform("offset_logit", target_bounds=(0.0, 100.0), offset=0.5)
@@ -788,6 +792,15 @@ class TestEvaluateModelsTransformPaths:
 
         result = self._patched_run(tmp_path, summary, transform_name="offset_logit")
         assert "metrics" in result
+
+        pred_files = list(tmp_path.rglob("predictions.json"))
+        assert pred_files, "evaluate wrote no predictions.json"
+        means = json.loads(pred_files[0].read_text())["y_pred_mean"]
+        assert means, "no predicted means recorded"
+        assert all(0.0 <= m <= 100.0 for m in means)
+        # Back-transformed logit-0 lands mid-scale; raw (untransformed) means
+        # would sit near 0, so this distinguishes the inverse actually running.
+        assert max(means) > 10.0
 
 
 # --- from unit/pipelines/test_evaluate_coverage.py ---

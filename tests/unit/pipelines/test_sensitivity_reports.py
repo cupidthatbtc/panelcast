@@ -326,7 +326,7 @@ class TestRunSplitSeedSensitivity:
             ),
         )
         monkeypatch.setattr(
-            "panelcast.models.bayes.predict.predict_new_artist",
+            "panelcast.models.bayes.predict.predict_new_entity",
             lambda *a, **kw: {
                 "y": np.random.default_rng(2).uniform(50, 90, (200, n_test))
             },
@@ -363,7 +363,7 @@ class TestRunSplitSeedSensitivity:
             lambda df, **kw: (df.iloc[:40], df.iloc[40:50], small_test),
         )
         monkeypatch.setattr(
-            "panelcast.models.bayes.predict.predict_new_artist",
+            "panelcast.models.bayes.predict.predict_new_entity",
             lambda *a, **kw: {"y": np.full((200, n_test), 75.0)},
         )
         monkeypatch.setattr(
@@ -390,7 +390,7 @@ class TestRunSplitSeedSensitivity:
             lambda df, **kw: (df, df, small_test),
         )
         monkeypatch.setattr(
-            "panelcast.models.bayes.predict.predict_new_artist",
+            "panelcast.models.bayes.predict.predict_new_entity",
             lambda *a, **kw: {"y": np.full((200, 1), 75.0)},
         )
         monkeypatch.setattr(
@@ -583,7 +583,7 @@ class TestRunSensitivitySuite:
         import panelcast.models.bayes.predict as _pred_mod
         import panelcast.pipelines.training_summary as _ts_mod2
         monkeypatch.setattr(_split_mod, "entity_disjoint_split", lambda df, **kw: (df, df, small_test))
-        monkeypatch.setattr(_pred_mod, "predict_new_artist", lambda *a, **kw: {"y": np.full((200, len(small_test)), 70.0)})
+        monkeypatch.setattr(_pred_mod, "predict_new_entity", lambda *a, **kw: {"y": np.full((200, len(small_test)), 70.0)})
         monkeypatch.setattr(_ts_mod2, "ar_center_on_model_scale", lambda s: 0.0)
         # extract_posterior_samples — imported locally in run_sensitivity_suite
         monkeypatch.setattr(
@@ -629,7 +629,7 @@ class TestRunSensitivitySuite:
         import panelcast.models.bayes.predict as _pred_mod
         import panelcast.pipelines.training_summary as _ts_mod2
         monkeypatch.setattr(_split_mod, "entity_disjoint_split", lambda df, **kw: (df, df, small_test))
-        monkeypatch.setattr(_pred_mod, "predict_new_artist", lambda *a, **kw: {"y": np.full((200, len(small_test)), 70.0)})
+        monkeypatch.setattr(_pred_mod, "predict_new_entity", lambda *a, **kw: {"y": np.full((200, len(small_test)), 70.0)})
         monkeypatch.setattr(_ts_mod2, "ar_center_on_model_scale", lambda s: 0.0)
         monkeypatch.setattr(
             _pred_mod, "extract_posterior_samples",

@@ -1,7 +1,7 @@
 # Evaluation Protocol
 
-Protocol terms use AOTY's entity/event names ("artist"/"album"); they apply to
-any domain's entities and events.
+Protocol terms are generic (entities and their sequential events); in the AOTY
+example domain an entity is an artist and an event is an album.
 
 Metrics
 - R2 on held-out test sets (primary and secondary splits)
@@ -10,11 +10,11 @@ Metrics
 - CRPS (proper scoring rule for probabilistic regression)
 
 Cross-validation
-- Primary evaluation: within-artist temporal holdout (last album per artist)
-- Secondary evaluation: artist-group split (no artist overlap)
-- Secondary split uses cold-start predictive path (population-level artist effect)
+- Primary evaluation: within-entity temporal holdout (last event per entity)
+- Secondary evaluation: entity-disjoint split (no entity overlap)
+- Secondary split uses cold-start predictive path (population-level entity effect)
 - Secondary split sets `prev_score` to training global mean for every row (no held-out label usage)
-- Primary split fails fast if unknown artists appear in test data (no silent row dropping)
+- Primary split fails fast if unknown entities appear in test data (no silent row dropping)
 
 History cap (`max_albums`)
 - `--max-albums` (default 50 for AOTY) caps the length of the time-varying
@@ -38,4 +38,4 @@ Diagnostics
 
 Model comparison
 - LOO and WAIC computed for the primary split when pointwise log-likelihood is available
-- Secondary split reports info-criteria as unavailable when using new-artist predictive path
+- Secondary split reports info-criteria as unavailable when using the new-entity predictive path

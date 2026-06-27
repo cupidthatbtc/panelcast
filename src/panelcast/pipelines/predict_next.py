@@ -1,8 +1,8 @@
-"""Next-album prediction pipeline.
+"""Next-event prediction pipeline.
 
 Generates predictions for:
-- Known artists (3 scenarios): next album using trained artist effects
-- New/hypothetical artists (2 scenarios): using population distribution
+- Known entities (3 scenarios): next event using trained entity effects
+- New/hypothetical entities (2 scenarios): using population distribution
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from panelcast.data.alignment import join_splits_with_features
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.models.bayes.io import load_manifest, load_model
 from panelcast.models.bayes.model import make_score_model
-from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_artist
+from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_entity
 from panelcast.models.bayes.priors import PriorConfig
 from panelcast.models.bayes.transforms import get_transform
 from panelcast.pipelines.training_summary import (
@@ -46,7 +46,7 @@ def _extract_posterior_samples(idata: object) -> dict[str, jnp.ndarray]:
     return extract_posterior_samples(idata)
 
 
-def _predict_known_artists(
+def _predict_known_entities(
     posterior_samples: dict[str, jnp.ndarray],
     summary: dict,
     last_album_info: pd.DataFrame,
@@ -56,18 +56,18 @@ def _predict_known_artists(
     batch_size: int = 500,
     artist_batch_size: int = 50,
 ) -> pd.DataFrame:
-    """Generate next-album predictions for all known artists under 3 scenarios.
+    """Generate next-event predictions for all known entities under 3 scenarios.
 
     Scenarios:
-    - "same": Use the artist's last album's feature values
+    - "same": Use the entity's last event's feature values
     - "population_mean": Use population mean features (zeros after z-scoring)
-    - "entity_mean": Use the artist's mean feature values
+    - "entity_mean": Use the entity's mean feature values
 
     Args:
         posterior_samples: Flattened posterior samples dict.
         summary: Training summary dict.
-        last_album_info: DataFrame with last album info per artist.
-        artist_mean_features: DataFrame with mean feature values per artist.
+        last_album_info: DataFrame with last event info per entity.
+        artist_mean_features: DataFrame with mean feature values per entity.
 
     Returns:
         DataFrame with columns: entity, scenario, pred_mean, pred_std,
@@ -280,12 +280,12 @@ def _predict_known_artists(
     return pd.DataFrame(results)
 
 
-def _predict_new_artists(
+def _predict_new_entities(
     posterior_samples: dict[str, jnp.ndarray],
     summary: dict,
     seed: int = 42,
 ) -> pd.DataFrame:
-    """Generate predictions for hypothetical new artists under 2 scenarios.
+    """Generate predictions for hypothetical new entities under 2 scenarios.
 
     Scenarios:
     - "population": Population mean features, median n_reviews
@@ -293,7 +293,7 @@ def _predict_new_artists(
 
     Both scenarios use training global-mean `prev_score` as the neutral
     cold-start baseline (matching evaluation protocol and train-time debut
-    handling), then differ only by assumed review count.
+    handling), then differ only by assumed observation count.
 
     Args:
         posterior_samples: Flattened posterior samples dict (numpy-compatible).
@@ -358,7 +358,7 @@ def _predict_new_artists(
                 if not learn_n_exponent and n_exponent != 0.0:
                     kwargs["fixed_n_exponent"] = n_exponent
 
-            pred = predict_new_artist(**kwargs)
+            pred = predict_new_entity(**kwargs)
 
             y_samples = np.asarray(pred["y"])
             results.append(
@@ -377,11 +377,11 @@ def _predict_new_artists(
     return pd.DataFrame(results)
 
 
-def predict_next_albums(ctx: StageContext) -> dict:
-    """Generate next-album predictions for known and new artists.
+def predict_next_events(ctx: StageContext) -> dict:
+    """Generate next-event predictions for known and new entities.
 
-    Known artists get 3 scenarios (same features, population mean, artist mean).
-    New artists get 2 scenarios (population, debut defaults).
+    Known entities get 3 scenarios (same features, population mean, entity mean).
+    New entities get 2 scenarios (population, debut defaults).
 
     Args:
         ctx: Stage context with run configuration.
@@ -474,9 +474,9 @@ def predict_next_albums(ctx: StageContext) -> dict:
     # Compute artist mean features
     artist_mean_features = train_df.groupby(entity_col)[feature_cols].mean()
 
-    # Generate known artist predictions
+    # Generate known entity predictions
     log.info("predicting_known_artists", n_artists=len(summary["artist_to_idx"]))
-    known_df = _predict_known_artists(
+    known_df = _predict_known_entities(
         posterior_samples,
         summary,
         last_album_info,
@@ -488,9 +488,9 @@ def predict_next_albums(ctx: StageContext) -> dict:
     )
     log.info("known_predictions_complete", n_rows=len(known_df))
 
-    # Generate new artist predictions
+    # Generate new entity predictions
     log.info("predicting_new_artists")
-    new_df = _predict_new_artists(posterior_samples, summary, seed=seed)
+    new_df = _predict_new_entities(posterior_samples, summary, seed=seed)
     log.info("new_predictions_complete", n_rows=len(new_df))
 
     # Save outputs
@@ -571,24 +571,24 @@ def predict_next_albums(ctx: StageContext) -> dict:
     }
 
 
-def predict_artist_next(
-    artist: str,
+def predict_entity_next(
+    entity: str,
     seed: int = 42,
     batch_size: int = 500,
     models_dir: str | Path = "models",
     splits_path: str | Path | None = None,
     features_path: str | Path = "data/features/train_features.parquet",
 ) -> pd.DataFrame:
-    """Next-album predictions for one known artist (library convenience).
+    """Next-event predictions for one known entity (library convenience).
 
-    Wraps the predict stage's known-artist path for a single entity: loads
-    the current model and training summary, rebuilds the artist's last-album
+    Wraps the predict stage's known-entity path for a single entity: loads
+    the current model and training summary, rebuilds the entity's last-event
     and mean-feature metadata from the training split, and returns the
     per-scenario prediction rows (same columns as
     outputs/predictions/next_event_known_entities.csv).
 
     Args:
-        artist: Entity name exactly as it appears in the training data.
+        entity: Entity name exactly as it appears in the training data.
         seed: Predictive rng seed.
         batch_size: Posterior-draw batch size for the predictive.
         models_dir: Directory holding manifest.json / training_summary.json.
@@ -597,10 +597,10 @@ def predict_artist_next(
         features_path: Training features parquet.
 
     Returns:
-        DataFrame with one row per scenario for the requested artist.
+        DataFrame with one row per scenario for the requested entity.
 
     Raises:
-        KeyError: If the artist was not part of the trained model.
+        KeyError: If the entity was not part of the trained model.
     """
     if splits_path is None:
         splits_path = (
@@ -615,10 +615,10 @@ def predict_artist_next(
     prefix = ds_block.get("model_prefix", "user")
 
     artist_to_idx = summary["artist_to_idx"]
-    if artist not in artist_to_idx:
+    if entity not in artist_to_idx:
         raise KeyError(
-            f"{entity_col} {artist!r} is not part of the trained model "
-            f"({len(artist_to_idx)} known entities). Use predict_new_artist "
+            f"{entity_col} {entity!r} is not part of the trained model "
+            f"({len(artist_to_idx)} known entities). Use predict_new_entity "
             "for cold-start predictions."
         )
 
@@ -632,10 +632,10 @@ def predict_artist_next(
     train_df = pd.read_parquet(splits_path)
     train_features = pd.read_parquet(features_path)
     train_df = join_splits_with_features(train_df, train_features, name="predict_one_train")
-    train_df = train_df[train_df[entity_col] == artist].copy()
+    train_df = train_df[train_df[entity_col] == entity].copy()
     if train_df.empty:
         raise KeyError(
-            f"{entity_col} {artist!r} has no rows in the training split at {splits_path}."
+            f"{entity_col} {entity!r} has no rows in the training split at {splits_path}."
         )
 
     feature_cols = summary["feature_cols"]
@@ -654,8 +654,8 @@ def predict_artist_next(
     last_album_info = last_album_info.join(artist_stats[["n_albums", "median_n_reviews"]])
     artist_mean_features = train_df.groupby(entity_col)[feature_cols].mean()
 
-    summary_single = {**summary, "artist_to_idx": {artist: artist_to_idx[artist]}}
-    return _predict_known_artists(
+    summary_single = {**summary, "artist_to_idx": {entity: artist_to_idx[entity]}}
+    return _predict_known_entities(
         posterior_samples,
         summary_single,
         last_album_info,
