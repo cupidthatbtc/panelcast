@@ -650,6 +650,20 @@ class TestBuildCommandString:
 class TestResumeConfigRestoration:
     """Tests for resume config restoration from manifest."""
 
+    def test_chain_method_in_resume_config_keys(self):
+        """chain_method is recorded in the manifest and re-emitted by the resume
+        command, so a resumed run must restore it rather than fall back to the default."""
+        assert "chain_method" in PipelineOrchestrator.RESUME_CONFIG_KEYS
+
+    def test_resume_restores_chain_method_from_manifest(self):
+        """Resume adopts the manifest's chain_method instead of the CLI default."""
+        config = PipelineConfig(resume="some-run")
+        orch = PipelineOrchestrator(config)
+        assert config.chain_method == "sequential"  # CLI default
+        orch.manifest = MagicMock(flags={"chain_method": "parallel"})
+        orch._restore_config_from_manifest()
+        assert config.chain_method == "parallel"
+
     @patch("panelcast.pipelines.orchestrator.ensure_environment_locked")
     @patch("panelcast.pipelines.orchestrator.verify_environment")
     @patch("panelcast.pipelines.orchestrator.get_execution_order")

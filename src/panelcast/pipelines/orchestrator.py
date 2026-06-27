@@ -567,6 +567,7 @@ class PipelineOrchestrator:
     RESUME_CONFIG_KEYS = (
         "target_accept",
         "max_tree_depth",
+        "chain_method",
         "num_chains",
         "num_samples",
         "num_warmup",
