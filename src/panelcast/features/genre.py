@@ -74,7 +74,7 @@ class GenreBlock(BaseFeatureBlock):
         """Number of PCA components (None to skip PCA)."""
         return self.params.get("n_components", 30)
 
-    def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> "GenreBlock":
+    def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> GenreBlock:
         """Learn genre vocabulary and fit PCA from training data.
 
         Parameters

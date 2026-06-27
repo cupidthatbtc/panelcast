@@ -230,7 +230,7 @@ class TestConvergenceReference:
             },
             "passed": passed,
             "recommend_grid_search": divergence_rate >= 0.05,
-            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         }
 
         # Write to models/convergence_reference.json

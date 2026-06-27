@@ -45,8 +45,8 @@ class TestPredictors:
             assert pred.samples.shape == (50, test.y.shape[0])
             assert np.all(pred.point >= train.bounds[0] - 1e-6)
             assert np.all(pred.point <= train.bounds[1] + 1e-6)
-            assert np.all((pred.samples >= train.bounds[0] - 1e-6))
-            assert np.all((pred.samples <= train.bounds[1] + 1e-6))
+            assert np.all(pred.samples >= train.bounds[0] - 1e-6)
+            assert np.all(pred.samples <= train.bounds[1] + 1e-6)
 
     def test_global_mean_is_constant(self):
         train, test = _panels()

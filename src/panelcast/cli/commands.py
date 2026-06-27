@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 import typer
 
@@ -25,7 +24,7 @@ def export_figures(
     scale: float = typer.Option(
         2.0, "--scale", "-s", help="Scale factor for raster output (2.0 = ~300dpi)"
     ),
-    run_dir: Optional[str] = typer.Option(
+    run_dir: str | None = typer.Option(
         None, "--run", "-r", help="Path to pipeline run directory"
     ),
 ) -> None:
@@ -211,7 +210,7 @@ def compare(
         "--baselines",
         help="Fit the baseline predictors and emit the benchmark comparison table.",
     ),
-    dataset: Optional[str] = typer.Option(
+    dataset: str | None = typer.Option(
         None,
         "--dataset",
         help="Dataset descriptor (bare name or YAML path; omit for AOTY defaults).",

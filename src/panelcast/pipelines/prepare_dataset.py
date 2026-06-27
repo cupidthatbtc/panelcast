@@ -4,7 +4,6 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
 
 import pandas as pd
 import structlog
@@ -105,7 +104,7 @@ def save_dataset(
     return {"parquet": parquet_path, "csv": csv_path}
 
 
-def prepare_datasets(config: Optional[PrepareConfig] = None) -> PrepareResult:
+def prepare_datasets(config: PrepareConfig | None = None) -> PrepareResult:
     """
     Prepare all cleaned datasets from raw CSV.
 

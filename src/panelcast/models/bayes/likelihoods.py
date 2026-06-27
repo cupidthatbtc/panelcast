@@ -26,8 +26,8 @@ The continuous (toggle-off) path is byte-identical to the pre-registry code.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import jax.numpy as jnp
 import jax.scipy.special as jsp

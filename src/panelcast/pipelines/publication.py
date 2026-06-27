@@ -461,7 +461,7 @@ def _resolve_model_key(model_dir: Path) -> tuple[str, str]:
     summary_path = model_dir / "training_summary.json"
     if summary_path.exists():
         try:
-            with open(summary_path, "r", encoding="utf-8") as f:
+            with open(summary_path, encoding="utf-8") as f:
                 dataset_block = json.load(f).get("dataset") or {}
             prefix = dataset_block.get("model_prefix") or "user"
         except (json.JSONDecodeError, OSError) as e:
@@ -520,7 +520,7 @@ def _load_publication_inputs(ctx: StageContext) -> _PublicationInputs:
 
     def _load_json(path: Path, log_event: str, artifact: str) -> dict[str, Any]:
         try:
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError) as e:
             log.warning(log_event, error=str(e))
@@ -714,7 +714,7 @@ def _save_predictions_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -
         ]
         pred_path = next((p for p in pred_candidates if p.exists()), None)
         if pred_path is not None:
-            with open(pred_path, "r", encoding="utf-8") as f:
+            with open(pred_path, encoding="utf-8") as f:
                 pred_data = json.load(f)
             interval_level = pred_data.get("interval_level", 0.90)
             pdf_path, png_path = save_predictions_plot(
@@ -744,7 +744,7 @@ def _save_reliability_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -
         ]
         cal_path = next((p for p in cal_candidates if p.exists()), None)
         if cal_path is not None:
-            with open(cal_path, "r", encoding="utf-8") as f:
+            with open(cal_path, encoding="utf-8") as f:
                 cal_data = json.load(f)
             probs = np.array(cal_data["predicted_probs"])
             if "bin_edges" in cal_data:
@@ -891,7 +891,7 @@ def _build_prior_justification(inp: _PublicationInputs) -> str | None:
         pp_path = inp.eval_dir / "prior_predictive.json"
         if pp_path.exists():
             try:
-                with open(pp_path, "r", encoding="utf-8") as f:
+                with open(pp_path, encoding="utf-8") as f:
                     pp_data = json.load(f)
                 pp_result = PriorPredictiveResult(
                     y_samples=np.array([]),

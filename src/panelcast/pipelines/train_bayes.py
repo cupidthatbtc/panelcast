@@ -500,7 +500,7 @@ def _apply_max_albums_cap(
 
 
 def _build_heteroscedastic_summary(
-    ctx: "StageContext",
+    ctx: StageContext,
     fit_result,
     model_args: dict,
     prefix: str,
@@ -654,7 +654,7 @@ def _build_heteroscedastic_summary(
 
 
 def train_models(
-    ctx: "StageContext",
+    ctx: StageContext,
     features_path: Path | None = None,
     splits_path: Path | None = None,
 ) -> dict:

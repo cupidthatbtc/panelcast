@@ -9,7 +9,7 @@ block retargets to any domain. Defaults are the AOTY literals; the
 
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 import pandas as pd
@@ -85,7 +85,7 @@ class EntityHistoryBlock(BaseFeatureBlock):
             event_col,
         ]
 
-    def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> "EntityHistoryBlock":
+    def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> EntityHistoryBlock:
         """Learn global statistics from training data for debut imputation."""
         self.validate_columns(df)
 

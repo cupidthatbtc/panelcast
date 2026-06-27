@@ -3,9 +3,9 @@
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import pandas as pd
 import structlog
@@ -68,9 +68,9 @@ class SplitResult:
     source_path: Path
     temporal_manifest_path: Path
     disjoint_manifest_path: Path
-    temporal_splits: Dict[str, Path]
-    disjoint_splits: Dict[str, Path]
-    summary: Dict[str, Any]
+    temporal_splits: dict[str, Path]
+    disjoint_splits: dict[str, Path]
+    summary: dict[str, Any]
 
 
 def save_split_parquet(df: pd.DataFrame, path: Path) -> None:
@@ -79,7 +79,7 @@ def save_split_parquet(df: pd.DataFrame, path: Path) -> None:
     df.to_parquet(path, compression="snappy", index=False)
 
 
-def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
+def create_splits(config: SplitConfig | None = None) -> SplitResult:
     """
     Create train/validation/test splits from cleaned dataset.
 
@@ -158,7 +158,7 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
     # Create manifest
     temporal_manifest = SplitManifest(
         version=config.version,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
         split_type=str(SplitType.WITHIN_ENTITY_TEMPORAL.value),
         parameters={
             "test_albums": config.test_albums,
@@ -246,7 +246,7 @@ def create_splits(config: Optional[SplitConfig] = None) -> SplitResult:
     # Create manifest
     disjoint_manifest = SplitManifest(
         version=config.version,
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
         split_type=str(SplitType.ENTITY_DISJOINT.value),
         parameters={
             "test_size": config.disjoint_test_size,

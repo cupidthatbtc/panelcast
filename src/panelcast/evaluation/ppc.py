@@ -13,8 +13,8 @@ Key concepts:
 
 import logging
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable
 
 import numpy as np
 import scipy.stats

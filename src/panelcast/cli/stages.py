@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Optional
+from typing import Annotated
 
 import typer
 
@@ -36,9 +36,9 @@ def stage_data(
     ctx: typer.Context,
     seed: int = typer.Option(42, "--seed", help="Random seed"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG logging"),
-    dataset: Optional[str] = _STAGE_DATASET_OPTION,
-    config_files: Optional[list[str]] = _STAGE_CONFIG_OPTION,
-    preset: Optional[str] = _STAGE_PRESET_OPTION,
+    dataset: str | None = _STAGE_DATASET_OPTION,
+    config_files: list[str] | None = _STAGE_CONFIG_OPTION,
+    preset: str | None = _STAGE_PRESET_OPTION,
 ) -> None:
     """Run data preparation stage only.
 
@@ -65,9 +65,9 @@ def stage_splits(
     ctx: typer.Context,
     seed: int = typer.Option(42, "--seed", help="Random seed"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG logging"),
-    dataset: Optional[str] = _STAGE_DATASET_OPTION,
-    config_files: Optional[list[str]] = _STAGE_CONFIG_OPTION,
-    preset: Optional[str] = _STAGE_PRESET_OPTION,
+    dataset: str | None = _STAGE_DATASET_OPTION,
+    config_files: list[str] | None = _STAGE_CONFIG_OPTION,
+    preset: str | None = _STAGE_PRESET_OPTION,
 ) -> None:
     """Run split creation stage only.
 
@@ -94,9 +94,9 @@ def stage_features(
     ctx: typer.Context,
     seed: int = typer.Option(42, "--seed", help="Random seed"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG logging"),
-    dataset: Optional[str] = _STAGE_DATASET_OPTION,
-    config_files: Optional[list[str]] = _STAGE_CONFIG_OPTION,
-    preset: Optional[str] = _STAGE_PRESET_OPTION,
+    dataset: str | None = _STAGE_DATASET_OPTION,
+    config_files: list[str] | None = _STAGE_CONFIG_OPTION,
+    preset: str | None = _STAGE_PRESET_OPTION,
 ) -> None:
     """Run feature building stage only.
 
@@ -147,9 +147,9 @@ def stage_train(
         "--allow-divergences",
         help="Don't fail on divergences (for exploratory runs)",
     ),
-    dataset: Optional[str] = _STAGE_DATASET_OPTION,
-    config_files: Optional[list[str]] = _STAGE_CONFIG_OPTION,
-    preset: Optional[str] = _STAGE_PRESET_OPTION,
+    dataset: str | None = _STAGE_DATASET_OPTION,
+    config_files: list[str] | None = _STAGE_CONFIG_OPTION,
+    preset: str | None = _STAGE_PRESET_OPTION,
 ) -> None:
     """Run model training stage only.
 
@@ -179,9 +179,9 @@ def stage_evaluate(
     ctx: typer.Context,
     seed: int = typer.Option(42, "--seed", help="Random seed"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG logging"),
-    dataset: Optional[str] = _STAGE_DATASET_OPTION,
-    config_files: Optional[list[str]] = _STAGE_CONFIG_OPTION,
-    preset: Optional[str] = _STAGE_PRESET_OPTION,
+    dataset: str | None = _STAGE_DATASET_OPTION,
+    config_files: list[str] | None = _STAGE_CONFIG_OPTION,
+    preset: str | None = _STAGE_PRESET_OPTION,
 ) -> None:
     """Run evaluation stage only.
 
@@ -207,9 +207,9 @@ def stage_predict(
     ctx: typer.Context,
     seed: int = typer.Option(42, "--seed", help="Random seed"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG logging"),
-    dataset: Optional[str] = _STAGE_DATASET_OPTION,
-    config_files: Optional[list[str]] = _STAGE_CONFIG_OPTION,
-    preset: Optional[str] = _STAGE_PRESET_OPTION,
+    dataset: str | None = _STAGE_DATASET_OPTION,
+    config_files: list[str] | None = _STAGE_CONFIG_OPTION,
+    preset: str | None = _STAGE_PRESET_OPTION,
 ) -> None:
     """Run next-event prediction stage only.
 
@@ -240,9 +240,9 @@ def stage_report(
         help="Fail if publication-readiness checks are not satisfied",
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable DEBUG logging"),
-    dataset: Optional[str] = _STAGE_DATASET_OPTION,
-    config_files: Optional[list[str]] = _STAGE_CONFIG_OPTION,
-    preset: Optional[str] = _STAGE_PRESET_OPTION,
+    dataset: str | None = _STAGE_DATASET_OPTION,
+    config_files: list[str] | None = _STAGE_CONFIG_OPTION,
+    preset: str | None = _STAGE_PRESET_OPTION,
 ) -> None:
     """Run report generation stage only.
 
@@ -280,7 +280,7 @@ def stage_sensitivity(
         int,
         typer.Option(min=50, help="Warmup iterations per refit (default 500)"),
     ] = 500,
-    dataset: Optional[str] = typer.Option(
+    dataset: str | None = typer.Option(
         None,
         "--dataset",
         help="Dataset descriptor (bare name or YAML path; omit for AOTY defaults).",

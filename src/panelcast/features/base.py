@@ -108,7 +108,7 @@ class BaseFeatureBlock:
         if missing:
             raise ValueError(f"{self.name} missing required columns: {missing}")
 
-    def fit(self, df, ctx: FeatureContext) -> "BaseFeatureBlock":
+    def fit(self, df, ctx: FeatureContext) -> BaseFeatureBlock:
         """Fit the block on training data.
 
         Subclasses should override this method to learn statistics,
@@ -195,7 +195,7 @@ class FeatureBlock(Protocol):
         """Check if block has been fitted."""
         ...
 
-    def fit(self, df, ctx: FeatureContext) -> "FeatureBlock":
+    def fit(self, df, ctx: FeatureContext) -> FeatureBlock:
         """Fit the block on training data."""
         ...
 

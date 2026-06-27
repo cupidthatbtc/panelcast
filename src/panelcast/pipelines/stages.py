@@ -9,9 +9,10 @@ from __future__ import annotations
 import hashlib
 import os
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.utils.hashing import sha256_path
@@ -72,7 +73,7 @@ class StageContext:
     seed: int
     strict: bool
     verbose: bool
-    manifest: "RunManifest"
+    manifest: RunManifest
     max_albums: int = 50
     # MCMC configuration
     num_chains: int = 4

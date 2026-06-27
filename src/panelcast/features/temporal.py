@@ -68,7 +68,7 @@ class TemporalBlock(BaseFeatureBlock):
             event_col,
         ]
 
-    def fit(self, df, ctx: FeatureContext) -> "TemporalBlock":
+    def fit(self, df, ctx: FeatureContext) -> TemporalBlock:
         """Fit the temporal block on training data.
 
         Validates required columns exist. This block is stateless,

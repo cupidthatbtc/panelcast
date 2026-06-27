@@ -8,8 +8,9 @@ over the descriptor's column names, and domain packs named in
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 from panelcast.config.descriptor import DatasetDescriptor
 

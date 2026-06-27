@@ -4,8 +4,8 @@ import pandas as pd
 import pytest
 
 from panelcast.data.split import (
-    entity_disjoint_split,
     assert_no_artist_overlap,
+    entity_disjoint_split,
     validate_temporal_split,
     within_entity_temporal_split,
 )

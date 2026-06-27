@@ -15,8 +15,9 @@ Key concepts:
   in the parameter names denotes the grouping entity.)
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, TypedDict
+from typing import TypedDict
 
 import jax.numpy as jnp
 from jax import random

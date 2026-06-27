@@ -18,8 +18,8 @@ Registering a new transform is a single :func:`register_transform` call.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 import jax
 import jax.numpy as jnp

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, Optional
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 
@@ -14,8 +14,8 @@ if TYPE_CHECKING:
 
 
 def _resolve_effective_config_files(
-    preset: Optional[str],
-    config_files: Optional[list[str]],
+    preset: str | None,
+    config_files: list[str] | None,
 ) -> list[str]:
     """Resolve ``--preset`` (layered first) + ``--config`` into an ordered list.
 
@@ -85,9 +85,9 @@ def _build_stage_config(
     *,
     seed: int,
     verbose: bool,
-    dataset: Optional[str],
-    config_files: Optional[list[str]],
-    preset: Optional[str],
+    dataset: str | None,
+    config_files: list[str] | None,
+    preset: str | None,
     **extra: object,
 ) -> PipelineConfig:
     """Build a single-stage ``PipelineConfig`` with ``run``'s option-wiring.
@@ -363,7 +363,7 @@ def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> No
 @app.command("run")
 def run(
     ctx: typer.Context,
-    config_files: Optional[list[str]] = typer.Option(
+    config_files: list[str] | None = typer.Option(
         None,
         "--config",
         "-c",
@@ -373,7 +373,7 @@ def run(
             "earlier ones. Explicit CLI options always win over YAML."
         ),
     ),
-    preset: Optional[str] = typer.Option(
+    preset: str | None = typer.Option(
         None,
         "--preset",
         help=(
@@ -388,7 +388,7 @@ def run(
         "--skip-existing",
         help="Skip stages with unchanged inputs",
     ),
-    stages: Optional[str] = typer.Option(
+    stages: str | None = typer.Option(
         None,
         "--stages",
         "-s",
@@ -440,7 +440,7 @@ def run(
         "--recalibrate",
         help="Force fresh calibration even if cached calibration exists",
     ),
-    resume: Optional[str] = typer.Option(
+    resume: str | None = typer.Option(
         None,
         "--resume",
         help="Resume failed run by run-id (e.g., '2026-01-19_143052')",
@@ -520,7 +520,7 @@ def run(
     ),
     # Data Filtering
     min_ratings: Annotated[
-        Optional[int],
+        int | None,
         typer.Option(
             min=1,
             help=(
@@ -669,7 +669,7 @@ def run(
         "--secondary-split/--no-secondary-split",
         help="Enable artist-disjoint secondary evaluation split",
     ),
-    dataset: Optional[str] = typer.Option(
+    dataset: str | None = typer.Option(
         None,
         "--dataset",
         help=(

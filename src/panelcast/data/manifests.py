@@ -146,7 +146,7 @@ def load_manifest(filepath: Path) -> SplitManifest:
     Returns:
         SplitManifest object
     """
-    with open(filepath, "r", encoding="utf-8") as f:
+    with open(filepath, encoding="utf-8") as f:
         d = json.load(f)
     return SplitManifest.from_dict(d)
 

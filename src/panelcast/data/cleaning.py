@@ -6,9 +6,9 @@ constants keep the AOTY literals as defaults so existing call sites behave
 byte-identically (default-equals-AOTY contract).
 """
 
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Mapping, Optional, Sequence
 
 import pandas as pd
 import structlog
@@ -220,8 +220,8 @@ def apply_exclusion_filter(
     df: pd.DataFrame,
     condition: pd.Series,
     reason: str,
-    logger: Optional[AuditLogger] = None,
-    value_col: Optional[str] = None,
+    logger: AuditLogger | None = None,
+    value_col: str | None = None,
     *,
     entity_col: str = "Artist",
     event_col: str = "Album",
@@ -269,8 +269,8 @@ def _has_nonempty_text(series: pd.Series) -> pd.Series:
 
 def clean_albums(
     df: pd.DataFrame,
-    config: Optional[CleaningConfig] = None,
-    logger: Optional[AuditLogger] = None,
+    config: CleaningConfig | None = None,
+    logger: AuditLogger | None = None,
 ) -> pd.DataFrame:
     """
     Apply full cleaning pipeline to raw album data.
@@ -377,7 +377,7 @@ def filter_for_target_model(
     min_obs: int,
     *,
     target: str = "primary",
-    logger: Optional[AuditLogger] = None,
+    logger: AuditLogger | None = None,
 ) -> pd.DataFrame:
     """
     Filter dataset for modeling one of the descriptor's targets.
@@ -465,7 +465,7 @@ def filter_for_target_model(
 def filter_for_user_score_model(
     df: pd.DataFrame,
     min_ratings: int,
-    logger: Optional[AuditLogger] = None,
+    logger: AuditLogger | None = None,
 ) -> pd.DataFrame:
     """
     Filter dataset for user score modeling (AOTY primary-target wrapper).
@@ -481,7 +481,7 @@ def filter_for_user_score_model(
 def filter_for_critic_score_model(
     df: pd.DataFrame,
     min_reviews: int = 1,
-    logger: Optional[AuditLogger] = None,
+    logger: AuditLogger | None = None,
 ) -> pd.DataFrame:
     """
     Filter dataset for critic score modeling (AOTY secondary-target wrapper).

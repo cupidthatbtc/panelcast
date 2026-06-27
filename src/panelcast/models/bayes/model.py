@@ -35,7 +35,7 @@ Model variants:
 - critic_score_model: For critic score prediction (prefix: "critic_")
 """
 
-from typing import Callable
+from collections.abc import Callable
 
 import jax.numpy as jnp
 import numpyro

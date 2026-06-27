@@ -57,7 +57,7 @@ def load_yaml_config(paths: str | Path | list[str | Path]) -> dict[str, Any]:
 
     data: dict = {}
     for path in path_list:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             next_data = yaml.safe_load(f)
         if next_data is None:
             next_data = {}

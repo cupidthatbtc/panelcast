@@ -44,7 +44,7 @@ class AlbumTypeBlock(BaseFeatureBlock):
     requires: list[str] = []
     required_columns: list[str] = ["Album_Type"]
 
-    def fit(self, df, ctx: FeatureContext) -> "AlbumTypeBlock":
+    def fit(self, df, ctx: FeatureContext) -> AlbumTypeBlock:
         """Fit the album type block on training data.
 
         Learns vocabulary of unique album types from training data
