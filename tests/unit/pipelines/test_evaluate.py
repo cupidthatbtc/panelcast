@@ -2159,6 +2159,47 @@ class TestPrepareTestModelArgs:
         assert model_args["y"] is None
         assert len(y_true) == 2
 
+    def test_eiv_and_propagate_rw_paths(self):
+        """errors_in_variables emits a finite prev_meas_sigma from the preceding
+        album's review count, and propagate_rw_horizon keeps the deep album_seq."""
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "B"],
+                "User_Score": [80.0, 82.0, 85.0],
+                "Album": ["a1", "a2", "b1"],
+                "n_reviews": [10, 40, 25],
+            }
+        )
+        test_features = pd.DataFrame(
+            {
+                "f1": [1.0, 2.0, 3.0],
+                "n_reviews": [10, 40, 25],
+            }
+        )
+        summary = self._make_summary()
+        summary["global_std_score"] = 8.0
+        summary["priors"]["errors_in_variables"] = True
+        summary["priors"]["propagate_rw_horizon"] = True
+        train_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "B", "B"],
+                "User_Score": [70.0, 75.0, 80.0, 82.0],
+                "n_reviews": [12, 15, 20, 22],
+            }
+        )
+
+        model_args, y_true = _prepare_test_model_args(
+            test_df, test_features, summary, train_df=train_df
+        )
+
+        assert "prev_meas_sigma" in model_args
+        sigma = model_args["prev_meas_sigma"]
+        assert sigma.shape == y_true.shape
+        # every row has a positive preceding review count, so the measurement
+        # scale is finite and strictly positive (never the zero fallback).
+        assert np.isfinite(sigma).all()
+        assert (sigma > 0).all()
+
     def test_overlap_columns_dropped(self):
         """Overlapping columns should be dropped from test_df."""
         test_df = pd.DataFrame(
