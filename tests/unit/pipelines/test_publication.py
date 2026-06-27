@@ -2354,6 +2354,37 @@ class TestArtistFanCharts:
         error_names = [e["artifact"] for e in artifacts["errors"]]
         assert "artist_fan_charts" not in error_names
 
+    def test_fan_charts_per_artist_failure_recorded(self, tmp_path):
+        """Per-artist chart failures must reach artifacts['errors'] so the
+        readiness gate cannot report ready while every chart silently failed."""
+        _write_json_more(tmp_path / "outputs/evaluation/metrics.json", _make_metrics_more())
+        _write_json_more(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics_more())
+        _write_json_more(tmp_path / "models/training_summary.json", _make_training_summary_more())
+
+        _make_known_artists_csv(tmp_path / "outputs/predictions/next_event_known_entities.csv")
+        _make_train_parquet(tmp_path / "data/splits/within_entity_temporal/train.parquet")
+        pred_path = tmp_path / "outputs/evaluation/within_entity_temporal/predictions.json"
+        _make_predictions_json(pred_path)
+
+        ctx = _setup_ctx_more(strict=False)
+        patches = _base_patches_more(
+            tmp_path,
+            save_artist_prediction_plot=patch(
+                "panelcast.pipelines.publication.save_artist_prediction_plot",
+                side_effect=RuntimeError("fan boom"),
+            ),
+            select_artist_subsets=patch(
+                "panelcast.pipelines.publication.select_artist_subsets",
+                return_value={"top": ["ArtistA", "ArtistB"]},
+            ),
+        )
+        artifacts = _run_with_patches_more(tmp_path, ctx, patches)
+        error_names = [e["artifact"] for e in artifacts["errors"]]
+        # The per-artist failure is recorded (not swallowed as a warning only)...
+        assert any(name.startswith("artist_fan_chart:") for name in error_names)
+        # ...while the outer block itself did not error.
+        assert "artist_fan_charts" not in error_names
+
 
 class TestPriorPredictiveLoadFailure:
     def test_corrupt_prior_predictive_json_logs_warning(self, tmp_path):

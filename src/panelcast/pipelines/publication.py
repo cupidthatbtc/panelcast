@@ -957,6 +957,11 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                         artifacts["figures"].append(str(png_path))
                     except Exception as e:
                         log.warning("artist_fan_chart_failed", artist=artist, error=str(e))
+                        # Record per-artist failures so the readiness gate sees them;
+                        # a run where every chart failed must not report ready.
+                        artifacts["errors"].append(
+                            {"artifact": f"artist_fan_chart:{artist}", "error": str(e)}
+                        )
 
                 log.info("artist_fan_charts_complete", n_artists=len(all_selected))
             else:
