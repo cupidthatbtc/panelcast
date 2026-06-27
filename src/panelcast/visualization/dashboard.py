@@ -420,7 +420,7 @@ def create_coefficients_table(coefficients: pd.DataFrame) -> str:
     return "\n".join(html_parts)
 
 
-def load_dashboard_data(run_dir: Path | None = None) -> DashboardData:
+def load_dashboard_data(run_dir: Path | None = None) -> DashboardData:  # noqa: C901  # tracked complexity debt
     """Load dashboard data from the most recent pipeline run or specified directory.
 
     Parameters

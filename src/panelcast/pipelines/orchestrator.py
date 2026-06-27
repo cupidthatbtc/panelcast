@@ -724,7 +724,7 @@ class PipelineOrchestrator:
         # Re-validate after restoration (catches corrupted/invalid manifest values)
         self.config._validate()
 
-    def _build_command_string(self) -> str:
+    def _build_command_string(self) -> str:  # noqa: C901  # tracked complexity debt
         """Build command string representation for manifest."""
         parts = ["panelcast run"]
         defaults = _get_default_config()
