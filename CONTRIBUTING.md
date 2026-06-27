@@ -78,6 +78,13 @@ chance to auto-fix formatting and imports.
   convergence / PPC / calibration checks green; golden-hash tests guard computed
   values against accidental drift.
 
+## Releasing
+
+The Python runtime reads its version from the installed package metadata
+(`panelcast.__version__` → `importlib.metadata`), whose source of truth is
+`pyproject.toml`. Bump `version` there, then hand-sync the static metadata that
+no code can read: `pixi.toml`, `CITATION.cff`, and the `MODEL_CARD.md` header.
+
 ## Reporting issues
 
 Use the issue templates under `.github/ISSUE_TEMPLATE/`. For bugs, include the

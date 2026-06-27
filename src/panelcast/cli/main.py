@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import typer
 
+from panelcast import __version__
 from panelcast.cli import app
-
-__version__ = "0.2.1"
 
 # Quick preflight uses fixed estimates rather than loading actual data (~1s vs ~30-60s).
 # These are conservative defaults for the memory estimation formula.
