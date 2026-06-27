@@ -178,6 +178,115 @@ def _stratify_metrics_by_history(
     return rows
 
 
+def _resolve_eval_horizon(
+    album_seq: np.ndarray,
+    *,
+    propagate_rw: bool,
+    max_seq_train: int,
+    n_horizon_clamped: int,
+    strict: bool,
+) -> tuple[np.ndarray, int]:
+    if propagate_rw:
+        # The variant the strict-mode guard advertises: keep the deep-horizon
+        # album_seq and grow the trajectory so re-sampled rw_raw accumulates the
+        # full innovations (deep intervals widen ~sqrt(h-max_seq)*sigma_rw).
+        album_seq = album_seq.astype(np.int32)
+        max_seq_eval = int(album_seq.max()) if len(album_seq) else max_seq_train
+        if n_horizon_clamped > 0:
+            log.info(
+                "primary_eval_horizon_propagated",
+                n_rows_over_horizon=n_horizon_clamped,
+                max_seq_train=max_seq_train,
+                max_seq_eval=max_seq_eval,
+            )
+    else:
+        if n_horizon_clamped > 0:
+            msg = (
+                "Primary split evaluation requires extrapolation beyond training horizon. "
+                f"n_rows_over_horizon={n_horizon_clamped}, max_seq_train={max_seq_train}. "
+                "Increase --max-albums or use a model variant that explicitly samples future "
+                "random-walk innovations (propagate_rw_horizon)."
+            )
+            if strict:
+                raise ValueError(msg)
+            log.warning(
+                "primary_eval_horizon_clamped",
+                n_rows_over_horizon=n_horizon_clamped,
+                max_seq_train=max_seq_train,
+            )
+        album_seq = np.minimum(album_seq, max_seq_train).astype(np.int32)
+        max_seq_eval = max_seq_train
+    return album_seq, max_seq_eval
+
+
+def _eiv_prev_nrev_base(
+    test_df: pd.DataFrame,
+    val_df: pd.DataFrame | None,
+    train_df: pd.DataFrame | None,
+    *,
+    entity_col: str,
+    n_obs_col: str,
+) -> tuple[str | None, pd.Series]:
+    nrev_col_test: str | None = None
+    if "n_reviews" in test_df.columns:
+        nrev_col_test = "n_reviews"
+    elif n_obs_col in test_df.columns:
+        nrev_col_test = n_obs_col
+
+    def _last_nrev(df: pd.DataFrame | None) -> pd.Series:
+        if df is None or df.empty:
+            return pd.Series(dtype=float)
+        col = "n_reviews" if "n_reviews" in df.columns else n_obs_col
+        if col not in df.columns:
+            return pd.Series(dtype=float)
+        return df.groupby(entity_col)[col].last()
+
+    base_prev_nrev = test_df[entity_col].map(_last_nrev(val_df))
+    base_prev_nrev = base_prev_nrev.fillna(test_df[entity_col].map(_last_nrev(train_df)))
+    return nrev_col_test, base_prev_nrev
+
+
+def _build_sequential_prev_scores(
+    test_df: pd.DataFrame,
+    *,
+    entity_col: str,
+    target_col: str,
+    base_prev: pd.Series,
+    base_prev_nrev: pd.Series | None,
+    eiv_on: bool,
+    nrev_col_test: str | None,
+) -> tuple[list[float], list[float]]:
+    prev_scores: list[float] = []
+    prev_nrevs: list[float] = []
+    for _, group in test_df.groupby(entity_col, sort=False):
+        first_idx = group.index[0]
+        group_prev = [float(base_prev.loc[first_idx])]
+        if eiv_on:
+            group_nrev = [float(base_prev_nrev.loc[first_idx])]
+        for j in range(1, len(group)):
+            group_prev.append(float(group.iloc[j - 1][target_col]))
+            if eiv_on:
+                prev_row_nrev = (
+                    float(group.iloc[j - 1][nrev_col_test])
+                    if nrev_col_test is not None
+                    else float("nan")
+                )
+                group_nrev.append(prev_row_nrev)
+        prev_scores.extend(group_prev)
+        if eiv_on:
+            prev_nrevs.extend(group_nrev)
+    return prev_scores, prev_nrevs
+
+
+def _eiv_prev_meas_sigma(prev_nrev: np.ndarray, global_std: float) -> np.ndarray:
+    with np.errstate(invalid="ignore", divide="ignore"):
+        return np.where(
+            np.isnan(prev_nrev) | (prev_nrev <= 0),
+            0.0,
+            global_std / np.sqrt(np.maximum(prev_nrev, 1.0)),
+        ).astype(np.float32)
+
+
 def _prepare_test_model_args(
     test_df: pd.DataFrame,
     test_features: pd.DataFrame,
@@ -269,36 +378,13 @@ def _prepare_test_model_args(
     temp_args = _apply_max_albums_cap(temp_args, max_albums, artist_album_counts)
     album_seq = temp_args["album_seq"]
     n_horizon_clamped = int(np.sum(album_seq > max_seq_train))
-    if propagate_rw:
-        # The variant the strict-mode guard advertises: keep the deep-horizon
-        # album_seq and grow the trajectory so re-sampled rw_raw accumulates the
-        # full innovations (deep intervals widen ~sqrt(h-max_seq)*sigma_rw).
-        album_seq = album_seq.astype(np.int32)
-        max_seq_eval = int(album_seq.max()) if len(album_seq) else max_seq_train
-        if n_horizon_clamped > 0:
-            log.info(
-                "primary_eval_horizon_propagated",
-                n_rows_over_horizon=n_horizon_clamped,
-                max_seq_train=max_seq_train,
-                max_seq_eval=max_seq_eval,
-            )
-    else:
-        if n_horizon_clamped > 0:
-            msg = (
-                "Primary split evaluation requires extrapolation beyond training horizon. "
-                f"n_rows_over_horizon={n_horizon_clamped}, max_seq_train={max_seq_train}. "
-                "Increase --max-albums or use a model variant that explicitly samples future "
-                "random-walk innovations (propagate_rw_horizon)."
-            )
-            if strict:
-                raise ValueError(msg)
-            log.warning(
-                "primary_eval_horizon_clamped",
-                n_rows_over_horizon=n_horizon_clamped,
-                max_seq_train=max_seq_train,
-            )
-        album_seq = np.minimum(album_seq, max_seq_train).astype(np.int32)
-        max_seq_eval = max_seq_train
+    album_seq, max_seq_eval = _resolve_eval_horizon(
+        album_seq,
+        propagate_rw=propagate_rw,
+        max_seq_train=max_seq_train,
+        n_horizon_clamped=n_horizon_clamped,
+        strict=strict,
+    )
 
     global_mean = summary["global_mean_score"]
     # Sequential prev_score: use the most recent known score before each test album.
@@ -331,42 +417,22 @@ def _prepare_test_model_args(
     # carry the preceding test album's count. NaN where prev fell back to the
     # global mean (no prior album) -> pinned to a zero measurement error below.
     nrev_col_test: str | None = None
+    base_prev_nrev: pd.Series = pd.Series(dtype=float)
     if eiv_on:
-        if "n_reviews" in test_df.columns:
-            nrev_col_test = "n_reviews"
-        elif n_obs_col in test_df.columns:
-            nrev_col_test = n_obs_col
+        nrev_col_test, base_prev_nrev = _eiv_prev_nrev_base(
+            test_df, val_df, train_df,
+            entity_col=entity_col, n_obs_col=n_obs_col,
+        )
 
-        def _last_nrev(df: pd.DataFrame | None) -> pd.Series:
-            if df is None or df.empty:
-                return pd.Series(dtype=float)
-            col = "n_reviews" if "n_reviews" in df.columns else n_obs_col
-            if col not in df.columns:
-                return pd.Series(dtype=float)
-            return df.groupby(entity_col)[col].last()
-
-        base_prev_nrev = test_df[entity_col].map(_last_nrev(val_df))
-        base_prev_nrev = base_prev_nrev.fillna(test_df[entity_col].map(_last_nrev(train_df)))
-
-    prev_scores: list[float] = []
-    prev_nrevs: list[float] = []
-    for _, group in test_df.groupby(entity_col, sort=False):
-        first_idx = group.index[0]
-        group_prev = [float(base_prev.loc[first_idx])]
-        if eiv_on:
-            group_nrev = [float(base_prev_nrev.loc[first_idx])]
-        for j in range(1, len(group)):
-            group_prev.append(float(group.iloc[j - 1][target_col]))
-            if eiv_on:
-                prev_row_nrev = (
-                    float(group.iloc[j - 1][nrev_col_test])
-                    if nrev_col_test is not None
-                    else float("nan")
-                )
-                group_nrev.append(prev_row_nrev)
-        prev_scores.extend(group_prev)
-        if eiv_on:
-            prev_nrevs.extend(group_nrev)
+    prev_scores, prev_nrevs = _build_sequential_prev_scores(
+        test_df,
+        entity_col=entity_col,
+        target_col=target_col,
+        base_prev=base_prev,
+        base_prev_nrev=base_prev_nrev,
+        eiv_on=eiv_on,
+        nrev_col_test=nrev_col_test,
+    )
     test_df["_prev_score"] = prev_scores
     if eiv_on:
         test_df["_prev_nrev"] = prev_nrevs
@@ -442,13 +508,7 @@ def _prepare_test_model_args(
         if global_std <= 0.0:
             log.warning("eiv_sigma_zero_legacy_summary", context="primary_eval")
         prev_nrev = test_df["_prev_nrev"].to_numpy(dtype=float)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            prev_meas_sigma = np.where(
-                np.isnan(prev_nrev) | (prev_nrev <= 0),
-                0.0,
-                global_std / np.sqrt(np.maximum(prev_nrev, 1.0)),
-            ).astype(np.float32)
-        test_model_args["prev_meas_sigma"] = prev_meas_sigma
+        test_model_args["prev_meas_sigma"] = _eiv_prev_meas_sigma(prev_nrev, global_std)
 
     return test_model_args, y_true
 
@@ -860,76 +920,12 @@ def _evaluate_predictions(
     return split_metrics, predictions_payload, calibration_payload
 
 
-def evaluate_models(ctx: StageContext) -> dict:
-    """Evaluate fitted models on primary and secondary test splits."""
-    log.info("evaluation_pipeline_start")
-
-    model_dir = Path("models")
-
-    # A missing manifest means no trained model at all -- report that before
-    # touching the training summary so the error names the actual gap.
-    manifest = load_manifest(model_dir)
-    if manifest is None:
-        raise ValueError("No trained user_score model found in models/manifest.json")
-
-    # The typed training summary records the dataset the model was trained
-    # on, which drives the model key and posterior-site prefix.
-    summary_path = model_dir / "training_summary.json"
-    summary = load_training_summary(summary_path).to_json_dict()
-    ds = _summary_dataset(summary)
-    prefix = ds["prefix"]
-    model_key = f"{prefix}_score"
-
-    if model_key not in manifest.current:
-        raise ValueError(f"No trained {model_key} model found in models/manifest.json")
-
-    model_filename = manifest.current[model_key]
-    model_path = model_dir / model_filename
-    log.info("loading_model", path=str(model_path))
-    idata = load_model(model_path)
-
-    # Guard: the fitted posterior must carry sites for the expected prefix.
-    # A mismatch means models/ holds a model trained under a different
-    # dataset descriptor — fail with a named error instead of a deep KeyError.
-    site_prefix = f"{prefix}_"
-    if not any(str(v).startswith(site_prefix) for v in idata.posterior.data_vars):
-        found = sorted(str(v) for v in idata.posterior.data_vars)[:8]
-        raise ValueError(
-            f"Posterior has no sites with expected prefix '{site_prefix}'. "
-            f"Found sites: {found}. The fitted model in models/ was trained "
-            "with a different dataset descriptor; re-run the train stage."
-        )
-
-    diagnostics = check_convergence(
-        idata,
-        rhat_threshold=float(getattr(ctx, "rhat_threshold", 1.01)),
-        ess_threshold=int(getattr(ctx, "ess_threshold", 400)),
-        allow_divergences=bool(getattr(ctx, "allow_divergences", False)),
-    )
-    _ = get_divergence_info(idata)
-    diagnostics_result = {
-        "passed": diagnostics.passed,
-        "rhat_max": float(diagnostics.rhat_max),
-        "ess_bulk_min": float(diagnostics.ess_bulk_min),
-        "divergences": int(diagnostics.divergences),
-        "rhat_threshold": float(diagnostics.rhat_threshold),
-        "ess_threshold": int(diagnostics.ess_threshold),
-    }
-
-    # Warn if loading old summary without sigma_rw_prior_type
-    priors_dict = summary.get("priors", {})
-    if isinstance(priors_dict, dict) and "sigma_rw_prior_type" not in priors_dict:
-        log.warning(
-            "prior_config_compat",
-            message=(
-                "Training summary missing sigma_rw_prior_type — "
-                "defaulting to 'lognormal'. Original training used 'halfnormal'. "
-                "This only affects retraining, not prediction."
-            ),
-        )
-
-    # Prior predictive check on training data structure
-    prior_predictive_result = None
+def _run_training_prior_predictive(
+    summary: dict,
+    ds: dict,
+    prefix: str,
+    ctx: StageContext,
+) -> Any | None:
     try:
         from panelcast.evaluation.prior_predictive import run_prior_predictive
 
@@ -1044,30 +1040,24 @@ def evaluate_models(ctx: StageContext) -> dict:
             checks_passed=prior_predictive_result.checks_passed,
             flags=prior_predictive_result.informational_flags,
         )
+        return prior_predictive_result
     except Exception as e:
         log.warning("prior_predictive_failed", error=str(e))
+        return None
 
-    # Plausibility flags are informational by default but gate strict runs.
-    if (
-        ctx.strict
-        and prior_predictive_result is not None
-        and not prior_predictive_result.checks_passed
-    ):
-        raise ValueError(
-            "Prior predictive plausibility checks failed under --strict: "
-            + "; ".join(prior_predictive_result.informational_flags or [])
-        )
 
-    posterior_samples = _extract_posterior_samples(idata)
-    first_var = next(iter(idata.posterior.data_vars))
-    n_chains = int(idata.posterior[first_var].shape[0])
-    n_draws = int(idata.posterior[first_var].shape[1])
-
-    intervals = tuple(sorted(set(ctx.calibration_intervals)))
-    split_results: dict[str, Any] = {}
-    split_artifacts: dict[str, dict[str, Any]] = {}
-
-    # Primary split: known-artist posterior predictive
+def _evaluate_primary_split(
+    *,
+    summary: dict,
+    ds: dict,
+    prefix: str,
+    ctx: StageContext,
+    posterior_samples: dict[str, Any],
+    n_chains: int,
+    n_draws: int,
+    intervals: tuple[float, ...],
+    discretize_obs: bool,
+) -> tuple[dict, dict]:
     primary_split_dir = resolve_split_dir(Path("data/splits"), PRIMARY_SPLIT)
     primary_features_dir = _resolve_feature_split_dir(PRIMARY_SPLIT)
     primary_test_df = pd.read_parquet(primary_split_dir / "test.parquet")
@@ -1104,7 +1094,6 @@ def evaluate_models(ctx: StageContext) -> dict:
     transform = _transform_from_summary(summary)
     if transform.name != "identity":
         primary_y_samples = np.asarray(transform.inverse(primary_y_samples))
-    discretize_obs = bool(summary.get("discretize_observation", False))
     primary_metrics, primary_predictions, primary_calibration = _evaluate_predictions(
         primary_y_true,
         primary_y_samples,
@@ -1181,17 +1170,122 @@ def evaluate_models(ctx: StageContext) -> dict:
         n_pairs=residual_acf["n_pairs"],
     )
 
-    split_results[PRIMARY_SPLIT] = {
+    primary_split_result = {
         **primary_metrics,
         "n_test": int(len(primary_y_true)),
         "info_criteria": primary_info_criteria,
         "residual_autocorrelation": residual_acf,
         "stratified_by_history": stratified_by_history,
     }
-    split_artifacts[PRIMARY_SPLIT] = {
+    primary_split_artifact = {
         "predictions": primary_predictions,
         "calibration": primary_calibration,
     }
+    return primary_split_result, primary_split_artifact
+
+
+def evaluate_models(ctx: StageContext) -> dict:
+    """Evaluate fitted models on primary and secondary test splits."""
+    log.info("evaluation_pipeline_start")
+
+    model_dir = Path("models")
+
+    # A missing manifest means no trained model at all -- report that before
+    # touching the training summary so the error names the actual gap.
+    manifest = load_manifest(model_dir)
+    if manifest is None:
+        raise ValueError("No trained user_score model found in models/manifest.json")
+
+    # The typed training summary records the dataset the model was trained
+    # on, which drives the model key and posterior-site prefix.
+    summary_path = model_dir / "training_summary.json"
+    summary = load_training_summary(summary_path).to_json_dict()
+    ds = _summary_dataset(summary)
+    prefix = ds["prefix"]
+    model_key = f"{prefix}_score"
+
+    if model_key not in manifest.current:
+        raise ValueError(f"No trained {model_key} model found in models/manifest.json")
+
+    model_filename = manifest.current[model_key]
+    model_path = model_dir / model_filename
+    log.info("loading_model", path=str(model_path))
+    idata = load_model(model_path)
+
+    # Guard: the fitted posterior must carry sites for the expected prefix.
+    # A mismatch means models/ holds a model trained under a different
+    # dataset descriptor — fail with a named error instead of a deep KeyError.
+    site_prefix = f"{prefix}_"
+    if not any(str(v).startswith(site_prefix) for v in idata.posterior.data_vars):
+        found = sorted(str(v) for v in idata.posterior.data_vars)[:8]
+        raise ValueError(
+            f"Posterior has no sites with expected prefix '{site_prefix}'. "
+            f"Found sites: {found}. The fitted model in models/ was trained "
+            "with a different dataset descriptor; re-run the train stage."
+        )
+
+    diagnostics = check_convergence(
+        idata,
+        rhat_threshold=float(getattr(ctx, "rhat_threshold", 1.01)),
+        ess_threshold=int(getattr(ctx, "ess_threshold", 400)),
+        allow_divergences=bool(getattr(ctx, "allow_divergences", False)),
+    )
+    _ = get_divergence_info(idata)
+    diagnostics_result = {
+        "passed": diagnostics.passed,
+        "rhat_max": float(diagnostics.rhat_max),
+        "ess_bulk_min": float(diagnostics.ess_bulk_min),
+        "divergences": int(diagnostics.divergences),
+        "rhat_threshold": float(diagnostics.rhat_threshold),
+        "ess_threshold": int(diagnostics.ess_threshold),
+    }
+
+    # Warn if loading old summary without sigma_rw_prior_type
+    priors_dict = summary.get("priors", {})
+    if isinstance(priors_dict, dict) and "sigma_rw_prior_type" not in priors_dict:
+        log.warning(
+            "prior_config_compat",
+            message=(
+                "Training summary missing sigma_rw_prior_type — "
+                "defaulting to 'lognormal'. Original training used 'halfnormal'. "
+                "This only affects retraining, not prediction."
+            ),
+        )
+
+    prior_predictive_result = _run_training_prior_predictive(summary, ds, prefix, ctx)
+
+    # Plausibility flags are informational by default but gate strict runs.
+    if (
+        ctx.strict
+        and prior_predictive_result is not None
+        and not prior_predictive_result.checks_passed
+    ):
+        raise ValueError(
+            "Prior predictive plausibility checks failed under --strict: "
+            + "; ".join(prior_predictive_result.informational_flags or [])
+        )
+
+    posterior_samples = _extract_posterior_samples(idata)
+    first_var = next(iter(idata.posterior.data_vars))
+    n_chains = int(idata.posterior[first_var].shape[0])
+    n_draws = int(idata.posterior[first_var].shape[1])
+
+    intervals = tuple(sorted(set(ctx.calibration_intervals)))
+    split_results: dict[str, Any] = {}
+    split_artifacts: dict[str, dict[str, Any]] = {}
+
+    discretize_obs = bool(summary.get("discretize_observation", False))
+    split_results[PRIMARY_SPLIT], split_artifacts[PRIMARY_SPLIT] = _evaluate_primary_split(
+        summary=summary,
+        ds=ds,
+        prefix=prefix,
+        ctx=ctx,
+        posterior_samples=posterior_samples,
+        n_chains=n_chains,
+        n_draws=n_draws,
+        intervals=intervals,
+        discretize_obs=discretize_obs,
+    )
 
     # Secondary split: artist-disjoint cold-start predictive path
     if ctx.evaluate_secondary_split:
