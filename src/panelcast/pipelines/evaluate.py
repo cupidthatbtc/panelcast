@@ -43,7 +43,7 @@ from panelcast.models.bayes.diagnostics import (
 )
 from panelcast.models.bayes.io import load_manifest, load_model
 from panelcast.models.bayes.model import make_score_model
-from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_artist
+from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_entity
 from panelcast.models.bayes.priors import PriorConfig
 from panelcast.models.bayes.transforms import get_transform
 from panelcast.pipelines.train_bayes import _apply_max_albums_cap
@@ -536,7 +536,7 @@ def _run_new_artist_predictive(
         if not learn_n_exponent and fixed_n_exponent != 0.0:
             kwargs["fixed_n_exponent"] = fixed_n_exponent
 
-    pred = predict_new_artist(**kwargs)
+    pred = predict_new_entity(**kwargs)
     y_pred = np.asarray(pred["y"])
     if y_pred.ndim == 1:
         y_pred = y_pred[:, None]

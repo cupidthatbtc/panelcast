@@ -16,7 +16,7 @@ from numpyro.handlers import seed, trace
 from numpyro.infer.util import initialize_model
 
 from panelcast.models.bayes.model import user_score_model
-from panelcast.models.bayes.predict import predict_new_artist
+from panelcast.models.bayes.predict import predict_new_entity
 from panelcast.models.bayes.priors import priors_for_transform
 from panelcast.models.bayes.transforms import get_transform
 
@@ -106,13 +106,13 @@ def _degenerate_posterior(mu: float, sigma_obs: float, n: int = 2000, rho: float
 
 
 @pytest.mark.parametrize("transform_name", TRANSFORMS)
-class TestPredictNewArtistTransformAxis:
-    """predict_new_artist must return score-scale outputs for any transform."""
+class TestPredictNewEntityTransformAxis:
+    """predict_new_entity must return score-scale outputs for any transform."""
 
     def test_mu_matches_back_transformed_location(self, transform_name):
         ps = MODEL_SCALE[transform_name]
         samples = _degenerate_posterior(ps["mu"], ps["sigma"])
-        result = predict_new_artist(
+        result = predict_new_entity(
             samples,
             X_new=jnp.zeros(2),
             prev_score=0.0,
@@ -130,7 +130,7 @@ class TestPredictNewArtistTransformAxis:
     def test_draws_finite_and_centred_on_mu(self, transform_name):
         ps = MODEL_SCALE[transform_name]
         samples = _degenerate_posterior(ps["mu"], ps["sigma"])
-        result = predict_new_artist(
+        result = predict_new_entity(
             samples,
             X_new=jnp.zeros(2),
             prev_score=0.0,
@@ -154,7 +154,7 @@ class TestPredictNewArtistTransformAxis:
         t = get_transform(transform_name, BOUNDS, offset=0.5)
         prev_model = float(t.forward(jnp.asarray(80.0)))
         samples = _degenerate_posterior(0.0, 1e-6, rho=1.0)
-        result = predict_new_artist(
+        result = predict_new_entity(
             samples,
             X_new=jnp.zeros(2),
             prev_score=prev_model,

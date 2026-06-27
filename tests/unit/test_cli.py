@@ -878,7 +878,7 @@ class TestExportFiguresCommand:
         assert "--run" in output
 
 
-class TestRunBranchCoverage:
+class TestRunPresetAndValidation:
     """Covers the relocated --preset fallback and run-level validation branches."""
 
     def test_preset_bundled_fallback_when_no_local_configs(self, monkeypatch, tmp_path):

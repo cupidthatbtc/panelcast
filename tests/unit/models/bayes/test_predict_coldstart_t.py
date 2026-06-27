@@ -6,7 +6,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from panelcast.models.bayes.predict import predict_new_artist
+from panelcast.models.bayes.predict import predict_new_entity
 
 
 @pytest.fixture
@@ -30,7 +30,7 @@ class TestStudentTColdStart:
     def test_predictive_sd_matches_student_t(self, degenerate_samples):
         """Empirical SD of y - mu must be sigma * sqrt(df/(df-2)), not sigma."""
         df = 4.0
-        result = predict_new_artist(
+        result = predict_new_entity(
             degenerate_samples,
             X_new=jnp.zeros(2),
             prev_score=60.0,
@@ -47,7 +47,7 @@ class TestStudentTColdStart:
 
     def test_df_at_least_100_uses_normal(self, degenerate_samples):
         """df >= 100 is the Normal limit: SD ~= sigma."""
-        result = predict_new_artist(
+        result = predict_new_entity(
             degenerate_samples,
             X_new=jnp.zeros(2),
             prev_score=60.0,
@@ -60,7 +60,7 @@ class TestStudentTColdStart:
 
     def test_default_df_is_student_t(self, degenerate_samples):
         """Default likelihood_df=4.0 must produce t noise (matches the model)."""
-        result = predict_new_artist(
+        result = predict_new_entity(
             degenerate_samples,
             X_new=jnp.zeros(2),
             prev_score=60.0,

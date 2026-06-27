@@ -9,10 +9,14 @@
 >   Student-t pins four PPC statistics (skewness, max, q50, q90) — an open
 >   modeling limitation, not a convergence problem.
 > - **Scale caveat.** Those numbers are from a ~5k-album SUBSET, **not** the full
->   ~62k-album corpus. The *Model Architecture / Hyperparameters / Evaluation
->   Results* snapshot further below predates this and is from a validation-scale
->   (2×500) run that failed convergence; treat the *Real-data subset validation*
->   section as the current real-data evidence and the rest as illustrative.
+>   ~62k-album corpus. Full-corpus publication-scale validation is **still
+>   pending and not part of 0.3.0** — it needs more GPU than is available locally
+>   (>24 GB even with `--exclude-rw-raw-from-collection`), so it is tracked
+>   separately as **#15** (cloud A100/H100 80 GB). The *Model Architecture /
+>   Hyperparameters / Evaluation Results* snapshot further below predates this and
+>   is from a validation-scale (2×500) run that failed convergence; treat the
+>   *Real-data subset validation* section as the current real-data evidence and
+>   the rest as illustrative.
 
 # Model Card: panelcast — Hierarchical Bayesian Score Prediction
 
@@ -26,10 +30,10 @@
 ## Model Details
 
 - **Model type:** Bayesian Hierarchical Regression with Time-Varying Effects
-- **Version:** 0.2.1
+- **Version:** 0.3.0
 - **Authors:** panelcast project
 - **Created:** 2026-06-11
-- **Last updated:** 2026-06-25
+- **Last updated:** 2026-06-27
 
 ## Intended Use
 
@@ -214,14 +218,14 @@ Point prediction metrics:
 - **Convergence (compute-bounded, geometry fixed).** The historical sigma_artist ESS deficit was traced to a sampling-geometry confound: the uncentered AR(1) term absorbed the score level, ridge-coupling rho and mu_artist (corr -0.997). AR centering with a level-located mu_artist prior removed it (corr +0.016, debut AR terms exactly zero). Remaining R-hat/ESS shortfalls at cheap validation settings (2 chains x 500) were compute-bounded; this is now **confirmed on real data**: at the publication configuration (4 chains x 5000, warmup 3000, with the rw_raw collection exclusion required for 24 GB GPUs) the ~5k-album subset reaches R-hat 1.00, bulk ESS 3,134 and 0 divergences — the gate passes. The full-corpus run remains future work.
 - **Symmetric likelihood vs. left-skewed target.** The Student-t likelihood is symmetric, but observed user-score distribution has skewness ~= -1.79 (long left tail of poorly-received albums). This is a structural mismatch, not a fitting issue. PPC p-values pinned at 0.000/1.000 for sd, skewness, q50, q90, and max are the expected signature of this mismatch. The lightest candidate fix — an offset-logit target transform — was implemented and evaluated twice (pre- and post-AR-centering) and is HELD: its sampler geometry does not mix at validation settings (R-hat 1.27-1.37, bulk ESS 5-10) and its priors fail score-scale plausibility checks. **Six likelihood families have since been implemented and tried against the mismatch, selectable via `--likelihood-family`:** `beta`, `skew_studentt`, `skew_normal`, `split_normal`, `beta_binomial`, and a two-component `mixture` — plus an integer-aware dequantization toggle (`--discretize-observation`). **None moves the `skewness`/`max` PPC pins toward the interior**; each trades worse convergence or point accuracy for the same or sharper pins, confirmed on real AOTY data across five of them (the synthetic edge that favored `beta` did not survive real, strongly left-skewed scores). Dequantization does relieve the integer-heaping `q50` pin specifically (p 0.009 → 0.082), but `skewness`/`max`/`q90` are the bounded-skew misspecification itself, not an integer-grid artifact, and more posterior samples sharpen them rather than relaxing them. The mismatch is therefore **confirmed structural and unresolved**, so Student-t remains the publication default (full evidence in [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md)). The symmetric likelihood's point accuracy and 95% interval calibration are unaffected.
 - **Soft-clip at [0, 100] interacts with symmetric tails.** Because the target is bounded but the likelihood is symmetric, soft_clip compresses both tails simultaneously. A logit-scale target would remove the clip, but the transform is held (see above); the clip stays.
-- **Errors-in-variables in the AR(1) predictor.** The album-to-album term regresses on the *observed* previous user score as if it were noise-free (`ar_term = rho * (prev_score - ar_center)`), yet that same quantity is modeled as review-count-noisy when it is the response (the heteroscedastic `sigma_obs / n^exponent`). Conditioning on a noisy regressor attenuates `rho` toward zero, worst for sparse-review entities whose lagged score is least certain. The principled fix is a latent-state AR that carries each entity's true level with its own uncertainty — a larger change, tracked for model-v2 (issue #14), not implemented here.
+- **Errors-in-variables in the AR(1) predictor.** The album-to-album term regresses on the *observed* previous user score as if it were noise-free (`ar_term = rho * (prev_score - ar_center)`), yet that same quantity is modeled as review-count-noisy when it is the response (the heteroscedastic `sigma_obs / n^exponent`). Conditioning on a noisy regressor attenuates `rho` toward zero, worst for sparse-review entities whose lagged score is least certain. The principled fix is a latent-state AR that carries each entity's true level with its own uncertainty — a larger change, tracked for model-v2 (issue #30), not implemented here.
 - **Trained on English-language reviews; may not generalize to other markets.**
 - Dynamic artist trajectories are learned only when an artist has at least 2 training albums (configurable via `dynamic.min_albums`).
 - Less reliable for genre-crossing artists due to sparse data.
 - Historical biases in music criticism may be reflected in predictions.
 - Does not account for album-specific factors (production, label influence).
 - Assumes gradual career evolution; sudden style changes poorly predicted.
-- **Long-horizon predictive variance is understated.** The latent artist effect is indexed by album sequence clipped to the longest training trajectory (`seq_idx = clip(album_seq - 1, 0, max_seq - 1)`), and prediction appends no further random-walk innovations beyond `max_seq`. For an album `h` steps past that horizon the forecast reuses the final latent step and omits the `(h - max_seq)·sigma_rw²` of accumulated random-walk variance a true multi-step-ahead forecast would carry, so deep-extrapolation intervals are too narrow. The flagship one-step-ahead use (next album) is unaffected; `--strict` already blocks horizon extrapolation beyond trained sequence support.
+- **Long-horizon predictive variance is understated.** The latent artist effect is indexed by album sequence clipped to the longest training trajectory (`seq_idx = clip(album_seq - 1, 0, max_seq - 1)`), and prediction appends no further random-walk innovations beyond `max_seq`. For an album `h` steps past that horizon the forecast reuses the final latent step and omits the `(h - max_seq)·sigma_rw²` of accumulated random-walk variance a true multi-step-ahead forecast would carry, so deep-extrapolation intervals are too narrow. The flagship one-step-ahead use (next album) is unaffected; `--strict` already blocks horizon extrapolation beyond trained sequence support. Tracked for model-v2 (issue #30).
 - Score predictions are probabilistic and should not be treated as ground truth.
 
 ## Ethical Considerations
@@ -253,7 +257,7 @@ idata = load_model(Path("models") / model_name)
 ```python
 from panelcast.models.bayes.predict import (
     extract_posterior_samples,
-    predict_new_artist,
+    predict_new_entity,
 )
 import jax.numpy as jnp
 
@@ -265,7 +269,7 @@ n_features = int(posterior_samples["user_beta"].shape[-1])
 X_new = jnp.zeros((1, n_features), dtype=jnp.float32)
 
 # Generate predictions with uncertainty
-pred = predict_new_artist(
+pred = predict_new_entity(
     posterior_samples=posterior_samples,
     X_new=X_new,
     prev_score=jnp.array([72.5], dtype=jnp.float32),

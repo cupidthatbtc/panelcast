@@ -1021,7 +1021,7 @@ def run_split_seed_sensitivity(
     import jax.numpy as jnp
 
     from panelcast.data.split import entity_disjoint_split
-    from panelcast.models.bayes.predict import predict_new_artist
+    from panelcast.models.bayes.predict import predict_new_entity
     from panelcast.pipelines.training_summary import ar_center_on_model_scale
 
     ds = summary.get("dataset", {})
@@ -1058,7 +1058,7 @@ def run_split_seed_sensitivity(
         )
         y_true = test_df[target_col].to_numpy(dtype=float)
         n = len(y_true)
-        pred = predict_new_artist(
+        pred = predict_new_entity(
             posterior_samples,
             X_new=jnp.zeros((n, n_features), dtype=jnp.float32),
             prev_score=jnp.full((n,), prev, dtype=jnp.float32),

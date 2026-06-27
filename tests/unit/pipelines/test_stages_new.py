@@ -164,8 +164,8 @@ class TestRunEvaluateStage:
 class TestRunPredictStage:
     """Tests for _run_predict_stage wrapper."""
 
-    def test_calls_predict_next_albums_with_ctx(self, tmp_path):
-        """_run_predict_stage passes ctx to predict_next_albums."""
+    def test_calls_predict_next_events_with_ctx(self, tmp_path):
+        """_run_predict_stage passes ctx to predict_next_events."""
         ctx = _make_ctx(tmp_path)
         captured = {}
 
@@ -173,7 +173,7 @@ class TestRunPredictStage:
             captured["ctx"] = ctx_arg
             return MagicMock()
 
-        with patch("panelcast.pipelines.predict_next.predict_next_albums", fake_predict):
+        with patch("panelcast.pipelines.predict_next.predict_next_events", fake_predict):
             _run_predict_stage(ctx)
 
         assert captured["ctx"] is ctx

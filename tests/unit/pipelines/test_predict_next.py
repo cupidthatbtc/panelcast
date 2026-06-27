@@ -18,10 +18,10 @@ from panelcast.pipelines.predict_next import (
     SCENARIOS_KNOWN,
     SCENARIOS_NEW,
     _extract_posterior_samples,
-    _predict_known_artists,
-    _predict_new_artists,
-    predict_artist_next,
-    predict_next_albums,
+    _predict_known_entities,
+    _predict_new_entities,
+    predict_entity_next,
+    predict_next_events,
 )
 
 
@@ -172,8 +172,8 @@ def _make_predictive_mock(n_samples, n_obs):
     return mock_predictive_cls
 
 
-class TestPredictKnownArtists:
-    """Tests for _predict_known_artists exercising real data transformations."""
+class TestPredictKnownEntities:
+    """Tests for _predict_known_entities exercising real data transformations."""
 
     def _run(
         self,
@@ -185,7 +185,7 @@ class TestPredictKnownArtists:
         predictive_mock=None,
         strict=False,
     ):
-        """Helper to call _predict_known_artists with standard mocking."""
+        """Helper to call _predict_known_entities with standard mocking."""
         n_artists = len(
             [a for a in mock_summary["artist_to_idx"] if a in mock_last_album_info.index]
         )
@@ -203,7 +203,7 @@ class TestPredictKnownArtists:
             patch("panelcast.pipelines.predict_next.Predictive", predictive_mock),
             patch("panelcast.pipelines.predict_next.random", mock_random),
         ):
-            return _predict_known_artists(
+            return _predict_known_entities(
                 mock_posterior_samples,
                 mock_summary,
                 mock_last_album_info,
@@ -287,7 +287,7 @@ class TestPredictKnownArtists:
             patch("panelcast.pipelines.predict_next.Predictive", predictive_mock),
             patch("panelcast.pipelines.predict_next.random", mock_random),
         ):
-            _predict_known_artists(
+            _predict_known_entities(
                 mock_posterior_samples,
                 mock_summary,
                 mock_last_album_info,
@@ -329,7 +329,7 @@ class TestPredictKnownArtists:
             patch("panelcast.pipelines.predict_next.Predictive", predictive_mock),
             patch("panelcast.pipelines.predict_next.random", mock_random),
         ):
-            _predict_known_artists(
+            _predict_known_entities(
                 mock_posterior_samples,
                 mock_summary,
                 mock_last_album_info,
@@ -374,7 +374,7 @@ class TestPredictKnownArtists:
             patch("panelcast.pipelines.predict_next.Predictive", predictive_mock),
             patch("panelcast.pipelines.predict_next.random", mock_random),
         ):
-            _predict_known_artists(
+            _predict_known_entities(
                 mock_posterior_samples,
                 summary,
                 last_album_info,
@@ -432,11 +432,11 @@ class TestPredictKnownArtists:
             )
 
 
-class TestPredictNewArtists:
-    """Tests for _predict_new_artists with mocked JAX and predict_new_artist."""
+class TestPredictNewEntities:
+    """Tests for _predict_new_entities with mocked JAX and predict_new_entity."""
 
     def _run(self, mock_posterior_samples, summary, *, predict_return=None):
-        """Helper to call _predict_new_artists with standard mocking."""
+        """Helper to call _predict_new_entities with standard mocking."""
         mock_jax = _make_jax_mock()
         if predict_return is None:
             rng = np.random.RandomState(77)
@@ -445,11 +445,11 @@ class TestPredictNewArtists:
         with (
             patch("panelcast.pipelines.predict_next.jax", mock_jax),
             patch(
-                "panelcast.pipelines.predict_next.predict_new_artist",
+                "panelcast.pipelines.predict_next.predict_new_entity",
                 return_value=predict_return,
             ) as mock_predict,
         ):
-            result = _predict_new_artists(mock_posterior_samples, summary)
+            result = _predict_new_entities(mock_posterior_samples, summary)
             return result, mock_predict
 
     def test_returns_dataframe(self, mock_posterior_samples, mock_summary):
@@ -489,7 +489,7 @@ class TestPredictNewArtists:
             assert "n_reviews_new" in call.kwargs
 
     def test_seed_passed_through(self, mock_posterior_samples, mock_summary):
-        """Specific seed value is forwarded to predict_new_artist."""
+        """Specific seed value is forwarded to predict_new_entity."""
         mock_jax = _make_jax_mock()
         rng = np.random.RandomState(77)
         predict_return = {"y": rng.randn(10).astype(np.float32)}
@@ -497,11 +497,11 @@ class TestPredictNewArtists:
         with (
             patch("panelcast.pipelines.predict_next.jax", mock_jax),
             patch(
-                "panelcast.pipelines.predict_next.predict_new_artist",
+                "panelcast.pipelines.predict_next.predict_new_entity",
                 return_value=predict_return,
             ) as mock_predict,
         ):
-            _predict_new_artists(mock_posterior_samples, mock_summary, seed=99)
+            _predict_new_entities(mock_posterior_samples, mock_summary, seed=99)
 
         # Both scenario calls should receive seed=99
         for call in mock_predict.call_args_list:
@@ -522,7 +522,7 @@ class TestPredictNewArtists:
     ):
         """Cold-start must predict under the trained family, not the studentt default.
 
-        Regression for the bug where _predict_new_artists never forwarded
+        Regression for the bug where _predict_new_entities never forwarded
         likelihood_family / discretize_observation, so a beta (or any
         non-studentt) model silently predicted new entities under Student-t.
         """
@@ -547,11 +547,11 @@ class TestPredictNewArtists:
             assert call.kwargs["discretize_observation"] is False
 
 
-class TestPredictNextAlbums:
-    """Integration-level test for predict_next_albums with mocked I/O."""
+class TestPredictNextEvents:
+    """Integration-level test for predict_next_events with mocked I/O."""
 
     def test_end_to_end(self, tmp_path, mock_summary, mock_posterior_samples):
-        """predict_next_albums returns dict with expected keys."""
+        """predict_next_events returns dict with expected keys."""
         # Build mock manifest
         mock_manifest = MagicMock()
         mock_manifest.current = {"user_score": "model.nc"}
@@ -663,11 +663,11 @@ class TestPredictNextAlbums:
                 return_value=mock_posterior_samples,
             ),
             patch(
-                "panelcast.pipelines.predict_next._predict_known_artists",
+                "panelcast.pipelines.predict_next._predict_known_entities",
                 return_value=known_df,
             ),
             patch(
-                "panelcast.pipelines.predict_next._predict_new_artists",
+                "panelcast.pipelines.predict_next._predict_new_entities",
                 return_value=new_df,
             ),
             patch(
@@ -689,7 +689,7 @@ class TestPredictNextAlbums:
             # But Path("models") also needs to work -- just delegate to MagicMock
             # The load_manifest and load_model are already mocked
 
-            result = predict_next_albums(mock_ctx)
+            result = predict_next_events(mock_ctx)
 
         assert isinstance(result, dict)
         assert "known_predictions_path" in result
@@ -755,7 +755,7 @@ class TestPredictNextAlbums:
             MockPath.side_effect = lambda p: MagicMock()
 
             with pytest.raises(ValueError, match="different indices"):
-                predict_next_albums(mock_ctx)
+                predict_next_events(mock_ctx)
 
 
 class TestExtractPosteriorSamplesEdgeCases:
@@ -937,13 +937,13 @@ def _mock_predictive(n_samples, n_obs):
     return cls
 
 
-class TestKnownArtistsBranches:
+class TestKnownEntitiesBranches:
     def test_missing_feature_scaler_raises(
         self, small_posterior, base_summary, last_album_info, artist_mean_features
     ):
         summary = {**base_summary, "feature_scaler": None}
         with pytest.raises(ValueError, match="feature_scaler"):
-            _predict_known_artists(small_posterior, summary, last_album_info, artist_mean_features)
+            _predict_known_entities(small_posterior, summary, last_album_info, artist_mean_features)
 
     def test_horizon_clamp_warning_non_strict(
         self, small_posterior, base_summary, last_album_info, artist_mean_features
@@ -963,7 +963,7 @@ class TestKnownArtistsBranches:
             patch("panelcast.pipelines.predict_next.Predictive", pred_cls),
             patch("panelcast.pipelines.predict_next.random", mock_random),
         ):
-            result = _predict_known_artists(
+            result = _predict_known_entities(
                 small_posterior, summary, info, artist_mean_features, strict=False
             )
 
@@ -989,7 +989,7 @@ class TestKnownArtistsBranches:
             patch("panelcast.pipelines.predict_next.Predictive", pred_cls),
             patch("panelcast.pipelines.predict_next.random", mock_random),
         ):
-            result = _predict_known_artists(
+            result = _predict_known_entities(
                 small_posterior, base_summary, last_album_info, partial_mean
             )
 
@@ -1014,7 +1014,7 @@ class TestKnownArtistsBranches:
             patch("panelcast.pipelines.predict_next.Predictive", pred_cls),
             patch("panelcast.pipelines.predict_next.random", mock_random),
         ):
-            result = _predict_known_artists(
+            result = _predict_known_entities(
                 small_posterior, base_summary, empty_info, artist_mean_features
             )
 
@@ -1047,7 +1047,7 @@ class TestKnownArtistsBranches:
             patch("panelcast.pipelines.predict_next.random", mock_random),
             patch("panelcast.pipelines.predict_next.get_transform", return_value=mock_transform),
         ):
-            result = _predict_known_artists(
+            result = _predict_known_entities(
                 small_posterior, summary, last_album_info, artist_mean_features
             )
 
@@ -1056,7 +1056,7 @@ class TestKnownArtistsBranches:
         assert isinstance(result, pd.DataFrame)
 
 
-class TestNewArtistsBranches:
+class TestNewEntitiesBranches:
     def test_non_identity_transform_in_new_artists(self, small_posterior, base_summary):
         # target_transform != "identity" => L323-324
         summary = {
@@ -1076,9 +1076,9 @@ class TestNewArtistsBranches:
         with (
             patch("panelcast.pipelines.predict_next.jax", mock_jax),
             patch("panelcast.pipelines.predict_next.get_transform", return_value=mock_transform),
-            patch("panelcast.pipelines.predict_next.predict_new_artist", return_value=pred_return),
+            patch("panelcast.pipelines.predict_next.predict_new_entity", return_value=pred_return),
         ):
-            result = _predict_new_artists(small_posterior, summary)
+            result = _predict_new_entities(small_posterior, summary)
 
         mock_transform.forward.assert_called()
         assert isinstance(result, pd.DataFrame)
@@ -1129,7 +1129,7 @@ def _make_known_new_dfs():
     return known_df, new_df
 
 
-def _predict_next_albums_stack(
+def _predict_next_events_stack(
     stack,
     base_summary,
     small_posterior,
@@ -1141,7 +1141,7 @@ def _predict_next_albums_stack(
     model_key_in_manifest=True,
     path_side_effect=None,
 ):
-    """Enter all standard patches for predict_next_albums into an ExitStack."""
+    """Enter all standard patches for predict_next_events into an ExitStack."""
     mock_manifest = MagicMock()
     if model_key_in_manifest:
         mock_manifest.current = {"user_score": "model.nc"}
@@ -1183,11 +1183,11 @@ def _predict_next_albums_stack(
             side_effect=[train_df, train_features],
         )
     )
-    stack.enter_context(
-        patch("panelcast.pipelines.predict_next._predict_known_artists", return_value=known_df)
+    known_mock = stack.enter_context(
+        patch("panelcast.pipelines.predict_next._predict_known_entities", return_value=known_df)
     )
-    stack.enter_context(
-        patch("panelcast.pipelines.predict_next._predict_new_artists", return_value=new_df)
+    new_mock = stack.enter_context(
+        patch("panelcast.pipelines.predict_next._predict_new_entities", return_value=new_df)
     )
     stack.enter_context(
         patch(
@@ -1205,8 +1205,12 @@ def _predict_next_albums_stack(
             patch("panelcast.pipelines.predict_next.Path", side_effect=lambda p: MagicMock())
         )
 
+    # Hand back the prediction-helper mocks so callers can assert on the
+    # last_album_info / summary that the upstream column logic actually built.
+    return known_mock, new_mock
 
-class TestPredictNextAlbumsBranches:
+
+class TestPredictNextEventsBranches:
     def _ctx(self):
         ctx = MagicMock()
         ctx.seed = 1
@@ -1220,7 +1224,7 @@ class TestPredictNextAlbumsBranches:
         known_df, new_df = _make_known_new_dfs()
         ctx = self._ctx()
         with ExitStack() as stack:
-            _predict_next_albums_stack(
+            _predict_next_events_stack(
                 stack,
                 base_summary,
                 small_posterior,
@@ -1231,7 +1235,7 @@ class TestPredictNextAlbumsBranches:
                 model_key_in_manifest=False,
             )
             with pytest.raises(ValueError, match="No trained"):
-                predict_next_albums(ctx)
+                predict_next_events(ctx)
 
     def test_posterior_prefix_mismatch_raises(self, tmp_path, base_summary, small_posterior):
         train_df, train_features = _make_minimal_dfs()
@@ -1258,15 +1262,16 @@ class TestPredictNextAlbumsBranches:
             patch("panelcast.pipelines.predict_next.Path", side_effect=lambda p: MagicMock()),
         ):
             with pytest.raises(ValueError, match="no sites with expected prefix"):
-                predict_next_albums(ctx)
+                predict_next_events(ctx)
 
     def test_n_reviews_col_uses_n_obs_col_fallback(self, tmp_path, base_summary, small_posterior):
-        # train_df has User_Ratings not n_reviews => L461 branch
+        # train_df has User_Ratings not n_reviews => median review count must be
+        # taken from the n_obs_col (User_Ratings: median(100, 200) = 150).
         train_df, train_features = _make_minimal_dfs()
         known_df, new_df = _make_known_new_dfs()
         ctx = self._ctx()
         with ExitStack() as stack:
-            _predict_next_albums_stack(
+            known_mock, _ = _predict_next_events_stack(
                 stack,
                 base_summary,
                 small_posterior,
@@ -1276,7 +1281,9 @@ class TestPredictNextAlbumsBranches:
                 new_df,
                 path_side_effect=lambda p: tmp_path if p == "outputs/predictions" else MagicMock(),
             )
-            result = predict_next_albums(ctx)
+            result = predict_next_events(ctx)
+        last_album_info = known_mock.call_args.args[2]
+        assert last_album_info.loc["ArtistA", "median_n_reviews"] == 150.0
         assert "known_predictions_path" in result
 
     def test_no_n_reviews_col_uses_summary_fallback(self, tmp_path, base_summary, small_posterior):
@@ -1292,7 +1299,7 @@ class TestPredictNextAlbumsBranches:
         known_df, new_df = _make_known_new_dfs()
         ctx = self._ctx()
         with ExitStack() as stack:
-            _predict_next_albums_stack(
+            known_mock, _ = _predict_next_events_stack(
                 stack,
                 base_summary,
                 small_posterior,
@@ -1302,11 +1309,14 @@ class TestPredictNextAlbumsBranches:
                 new_df,
                 path_side_effect=lambda p: tmp_path if p == "outputs/predictions" else MagicMock(),
             )
-            result = predict_next_albums(ctx)
+            result = predict_next_events(ctx)
+        # No review column at all => fall back to the summary's median (100).
+        last_album_info = known_mock.call_args.args[2]
+        assert last_album_info.loc["ArtistA", "median_n_reviews"] == 100
         assert "known_predictions_path" in result
 
     def test_n_reviews_col_explicit(self, tmp_path, base_summary, small_posterior):
-        # train_df has n_reviews => L459 branch
+        # train_df has an explicit n_reviews column => median(100, 200) = 150.
         train_df = pd.DataFrame(
             {"Artist": ["ArtistA", "ArtistA"], "User_Score": [75.0, 80.0], "n_reviews": [100, 200]},
             index=[0, 1],
@@ -1318,7 +1328,7 @@ class TestPredictNextAlbumsBranches:
         known_df, new_df = _make_known_new_dfs()
         ctx = self._ctx()
         with ExitStack() as stack:
-            _predict_next_albums_stack(
+            known_mock, _ = _predict_next_events_stack(
                 stack,
                 base_summary,
                 small_posterior,
@@ -1328,7 +1338,9 @@ class TestPredictNextAlbumsBranches:
                 new_df,
                 path_side_effect=lambda p: tmp_path if p == "outputs/predictions" else MagicMock(),
             )
-            result = predict_next_albums(ctx)
+            result = predict_next_events(ctx)
+        last_album_info = known_mock.call_args.args[2]
+        assert last_album_info.loc["ArtistA", "median_n_reviews"] == 150.0
         assert "known_predictions_path" in result
 
     def test_out_of_bounds_warning_triggered(self, tmp_path, base_summary, small_posterior):
@@ -1339,7 +1351,7 @@ class TestPredictNextAlbumsBranches:
         known_df["pred_mean"] = 110.0
         ctx = self._ctx()
         with ExitStack() as stack:
-            _predict_next_albums_stack(
+            _predict_next_events_stack(
                 stack,
                 base_summary,
                 small_posterior,
@@ -1349,7 +1361,7 @@ class TestPredictNextAlbumsBranches:
                 new_df,
                 path_side_effect=lambda p: tmp_path if p == "outputs/predictions" else MagicMock(),
             )
-            result = predict_next_albums(ctx)
+            result = predict_next_events(ctx)
         assert "pred_summary" in result
 
     def test_wide_interval_warning_triggered(self, tmp_path, base_summary, small_posterior):
@@ -1361,7 +1373,7 @@ class TestPredictNextAlbumsBranches:
         known_df["pred_q95"] = 90.0
         ctx = self._ctx()
         with ExitStack() as stack:
-            _predict_next_albums_stack(
+            _predict_next_events_stack(
                 stack,
                 base_summary,
                 small_posterior,
@@ -1371,7 +1383,7 @@ class TestPredictNextAlbumsBranches:
                 new_df,
                 path_side_effect=lambda p: tmp_path if p == "outputs/predictions" else MagicMock(),
             )
-            result = predict_next_albums(ctx)
+            result = predict_next_events(ctx)
         assert "pred_summary" in result
 
     def test_horizon_clamped_count_in_summary(self, tmp_path, base_summary, small_posterior):
@@ -1382,7 +1394,7 @@ class TestPredictNextAlbumsBranches:
         known_df["horizon_clamped"] = True
         ctx = self._ctx()
         with ExitStack() as stack:
-            _predict_next_albums_stack(
+            _predict_next_events_stack(
                 stack,
                 base_summary,
                 small_posterior,
@@ -1392,11 +1404,11 @@ class TestPredictNextAlbumsBranches:
                 new_df,
                 path_side_effect=lambda p: tmp_path if p == "outputs/predictions" else MagicMock(),
             )
-            result = predict_next_albums(ctx)
+            result = predict_next_events(ctx)
         assert result["pred_summary"]["n_horizon_clamped_artists"] == 1
 
 
-class TestPredictArtistNext:
+class TestPredictEntityNext:
     def _make_summary_obj(self, base_summary):
         obj = MagicMock()
         obj.to_json_dict.return_value = base_summary
@@ -1456,7 +1468,7 @@ class TestPredictArtistNext:
             )
         )
         stack.enter_context(
-            patch("panelcast.pipelines.predict_next._predict_known_artists", return_value=known_df)
+            patch("panelcast.pipelines.predict_next._predict_known_entities", return_value=known_df)
         )
         return known_df
 
@@ -1476,7 +1488,7 @@ class TestPredictArtistNext:
                     return_value=MagicMock(__truediv__=lambda s, o: MagicMock()),
                 )
             )
-            result = predict_artist_next("ArtistA", models_dir="models", splits_path=None)
+            result = predict_entity_next("ArtistA", models_dir="models", splits_path=None)
 
         assert isinstance(result, pd.DataFrame)
 
@@ -1490,7 +1502,7 @@ class TestPredictArtistNext:
 
         with ExitStack() as stack:
             self._base_stack(stack, base_summary, small_posterior, train_df, train_features)
-            result = predict_artist_next(
+            result = predict_entity_next(
                 "ArtistA", models_dir="models", splits_path="dummy.parquet"
             )
 
@@ -1505,7 +1517,7 @@ class TestPredictArtistNext:
             ),
         ):
             with pytest.raises(KeyError, match="is not part of the trained model"):
-                predict_artist_next("UnknownArtist", models_dir="models")
+                predict_entity_next("UnknownArtist", models_dir="models")
 
     def test_manifest_missing_raises(self, base_summary, small_posterior):
         mock_summary_obj = self._make_summary_obj(base_summary)
@@ -1519,7 +1531,7 @@ class TestPredictArtistNext:
             patch("panelcast.pipelines.predict_next.load_manifest", return_value=mock_manifest),
         ):
             with pytest.raises(ValueError, match="No trained"):
-                predict_artist_next("ArtistA", models_dir="models")
+                predict_entity_next("ArtistA", models_dir="models")
 
     def test_empty_train_rows_raises(self, base_summary, small_posterior):
         # ArtistA in summary but training split only has ArtistB => empty filter
@@ -1555,7 +1567,7 @@ class TestPredictArtistNext:
             ),
         ):
             with pytest.raises(KeyError, match="has no rows"):
-                predict_artist_next("ArtistA", models_dir="models", splits_path="dummy.parquet")
+                predict_entity_next("ArtistA", models_dir="models", splits_path="dummy.parquet")
 
     def test_n_reviews_uses_n_obs_col(self, base_summary, small_posterior):
         # train_df has User_Ratings not n_reviews => L673-674
@@ -1571,7 +1583,7 @@ class TestPredictArtistNext:
 
         with ExitStack() as stack:
             self._base_stack(stack, base_summary, small_posterior, train_df, train_features)
-            result = predict_artist_next(
+            result = predict_entity_next(
                 "ArtistA", models_dir="models", splits_path="dummy.parquet"
             )
 
@@ -1587,7 +1599,7 @@ class TestPredictArtistNext:
 
         with ExitStack() as stack:
             self._base_stack(stack, base_summary, small_posterior, train_df, train_features)
-            result = predict_artist_next(
+            result = predict_entity_next(
                 "ArtistA", models_dir="models", splits_path="dummy.parquet"
             )
 

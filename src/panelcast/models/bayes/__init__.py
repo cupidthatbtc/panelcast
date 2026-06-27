@@ -28,7 +28,7 @@ from panelcast.models.bayes.model import (
 from panelcast.models.bayes.predict import (
     PredictionResult,
     generate_posterior_predictive,
-    predict_new_artist,
+    predict_new_entity,
     predict_out_of_sample,
 )
 from panelcast.models.bayes.priors import PriorConfig, get_default_priors
@@ -55,7 +55,7 @@ __all__ = [
     "PredictionResult",
     "generate_posterior_predictive",
     "predict_out_of_sample",
-    "predict_new_artist",
+    "predict_new_entity",
     # I/O
     "ModelManifest",
     "ModelsManifest",

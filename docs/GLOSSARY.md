@@ -61,7 +61,7 @@ things you'd actually bring up when explaining the project.
 
 **Predictive(model, posterior_samples, batch_ndims=1)** — NumPyro's posterior predictive sampler. Runs the model forward with `y=None` to generate predictions. Each posterior draw produces a different prediction, giving us a full predictive distribution per observation.
 
-**predict_new_artist()** — The hierarchical payoff. For artists NOT in training, we sample a new artist effect from `Normal(mu_artist, sigma_artist)` — the population distribution. New artists automatically get wider uncertainty. Returns full predictive draws (`y`), mean predictions (`mu`), and the sampled artist effect.
+**predict_new_entity()** — The hierarchical payoff. For entities NOT in training, we sample a new entity effect from `Normal(mu_artist, sigma_artist)` — the population distribution. ("artist" in the parameter names denotes the grouping entity.) New entities automatically get wider uncertainty. Returns full predictive draws (`y`), mean predictions (`mu`), and the sampled entity effect.
 
 **Epistemic vs. aleatoric uncertainty** — The spread of `mu` across posterior samples = epistemic (what we don't know about parameters). The gap between `y` and `mu` = aleatoric (irreducible observation noise). Our PredictionResult separates these.
 
@@ -79,7 +79,7 @@ things you'd actually bring up when explaining the project.
 
 **within_entity_temporal_split()** — Primary evaluation: hold out each artist's last album(s) for test. Tests the actual use case: "given an artist's history, predict their next album."
 
-**entity_disjoint_split()** — Secondary evaluation: no artist overlap between train and test. Tests cold-start: "can we predict for artists we've never seen?" Uses `predict_new_artist()` under the hood.
+**entity_disjoint_split()** — Secondary evaluation: no entity overlap between train and test. Tests cold-start: "can we predict for entities we've never seen?" Uses `predict_new_entity()` under the hood.
 
 > The split strategies were renamed artist → entity for domain portability. The
 > old `within_artist_temporal` / `artist_disjoint` directory and manifest
@@ -120,7 +120,7 @@ highlights; this section is the complete inventory.
 
 **jax.numpy (jnp)** — JAX's drop-in replacement for NumPy. All the array operations inside the model function use `jnp` instead of `np` because JAX needs to trace through them for automatic differentiation. Outside the model (metrics, data wrangling), we use regular `np`.
 
-**jax.random.key()** — JAX's random number generator. Unlike NumPy's global RNG state, JAX uses explicit PRNG keys that you split and pass around. Every `fit_model()` and `predict_new_artist()` call takes a seed that becomes a JAX key. This is what makes our runs reproducible.
+**jax.random.key()** — JAX's random number generator. Unlike NumPy's global RNG state, JAX uses explicit PRNG keys that you split and pass around. Every `fit_model()` and `predict_new_entity()` call takes a seed that becomes a JAX key. This is what makes our runs reproducible.
 
 **jax.nn.softplus()** — A smooth approximation to `max(0, x)`. We use it inside `soft_clip()` to keep predictions in the (0, 100) range without hard boundaries that would break NUTS's gradient computation.
 
@@ -196,7 +196,7 @@ highlights; this section is the complete inventory.
 
 **predict_out_of_sample(model, mcmc, new_model_args)** — Same as posterior predictive but for held-out data (val/test set). The artists must have been seen during training — their fitted artist effects are reused.
 
-**predict_new_artist(posterior_samples, X_new, prev_score)** — Prediction for artists NOT in the training set. Samples a new artist effect from `Normal(mu_artist, sigma_artist)` — the population distribution. This is the hierarchical Bayesian payoff: new artists get predictions with appropriate extra uncertainty, automatically. Returns a dict with `y` (full predictive draws), `mu` (mean without noise), `artist_effect`, and `sigma_scaled`.
+**predict_new_entity(posterior_samples, X_new, prev_score)** — Prediction for entities NOT in the training set. Samples a new entity effect from `Normal(mu_artist, sigma_artist)` — the population distribution. This is the hierarchical Bayesian payoff: new entities get predictions with appropriate extra uncertainty, automatically. Returns a dict with `y` (full predictive draws), `mu` (mean without noise), `artist_effect`, and `sigma_scaled`.
 
 **PredictionResult** — Container with `y` (predicted scores with observation noise, shape `(n_samples, n_obs)`) and optionally `mu` (mean predictions without noise). The spread of `mu` across samples captures epistemic uncertainty (what we don't know about the parameters); the difference between `y` and `mu` captures aleatoric uncertainty (irreducible noise).
 

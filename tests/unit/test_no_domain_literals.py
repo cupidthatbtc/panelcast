@@ -26,7 +26,7 @@ LITERAL_PATTERN = re.compile(r"[\"']User_Score[\"']|[\"']Artist[\"']")
 
 # Second tier: legacy prediction-artifact schema literals. Matches the exact
 # quoted scenario/column tokens (not Python identifiers like
-# ``predict_new_artist`` or variables like ``artist_mean_features``) and the
+# ``predict_new_entity`` or variables like ``artist_mean_features``) and the
 # legacy CSV filename stems, which only ever appear in artifact paths.
 LEGACY_ARTIFACT_PATTERN = re.compile(
     r"[\"'](?:artist_mean|n_training_albums)[\"']"
