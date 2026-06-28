@@ -7,6 +7,7 @@ for publication and dashboard workflows.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -59,6 +60,28 @@ log = structlog.get_logger()
 
 PRIMARY_SPLIT = str(SplitType.WITHIN_ENTITY_TEMPORAL.value)
 SECONDARY_SPLIT = str(SplitType.ENTITY_DISJOINT.value)
+
+_EVAL_OUTPUT_DIR = "outputs/evaluation"  # str so use sites build Path() at call time (patchable)
+_SAVE_LOG_LIKELIHOOD_ENV = "PANELCAST_SAVE_LOG_LIKELIHOOD"
+
+
+def _log_likelihood_save_path() -> Path | None:
+    """Opt-in destination for the primary-split pointwise log-likelihood idata.
+
+    Off by default; set ``PANELCAST_SAVE_LOG_LIKELIHOOD=1`` to persist
+    ``outputs/evaluation/log_likelihood.nc`` so a downstream cross-model LOO
+    comparison (the transform x latent bake-off) can run ``az.compare`` on a
+    common test set. Returns None when the gate is unset.
+    """
+    if os.environ.get(_SAVE_LOG_LIKELIHOOD_ENV):
+        return Path(_EVAL_OUTPUT_DIR) / "log_likelihood.nc"
+    return None
+
+
+def _save_log_likelihood_idata(idata_ll: az.InferenceData, path: Path) -> None:
+    """Persist the pointwise log-likelihood idata (with posterior) to netCDF."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    idata_ll.to_netcdf(str(path))
 
 
 def _json_safe(value: Any) -> Any:
@@ -682,6 +705,7 @@ def _compute_info_criteria(
     y_raw: np.ndarray | None = None,
     seed: int = 0,
     batch_size: int = 500,
+    log_likelihood_path: Path | None = None,
 ) -> dict[str, Any]:
     """Compute WAIC/LOO from pointwise log-likelihood.
 
@@ -795,6 +819,10 @@ def _compute_info_criteria(
             )
         groups["posterior"] = xr.Dataset(post_vars)
     idata_ll = az.InferenceData(**groups)
+    if log_likelihood_path is not None:  # pragma: no cover - opt-in bake-off save path
+        # Persist for cross-model LOO comparison (az.compare needs the pointwise
+        # log-lik on a common test set; the Jacobian above keeps it score-scale).
+        _save_log_likelihood_idata(idata_ll, log_likelihood_path)
     loo_kwargs: dict[str, Any] = {} if "posterior" in groups else {"reff": 1.0}
     loo = az.loo(idata_ll, var_name="y", pointwise=True, **loo_kwargs)
     waic = az.waic(idata_ll, var_name="y", pointwise=True)
@@ -1121,6 +1149,7 @@ def _evaluate_primary_split(
             y_raw=primary_y_true,
             seed=ctx.seed,
             batch_size=int(getattr(ctx, "predictive_batch_size", 500)),
+            log_likelihood_path=_log_likelihood_save_path(),
         )
     except Exception as e:
         if ctx.strict:
@@ -1360,7 +1389,7 @@ def evaluate_models(ctx: StageContext) -> dict:
                     f"(tolerance={ctx.coverage_tolerance})."
                 )
 
-    output_dir = Path("outputs/evaluation")
+    output_dir = Path(_EVAL_OUTPUT_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     diagnostics_path = output_dir / "diagnostics.json"

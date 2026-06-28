@@ -9,8 +9,12 @@ splits/features and emits one comparison table.
 Each cell runs `panelcast run --preset diagnostic --stages train,evaluate
 --likelihood-family studentt` with the cell's transform/latent, so the
 data/splits/features stages must already exist on disk and `AOTY_DATASET_PATH`
-must point at the subset. Each run's `outputs/evaluation/` is snapshotted into
-`.audit/transform_latent_bakeoff/<cell>/` before the next cell overwrites it.
+must point at the subset. `PANELCAST_SAVE_LOG_LIKELIHOOD=1` is set for each run so
+the evaluate stage persists `outputs/evaluation/log_likelihood.nc` (pointwise,
+score-scale). Each run's `outputs/evaluation/` is snapshotted into
+`.audit/transform_latent_bakeoff/<cell>/` before the next cell overwrites it; the
+snapshotted log-likelihoods feed a pairwise `az.compare` so the table reports LOO
+elpd + SE and the paired `elpd_diff +/- dse` vs the kept default.
 
 GPU: invoke with the GPU venv interpreter (`~/aoty-gpu/bin/python`) so the
 sibling `panelcast` is the GPU build. Do NOT set `JAX_PLATFORMS=cuda` — evaluate
@@ -20,6 +24,10 @@ Example
 -------
     AOTY_DATASET_PATH=data/raw/aoty_subset.csv \
         ~/aoty-gpu/bin/python scripts/bakeoff_transform_latent.py
+
+Pass `--reassemble` to rebuild the comparison artifacts from existing snapshots
+without re-fitting (LOO columns always; the pairwise rows when the per-cell
+`log_likelihood.nc` snapshots are present).
 """
 
 from __future__ import annotations
@@ -39,6 +47,9 @@ CELLS = (
     {"name": "offset_logit_rw", "transform": "offset_logit", "latent": "rw"},
     {"name": "offset_logit_ar1", "transform": "offset_logit", "latent": "ar1"},
 )
+
+DEFAULT_CELL = "identity_rw"  # the kept default; pairwise diffs are measured against it
+_SNAPSHOT_FILES = ("metrics.json", "diagnostics.json", "log_likelihood.nc")
 
 
 def _json_safe(obj):
@@ -68,8 +79,11 @@ def _run_cell(panelcast_bin: str, cell: dict, preset: str) -> int:
         "--latent-process",
         cell["latent"],
     ]
+    # Opt the evaluate stage into persisting the pointwise log-likelihood so the
+    # pairwise az.compare below has a common-test-set idata per cell.
+    env = {**os.environ, "PANELCAST_SAVE_LOG_LIKELIHOOD": "1"}
     print(f"\n=== {cell['name']} ({cell['transform']} x {cell['latent']}) ===\n  $ {' '.join(cmd)}")
-    return subprocess.run(cmd, check=False).returncode
+    return subprocess.run(cmd, check=False, env=env).returncode
 
 
 def _read_metrics(eval_dir: Path) -> dict:
@@ -90,7 +104,9 @@ def _read_metrics(eval_dir: Path) -> dict:
         point = m.get("point_metrics", {})
         cov95 = (m.get("calibration", {}).get("coverages", {}) or {}).get("0.95", {})
         pit = (m.get("calibration", {}) or {}).get("pit", {}) or {}
-        loo = (m.get("info_criteria", {}) or {}).get("loo", {})
+        info = m.get("info_criteria", {}) or {}
+        loo = info.get("loo", {}) or {}
+        waic = info.get("waic", {}) or {}
         pinned = m.get("ppc", {}).get("extreme_statistics", []) or []
         out.update(
             mae=point.get("mae"),
@@ -102,10 +118,64 @@ def _read_metrics(eval_dir: Path) -> dict:
             ppc_pinned=len(pinned),
             ppc_pinned_names=",".join(pinned) or "-",
             loo_elpd=loo.get("elpd"),
+            loo_se=loo.get("se"),
+            p_loo=loo.get("p"),
+            waic_elpd=waic.get("elpd"),
             pareto_k_max=loo.get("pareto_k_max"),
             pareto_k_gt07=loo.get("pareto_k_gt_0_7"),
         )
     return out
+
+
+def _pairwise_loo(rows: list[dict], out_dir: Path, default_cell: str = DEFAULT_CELL) -> list[dict]:
+    """Pairwise LOO elpd_diff +/- dse of each cell vs the kept default.
+
+    Loads each cell's persisted pointwise log-likelihood idata and runs
+    `az.compare` (via `compare_models`) on the {default, cell} pair, so the SE is
+    the *paired* difference SE — the cells are fit to identical test data, so this
+    is smaller (and the honest significance number) than each model's marginal SE.
+    The elpd_diff is signed cell-minus-default (positive = beats the default).
+    Returns [] when the default cell's idata snapshot is absent.
+    """
+    import arviz as az
+
+    from panelcast.evaluation.cv import compare_models
+
+    by_name = {r["name"]: r for r in rows}
+    default_nc = out_dir / default_cell / "log_likelihood.nc"
+    default_row = by_name.get(default_cell)
+    if default_row is None or default_row.get("loo_elpd") is None or not default_nc.exists():
+        return []
+    idata_default = az.from_netcdf(str(default_nc))
+    elpd_default = float(default_row["loo_elpd"])
+
+    pairwise: list[dict] = []
+    for row in rows:
+        name = row["name"]
+        cell_nc = out_dir / name / "log_likelihood.nc"
+        if name == default_cell or row.get("loo_elpd") is None or not cell_nc.exists():
+            continue
+        try:
+            idata_cell = az.from_netcdf(str(cell_nc))
+            cmp = compare_models({default_cell: idata_default, name: idata_cell}, ic="loo")
+            # az.compare anchors at the best model (elpd_diff/dse measured from it).
+            # The pair's difference SE is the one non-reference row; the reference
+            # row's dse is 0. Sign the diff from the per-cell LOO elpds so the table
+            # and this column agree.
+            dse = float(cmp["dse"].abs().max())
+        except Exception as exc:  # noqa: BLE001 — audit script: degrade, don't abort
+            print(f"  ! pairwise compare failed for {name}: {type(exc).__name__}: {exc}")
+            continue
+        elpd_diff = float(row["loo_elpd"]) - elpd_default
+        pairwise.append(
+            {
+                "name": name,
+                "elpd_diff": elpd_diff,
+                "dse": dse,
+                "z": (elpd_diff / dse) if dse else None,
+            }
+        )
+    return pairwise
 
 
 def _fmt(v, spec: str = ".3g") -> str:
@@ -137,23 +207,97 @@ _COLUMNS = [
     ("cov95", "cov95", ".3f"),
     ("pit_dev", "pit_dev", ".3f"),
     ("crps", "crps", ".2f"),
+    ("loo_elpd", "loo", ".1f"),
+    ("loo_se", "se", ".1f"),
+    ("p_loo", "p_loo", ".1f"),
+    ("waic_elpd", "waic", ".1f"),
     ("pareto_k_max", "k_max", ".2f"),
     ("pareto_k_gt07", "k>0.7", None),
 ]
 
 
-def _render_markdown(rows: list[dict]) -> str:
-    """Render the per-cell rows as the comparison markdown table."""
+def _render_markdown(
+    rows: list[dict], pairwise: list[dict] | None = None, default_cell: str = DEFAULT_CELL
+) -> str:
+    """Render the per-cell rows (and optional pairwise LOO table) as markdown."""
     head = "| " + " | ".join(label for _, label, _ in _COLUMNS) + " |"
     sep = "| " + " | ".join("---" for _ in _COLUMNS) + " |"
-    lines = ["# Transform x latent-process bake-off (real subset, likelihood=studentt)", "", head, sep]
+    lines = [
+        "# Transform x latent-process bake-off (real subset, likelihood=studentt)",
+        "",
+        head,
+        sep,
+    ]
     for r in rows:
         cells = []
         for key, _, spec in _COLUMNS:
             v = r.get(key)
             cells.append(str(v) if spec == "{}" else _fmt(v, spec or ".3g"))
         lines.append("| " + " | ".join(cells) + " |")
+
+    if pairwise:
+        lines += [
+            "",
+            f"## Pairwise LOO vs kept default ({default_cell})",
+            "",
+            "elpd_diff is cell minus default (positive = beats the default); dse is the",
+            "*paired* difference SE from `az.compare` on identical test data.",
+            "",
+            "| cell | elpd_diff | dse | z (diff/dse) |",
+            "| --- | --- | --- | --- |",
+        ]
+        for p in pairwise:
+            lines.append(
+                f"| {p['name']} | {_fmt(p.get('elpd_diff'), '+.1f')} | "
+                f"{_fmt(p.get('dse'), '.1f')} | {_fmt(p.get('z'), '+.2f')} |"
+            )
+        scored = {p["name"] for p in pairwise} | {default_cell}
+        omitted = [
+            r["name"] for r in rows if r.get("loo_elpd") is not None and r["name"] not in scored
+        ]
+        if omitted:
+            lines += [
+                "",
+                f"_No current pointwise log-likelihood snapshot for {', '.join(omitted)}, "
+                "so the pairwise table omits them._",
+            ]
     return "\n".join(lines) + "\n"
+
+
+def _collect_rows_from_snapshots(out_dir: Path) -> list[dict]:
+    """Rebuild per-cell rows from existing snapshots (no re-fitting)."""
+    rows: list[dict] = []
+    for cell in CELLS:
+        row = {"name": cell["name"], "transform": cell["transform"], "latent": cell["latent"]}
+        dest = out_dir / cell["name"]
+        if (dest / "metrics.json").exists():
+            row.update(_read_metrics(dest))
+        else:
+            row["error"] = "no snapshot"
+        rows.append(row)
+    return rows
+
+
+def _run_grid(panelcast_bin: str, preset: str, eval_dir: Path, out_dir: Path) -> list[dict]:
+    """Fit each cell, snapshot its evaluation outputs, and collect the row."""
+    rows: list[dict] = []
+    for cell in CELLS:
+        row = {"name": cell["name"], "transform": cell["transform"], "latent": cell["latent"]}
+        code = _run_cell(panelcast_bin, cell, preset)
+        if code != 0:
+            row["error"] = f"panelcast run exited {code}"
+            print(f"  ! {cell['name']} failed (exit {code}); recording and continuing")
+            rows.append(row)
+            continue
+        dest = out_dir / cell["name"]
+        dest.mkdir(parents=True, exist_ok=True)
+        for fname in _SNAPSHOT_FILES:
+            src = eval_dir / fname
+            if src.exists():
+                shutil.copy2(src, dest / fname)
+        row.update(_read_metrics(eval_dir))
+        rows.append(row)
+    return rows
 
 
 def main() -> int:
@@ -168,39 +312,33 @@ def main() -> int:
         default=default_bin,
         help="panelcast executable (default: sibling of the running interpreter).",
     )
+    parser.add_argument(
+        "--reassemble",
+        action="store_true",
+        help="Skip fitting; rebuild comparison.{md,json} from existing --out-dir snapshots.",
+    )
     args = parser.parse_args()
-
-    if "AOTY_DATASET_PATH" not in os.environ:
-        print(
-            "warning: AOTY_DATASET_PATH not set; set it to data/raw/aoty_subset.csv "
-            "for the subset bake-off.",
-            file=sys.stderr,
-        )
 
     eval_dir = Path(args.eval_dir)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    rows: list[dict] = []
-    for cell in CELLS:
-        row = {"name": cell["name"], "transform": cell["transform"], "latent": cell["latent"]}
-        code = _run_cell(args.panelcast_bin, cell, args.preset)
-        if code != 0:
-            row["error"] = f"panelcast run exited {code}"
-            print(f"  ! {cell['name']} failed (exit {code}); recording and continuing")
-            rows.append(row)
-            continue
-        dest = out_dir / cell["name"]
-        dest.mkdir(parents=True, exist_ok=True)
-        for fname in ("metrics.json", "diagnostics.json"):
-            src = eval_dir / fname
-            if src.exists():
-                shutil.copy2(src, dest / fname)
-        row.update(_read_metrics(eval_dir))
-        rows.append(row)
+    if args.reassemble:
+        rows = _collect_rows_from_snapshots(out_dir)
+    else:
+        if "AOTY_DATASET_PATH" not in os.environ:
+            print(
+                "warning: AOTY_DATASET_PATH not set; set it to data/raw/aoty_subset.csv "
+                "for the subset bake-off.",
+                file=sys.stderr,
+            )
+        rows = _run_grid(args.panelcast_bin, args.preset, eval_dir, out_dir)
 
-    (out_dir / "comparison.json").write_text(json.dumps(_json_safe(rows), indent=2), encoding="utf-8")
-    md = _render_markdown(rows)
+    pairwise = _pairwise_loo(rows, out_dir)
+
+    payload = {"cells": _json_safe(rows), "pairwise_vs_default": _json_safe(pairwise)}
+    (out_dir / "comparison.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    md = _render_markdown(rows, pairwise)
     (out_dir / "comparison.md").write_text(md, encoding="utf-8")
     print("\n" + md)
     print(f"wrote {out_dir / 'comparison.json'} and {out_dir / 'comparison.md'}")
