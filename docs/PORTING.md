@@ -11,6 +11,12 @@ airframes fly sequential test flights, each scored 0–10 by flight-test
 telemetry. The full descriptor lives at `configs/datasets/aero.yaml`;
 the e2e proof at `tests/e2e/test_domain_portability.py`.
 
+**What "portable" means here:** the *apparatus* ports — a new domain runs the
+full pipeline (data → … → report) with zero source changes, and AOTY stays
+byte-identical. It does **not** mean the model predicts well on a new domain: the
+e2e test asserts the pipeline runs and the output structure, not predictive
+accuracy, which is untested off AOTY by construction.
+
 ## The mental model
 
 | Concept | AOTY (default) | Aero example |

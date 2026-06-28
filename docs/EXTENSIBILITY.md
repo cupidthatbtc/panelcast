@@ -71,7 +71,10 @@ Current block files
   matrices byte-for-byte: a registry/block refactor must not change outputs.
 - `tests/e2e/test_domain_portability.py` proves the descriptor surface:
   the aero domain runs the full pipeline with zero source changes, and
-  `--dataset aoty_full` is byte-identical to running with no flag.
+  `--dataset aoty_full` is byte-identical to running with no flag. This proves
+  the apparatus *runs* on a new domain (and stays byte-identical on AOTY), not
+  that it *predicts* well there — predictive accuracy off AOTY is untested by
+  construction.
 
 ## Rebuilding features
 
