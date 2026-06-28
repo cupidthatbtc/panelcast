@@ -8,7 +8,7 @@ coverage:
       default:
         target: 90%
         threshold: 1%
-        # Advisory, not blocking: opt-in model-v2 paths (EIV / RW-horizon
-        # propagation) run only under the slow suite, which PR CI deselects, so
-        # diff coverage understates them. Project coverage (95%) stays a hard gate.
-        informational: true
+        # Blocking. The opt-in model-v2 paths (EIV / RW-horizon propagation) that
+        # forced the advisory downgrade (PR #32) now have fast-suite tests PR CI
+        # runs — e.g. test_fit_eiv.py's gate-logic tests and test_rw_horizon.py —
+        # so diff coverage no longer understates them. Project (95%) stays a gate.
