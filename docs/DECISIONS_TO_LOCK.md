@@ -45,19 +45,25 @@ Feature scope (defaults)
 
 Bayesian modeling (adopted gates — validated on 2x500 cheap runs, 2026-06-10)
 - Sampler: NumPyro NUTS
-- `target_transform = identity` — offset_logit HELD. At cheap 2×500 settings it
-  failed PPC/PIT/coverage and would not mix (R-hat 1.27–1.37). The diagnostic
-  transform×latent bake-off (`docs/LIKELIHOOD_CANDIDATES.md`,
-  `.audit/transform_latent_bakeoff/`) now shows offset_logit *does* mix at 4×1000
-  (R-hat 1.01) but ~10× slower, and still does not move the bounded-skew
-  skewness/max/q90 PPC pins — it relieves q50 only to newly pin q10. Held.
+- `target_transform = identity` — offset_logit HELD as a deliberate values
+  choice, not a failure. The old "failed PPC/PIT/coverage, would not mix (R-hat
+  1.27–1.37)" note was a cheap-2×500 artifact, now refuted: the diagnostic
+  4×1000 transform×latent bake-off (`docs/LIKELIHOOD_CANDIDATES.md`,
+  `.audit/transform_latent_bakeoff/`) shows offset_logit *mixes* (R-hat 1.01,
+  0 div, ~10× slower) and in fact *wins every held-out predictive metric* — LOO
+  +60.1 (paired dse 4.6, z ≈ 13), R² 0.428 vs 0.417, RMSE 8.19 vs 8.27, CRPS
+  4.13 vs 4.19, PIT 0.049 vs 0.056 (at one Pareto-k > 0.7). It is held because it
+  does not move the bounded-skew skewness/max/q90 PPC pins — it relieves q50 only
+  to newly pin q10 — so the project trades a predictive gain for matching the
+  generative distribution. A values choice, not a defect.
 - `ar_center = global` — ADOPTED: corr(rho, mu_artist) -0.997 -> +0.016,
   debut AR terms exactly zero, prior predictive flipped to passing.
-- `latent_process = rw` — ar1 registered behind a gate; adopt only if LOO
-  clearly wins. The diagnostic transform×latent bake-off (above) shows it does
-  not: on the default transform ar1 drops bulk ESS 802 → 577 and pins one more
-  PPC statistic at identical point accuracy and calibration. Held; rw stays
-  default.
+- `latent_process = rw` — ar1 registered behind a LOO-clear-win gate that has
+  not triggered. On the default transform the paired LOO difference is −5.2 ± 2.6
+  (z ≈ −2; `.audit/transform_latent_bakeoff/`) — a small, marginally-resolved
+  *decrement*, not the clear win the gate requires — while bulk ESS drops 787 →
+  635 and one more PPC statistic pins, at identical point accuracy and
+  calibration. Held; rw stays default.
 - `artist_effect_param = noncentered`, `sigma_artist_prior_type = halfnormal`
   — won the 4-variant mixing bake-off
   (`outputs/experiments/sigma_artist_mixing.json`).
