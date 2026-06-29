@@ -83,7 +83,7 @@ absorbs much of the raw skew, so this is milder than AOTY's −1.79):
 **Takeaways**
 
 - Both new families **mix** at validation settings (R-hat ≤ 1.02), unlike the
-  offset-logit transform, which failed to mix (R-hat 1.27–1.37) **at these cheap
+  `offset_logit` transform, which failed to mix (R-hat 1.27–1.37) **at these cheap
   2×500 settings**. That mixing verdict is *superseded* below: at the diagnostic
   4×1000 bake-off offset_logit mixes (R-hat 1.01) and wins the predictive
   metrics, held only on the structural pins (see *Transform × latent process*).
@@ -356,7 +356,8 @@ at the **worst bulk ESS of the grid (477)**: `ar1` buys nothing on top of the
 transform.)
 
 **`ar1` does not help (claim 3).** On the default transform it drops bulk ESS
-802 → 577, tips `skewness` over the >0.99 flag (0.990 → 0.99025 — within the
+802 → 577 here (787 → 635 in the regenerated `comparison.json` the decision
+journal quotes), tips `skewness` over the >0.99 flag (0.990 → 0.99025 — within the
 borderline noise the waves above already note), and leaves point accuracy and
 calibration unchanged (MAE 5.63 vs 5.64, identical RMSE/coverage). It buys no
 PPC or predictive improvement at a real mixing cost, so `latent_process = rw`

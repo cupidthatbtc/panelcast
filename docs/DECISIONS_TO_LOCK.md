@@ -47,7 +47,7 @@ Bayesian modeling (adopted gates — validated on 2x500 cheap runs, 2026-06-10)
 - Sampler: NumPyro NUTS
 - `target_transform = identity` — offset_logit HELD as a deliberate values
   choice, not a failure. The old "failed PPC/PIT/coverage, would not mix (R-hat
-  1.27–1.37)" note was a cheap-2×500 artifact, since refuted: the diagnostic
+  1.27–1.37)" note was a cheap-2×500 artifact, now refuted: the diagnostic
   4×1000 transform×latent bake-off (`docs/LIKELIHOOD_CANDIDATES.md`,
   `.audit/transform_latent_bakeoff/`) shows offset_logit *mixes* (R-hat 1.01,
   0 div, ~10× slower) and in fact *wins every held-out predictive metric* — LOO

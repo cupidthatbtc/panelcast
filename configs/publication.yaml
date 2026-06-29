@@ -9,10 +9,10 @@
 #
 # Adopted gate decisions (validated on 2x500 cheap runs, 2026-06-10):
 # - target_transform: identity — offset_logit HELD on a values choice, not a
-#   failure. The 4x1000 transform x latent bake-off
-#   (.audit/transform_latent_bakeoff/) shows it mixes (R-hat 1.01, 0 div, ~10x
+#   failure. The 4×1000 transform × latent bake-off
+#   (.audit/transform_latent_bakeoff/) shows it mixes (R-hat 1.01, 0 div, ~10×
 #   slower) and wins every held-out predictive metric — LOO +60.1 (paired dse
-#   4.6), R^2 0.428 vs 0.417, RMSE 8.19 vs 8.27, PIT 0.049 vs 0.056 — but does
+#   4.6), R² 0.428 vs 0.417, RMSE 8.19 vs 8.27, PIT 0.049 vs 0.056 — but does
 #   not move the structural skewness/max/q90 PPC pins (it only trades the q50 pin
 #   for a new q10 pin). We prioritize the generative-shape match over the
 #   predictive gain. Held.
@@ -23,7 +23,7 @@
 #   vs 68 zerosum, 5 lognormal; see outputs/experiments/sigma_artist_mixing.json).
 #   ESS extrapolates to ~4000 at these settings (gate: 800).
 # - latent_process: rw — ar1 registered behind a LOO-clear-win gate that has not
-#   triggered: in the bake-off the paired LOO difference is -5.2 +/- 2.6 (a small
+#   triggered: in the bake-off the paired LOO difference is -5.2 ± 2.6 (a small
 #   decrement, not a win) while bulk ESS drops 787 -> 635. Held; rw stays default.
 # - Warmup 3000 (plan range 3000-5000): the centered geometry adapts fast
 #   (stable step size well before iteration 500 on cheap runs).
