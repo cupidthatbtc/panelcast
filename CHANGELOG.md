@@ -44,7 +44,7 @@ model-card numbers are unchanged; everything new is opt-in.
   domain with no source changes, but predictive accuracy off the AOTY example is
   untested by construction (#48).
 - Surfaced LOO (elpd + SE) and pairwise ELPD in the transform × latent bake-off,
-  and corrected the `offset_logit` / AR(1) verdicts in the decision journal
+  and corrected the `offset_logit` and AR(1) verdicts in the decision journal
   (#34, #35).
 
 ### Fixed
