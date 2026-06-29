@@ -4,6 +4,66 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] — 2026-06-28
+
+A backward-compatible modeling and code-quality release. Both new model-v2
+options are **default-off and parity-locked** — a unit test pins the posterior
+draws bit-identical with the gates off — so existing runs and the published
+model-card numbers are unchanged; everything new is opt-in.
+
+### Added
+
+- **Errors-in-variables AR(1) gate** (`errors_in_variables`, default off; #30).
+  The album-to-album term regresses on the *observed* previous score as if it
+  were noise-free, attenuating `rho` toward zero for sparse-review entities. The
+  gate de-noises the regressor with a fixed, data-derived measurement-error
+  latent (`prev_latent = prev_score + (global_std / √prev_n_reviews)·z`, debuts
+  pinned to zero) rather than a second latent AR, so it adds no new funnel
+  geometry. Synthetic-recovery tests confirm `rho` de-attenuates with the gate on.
+- **Long-horizon random-walk variance gate** (`propagate_rw_horizon`, default
+  off; #30). Prediction past the longest training trajectory reused the final
+  latent step and dropped the accumulated random-walk variance, so
+  deep-extrapolation intervals were too narrow. With the gate on, the
+  evaluate/predict stages remove the sequence clamp and the re-sampled trajectory
+  carries the full innovations; training and within-horizon draws are unchanged.
+- **Baseline comparison** (`docs/BASELINES.md`), reframing the model as a
+  calibrated-uncertainty engine rather than a point forecaster — competitive with
+  ridge, behind gradient boosting on point accuracy, and better calibrated than
+  GBM (#39).
+- A **C901 cyclomatic-complexity gate** (max 22) and a `@claude` GitHub Action
+  workflow.
+
+### Changed
+
+- **Code-quality remediation** (#14): decomposed the publication-artifact and
+  evaluate spines into focused helpers, de-nested the known-entity prediction
+  path, split run-command validation and preflight, modernized annotations and
+  stdlib idioms, and made the best-effort handlers record exception type and
+  traceback. Behavior-preserving.
+- Tightened the portability claim across the docs — the harness ports to a new
+  domain with no source changes, but predictive accuracy off the AOTY example is
+  untested by construction (#48).
+- Surfaced LOO (elpd + SE) and pairwise ELPD in the transform × latent bake-off,
+  and corrected the `offset_logit` / AR(1) verdicts in the decision journal
+  (#34, #35).
+
+### Fixed
+
+- `resume` now restores `chain_method` — it was missing from `RESUME_CONFIG_KEYS`,
+  so a resumed run silently reverted to the default (#36).
+- The RW-horizon clamp count excludes below-`min_albums` entities that were
+  inflating it (#37).
+
+### Notes
+
+- The v1-vs-v2 subset bake-off finds **both gates immaterial on the ~5k-album
+  subset** — LOO moves within its SE and every point/calibration metric is
+  unchanged, consistent with the `n_exponent ≈ 0` result. They ship default-off;
+  their value is only measurable at full-corpus scale and longer horizons (#49,
+  [`.audit/model_v2_bakeoff/comparison.md`](.audit/model_v2_bakeoff/comparison.md)).
+- Full-corpus (~62k-album) publication-scale validation remains out of scope and
+  GPU-bound (#15).
+
 ## [0.3.0] — 2026-06-27
 
 ### Removed

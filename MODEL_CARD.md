@@ -10,7 +10,7 @@
 >   modeling limitation, not a convergence problem.
 > - **Scale caveat.** Those numbers are from a ~5k-album SUBSET, **not** the full
 >   ~62k-album corpus. Full-corpus publication-scale validation is **still
->   pending and not part of 0.3.0** — it needs more GPU than is available locally
+>   pending and not part of 0.4.0** — it needs more GPU than is available locally
 >   (>24 GB even with `--exclude-rw-raw-from-collection`), so it is tracked
 >   separately as **#15** (cloud A100/H100 80 GB). The *Model Architecture /
 >   Hyperparameters / Evaluation Results* snapshot further below predates this and
@@ -30,10 +30,10 @@
 ## Model Details
 
 - **Model type:** Bayesian Hierarchical Regression with Time-Varying Effects
-- **Version:** 0.3.0
+- **Version:** 0.4.0
 - **Authors:** panelcast project
 - **Created:** 2026-06-11
-- **Last updated:** 2026-06-27
+- **Last updated:** 2026-06-28
 
 ## Intended Use
 
