@@ -83,7 +83,10 @@ absorbs much of the raw skew, so this is milder than AOTY's −1.79):
 **Takeaways**
 
 - Both new families **mix** at validation settings (R-hat ≤ 1.02), unlike the
-  offset-logit transform, which failed to mix (R-hat 1.27–1.37).
+  offset-logit transform, which failed to mix (R-hat 1.27–1.37) **at these cheap
+  2×500 settings**. That mixing verdict is *superseded* below: at the diagnostic
+  4×1000 bake-off offset_logit mixes (R-hat 1.01) and wins the predictive
+  metrics, held only on the structural pins (see *Transform × latent process*).
 - `beta` was the **synthetic-data recommended candidate**: its predictions
   cannot leave the score bounds, eliminating the out-of-bounds predictive mass
   that drives the symmetric likelihood's pinned max/min statistics. **This
