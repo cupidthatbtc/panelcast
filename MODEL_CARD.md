@@ -174,6 +174,12 @@ configuration (4 chains × 5,000, warmup 3,000, Student-t).
 This demonstrates the mechanism on **real, strongly left-skewed data**; it is a
 ~5k-album subset, not the final full-corpus result.
 
+Two convergent negative results — the learned heteroscedastic exponent
+collapsing to zero and the entity-disjoint R² ≈ 0 — are one finding: the
+predictive mass lives in the per-entity intercept, with measurement-noise
+modeling and covariates both ~null. See
+[`docs/WHAT_CARRIES_THE_SIGNAL.md`](docs/WHAT_CARRIES_THE_SIGNAL.md).
+
 ### Convergence Diagnostics (superseded validation-scale snapshot)
 
 > **Superseded.** These numbers are from a validation-scale run (2 chains × 500),
