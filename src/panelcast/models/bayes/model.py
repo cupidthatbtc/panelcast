@@ -799,10 +799,9 @@ def make_score_model(score_type: str) -> Callable:
                 dist.Normal(0.0, 1.0).expand([len(artist_idx)]).to_event(1),
             )
             prev_latent = prev_score + prev_meas_sigma * prev_latent_raw
-            # Rebuild mu_raw with the latent regressor. Valid only because the base
-            # AR term is exactly rho * (prev_score - ar_center); if ar_term ever
-            # becomes compound, this substitution must be updated to match.
-            mu_raw = obs_artist_effect + X @ beta + rho * (prev_latent - ar_center)
+            # Swap the AR regressor from prev_score to prev_latent as a delta on
+            # the base predictor, so there is no second copy of mu_raw to drift.
+            mu_raw = mu_raw + rho * (prev_latent - prev_score)
 
         mu = _apply_target_transform(mu_raw, priors, target_bounds)
 
