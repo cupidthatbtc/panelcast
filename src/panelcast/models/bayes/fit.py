@@ -20,7 +20,7 @@ import jax
 import numpy as np
 import xarray as xr
 from jax import random
-from numpyro.infer import MCMC, NUTS
+from numpyro.infer import MCMC, NUTS, init_to_feasible, init_to_median, init_to_uniform
 
 __all__ = [
     "MCMCConfig",
@@ -55,6 +55,11 @@ class MCMCConfig:
             Default 10 (numpyro default).
         target_accept_prob: Target acceptance probability for adaptation.
             Default 0.90 improves adaptation for challenging posteriors.
+        init_strategy: NUTS initialization strategy: "uniform", "median", or
+            "feasible". Default "uniform" is NumPyro's default and keeps every
+            published trajectory byte-identical; changing it re-baselines any
+            init-sensitive fixture, so flip the default only in a versioned
+            re-baseline.
     """
 
     num_warmup: int = 1000
@@ -64,6 +69,7 @@ class MCMCConfig:
     seed: int = 0
     max_tree_depth: int = 10
     target_accept_prob: float = 0.90
+    init_strategy: str = "uniform"
 
     def to_dict(self) -> dict:
         """Convert to dictionary for JSON serialization."""
@@ -85,6 +91,9 @@ class FitResult:
         peak_gpu_memory_bytes: Process-wide peak GPU allocation observed right
             after sampling (None on CPU or when the backend exposes no stats).
             Free telemetry used to validate preflight memory projections.
+        tree_depth_saturation: Fraction of post-warmup transitions whose tree
+            completed max_tree_depth doublings (an efficiency signal, not a
+            correctness one).
     """
 
     mcmc: MCMC
@@ -93,6 +102,7 @@ class FitResult:
     runtime_seconds: float
     gpu_info: str
     peak_gpu_memory_bytes: int | None = None
+    tree_depth_saturation: float | None = None
 
 
 def measure_peak_gpu_bytes() -> int | None:
@@ -162,6 +172,40 @@ def get_gpu_info() -> str:
     # Fall back to JAX device kind
     gpu_devices = [d.device_kind for d in devices if d.platform == "gpu"]
     return ", ".join(gpu_devices) if gpu_devices else "GPU (unknown type)"
+
+
+def _resolve_init_strategy(name: str) -> Callable:
+    strategies = {
+        "uniform": init_to_uniform,
+        "median": init_to_median,
+        "feasible": init_to_feasible,
+    }
+    if name not in strategies:
+        raise ValueError(f"Invalid init_strategy: '{name}'. Must be one of {sorted(strategies)}.")
+    return strategies[name]
+
+
+def _log_tree_depth_saturation(mcmc: MCMC, max_tree_depth: int) -> float | None:
+    """Fraction of transitions that completed max_tree_depth doublings.
+
+    A full tree at depth d takes 2^d - 1 leapfrog steps; counting num_steps >=
+    that undercounts trees that turned inside the final doubling, so this is a
+    conservative saturation measure.
+    """
+    num_steps = mcmc.get_extra_fields().get("num_steps")
+    if num_steps is None:
+        return None
+    saturation = float(np.mean(np.asarray(num_steps) >= 2**max_tree_depth - 1))
+    logger.info(
+        f"Tree-depth saturation: {saturation:.1%} of transitions "
+        f"hit max_tree_depth={max_tree_depth}"
+    )
+    if saturation > 0.05:
+        logger.warning(
+            f"{saturation:.1%} of transitions saturate "
+            f"max_tree_depth={max_tree_depth}; consider raising it."
+        )
+    return saturation
 
 
 def fit_model(
@@ -240,11 +284,13 @@ def fit_model(
     logger.info(f"GPU info: {gpu_info}")
     logger.info(f"JAX default backend: {jax.default_backend()}")
 
-    # Create NUTS kernel with specified settings
+    logger.info(f"NUTS init strategy: {config.init_strategy}")
+
     kernel = NUTS(
         model,
         max_tree_depth=config.max_tree_depth,
         target_accept_prob=config.target_accept_prob,
+        init_strategy=_resolve_init_strategy(config.init_strategy),
     )
 
     # Create MCMC runner
@@ -305,6 +351,8 @@ def fit_model(
             f"Found {divergences} divergent transitions. "
             "Consider increasing target_accept_prob or checking model specification."
         )
+
+    tree_depth_saturation = _log_tree_depth_saturation(mcmc, config.max_tree_depth)
 
     # Convert to ArviZ InferenceData
     # Get samples using public API
@@ -469,4 +517,5 @@ def fit_model(
         runtime_seconds=runtime_seconds,
         gpu_info=gpu_info,
         peak_gpu_memory_bytes=peak_gpu_memory_bytes,
+        tree_depth_saturation=tree_depth_saturation,
     )
