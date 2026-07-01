@@ -174,6 +174,40 @@ def get_gpu_info() -> str:
     return ", ".join(gpu_devices) if gpu_devices else "GPU (unknown type)"
 
 
+def _resolve_init_strategy(name: str) -> Callable:
+    strategies = {
+        "uniform": init_to_uniform,
+        "median": init_to_median,
+        "feasible": init_to_feasible,
+    }
+    if name not in strategies:
+        raise ValueError(f"Invalid init_strategy: '{name}'. Must be one of {sorted(strategies)}.")
+    return strategies[name]
+
+
+def _log_tree_depth_saturation(mcmc: MCMC, max_tree_depth: int) -> float | None:
+    """Fraction of transitions that completed max_tree_depth doublings.
+
+    A full tree at depth d takes 2^d - 1 leapfrog steps; counting num_steps >=
+    that undercounts trees that turned inside the final doubling, so this is a
+    conservative saturation measure.
+    """
+    num_steps = mcmc.get_extra_fields().get("num_steps")
+    if num_steps is None:
+        return None
+    saturation = float(np.mean(np.asarray(num_steps) >= 2**max_tree_depth - 1))
+    logger.info(
+        f"Tree-depth saturation: {saturation:.1%} of transitions "
+        f"hit max_tree_depth={max_tree_depth}"
+    )
+    if saturation > 0.05:
+        logger.warning(
+            f"{saturation:.1%} of transitions saturate "
+            f"max_tree_depth={max_tree_depth}; consider raising it."
+        )
+    return saturation
+
+
 def fit_model(
     model: Callable,
     model_args: dict,
@@ -250,23 +284,13 @@ def fit_model(
     logger.info(f"GPU info: {gpu_info}")
     logger.info(f"JAX default backend: {jax.default_backend()}")
 
-    init_strategies = {
-        "uniform": init_to_uniform,
-        "median": init_to_median,
-        "feasible": init_to_feasible,
-    }
-    if config.init_strategy not in init_strategies:
-        raise ValueError(
-            f"Invalid init_strategy: '{config.init_strategy}'. "
-            f"Must be one of {sorted(init_strategies)}."
-        )
     logger.info(f"NUTS init strategy: {config.init_strategy}")
 
     kernel = NUTS(
         model,
         max_tree_depth=config.max_tree_depth,
         target_accept_prob=config.target_accept_prob,
-        init_strategy=init_strategies[config.init_strategy],
+        init_strategy=_resolve_init_strategy(config.init_strategy),
     )
 
     # Create MCMC runner
@@ -328,23 +352,7 @@ def fit_model(
             "Consider increasing target_accept_prob or checking model specification."
         )
 
-    # A NUTS tree that completes max_tree_depth doublings takes 2^depth - 1
-    # leapfrog steps; counting num_steps >= that undercounts trees that turned
-    # inside the final doubling, so this is a conservative saturation measure.
-    num_steps = mcmc.get_extra_fields().get("num_steps")
-    tree_depth_saturation = None
-    if num_steps is not None:
-        saturated = np.asarray(num_steps) >= 2**config.max_tree_depth - 1
-        tree_depth_saturation = float(np.mean(saturated))
-        logger.info(
-            f"Tree-depth saturation: {tree_depth_saturation:.1%} of transitions "
-            f"hit max_tree_depth={config.max_tree_depth}"
-        )
-        if tree_depth_saturation > 0.05:
-            logger.warning(
-                f"{tree_depth_saturation:.1%} of transitions saturate "
-                f"max_tree_depth={config.max_tree_depth}; consider raising it."
-            )
+    tree_depth_saturation = _log_tree_depth_saturation(mcmc, config.max_tree_depth)
 
     # Convert to ArviZ InferenceData
     # Get samples using public API
