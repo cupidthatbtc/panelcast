@@ -922,6 +922,7 @@ def train_models(
         runtime_seconds=fit_result.runtime_seconds,
         gpu_info=fit_result.gpu_info,
         peak_gpu_memory_bytes=fit_result.peak_gpu_memory_bytes,
+        tree_depth_saturation=fit_result.tree_depth_saturation,
     )
 
     # Check convergence using CLI-provided thresholds

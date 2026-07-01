@@ -319,6 +319,7 @@ class TestMCMCConfigExpanded:
         assert cfg.seed == 0
         assert cfg.max_tree_depth == 10
         assert cfg.target_accept_prob == 0.90
+        assert cfg.init_strategy == "uniform"
 
     def test_frozen(self):
         cfg = MCMCConfig()
@@ -335,6 +336,7 @@ class TestMCMCConfigExpanded:
             "seed",
             "max_tree_depth",
             "target_accept_prob",
+            "init_strategy",
         }
         assert set(d.keys()) == expected_keys
 
@@ -831,6 +833,99 @@ class TestFitModelIdataGroups:
         assert "sample_stats" in groups
         assert "observed_data" in groups
         assert "constant_data" in groups
+
+
+class TestInitStrategyAndTreeDepth:
+    """Cover init_strategy resolution and tree-depth saturation reporting."""
+
+    @patch("panelcast.models.bayes.fit.MCMC")
+    @patch("panelcast.models.bayes.fit.NUTS")
+    @patch("panelcast.models.bayes.fit.get_gpu_info")
+    @patch("panelcast.models.bayes.fit.jax.default_backend")
+    def test_init_strategy_passed_to_nuts(self, mock_backend, mock_gpu, mock_nuts, mock_mcmc_cls):
+        from numpyro.infer import init_to_median
+
+        mock_backend.return_value = "cpu"
+        mock_gpu.return_value = "CPU only"
+        mock_nuts.return_value = MagicMock()
+        mock_mcmc_cls.return_value = _make_mock_mcmc()
+
+        fit_model(
+            model=lambda **kw: None,
+            model_args=_make_model_args(),
+            config=MCMCConfig(num_warmup=5, num_samples=10, num_chains=2, init_strategy="median"),
+            progress_bar=False,
+        )
+
+        assert mock_nuts.call_args.kwargs["init_strategy"] is init_to_median
+
+    @patch("panelcast.models.bayes.fit.MCMC")
+    @patch("panelcast.models.bayes.fit.NUTS")
+    @patch("panelcast.models.bayes.fit.get_gpu_info")
+    @patch("panelcast.models.bayes.fit.jax.default_backend")
+    def test_invalid_init_strategy_raises(self, mock_backend, mock_gpu, mock_nuts, mock_mcmc_cls):
+        mock_backend.return_value = "cpu"
+        mock_gpu.return_value = "CPU only"
+
+        with pytest.raises(ValueError, match="Invalid init_strategy"):
+            fit_model(
+                model=lambda **kw: None,
+                model_args=_make_model_args(),
+                config=MCMCConfig(num_warmup=5, num_samples=10, init_strategy="magic"),
+                progress_bar=False,
+            )
+
+    @patch("panelcast.models.bayes.fit.MCMC")
+    @patch("panelcast.models.bayes.fit.NUTS")
+    @patch("panelcast.models.bayes.fit.get_gpu_info")
+    @patch("panelcast.models.bayes.fit.jax.default_backend")
+    def test_tree_depth_saturation_fraction(self, mock_backend, mock_gpu, mock_nuts, mock_mcmc_cls):
+        mock_backend.return_value = "cpu"
+        mock_gpu.return_value = "CPU only"
+        mock_nuts.return_value = MagicMock()
+
+        mock_mcmc = _make_mock_mcmc(n_chains=2, n_draws=10)
+        # half the transitions complete the full depth-10 tree (2^10 - 1 steps)
+        num_steps = np.ones(20, dtype=int) * 5
+        num_steps[:10] = 1023
+        mock_mcmc.get_extra_fields.return_value = {
+            "diverging": np.zeros(20, dtype=bool),
+            "num_steps": num_steps,
+        }
+        mock_mcmc_cls.return_value = mock_mcmc
+
+        result = fit_model(
+            model=lambda **kw: None,
+            model_args=_make_model_args(),
+            config=MCMCConfig(num_warmup=5, num_samples=10, num_chains=2),
+            progress_bar=False,
+        )
+
+        assert result.tree_depth_saturation == pytest.approx(0.5)
+
+    @patch("panelcast.models.bayes.fit.MCMC")
+    @patch("panelcast.models.bayes.fit.NUTS")
+    @patch("panelcast.models.bayes.fit.get_gpu_info")
+    @patch("panelcast.models.bayes.fit.jax.default_backend")
+    def test_no_num_steps_leaves_saturation_none(
+        self, mock_backend, mock_gpu, mock_nuts, mock_mcmc_cls
+    ):
+        mock_backend.return_value = "cpu"
+        mock_gpu.return_value = "CPU only"
+        mock_nuts.return_value = MagicMock()
+
+        mock_mcmc = _make_mock_mcmc()
+        mock_mcmc.get_extra_fields.return_value = {"diverging": np.zeros(20, dtype=bool)}
+        mock_mcmc_cls.return_value = mock_mcmc
+
+        result = fit_model(
+            model=lambda **kw: None,
+            model_args=_make_model_args(),
+            config=MCMCConfig(num_warmup=5, num_samples=10, num_chains=2),
+            progress_bar=False,
+        )
+
+        assert result.tree_depth_saturation is None
 
 
 class TestGetGpuInfoAdditional:
