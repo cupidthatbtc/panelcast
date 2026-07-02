@@ -58,12 +58,12 @@ Bayesian modeling (adopted gates — validated on 2x500 cheap runs, 2026-06-10)
   default) remains available via `--target-transform identity`.
 - `ar_center = global` — ADOPTED: corr(rho, mu_artist) -0.997 -> +0.016,
   debut AR terms exactly zero, prior predictive flipped to passing.
-- `latent_process = rw` — ar1 registered behind a LOO-clear-win gate that has
-  not triggered. On the default transform the paired LOO difference is −5.2 ± 2.6
-  (z ≈ −2; `.audit/transform_latent_bakeoff/`) — a small, marginally-resolved
-  *decrement*, not the clear win the gate requires — while bulk ESS drops 787 →
-  635 and one more PPC statistic pins, at identical point accuracy and
-  calibration. Held; rw stays default.
+- `latent_process = rw` — ar1 registered behind an ELPD-clear-win gate that has
+  not triggered. Under the corrected held-out lppd estimator (#63) the paired
+  ELPD difference is −2.2 ± 0.93 (z ≈ −2.4; `.audit/transform_latent_bakeoff/`)
+  — a small, resolved *decrement*, not the clear win the gate requires — while
+  bulk ESS drops 787 → 635 and one more PPC statistic pins, at identical point
+  accuracy and calibration. Held; rw stays default.
 - `artist_effect_param = noncentered`, `sigma_artist_prior_type = halfnormal`
   — won the 4-variant mixing bake-off
   (`outputs/experiments/sigma_artist_mixing.json`).

@@ -77,12 +77,13 @@ On the ~5,000-album AOTY subset, against baselines fit on the same real splits
 |---|---:|---:|---:|---:|
 | gradient boosting | **5.41** | **0.486** | 0.770 | 0.899 |
 | ridge | 5.62 | 0.455 | 0.873 | 0.962 |
-| **panelcast** | 5.64 | 0.417 | 0.858 | 0.957 |
+| **panelcast** | 5.66 | 0.429 | 0.864 | 0.959 |
 | entity mean | 6.11 | 0.322 | 0.818 | 0.925 |
 
 The model is **mid-pack on point accuracy** — a gradient-boosted regressor beats it
-(MAE 5.41 vs 5.64) — but GBM gets there by **under-covering** (80%/95% interval
-coverage 0.77/0.90 vs the model's 0.86/0.96). The deliverable is *calibrated
+(MAE 5.41 vs 5.66) — but GBM gets there by **under-covering** (80%/95% interval
+coverage 0.77/0.90 vs the model's 0.86/0.96). On the cold-start (never-seen entity)
+split the model now leads outright (MAE 7.01, R² 0.095, 95% coverage 0.956). The deliverable is *calibrated
 uncertainty* — intervals as a modeled quantity, an interpretable between-entity vs
 residual variance decomposition, and a generative model you can interrogate — **not**
 a point-accuracy score. If you only need a point estimate, a GBM is simpler and

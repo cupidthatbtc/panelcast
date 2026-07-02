@@ -2,12 +2,13 @@
 >
 > - **Convergence is now demonstrated on real data.** A representative subset of
 >   the AOTY corpus (~800 artists / 5,182 albums, user-score skewness −2.08)
->   **passes** the convergence gate at the publication configuration (4×5000):
->   R-hat 1.00, bulk ESS 3,134, 0 divergences. See *Real-data subset validation*
->   below.
-> - **The likelihood is still misspecified.** On the same real data the symmetric
->   Student-t pins four PPC statistics (skewness, max, q50, q90) — an open
->   modeling limitation, not a convergence problem.
+>   **passes** the convergence gate at the publication configuration (4×5000)
+>   under the promoted `offset_logit` transform: R-hat 1.00, bulk ESS 2,333,
+>   0 divergences. See *Real-data subset re-baseline* below.
+> - **The likelihood is still misspecified, less than before.** On the same real
+>   data the transform relieves the mean/sd/q50 pins, but skewness, max and q90
+>   stay pinned (plus q10, the transform's known trade) — an open modeling
+>   limitation, not a convergence problem.
 > - **Scale caveat.** Those numbers are from a ~5k-album SUBSET, **not** the full
 >   ~62k-album corpus. Full-corpus publication-scale validation is **still
 >   pending and not part of 0.4.0** — it needs more GPU than is available locally
@@ -139,94 +140,90 @@ Prior distributions are weakly informative, chosen to regularize inference while
 
 ## Evaluation Results
 
-### Real-data subset validation (2026-06-23)
+### Real-data subset re-baseline (2026-07-02, `offset_logit` default)
 
-The headline convergence gap is closed **on real data at reduced scale**. A
-representative subset of the full AOTY corpus — ~800 whole artists sampled with
-their full discographies (`scripts/make_aoty_subset.py`), 5,182 albums with ≥10
-user ratings across 653 multi-album artists, observed user-score skewness −2.08
-(the full corpus is −2.06) — was fit on GPU (RTX 5090) at the publication
-configuration (4 chains × 5,000, warmup 3,000, Student-t).
+The published baseline is a fresh publication-configuration fit under the
+promoted `offset_logit` target transform (#43). Data: a representative subset
+of the full AOTY corpus — ~800 whole artists sampled with their full
+discographies (`scripts/make_aoty_subset.py`), 5,182 albums with ≥10 user
+ratings across 653 multi-album artists, observed user-score skewness −2.08
+(the full corpus is −2.06) — fit on GPU (RTX 5090) at 4 chains × 5,000,
+warmup 3,000, Student-t likelihood on the transformed scale.
 
-- **Convergence gate: PASS** — R-hat (max) 1.00, bulk ESS 3,134 (≥ 400), 0
-  divergences, LOO Pareto-k all < 0.7.
-- **Predictive** (within-entity temporal test, n = 653): MAE 5.64, RMSE 8.26,
-  R² 0.42, CRPS 4.19; 80% coverage 0.856, 95% coverage 0.956 (within tolerance).
-- **PPC (still pinned):** skewness p = 0.991, max p = 1.000, q50 p = 0.007,
-  q90 p = 1.000 — the symmetric-likelihood / left-skewed-target mismatch
-  persists on real data (and sharpens with more draws, as expected). mean, sd,
-  min and q10 are interior.
-- **Baselines on the same real splits:** the model is competitive with ridge
-  (MAE 5.62) and behind gradient boosting (MAE 5.41) on point accuracy, but is
-  better calibrated than GBM (95% coverage 0.956 vs 0.899, and 80% 0.86 vs 0.77 —
-  GBM under-covers). Its edge is calibrated uncertainty and an interpretable
-  variance decomposition, not raw point accuracy. Cold-start (artist-disjoint) is
-  near-irreducible — every method, the model included, collapses to R² ≈ 0 for
-  never-seen entities — and within-entity R² runs from ≈0.49 on thin catalogs
-  *down* to ≈0.33 on deep ones. Full table and gradient:
-  [`docs/BASELINES.md`](docs/BASELINES.md).
-- **Likelihood decision:** the bounded Beta candidate was tested on this real
-  subset and does **not** win — it pins more PPC statistics, mixes worse
-  (bulk ESS 304, 1 divergence), and yields an unreliable LOO (35 Pareto-k > 0.7).
-  The publication default reverted to Student-t. See
-  `docs/LIKELIHOOD_CANDIDATES.md`.
+- **Convergence gate: PASS** — R-hat (max) 1.00, bulk ESS 2,333 (≥ 400), 0
+  divergences.
+- **Predictive** (within-entity temporal test, n = 653): MAE 5.66, RMSE 8.19,
+  R² 0.429, CRPS 4.13; held-out ELPD (test lppd) −2205.3 (SE 21.9),
+  −3.38/obs. Against the prior `identity` baseline: RMSE 8.26 → 8.19,
+  R² 0.417 → 0.429, CRPS 4.19 → 4.13, paired held-out ELPD +22.2 ± 4.5
+  (z ≈ +4.9, stable across seeds 42/43/44); MAE 5.64 → 5.66 (the Student-t
+  robust-loss trade, unchanged by the transform).
+- **Calibration:** 80% coverage 0.864 (width 20.0; slightly over-covering,
+  outside the ±0.03 tolerance), 95% coverage 0.959 (width 33.4; within
+  tolerance) — same profile as the identity baseline.
+- **PPC — pins reduced from seven to four:** mean (p = 0.51), sd (0.28),
+  q50 (0.054) and min (0.96) are now interior; the remaining pins are
+  skewness (1.00), max (0.999), q90 (0.999) — the structural bounded-skew
+  signature — plus q10 (0.003), the transform's known trade for relieving
+  q50. See Limitations.
+- **Baselines on the same real splits:** competitive with ridge and behind
+  gradient boosting on point accuracy, better calibrated than both. Cold-start
+  (artist-disjoint) improves from R² ≈ 0 under identity to R² 0.095 (MAE 7.01)
+  under the transform, though it stays the model's weakest split. Regenerated
+  table: [`docs/BASELINES.md`](docs/BASELINES.md).
+- **Likelihood decision (historical):** the bounded Beta candidate was tested
+  on this real subset and did **not** win — more pinned PPC statistics and
+  worse mixing (bulk ESS 304, 1 divergence). Student-t remains the default.
+  See `docs/LIKELIHOOD_CANDIDATES.md`.
 
 This demonstrates the mechanism on **real, strongly left-skewed data**; it is a
-~5k-album subset, not the final full-corpus result.
+~5k-album subset, not the final full-corpus result. The raw metrics snapshot is
+committed at `.audit/baseline_metrics.json`.
 
-Two convergent negative results — the learned heteroscedastic exponent
-collapsing to zero and the entity-disjoint R² ≈ 0 — are one finding: the
-predictive mass lives in the per-entity intercept, with measurement-noise
-modeling and covariates both ~null. See
-[`docs/WHAT_CARRIES_THE_SIGNAL.md`](docs/WHAT_CARRIES_THE_SIGNAL.md).
+Two convergent negative results from the identity era — the learned
+heteroscedastic exponent collapsing to zero and the entity-disjoint R² ≈ 0 —
+are one finding: the predictive mass lives in the per-entity intercept, with
+measurement-noise modeling and covariates both ~null. See
+[`docs/WHAT_CARRIES_THE_SIGNAL.md`](docs/WHAT_CARRIES_THE_SIGNAL.md). The
+`offset_logit` re-baseline softens the second half (cold-start R² 0.095), but
+the intercept-carries-the-signal conclusion stands.
 
-### Convergence Diagnostics (superseded validation-scale snapshot)
+### Convergence Diagnostics (publication-scale snapshot, 2026-07-02)
 
-> **Superseded.** These numbers are from a validation-scale run (2 chains × 500),
-> retained only as the auto-generated snapshot. The current real-data verdict is
-> **PASS** at the publication configuration — see *Real-data subset validation*
-> above (R-hat 1.00, bulk ESS 3,134, 0 divergences).
+Convergence status: **PASS**
 
-Convergence status (validation-scale): FAILED
-
-- R-hat (max): 1.0300 (threshold: < 1.01)
-- ESS bulk (min): 158
-- ESS tail (min): 158
+- R-hat (max): 1.00 (threshold: < 1.01)
+- ESS bulk (min): 2,333 (threshold: ≥ 400)
 - Divergent transitions: 0
-
-The R-hat/ESS shortfall here is compute-bounded at the 2 × 500 validation
-settings, not a model pathology — see Limitations.
 
 ### Calibration
 
-Credible interval coverage:
-- 80% CI: 83.7% empirical coverage, mean width=18.33
-- 95% CI: 94.3% empirical coverage, mean width=31.26
+Credible interval coverage (within-entity temporal test):
+- 80% CI: 86.4% empirical coverage, mean width = 19.99
+- 95% CI: 95.9% empirical coverage, mean width = 33.44
 
 **Posterior Predictive Checks:**
-- mean: T(y_obs)=68.43, p=1.000 (MC SE: 0.000)
-- sd: T(y_obs)=11.43, p=0.003 (MC SE: 0.002)
-- skewness: T(y_obs)=-1.89, p=0.998 (MC SE: 0.001)
-- min: T(y_obs)=0.00, p=0.439 (MC SE: 0.016)
-- max: T(y_obs)=94.00, p=1.000 (MC SE: 0.000)
-- q10: T(y_obs)=55.00, p=1.000 (MC SE: 0.000)
-- q50: T(y_obs)=71.00, p=0.000 (MC SE: 0.000)
-- q90: T(y_obs)=79.00, p=1.000 (MC SE: 0.000)
+- mean: T(y_obs)=68.79, p=0.513
+- sd: T(y_obs)=10.83, p=0.284
+- skewness: T(y_obs)=-2.08, p=1.000
+- min: T(y_obs)=3.00, p=0.962
+- max: T(y_obs)=88.00, p=0.999
+- q10: T(y_obs)=58.00, p=0.003
+- q50: T(y_obs)=71.00, p=0.054
+- q90: T(y_obs)=79.00, p=0.999
 
 ### Predictive Performance
 
-Point prediction metrics:
+Point prediction metrics (within-entity temporal test, n = 653):
 
-- MAE: 5.61
+- MAE: 5.66
 - RMSE: 8.19
-- R-squared: 0.486
-- ELPD (LOO-CV): -28264.9 (SE: 103.1)
-
-- **ELPD (LOO-CV):** -28264.9
+- R-squared: 0.429
+- **Held-out ELPD (test lppd):** −2205.3 (SE: 21.9), −3.38 per observation
 
 ## Limitations
 
-- **Convergence (compute-bounded, geometry fixed).** The historical sigma_artist ESS deficit was traced to a sampling-geometry confound: the uncentered AR(1) term absorbed the score level, ridge-coupling rho and mu_artist (corr -0.997). AR centering with a level-located mu_artist prior removed it (corr +0.016, debut AR terms exactly zero). Remaining R-hat/ESS shortfalls at cheap validation settings (2 chains x 500) were compute-bounded; this is now **confirmed on real data**: at the publication configuration (4 chains x 5000, warmup 3000, with the rw_raw collection exclusion required for 24 GB GPUs) the ~5k-album subset reaches R-hat 1.00, bulk ESS 3,134 and 0 divergences — the gate passes. The full-corpus run remains future work.
+- **Convergence (compute-bounded, geometry fixed).** The historical sigma_artist ESS deficit was traced to a sampling-geometry confound: the uncentered AR(1) term absorbed the score level, ridge-coupling rho and mu_artist (corr -0.997). AR centering with a level-located mu_artist prior removed it (corr +0.016, debut AR terms exactly zero). Remaining R-hat/ESS shortfalls at cheap validation settings (2 chains x 500) were compute-bounded; this is now **confirmed on real data**: at the publication configuration (4 chains x 5000, warmup 3000, with the rw_raw collection exclusion required for 24 GB GPUs) the ~5k-album subset passes the gate under both transforms — R-hat 1.00, 0 divergences, bulk ESS 3,134 (identity) / 2,333 (the offset_logit default). The full-corpus run remains future work.
 - **Symmetric likelihood vs. left-skewed target.** The Student-t likelihood is symmetric, but observed user-score distribution has skewness ~= -1.79 (long left tail of poorly-received albums). This is a structural mismatch, not a fitting issue. PPC p-values pinned at 0.000/1.000 for sd, skewness, q50, q90, and max are the expected signature of this mismatch. The lightest candidate fix — an `offset_logit` target transform — is now the **default** (adopted in 0.5.0 on the corrected #63 estimator: paired held-out elpd +22.2 ± 4.5 over identity, seed-stable, plus R² 0.428 vs 0.417 and PIT 0.049 vs 0.056; [`.audit/transform_latent_bakeoff/`](.audit/transform_latent_bakeoff/)), yet it does not move the `skewness`/`max`/`q90` PPC pins — it only trades the `q50` pin for a new `q10` pin — so it leaves this structural mismatch unaddressed. **Six likelihood families have since been implemented and tried against the mismatch, selectable via `--likelihood-family`:** `beta`, `skew_studentt`, `skew_normal`, `split_normal`, `beta_binomial`, and a two-component `mixture` — plus an integer-aware dequantization toggle (`--discretize-observation`). **None moves the `skewness`/`max` PPC pins toward the interior**; each trades worse convergence or point accuracy for the same or sharper pins, confirmed on real AOTY data across five of them (the synthetic edge that favored `beta` did not survive real, strongly left-skewed scores). Dequantization does relieve the integer-heaping `q50` pin specifically (p 0.009 → 0.082), but `skewness`/`max`/`q90` are the bounded-skew misspecification itself, not an integer-grid artifact, and more posterior samples sharpen them rather than relaxing them. The mismatch is therefore **confirmed structural and unresolved**, so Student-t remains the publication default (full evidence in [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md)). The symmetric likelihood's point accuracy and 95% interval calibration are unaffected.
 - **Soft-clip at [0, 100] under `--target-transform identity`.** With the 0.5.0 `offset_logit` default the bounds hold by construction and no clip is applied. Under the `identity` transform (the former default, still selectable) the bounded target meets a symmetric likelihood and soft_clip compresses both tails simultaneously.
 - **Errors-in-variables in the AR(1) predictor (addressable; opt-in `errors_in_variables`).** The album-to-album term regresses on the *observed* previous user score as if it were noise-free (`ar_term = rho * (prev_score - ar_center)`), yet that same quantity is modeled as review-count-noisy when it is the response (the heteroscedastic `sigma_obs / n^exponent`). Conditioning on a noisy regressor attenuates `rho` toward zero, worst for sparse-review entities whose lagged score is least certain. The model-v2 fix (issue #30) ships as a gated option, default **off** so the published numbers stay byte-identical: rather than a second latent-state AR (which would duplicate the existing random-walk artist trajectory and reintroduce the `sigma_rw ↔ rho ↔ level` ridge), it de-noises the *regressor* with a fixed, data-derived measurement-error latent — `prev_latent = prev_score + (global_std/√prev_n_reviews)·z`, `z ~ Normal(0, 1)`, debuts pinned to zero — and forms `ar_term = rho·(prev_latent - ar_center)`. When a non-identity target transform is active, `global_std` is measured on the model scale, so the per-observation measurement-error scale is an approximation under the transform's nonlinearity — acceptable for a fixed regularization prior, but a consideration before default adoption. Synthetic-recovery tests confirm `rho` de-attenuates with the gate on; the quantitative subset bake-off (v1 vs v2 at the publication configuration, both clearing the gate at R-hat 1.00 / bulk ESS > 3,100 / 0 divergences) is now complete and the gate is **immaterial on this subset** — LOO moves +0.4 against an SE of ~29.6 and every point/calibration metric is unchanged, consistent with the `n_exponent ≈ 0` result. It stays default-off, parity-safe; see [`.audit/model_v2_bakeoff/comparison.md`](.audit/model_v2_bakeoff/comparison.md).
