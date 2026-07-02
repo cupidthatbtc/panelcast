@@ -21,9 +21,10 @@
 #   won the 4-variant mixing bake-off (sigma_artist bulk ESS 121/600 draws
 #   vs 68 zerosum, 5 lognormal; see outputs/experiments/sigma_artist_mixing.json).
 #   ESS extrapolates to ~4000 at these settings (gate: 800).
-# - latent_process: rw — ar1 registered behind a LOO-clear-win gate that has not
-#   triggered: in the bake-off the paired LOO difference is -5.2 ± 2.6 (a small
-#   decrement, not a win) while bulk ESS drops 787 -> 635. Held; rw stays default.
+# - latent_process: rw — ar1 registered behind an ELPD-clear-win gate that has
+#   not triggered: under the corrected estimator (#63) the paired ELPD difference
+#   is -2.2 ± 0.93 (a small decrement, not a win) while bulk ESS drops 787 -> 635.
+#   Held; rw stays default.
 # - Warmup 3000 (plan range 3000-5000): the centered geometry adapts fast
 #   (stable step size well before iteration 500 on cheap runs).
 #

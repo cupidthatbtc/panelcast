@@ -601,7 +601,7 @@ class TestBuildCommandStringExtended:
     def test_command_records_every_model_gate(self, tmp_path):
         """Every output-affecting gate appears flag-style when non-default."""
         config = PipelineConfig(
-            target_transform="offset_logit",
+            target_transform="identity",
             logit_offset=1.0,
             ar_center="none",
             latent_process="ar1",
@@ -616,7 +616,7 @@ class TestBuildCommandStringExtended:
         )
         orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
         cmd = orchestrator._build_command_string()
-        assert "--target-transform offset_logit" in cmd
+        assert "--target-transform identity" in cmd
         assert "--logit-offset 1.0" in cmd
         assert "--ar-center none" in cmd
         assert "--latent-process ar1" in cmd

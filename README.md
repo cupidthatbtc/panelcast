@@ -14,12 +14,14 @@
 > finished part. The headline *statistical* result is now **partially
 > established on real data**: on a representative ~800-artist / ~5k-album AOTY
 > subset (skewness −2.08), the model **passes the convergence gate** at the
-> publication configuration (R-hat 1.00, bulk ESS 3,134, 0 divergences), and
-> the baseline benchmark runs on the same real splits. Still open: the
-> posterior-predictive p-values stay pinned at the extremes by a
-> symmetric-likelihood / left-skewed-target mismatch (six likelihood families
-> plus a dequantization toggle were tried and **none resolves it**), and this is
-> a subset, not the full ~62k-album corpus. See [`MODEL_CARD.md`](MODEL_CARD.md) and
+> publication configuration under the promoted `offset_logit` transform
+> (R-hat 1.00, bulk ESS 2,333, 0 divergences), and the baseline benchmark runs
+> on the same real splits. Still open: the skewness/max/q90
+> posterior-predictive p-values stay pinned by a bounded-skew mismatch — the
+> transform relieved mean/sd/q50, and six likelihood families plus a
+> dequantization toggle were tried against the rest with **none resolving it**
+> — and this is a subset, not the full ~62k-album corpus. See
+> [`MODEL_CARD.md`](MODEL_CARD.md) and
 > [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md). Treat the
 > subset numbers as real but not final.
 
@@ -77,12 +79,13 @@ On the ~5,000-album AOTY subset, against baselines fit on the same real splits
 |---|---:|---:|---:|---:|
 | gradient boosting | **5.41** | **0.486** | 0.770 | 0.899 |
 | ridge | 5.62 | 0.455 | 0.873 | 0.962 |
-| **panelcast** | 5.64 | 0.417 | 0.858 | 0.957 |
+| **panelcast** | 5.66 | 0.429 | 0.864 | 0.959 |
 | entity mean | 6.11 | 0.322 | 0.818 | 0.925 |
 
 The model is **mid-pack on point accuracy** — a gradient-boosted regressor beats it
-(MAE 5.41 vs 5.64) — but GBM gets there by **under-covering** (80%/95% interval
-coverage 0.77/0.90 vs the model's 0.86/0.96). The deliverable is *calibrated
+(MAE 5.41 vs 5.66) — but GBM gets there by **under-covering** (80%/95% interval
+coverage 0.77/0.90 vs the model's 0.86/0.96). On the cold-start (never-seen entity)
+split the model now leads outright (MAE 7.01, R² 0.095, 95% coverage 0.956). The deliverable is *calibrated
 uncertainty* — intervals as a modeled quantity, an interpretable between-entity vs
 residual variance decomposition, and a generative model you can interrogate — **not**
 a point-accuracy score. If you only need a point estimate, a GBM is simpler and
@@ -204,7 +207,8 @@ See [`docs/CLI.md`](docs/CLI.md) for the complete command reference.
 
 A note on results: at the publication configuration the model now **passes the
 convergence gate** on a real ~800-artist / ~5k-album AOTY subset (R-hat 1.00,
-bulk ESS 3,134, 0 divergences) under the default **Student-t** likelihood:
+bulk ESS 2,333, 0 divergences) under the default **Student-t** likelihood on
+the `offset_logit` transformed scale:
 
 ```bash
 panelcast run --preset publication        # 4 chains × 5000, Student-t likelihood
