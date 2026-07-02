@@ -72,6 +72,7 @@ gpu = [
 dev = [
   "pytest>=8.0",
   "pytest-cov>=4.1",
+  "pytest-timeout>=2.4.0",
   "mypy>=1.8",
 ]
 comparison = [
@@ -80,7 +81,7 @@ comparison = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q --strict-markers"
 python_files = ["test_*.py"]
 filterwarnings = [
     # Upstream numpyro deprecation with JAX 0.8.x; harmless in this codebase.
@@ -90,6 +91,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "e2e: marks tests as end-to-end tests",
     "smoke: marks a fast end-to-end smoke check (the CI PR smoke job)",
+    "timeout: per-test wall-clock limit (pytest-timeout)",
 ]
 
 [tool.ruff]

@@ -9,6 +9,7 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -30,6 +31,7 @@ jobs:
 
   test-fast:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: lint
     permissions:
       contents: read
@@ -55,10 +57,10 @@ jobs:
           verbose: true
 
   smoke:
-    # Tiny synthetic end-to-end (panelcast demo shape) on every PR.
+    # Tiny synthetic end-to-end (panelcast demo shape) on every PR and main push.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: lint
-    if: github.event_name == 'pull_request'
     permissions:
       contents: read
     steps:
