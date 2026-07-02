@@ -155,6 +155,12 @@ class TestBetaCeiling:
                 y=None, **_model_args("beta_ceiling", effective_ceiling=150.0)
             )
 
+    def test_non_identity_transform_rejected(self):
+        with pytest.raises(ValueError, match="target_transform='identity'"):
+            trace(seed(make_score_model("user"), random.PRNGKey(0))).get_trace(
+                y=None, **_model_args("beta_ceiling", target_transform="offset_logit")
+            )
+
     def test_ceiling_persisted_as_posterior_site(self):
         tr = trace(seed(make_score_model("user"), random.PRNGKey(0))).get_trace(
             y=None, **_model_args("beta_ceiling")

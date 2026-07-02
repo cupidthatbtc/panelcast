@@ -262,6 +262,40 @@ class TestPredictNewEntityDispatch:
                 likelihood_family="beta_binomial",
             )
 
+    def _beta_ceiling_posterior(self):
+        rng = np.random.default_rng(3)
+        return self._posterior(
+            extra={
+                "user_phi": jnp.asarray(np.abs(rng.normal(20, 2, 40))),
+                "user_effective_ceiling": jnp.full(40, 95.0),
+            }
+        )
+
+    def test_beta_ceiling_prediction_respects_ceiling(self):
+        out = predict_new_entity(
+            self._beta_ceiling_posterior(),
+            X_new=jnp.zeros(N_FEATURES),
+            prev_score=70.0,
+            likelihood_family="beta_ceiling",
+            target_bounds=(0.0, 100.0),
+            ar_center=70.0,
+        )
+        y = np.asarray(out["y"])
+        assert y.shape[0] == 40
+        assert y.min() >= 0.0 and y.max() <= 95.0
+
+    def test_beta_ceiling_without_ceiling_site_raises(self):
+        post = self._posterior(
+            extra={"user_phi": jnp.asarray(np.abs(np.random.default_rng(3).normal(20, 2, 40)))}
+        )
+        with pytest.raises(ValueError, match="effective_ceiling"):
+            predict_new_entity(
+                post,
+                X_new=jnp.zeros(N_FEATURES),
+                prev_score=70.0,
+                likelihood_family="beta_ceiling",
+            )
+
     def test_beta_binomial_cold_start_caps_huge_n_reviews(self):
         # A mega-reviewed event (n far above the cap) must still draw bounded scores
         # rather than blow total_count into the float32-jagged regime.
