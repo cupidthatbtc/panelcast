@@ -237,6 +237,58 @@ class TestPrepareModelData:
         expected = np.array([1, 2, 3, 1, 1])
         np.testing.assert_array_equal(album_seq, expected)
 
+    def test_entity_group_pooling_builds_group_args(self):
+        """Gate-on: modal per-artist groups with __rest__ bucketing land in model_args."""
+        df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "B", "C", "D"],
+                "User_Score": [70.0, 75.0, 80.0, 85.0, 90.0],
+                # A and B share Rock (2 entities -> kept); Jazz has one entity
+                # and D has no genre -> both bucket to __rest__.
+                "primary_genre": ["Rock", "Rock", "Rock", "Jazz", None],
+                "feature_1": [1.0, 2.0, 3.0, 4.0, 5.0],
+                "n_reviews": [10, 20, 30, 40, 50],
+            }
+        )
+        model_args, _ = prepare_model_data(
+            df, ["feature_1"], min_albums_filter=1, entity_group_pooling=True
+        )
+
+        assert model_args["group_to_idx"] == {"__rest__": 0, "Rock": 1}
+        assert model_args["n_groups"] == 2
+        idx = model_args["group_idx_by_artist"]
+        assert idx.dtype == np.int32
+        np.testing.assert_array_equal(idx, np.array([1, 1, 0, 0], dtype=np.int32))
+
+    def test_entity_group_pooling_missing_column_raises(self):
+        df = pd.DataFrame(
+            {
+                "Artist": ["A", "B"],
+                "User_Score": [70.0, 80.0],
+                "feature_1": [1.0, 2.0],
+                "n_reviews": [10, 20],
+            }
+        )
+        with pytest.raises(ValueError, match="missing"):
+            prepare_model_data(df, ["feature_1"], entity_group_pooling=True)
+
+    def test_entity_group_pooling_no_descriptor_column_raises(self):
+        from panelcast.config.descriptor import DatasetDescriptor
+
+        df = pd.DataFrame(
+            {
+                "Artist": ["A", "B"],
+                "User_Score": [70.0, 80.0],
+                "feature_1": [1.0, 2.0],
+                "n_reviews": [10, 20],
+            }
+        )
+        descriptor = DatasetDescriptor(entity_group_col=None)
+        with pytest.raises(ValueError, match="entity_group_col"):
+            prepare_model_data(
+                df, ["feature_1"], descriptor=descriptor, entity_group_pooling=True
+            )
+
     def test_prev_score_computation(self, sample_train_df):
         """Should compute shifted prev_score within artist."""
         model_args, valid_mask = prepare_model_data(

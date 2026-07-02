@@ -2141,6 +2141,35 @@ class TestPrepareTestModelArgs:
         assert model_args["y"] is None
         assert len(y_true) == 2
 
+    def test_entity_group_pooling_threads_group_args(self):
+        """Gate-on: the summary's per-artist group vector reaches model_args."""
+        test_df = pd.DataFrame(
+            {"Artist": ["A", "B"], "User_Score": [80.0, 85.0], "Album": ["a1", "b1"]}
+        )
+        test_features = pd.DataFrame({"f1": [1.0, 2.0], "n_reviews": [10, 20]})
+        summary = self._make_summary()
+        summary["priors"]["entity_group_pooling"] = True
+        summary["group_idx_by_artist"] = [1, 0]
+        summary["n_groups"] = 2
+
+        model_args, _ = _prepare_test_model_args(test_df, test_features, summary)
+
+        np.testing.assert_array_equal(
+            model_args["group_idx_by_artist"], np.array([1, 0], dtype=np.int32)
+        )
+        assert model_args["n_groups"] == 2
+
+    def test_entity_group_pooling_missing_summary_data_raises(self):
+        test_df = pd.DataFrame(
+            {"Artist": ["A"], "User_Score": [80.0], "Album": ["a1"]}
+        )
+        test_features = pd.DataFrame({"f1": [1.0], "n_reviews": [10]})
+        summary = self._make_summary()
+        summary["priors"]["entity_group_pooling"] = True
+
+        with pytest.raises(ValueError, match="group_idx_by_artist"):
+            _prepare_test_model_args(test_df, test_features, summary)
+
     def test_eiv_and_propagate_rw_paths(self):
         """errors_in_variables emits a finite prev_meas_sigma from the preceding
         album's review count, and propagate_rw_horizon keeps the deep album_seq."""
@@ -2454,7 +2483,7 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true, _ = _prepare_disjoint_inputs(
+        X, prev_score, n_reviews, y_true, group_idx = _prepare_disjoint_inputs(
             test_df, test_features, summary
         )
 
@@ -2462,6 +2491,32 @@ class TestPrepareDisjointInputs:
         assert len(y_true) == 2
         # Cold-start: all prev_score should be global mean
         np.testing.assert_allclose(prev_score, [75.0, 75.0])
+        assert group_idx is None  # gate off
+
+    def test_group_idx_mapped_through_training_groups(self):
+        """Gate-on: each artist's modal group maps via group_to_idx; unseen -> -1."""
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["NewA", "NewA", "NewB", "NewC"],
+                "User_Score": [80.0, 82.0, 85.0, 70.0],
+                "primary_genre": ["Rock", "Rock", "Techno", None],
+            }
+        )
+        test_features = pd.DataFrame(
+            {
+                "f1": [1.0, 2.0, 3.0, 4.0],
+                "n_reviews": [10, 20, 30, 40],
+            }
+        )
+        summary = self._make_summary()
+        summary["entity_group_pooling"] = True
+        summary["entity_group_col"] = "primary_genre"
+        summary["group_to_idx"] = {"__rest__": 0, "Rock": 1}
+
+        *_, group_idx = _prepare_disjoint_inputs(test_df, test_features, summary)
+
+        # Rock was seen in training (idx 1); Techno and missing genres were not.
+        np.testing.assert_array_equal(group_idx, np.array([1, 1, -1, -1], dtype=np.int32))
 
     def test_overlap_columns_dropped(self):
         """Overlapping columns between test_df and test_features are handled."""
