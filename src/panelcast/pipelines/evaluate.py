@@ -20,6 +20,7 @@ import structlog
 import xarray as xr
 from jax import random
 from numpyro.infer import Predictive, log_likelihood
+from scipy.special import logsumexp
 
 from panelcast.data.alignment import join_splits_with_features
 from panelcast.data.split_types import (
@@ -707,7 +708,15 @@ def _compute_info_criteria(
     batch_size: int = 500,
     log_likelihood_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Compute WAIC/LOO from pointwise log-likelihood.
+    """Compute held-out ELPD as the direct log pointwise predictive density.
+
+    PSIS-LOO / WAIC are deliberately not used here: the test rows were never
+    part of the likelihood that produced the posterior, so the importance
+    re-weighting collapses toward a per-point harmonic-mean estimator and
+    Pareto-k turns into an artifact (#63). For held-out data the honest
+    estimator is the plain Monte-Carlo lppd,
+    ``elpd_i = logsumexp_s(ll_si) - log S``, summed over observations with
+    the SE taken from the across-point spread.
 
     The saved posterior deliberately excludes the huge ``{prefix}_rw_raw``
     tensor (and ``{prefix}_entity_obs_raw`` when the entity-overdispersion
@@ -796,51 +805,32 @@ def _compute_info_criteria(
         n_chains_use = n_chains
         n_draws_use = n_draws
 
-    da = xr.DataArray(
-        log_lik.reshape(n_chains_use, n_draws_use, n_obs),
-        dims=["chain", "draw", "obs"],
-        coords={
-            "chain": range(n_chains_use),
-            "draw": range(n_draws_use),
-            "obs": range(n_obs),
-        },
-    )
-    groups: dict[str, xr.Dataset] = {"log_likelihood": xr.Dataset({"y": da})}
-    # az.loo needs posterior draws to estimate relative efficiency (reff);
-    # rebuild the (chain, draw, ...) posterior group from the flat samples.
-    if n_chains_use * n_draws_use == n_samples_total:
-        post_vars: dict[str, xr.DataArray] = {}
-        for site, values in posterior_samples.items():
-            arr = np.asarray(values)
-            site_shape = arr.shape[1:]
-            dims = ["chain", "draw"] + [f"{site}_dim_{i}" for i in range(len(site_shape))]
-            post_vars[site] = xr.DataArray(
-                arr.reshape(n_chains_use, n_draws_use, *site_shape), dims=dims
-            )
-        groups["posterior"] = xr.Dataset(post_vars)
-    idata_ll = az.InferenceData(**groups)
     if log_likelihood_path is not None:  # pragma: no cover - opt-in bake-off save path
-        # Persist for cross-model LOO comparison (az.compare needs the pointwise
-        # log-lik on a common test set; the Jacobian above keeps it score-scale).
+        # Persist for cross-model comparison (the bake-offs pair per-point
+        # elpds on a common test set; the Jacobian above keeps it score-scale).
+        da = xr.DataArray(
+            log_lik.reshape(n_chains_use, n_draws_use, n_obs),
+            dims=["chain", "draw", "obs"],
+            coords={
+                "chain": range(n_chains_use),
+                "draw": range(n_draws_use),
+                "obs": range(n_obs),
+            },
+        )
+        idata_ll = az.InferenceData(log_likelihood=xr.Dataset({"y": da}))
         _save_log_likelihood_idata(idata_ll, log_likelihood_path)
-    loo_kwargs: dict[str, Any] = {} if "posterior" in groups else {"reff": 1.0}
-    loo = az.loo(idata_ll, var_name="y", pointwise=True, **loo_kwargs)
-    waic = az.waic(idata_ll, var_name="y", pointwise=True)
 
-    pareto_k = np.asarray(loo.pareto_k)
+    elpd_i = logsumexp(log_lik, axis=0) - np.log(n_samples_total)
+    elpd = float(np.sum(elpd_i))
+    se = float(np.sqrt(n_obs * np.var(elpd_i, ddof=1))) if n_obs > 1 else float("nan")
     return {
-        "loo": {
-            "elpd": float(loo.elpd_loo),
-            "se": float(loo.se),
-            "p": float(loo.p_loo),
-            "pareto_k_max": float(np.max(pareto_k)),
-            "pareto_k_gt_0_7": int(np.sum(pareto_k > 0.7)),
+        "heldout_elpd": {
+            "elpd": elpd,
+            "se": se,
+            "n_obs": int(n_obs),
+            "elpd_per_obs": elpd / n_obs,
         },
-        "waic": {
-            "elpd": float(waic.elpd_waic),
-            "se": float(waic.se),
-            "p": float(waic.p_waic),
-        },
+        "method": "heldout_lppd",
         "scale": "score" if transform is not None else "model",
         "latents_marginalized": bool(needs_latents),
     }

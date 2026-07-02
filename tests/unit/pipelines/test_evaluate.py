@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
+from scipy.special import logsumexp
 
 from panelcast.pipelines.evaluate import (
     _compute_info_criteria,
@@ -250,17 +251,6 @@ class TestRunNewArtistPredictive:
 
 
 class TestComputeInfoCriteriaBranches:
-    def _fake_loo_waic(self, n_obs: int):
-        return (
-            SimpleNamespace(
-                elpd_loo=-50.0,
-                se=3.0,
-                p_loo=5.0,
-                pareto_k=np.full(n_obs, 0.1),
-            ),
-            SimpleNamespace(elpd_waic=-52.0, se=3.2, p_waic=5.5),
-        )
-
     def test_entity_overdispersion_gate_excludes_entity_site(self):
         # When user_tau_entity is present but user_entity_obs_raw is absent,
         # entity_obs_raw must be appended to excluded_latents (line 593).
@@ -281,7 +271,6 @@ class TestComputeInfoCriteriaBranches:
         }
         y_true = np.full(n_obs, 70.0, dtype=np.float32)
         fake_log_lik = np.random.default_rng(0).normal(size=(n_total, n_obs))
-        fake_loo, fake_waic = self._fake_loo_waic(n_obs)
 
         latent_sites_requested: list[list[str]] = []
 
@@ -301,14 +290,13 @@ class TestComputeInfoCriteriaBranches:
                 "panelcast.pipelines.evaluate.log_likelihood",
                 return_value={"user_y": fake_log_lik},
             ),
-            patch("panelcast.pipelines.evaluate.az.loo", return_value=fake_loo),
-            patch("panelcast.pipelines.evaluate.az.waic", return_value=fake_waic),
         ):
             result = _compute_info_criteria(
                 posterior_samples, model_args, y_true, n_chains=1, n_draws=10
             )
 
         assert result["latents_marginalized"] is True
+        assert result["method"] == "heldout_lppd"
         # Both rw_raw and entity_obs_raw should appear somewhere in the requests
         all_requested = [s for sites in latent_sites_requested for s in sites]
         assert "user_entity_obs_raw" in all_requested
@@ -332,7 +320,6 @@ class TestComputeInfoCriteriaBranches:
         y_true = np.full(n_obs, 70.0, dtype=np.float32)
         y_raw = np.full(n_obs, 75.0, dtype=np.float32)
         fake_log_lik = np.zeros((n_total, n_obs))
-        fake_loo, fake_waic = self._fake_loo_waic(n_obs)
 
         transform = MagicMock()
         transform.name = "offset_logit"
@@ -344,8 +331,6 @@ class TestComputeInfoCriteriaBranches:
                 "panelcast.pipelines.evaluate.log_likelihood",
                 return_value={"user_y": fake_log_lik},
             ),
-            patch("panelcast.pipelines.evaluate.az.loo", return_value=fake_loo),
-            patch("panelcast.pipelines.evaluate.az.waic", return_value=fake_waic),
         ):
             result = _compute_info_criteria(
                 posterior_samples,
@@ -358,7 +343,11 @@ class TestComputeInfoCriteriaBranches:
             )
 
         transform.log_jacobian.assert_called_once()
-        assert "loo" in result
+        # Zero log-lik + constant -2 Jacobian: elpd_i = -2 exactly per obs.
+        assert result["heldout_elpd"]["elpd"] == pytest.approx(-2.0 * n_obs)
+        assert result["heldout_elpd"]["elpd_per_obs"] == pytest.approx(-2.0)
+        assert result["heldout_elpd"]["se"] == pytest.approx(0.0)
+        assert result["scale"] == "score"
 
     def test_jacobian_requires_y_raw(self):
         # y_raw=None with a non-identity transform raises (line 627).
@@ -1255,10 +1244,22 @@ class TestResolveFeatureSplitDir:
 
 
 class TestComputeInfoCriteria:
-    """Tests for _compute_info_criteria covering chain/draw mismatch."""
+    """Tests for the direct held-out lppd estimator (#63)."""
 
-    def test_matching_chains_draws(self):
-        """Standard case: n_chains * n_draws == n_samples_total."""
+    @staticmethod
+    def _model_args(n_obs: int) -> dict:
+        return {
+            "artist_idx": np.zeros(n_obs, dtype=np.int32),
+            "album_seq": np.ones(n_obs, dtype=np.int32),
+            "prev_score": np.full(n_obs, 70.0, dtype=np.float32),
+            "X": np.zeros((n_obs, 2), dtype=np.float32),
+            "n_reviews": np.full(n_obs, 50, dtype=np.int32),
+            "n_artists": 1,
+            "max_seq": 5,
+        }
+
+    def test_matches_direct_logsumexp_math(self):
+        """elpd/se reproduce the direct lppd computed by hand on the same log-lik."""
         n_chains, n_draws, n_obs = 2, 50, 10
         samples_total = n_chains * n_draws
         # user_rw_raw present -> no latent marginalization (Predictive) needed
@@ -1266,99 +1267,80 @@ class TestComputeInfoCriteria:
             "user_sigma_obs": np.ones(samples_total),
             "user_rw_raw": np.zeros((samples_total, 4, 1)),
         }
-
-        model_args = {
-            "artist_idx": np.zeros(n_obs, dtype=np.int32),
-            "album_seq": np.ones(n_obs, dtype=np.int32),
-            "prev_score": np.full(n_obs, 70.0, dtype=np.float32),
-            "X": np.zeros((n_obs, 2), dtype=np.float32),
-            "n_reviews": np.full(n_obs, 50, dtype=np.int32),
-            "n_artists": 1,
-            "max_seq": 5,
-        }
         y_true = np.full(n_obs, 70.0, dtype=np.float32)
 
         rng = np.random.default_rng(0)
         fake_log_lik = rng.normal(size=(samples_total, n_obs))
+        expected_i = logsumexp(fake_log_lik, axis=0) - np.log(samples_total)
+        expected_elpd = float(np.sum(expected_i))
+        expected_se = float(np.sqrt(n_obs * np.var(expected_i, ddof=1)))
 
-        with (
-            patch("panelcast.pipelines.evaluate.log_likelihood") as mock_ll,
-            patch("panelcast.pipelines.evaluate.az.loo") as mock_loo,
-            patch("panelcast.pipelines.evaluate.az.waic") as mock_waic,
-        ):
+        with patch("panelcast.pipelines.evaluate.log_likelihood") as mock_ll:
             mock_ll.return_value = {"user_y": fake_log_lik}
-            mock_loo.return_value = SimpleNamespace(
-                elpd_loo=-100.0,
-                se=5.0,
-                p_loo=10.0,
-                pareto_k=np.full(n_obs, 0.2),
-            )
-            mock_waic.return_value = SimpleNamespace(
-                elpd_waic=-102.0,
-                se=5.5,
-                p_waic=11.0,
-            )
             result = _compute_info_criteria(
-                posterior_samples, model_args, y_true, n_chains, n_draws
+                posterior_samples, self._model_args(n_obs), y_true, n_chains, n_draws
             )
 
-        assert "loo" in result
-        assert "waic" in result
-        assert result["loo"]["elpd"] == -100.0
-        assert result["waic"]["elpd"] == -102.0
-        assert result["loo"]["pareto_k_gt_0_7"] == 0
+        payload = result["heldout_elpd"]
+        assert payload["elpd"] == pytest.approx(expected_elpd)
+        assert payload["se"] == pytest.approx(expected_se)
+        assert payload["n_obs"] == n_obs
+        assert payload["elpd_per_obs"] == pytest.approx(expected_elpd / n_obs)
+        assert result["method"] == "heldout_lppd"
+        assert result["scale"] == "model"
         assert result["latents_marginalized"] is False
 
+    def test_hand_computed_value(self):
+        """Two draws, two points, densities chosen so elpd/se are exact by hand.
+
+        Per-point predictive densities: obs0 mean((1+3)/2)=2, obs1 mean((1+7)/2)=4,
+        so elpd_i = [log 2, log 4], elpd = 3*log 2, and the across-point spread
+        gives se = sqrt(2 * var(ddof=1)) = log 2 exactly.
+        """
+        n_obs = 2
+        posterior_samples = {
+            "user_sigma_obs": np.ones(2),
+            "user_rw_raw": np.zeros((2, 4, 1)),
+        }
+        y_true = np.full(n_obs, 70.0, dtype=np.float32)
+        fake_log_lik = np.log(np.array([[1.0, 1.0], [3.0, 7.0]]))
+
+        with patch("panelcast.pipelines.evaluate.log_likelihood") as mock_ll:
+            mock_ll.return_value = {"user_y": fake_log_lik}
+            result = _compute_info_criteria(
+                posterior_samples, self._model_args(n_obs), y_true, n_chains=1, n_draws=2
+            )
+
+        payload = result["heldout_elpd"]
+        assert payload["elpd"] == pytest.approx(3 * np.log(2.0))
+        assert payload["se"] == pytest.approx(np.log(2.0))
+        assert payload["elpd_per_obs"] == pytest.approx(1.5 * np.log(2.0))
+
     def test_mismatched_chains_draws(self):
-        """When n_chains * n_draws != n_samples_total, falls back to 1 chain."""
+        """A flat sample count that isn't n_chains*n_draws still evaluates."""
         n_obs = 5
         n_samples_total = 73  # doesn't match 2*50
         posterior_samples = {
             "user_sigma_obs": np.ones(n_samples_total),
             "user_rw_raw": np.zeros((n_samples_total, 4, 1)),
         }
-
-        model_args = {
-            "artist_idx": np.zeros(n_obs, dtype=np.int32),
-            "album_seq": np.ones(n_obs, dtype=np.int32),
-            "prev_score": np.full(n_obs, 70.0, dtype=np.float32),
-            "X": np.zeros((n_obs, 2), dtype=np.float32),
-            "n_reviews": np.full(n_obs, 50, dtype=np.int32),
-            "n_artists": 1,
-            "max_seq": 5,
-        }
         y_true = np.full(n_obs, 70.0, dtype=np.float32)
 
         rng = np.random.default_rng(0)
         fake_log_lik = rng.normal(size=(n_samples_total, n_obs))
+        expected_i = logsumexp(fake_log_lik, axis=0) - np.log(n_samples_total)
 
-        with (
-            patch("panelcast.pipelines.evaluate.log_likelihood") as mock_ll,
-            patch("panelcast.pipelines.evaluate.az.loo") as mock_loo,
-            patch("panelcast.pipelines.evaluate.az.waic") as mock_waic,
-        ):
+        with patch("panelcast.pipelines.evaluate.log_likelihood") as mock_ll:
             mock_ll.return_value = {"user_y": fake_log_lik}
-            mock_loo.return_value = SimpleNamespace(
-                elpd_loo=-200.0,
-                se=10.0,
-                p_loo=20.0,
-                pareto_k=np.full(n_obs, 0.2),
-            )
-            mock_waic.return_value = SimpleNamespace(
-                elpd_waic=-205.0,
-                se=10.5,
-                p_waic=21.0,
-            )
             result = _compute_info_criteria(
                 posterior_samples,
-                model_args,
+                self._model_args(n_obs),
                 y_true,
                 n_chains=2,
                 n_draws=50,  # 2*50=100 != 73
             )
 
-        assert "loo" in result
-        assert result["loo"]["elpd"] == -200.0
+        assert result["heldout_elpd"]["elpd"] == pytest.approx(float(np.sum(expected_i)))
 
     def test_missing_y_key_raises(self):
         """Raises ValueError when no observed site ending in '_y' is found."""

@@ -13,8 +13,9 @@ must point at the subset. `PANELCAST_SAVE_LOG_LIKELIHOOD=1` is set for each run 
 the evaluate stage persists `outputs/evaluation/log_likelihood.nc` (pointwise,
 score-scale). Each run's `outputs/evaluation/` is snapshotted into
 `.audit/transform_latent_bakeoff/<cell>/` before the next cell overwrites it; the
-snapshotted log-likelihoods feed a pairwise `az.compare` so the table reports LOO
-elpd + SE and the paired `elpd_diff +/- dse` vs the kept default.
+snapshotted log-likelihoods feed the direct held-out elpd estimator (#63) so the
+table reports test lppd + SE and the paired per-point `elpd_diff +/- dse` vs the
+kept default.
 
 GPU: invoke with the GPU venv interpreter (`~/aoty-gpu/bin/python`) so the
 sibling `panelcast` is the GPU build. Do NOT set `JAX_PLATFORMS=cuda` — evaluate
@@ -26,8 +27,9 @@ Example
         ~/aoty-gpu/bin/python scripts/bakeoff_transform_latent.py
 
 Pass `--reassemble` to rebuild the comparison artifacts from existing snapshots
-without re-fitting (LOO columns always; the pairwise rows when the per-cell
-`log_likelihood.nc` snapshots are present).
+without re-fitting. The elpd columns and pairwise rows are recomputed from the
+per-cell `log_likelihood.nc` snapshots; cells without one (offset_logit_ar1)
+render "-" rather than resurfacing pre-#63 PSIS-LOO numbers.
 """
 
 from __future__ import annotations
@@ -105,8 +107,11 @@ def _read_metrics(eval_dir: Path) -> dict:
         cov95 = (m.get("calibration", {}).get("coverages", {}) or {}).get("0.95", {})
         pit = (m.get("calibration", {}) or {}).get("pit", {}) or {}
         info = m.get("info_criteria", {}) or {}
-        loo = info.get("loo", {}) or {}
-        waic = info.get("waic", {}) or {}
+        # Direct held-out lppd (#63). No legacy `loo` fallback: pre-#63
+        # snapshots recompute from their log_likelihood.nc instead (see
+        # _collect_rows_from_snapshots) — the PSIS-LOO-on-test numbers those
+        # metrics.json carry are the artifact #63 retired.
+        elpd = info.get("heldout_elpd", {}) or {}
         pinned = m.get("ppc", {}).get("extreme_statistics", []) or []
         out.update(
             mae=point.get("mae"),
@@ -117,56 +122,59 @@ def _read_metrics(eval_dir: Path) -> dict:
             crps=(m.get("crps", {}) or {}).get("mean_crps"),
             ppc_pinned=len(pinned),
             ppc_pinned_names=",".join(pinned) or "-",
-            loo_elpd=loo.get("elpd"),
-            loo_se=loo.get("se"),
-            p_loo=loo.get("p"),
-            waic_elpd=waic.get("elpd"),
-            pareto_k_max=loo.get("pareto_k_max"),
-            pareto_k_gt07=loo.get("pareto_k_gt_0_7"),
+            elpd=elpd.get("elpd"),
+            elpd_se=elpd.get("se"),
         )
     return out
 
 
-def _pairwise_loo(rows: list[dict], out_dir: Path, default_cell: str = DEFAULT_CELL) -> list[dict]:
-    """Pairwise LOO elpd_diff +/- dse of each cell vs the kept default.
-
-    Loads each cell's persisted pointwise log-likelihood idata and runs
-    `az.compare` (via `compare_models`) on the {default, cell} pair, so the SE is
-    the *paired* difference SE — the cells are fit to identical test data, so this
-    is smaller (and the honest significance number) than each model's marginal SE.
-    The elpd_diff is signed cell-minus-default (positive = beats the default).
-    Returns [] when the default cell's idata snapshot is absent.
-    """
+def _pointwise_elpd(nc_path: Path):
+    """Per-observation elpd_i from a persisted pointwise log-likelihood idata."""
     import arviz as az
+    import numpy as np
+    from scipy.special import logsumexp
 
-    from panelcast.evaluation.cv import compare_models
+    idata = az.from_netcdf(str(nc_path))
+    arr = np.asarray(idata.log_likelihood["y"].values)  # (chain, draw, obs)
+    n_samples = arr.shape[0] * arr.shape[1]
+    return logsumexp(arr.reshape(n_samples, arr.shape[2]), axis=0) - np.log(n_samples)
 
-    by_name = {r["name"]: r for r in rows}
+
+def _pairwise_elpd(rows: list[dict], out_dir: Path, default_cell: str = DEFAULT_CELL) -> list[dict]:
+    """Paired per-point held-out elpd_diff +/- dse of each cell vs the kept default.
+
+    Loads the two cells' persisted pointwise log-likelihoods (identical test
+    rows), takes d_i = elpd_i(cell) - elpd_i(default), and reports
+    `sum(d_i) +/- sqrt(n * var(d_i, ddof=1))` — the paired SE, smaller (and the
+    honest significance number) than each cell's marginal SE. The diff is signed
+    cell-minus-default (positive = beats the default). Returns [] when the
+    default cell's snapshot is absent.
+    """
+    import numpy as np
+
     default_nc = out_dir / default_cell / "log_likelihood.nc"
-    default_row = by_name.get(default_cell)
-    if default_row is None or default_row.get("loo_elpd") is None or not default_nc.exists():
+    if not default_nc.exists():
         return []
-    idata_default = az.from_netcdf(str(default_nc))
-    elpd_default = float(default_row["loo_elpd"])
+    elpd_default = _pointwise_elpd(default_nc)
 
     pairwise: list[dict] = []
     for row in rows:
         name = row["name"]
         cell_nc = out_dir / name / "log_likelihood.nc"
-        if name == default_cell or row.get("loo_elpd") is None or not cell_nc.exists():
+        if name == default_cell or not cell_nc.exists():
             continue
         try:
-            idata_cell = az.from_netcdf(str(cell_nc))
-            cmp = compare_models({default_cell: idata_default, name: idata_cell}, ic="loo")
-            # az.compare anchors at the best model (elpd_diff/dse measured from it).
-            # The pair's difference SE is the one non-reference row; the reference
-            # row's dse is 0. Sign the diff from the per-cell LOO elpds so the table
-            # and this column agree.
-            dse = float(cmp["dse"].abs().max())
+            elpd_cell = _pointwise_elpd(cell_nc)
+            if elpd_cell.shape != elpd_default.shape:
+                raise ValueError(
+                    f"pointwise shapes differ: {elpd_cell.shape} vs {elpd_default.shape}"
+                )
+            d = elpd_cell - elpd_default
+            dse = float(np.sqrt(d.size * np.var(d, ddof=1)))
         except Exception as exc:  # noqa: BLE001 — audit script: degrade, don't abort
-            print(f"  ! pairwise compare failed for {name}: {type(exc).__name__}: {exc}")
+            print(f"  ! pairwise diff failed for {name}: {type(exc).__name__}: {exc}")
             continue
-        elpd_diff = float(row["loo_elpd"]) - elpd_default
+        elpd_diff = float(np.sum(d))
         pairwise.append(
             {
                 "name": name,
@@ -207,12 +215,8 @@ _COLUMNS = [
     ("cov95", "cov95", ".3f"),
     ("pit_dev", "pit_dev", ".3f"),
     ("crps", "crps", ".2f"),
-    ("loo_elpd", "loo", ".1f"),
-    ("loo_se", "se", ".1f"),
-    ("p_loo", "p_loo", ".1f"),
-    ("waic_elpd", "waic", ".1f"),
-    ("pareto_k_max", "k_max", ".2f"),
-    ("pareto_k_gt07", "k>0.7", None),
+    ("elpd", "elpd", ".1f"),
+    ("elpd_se", "se", ".1f"),
 ]
 
 
@@ -238,10 +242,10 @@ def _render_markdown(
     if pairwise:
         lines += [
             "",
-            f"## Pairwise LOO vs kept default ({default_cell})",
+            f"## Pairwise held-out elpd vs kept default ({default_cell})",
             "",
             "elpd_diff is cell minus default (positive = beats the default); dse is the",
-            "*paired* difference SE from `az.compare` on identical test data.",
+            "*paired* difference SE from per-point elpd diffs on identical test data (#63).",
             "",
             "| cell | elpd_diff | dse | z (diff/dse) |",
             "| --- | --- | --- | --- |",
@@ -253,7 +257,7 @@ def _render_markdown(
             )
         scored = {p["name"] for p in pairwise} | {default_cell}
         omitted = [
-            r["name"] for r in rows if r.get("loo_elpd") is not None and r["name"] not in scored
+            r["name"] for r in rows if r.get("elpd") is not None and r["name"] not in scored
         ]
         if omitted:
             lines += [
@@ -265,7 +269,14 @@ def _render_markdown(
 
 
 def _collect_rows_from_snapshots(out_dir: Path) -> list[dict]:
-    """Rebuild per-cell rows from existing snapshots (no re-fitting)."""
+    """Rebuild per-cell rows from existing snapshots (no re-fitting).
+
+    elpd/se are recomputed from the snapshotted pointwise `log_likelihood.nc`
+    (the #63 estimator), overriding whatever metrics.json recorded; cells
+    without one render "-".
+    """
+    import numpy as np
+
     rows: list[dict] = []
     for cell in CELLS:
         row = {"name": cell["name"], "transform": cell["transform"], "latent": cell["latent"]}
@@ -274,6 +285,14 @@ def _collect_rows_from_snapshots(out_dir: Path) -> list[dict]:
             row.update(_read_metrics(dest))
         else:
             row["error"] = "no snapshot"
+        nc = dest / "log_likelihood.nc"
+        if nc.exists():
+            try:
+                elpd_i = _pointwise_elpd(nc)
+                row["elpd"] = float(np.sum(elpd_i))
+                row["elpd_se"] = float(np.sqrt(elpd_i.size * np.var(elpd_i, ddof=1)))
+            except Exception as exc:  # noqa: BLE001 — audit script: degrade, don't abort
+                print(f"  ! elpd recompute failed for {cell['name']}: {type(exc).__name__}: {exc}")
         rows.append(row)
     return rows
 
@@ -334,7 +353,7 @@ def main() -> int:
             )
         rows = _run_grid(args.panelcast_bin, args.preset, eval_dir, out_dir)
 
-    pairwise = _pairwise_loo(rows, out_dir)
+    pairwise = _pairwise_elpd(rows, out_dir)
 
     payload = {"cells": _json_safe(rows), "pairwise_vs_default": _json_safe(pairwise)}
     (out_dir / "comparison.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")

@@ -326,22 +326,44 @@ class TestPointMetricParsing:
 
 
 class TestLooParsing:
-    def test_parse_loo_result_valid(self):
+    def test_parse_heldout_elpd_valid(self):
+        result = _parse_loo_result(
+            {"info_criteria": {"heldout_elpd": {"elpd": -123.4, "se": 5.6, "n_obs": 100}}}
+        )
+        assert result is not None
+        assert result.elpd_loo == pytest.approx(-123.4)
+        assert result.se_elpd == pytest.approx(5.6)
+
+    def test_parse_legacy_loo_fallback(self):
+        # Pre-#63 metrics.json payloads still parse.
         result = _parse_loo_result({"info_criteria": {"loo": {"elpd": -123.4, "se": 5.6}}})
         assert result is not None
         assert result.elpd_loo == pytest.approx(-123.4)
         assert result.se_elpd == pytest.approx(5.6)
+
+    def test_heldout_elpd_preferred_over_legacy_loo(self):
+        result = _parse_loo_result(
+            {
+                "info_criteria": {
+                    "heldout_elpd": {"elpd": -100.0, "se": 4.0},
+                    "loo": {"elpd": -200.0, "se": 8.0},
+                }
+            }
+        )
+        assert result is not None
+        assert result.elpd_loo == pytest.approx(-100.0)
 
     @pytest.mark.parametrize(
         "payload",
         [
             {},
             {"info_criteria": None},
-            {"info_criteria": {"loo": None}},
+            {"info_criteria": {"heldout_elpd": None}},
+            {"info_criteria": {"heldout_elpd": {"elpd": -123.4}}},
+            {"info_criteria": {"heldout_elpd": {"se": 5.6}}},
+            {"info_criteria": {"heldout_elpd": {"elpd": "bad", "se": 5.6}}},
+            {"info_criteria": {"heldout_elpd": {"elpd": -123.4, "se": "bad"}}},
             {"info_criteria": {"loo": {"elpd": -123.4}}},
-            {"info_criteria": {"loo": {"se": 5.6}}},
-            {"info_criteria": {"loo": {"elpd": "bad", "se": 5.6}}},
-            {"info_criteria": {"loo": {"elpd": -123.4, "se": "bad"}}},
         ],
     )
     def test_parse_loo_result_invalid_payload(self, payload):
@@ -698,7 +720,7 @@ class TestHelperInterop:
                             "coverages": {"0.95": {"nominal": 0.95, "empirical": 0.94}}
                         },
                         "point_metrics": {"mae": 0.8, "rmse": 1.1, "r2": 0.4},
-                        "info_criteria": {"loo": {"elpd": -42.5, "se": 1.2}},
+                        "info_criteria": {"heldout_elpd": {"elpd": -42.5, "se": 1.2}},
                     }
                 },
             }

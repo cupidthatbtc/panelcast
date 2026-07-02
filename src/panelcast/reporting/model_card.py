@@ -298,7 +298,7 @@ def _generate_markdown(data: ModelCardData) -> str:
     lines.append(data.predictive_summary)
     if data.loo_elpd is not None:
         lines.append("")
-        lines.append(f"- **ELPD (LOO-CV):** {data.loo_elpd:.1f}")
+        lines.append(f"- **Held-out ELPD (test lppd):** {data.loo_elpd:.1f}")
     lines.append("")
 
     # Limitations
@@ -443,7 +443,7 @@ def _generate_latex(data: ModelCardData) -> str:
     lines.append(_latex_escape(data.predictive_summary))
     if data.loo_elpd is not None:
         lines.append("")
-        lines.append(f"ELPD (LOO-CV): {data.loo_elpd:.1f}")
+        lines.append(f"Held-out ELPD (test lppd): {data.loo_elpd:.1f}")
     lines.append("")
 
     # Limitations
@@ -1041,11 +1041,13 @@ def update_model_card_with_results(
         new_loo_elpd = loo_result.elpd_loo
         if new_predictive != data.predictive_summary:
             new_predictive += (
-                f"\n- ELPD (LOO-CV): {loo_result.elpd_loo:.1f} (SE: {loo_result.se_elpd:.1f})"
+                f"\n- Held-out ELPD (test lppd): {loo_result.elpd_loo:.1f} "
+                f"(SE: {loo_result.se_elpd:.1f})"
             )
         else:
             new_predictive = (
-                f"ELPD (LOO-CV): {loo_result.elpd_loo:.1f} (SE: {loo_result.se_elpd:.1f})"
+                f"Held-out ELPD (test lppd): {loo_result.elpd_loo:.1f} "
+                f"(SE: {loo_result.se_elpd:.1f})"
             )
 
     # Append PPC summary to calibration section

@@ -653,12 +653,12 @@ class TestGenerateModelCardExpanded:
             loo_elpd=-1234.5,
         )
         card = generate_model_card(data2, format="markdown")
-        assert "ELPD (LOO-CV):" in card
+        assert "Held-out ELPD (test lppd):" in card
         assert "-1234.5" in card
 
     def test_markdown_no_elpd(self, minimal_data):
         card = generate_model_card(minimal_data, format="markdown")
-        assert "ELPD (LOO-CV):" not in card
+        assert "Held-out ELPD (test lppd):" not in card
 
     def test_markdown_no_hyperparameters(self, minimal_data):
         card = generate_model_card(minimal_data, format="markdown")
