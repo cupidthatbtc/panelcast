@@ -4,10 +4,13 @@ The Bayesian model needs something to be incrementally better *than*. These are
 deliberately simple, fast, non-Bayesian predictors that nonetheless emit
 predictive intervals, so they score through the exact same evaluation toolkit
 (``evaluation.metrics`` / ``evaluation.calibration`` / CRPS / PPC) as the full
-model. Every baseline produces Gaussian predictive samples around a point
+model. Most baselines produce Gaussian predictive samples around a point
 prediction, with the spread set from train-residual scale — enough to fill the
 coverage columns of the benchmark table honestly (train-residual intervals are
 mildly optimistic; they are a floor, not a calibrated forecast).
+``conformal_gbm`` is the exception: its samples resample held-out calibration
+residuals, so its intervals carry a distribution-free split-conformal
+guarantee instead of a Gaussian assumption.
 
 Predictors:
 - ``global_mean``  — the train global mean for every row.
@@ -17,6 +20,9 @@ Predictors:
 - ``ridge``        — ``sklearn`` ridge regression on the feature matrix.
 - ``gbm``          — ``sklearn`` histogram gradient boosting; residual-scale
   intervals.
+- ``conformal_gbm`` — the same GBM wrapped in split-conformal calibration:
+  distribution-free intervals from held-out calibration residuals instead of
+  a Gaussian wrapper.
 """
 
 from __future__ import annotations
@@ -40,6 +46,7 @@ __all__ = [
     "LastScoreBaseline",
     "RidgeBaseline",
     "GBMBaseline",
+    "ConformalGBMBaseline",
     "build_default_baselines",
     "score_prediction",
     "benchmark_baselines",
@@ -280,14 +287,91 @@ class GBMBaseline(Baseline):
         return self._model.predict(np.asarray(test.X, dtype=float))
 
 
+class ConformalGBMBaseline(Baseline):
+    """Split-conformal GBM: distribution-free intervals around the GBM point.
+
+    Fits the same histogram GBM on a proper-train subset and turns the held-out
+    calibration residuals into a conformal predictive distribution: predictive
+    samples are the point prediction plus calibration residuals resampled with
+    replacement, so every equal-tailed interval the evaluation toolkit reads off
+    the samples is a split-conformal interval. Two sentinel residuals spanning
+    the full target range stand in for the +/-inf augmentation of the classic
+    construction (after clipping they land on the bounds).
+
+    The finite-sample guarantee assumes calibration and test rows are
+    exchangeable. The random calibration split only approximates that for the
+    within-entity temporal test rows (each entity's chronologically-last
+    events), and no guarantee at all transfers to the entity-disjoint split —
+    measuring what the wrapper actually delivers there is the point of
+    including it.
+    """
+
+    name = "conformal_gbm"
+
+    def __init__(
+        self,
+        bounds: tuple[float, float] = (0.0, 100.0),
+        calibration_fraction: float = 0.25,
+        split_seed: int = 0,
+    ) -> None:
+        super().__init__(bounds)
+        if not 0.0 < calibration_fraction < 1.0:
+            raise ValueError(f"calibration_fraction must be in (0, 1), got {calibration_fraction}")
+        self.calibration_fraction = calibration_fraction
+        self.split_seed = split_seed
+
+    def fit(self, train: PanelData) -> ConformalGBMBaseline:
+        from sklearn.ensemble import HistGradientBoostingRegressor
+
+        y = np.asarray(train.y, dtype=float)
+        valid = ~np.isnan(y)
+        X = np.asarray(train.X, dtype=float)[valid]
+        y = y[valid]
+        n = y.shape[0]
+
+        self._model = HistGradientBoostingRegressor(random_state=0)
+        n_cal = int(round(n * self.calibration_fraction))
+        if n_cal < 1 or n - n_cal < 2:
+            # Too small to hold out a calibration set: degrade to plain
+            # train-residual calibration (no conformal guarantee).
+            self._model.fit(X, y)
+            residuals = y - self._model.predict(X)
+        else:
+            perm = np.random.default_rng(self.split_seed).permutation(n)
+            cal_idx, fit_idx = perm[:n_cal], perm[n_cal:]
+            self._model.fit(X[fit_idx], y[fit_idx])
+            residuals = y[cal_idx] - self._model.predict(X[cal_idx])
+
+        span = self.bounds[1] - self.bounds[0]
+        self._residual_pool = np.concatenate([residuals, [-span, span]])
+        self._sigma = _train_residual_sigma(residuals)
+        return self
+
+    def _point(self, test: PanelData) -> np.ndarray:
+        return self._model.predict(np.asarray(test.X, dtype=float))
+
+    def predict(
+        self, test: PanelData, n_samples: int, rng: np.random.Generator
+    ) -> BaselinePrediction:
+        point = np.clip(self._point(test), *self.bounds)
+        draws = rng.choice(self._residual_pool, size=(n_samples, point.shape[0]))
+        samples = np.clip(point[None, :] + draws, *self.bounds)
+        return BaselinePrediction(point=point, samples=samples)
+
+
 def build_default_baselines(bounds: tuple[float, float] = (0.0, 100.0)) -> list[Baseline]:
-    """The full baseline panel, in table order."""
+    """The full baseline panel, in table order.
+
+    ``conformal_gbm`` is appended last so the shared-rng draw streams of the
+    preexisting baselines stay byte-identical.
+    """
     return [
         GlobalMeanBaseline(bounds),
         EntityMeanBaseline(bounds),
         LastScoreBaseline(bounds),
         RidgeBaseline(bounds),
         GBMBaseline(bounds),
+        ConformalGBMBaseline(bounds),
     ]
 
 

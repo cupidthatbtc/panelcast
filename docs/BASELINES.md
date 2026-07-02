@@ -15,6 +15,7 @@ table is otherwise invisible in the repo.)
 | Model | MAE | RMSE | R² | CRPS | 80% cov | 95% cov | 95% width |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | gradient boosting | **5.41** | **7.76** | **0.486** | **4.01** | 0.770 | 0.899 | 22.7 |
+| conformal GBM | 5.59 | 7.90 | 0.468 | 4.09 | 0.822 | 0.946 | 31.4 |
 | ridge | 5.62 | 8.00 | 0.455 | 4.22 | 0.873 | 0.962 | 33.8 |
 | **panelcast (Bayesian)** | 5.64 | 8.27 | 0.417 | 4.19 | 0.858 | 0.957 | 33.1 |
 | last score | 6.10 | 8.88 | 0.328 | 4.71 | 0.900 | 0.971 | 39.4 |
@@ -44,22 +45,37 @@ parameters, PPC), and a structure that ports to a new domain by swapping one
 descriptor. Those are uncertainty-quantification deliverables, not point-accuracy
 ones — and a user who only needs a point estimate should reach for the GBM.
 
-> The baselines' coverage comes from a Gaussian-residual wrapper, not a
-> distribution-free guarantee. Whether a **conformalized** GBM could keep its
-> point-accuracy edge *and* reach nominal coverage is the sharper test of this
-> value proposition — tracked in
-> [#50](https://github.com/cupidthatbtc/panelcast/issues/50).
+> That sharper test has now been run
+> ([#50](https://github.com/cupidthatbtc/panelcast/issues/50)): **conformal GBM**
+> wraps the same GBM in split-conformal calibration (75/25 proper-train/calibration
+> split; predictive samples resample held-out signed residuals, so the intervals
+> are distribution-free). It keeps most of the GBM's point edge (MAE 5.59 vs 5.41;
+> the gap is the 25% of train held out for calibration) and reaches near-nominal
+> coverage (95%: 0.946; 80%: 0.822) with *narrower* 95% intervals than the model
+> (31.4 vs 33.1). So **calibration alone is cheap** — the model's interval
+> quality can be approximated without a likelihood, and on the cold-start split
+> below the conformal wrapper even edges the model (0.912 vs 0.896). The honest
+> value proposition for the Bayesian model is therefore what conformal cannot
+> produce: a generative story you can interrogate (posterior parameters, PPC)
+> and the entity-vs-residual variance decomposition — not the intervals.
 
 ## Cold-start — a brand-new entity with no history (artist-disjoint, N = 799)
 
 | Model | MAE | R² | 80% cov | 95% cov | 95% width |
 |---|---:|---:|---:|---:|---:|
 | ridge | 7.33 | 0.083 | 0.820 | 0.937 | 33.3 |
+| conformal GBM | 7.27 | 0.037 | 0.713 | 0.912 | 31.4 |
 | gradient boosting | 7.31 | 0.037 | 0.640 | 0.810 | 21.7 |
 | **panelcast (Bayesian)** | 7.19 | 0.003 | 0.707 | 0.896 | 29.8 |
 | entity mean | 7.69 | −0.001 | 0.743 | 0.900 | 29.1 |
 | last score | 7.69 | −0.001 | 0.837 | 0.947 | 38.0 |
 | global mean | 7.69 | −0.001 | 0.901 | 0.957 | 44.0 |
+
+The conformal wrapper's guarantee assumes calibration and test rows are
+exchangeable — true-ish for the within-entity split, false by construction for
+never-seen entities. It degrades accordingly (95% coverage 0.912, down from
+0.946), though it still beats the raw GBM's 0.810 by a wide margin. No method
+is calibrated out here without widening.
 
 For an entity with **no training history, every method collapses toward the global
 mean** — R² ≈ 0 across the board, and the model's 0.003 is a statistical tie with
