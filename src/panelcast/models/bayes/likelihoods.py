@@ -552,8 +552,9 @@ def _symmetric_draws(key, mu_pred, sigma_scaled, *, df, transform, skew, tailwei
     """Shared location-scale draw: Student-t base for df<100 (legacy), else Normal.
 
     ``skew`` (or None) applies the sinh-arcsinh tilt; ``student_base`` selects the
-    df-dependent base used by studentt/normal/skew_studentt (preserves the
-    pre-registry behavior verbatim, including normal's Student-t predictive base).
+    df-dependent base, used by studentt and skew_studentt to preserve their
+    pre-registry predictive behavior verbatim. The normal family always predicts
+    from a Normal base regardless of df.
     """
     if student_base and df < 100:
         base_noise = random.t(key, df, mu_pred.shape)
@@ -579,10 +580,9 @@ def _normal_predict_draws(
     key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
     n_reviews=None,
 ):
-    # student_base=True preserves the pre-registry predictive base for "normal".
     y = _symmetric_draws(
         key, mu_pred, sigma_scaled, df=df, transform=transform,
-        skew=None, tailweight=skew_tailweight, student_base=True,
+        skew=None, tailweight=skew_tailweight, student_base=False,
     )
     return jnp.round(y) if discretize else y
 
