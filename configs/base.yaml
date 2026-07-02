@@ -47,8 +47,10 @@ n_exponent_prior: logit-normal
 # overprediction for extreme-score albums. Set >= 100 for Normal.
 likelihood_df: 4.0
 
-# Model gates (Phase 5/6 adopted decisions; defaults restated)
-target_transform: identity
+# Model gates (Phase 5/6 adopted decisions; defaults restated).
+# offset_logit promoted to default in 0.5.0 (#43): +22 held-out elpd over
+# identity on the corrected estimator, stable across seeds.
+target_transform: offset_logit
 ar_center: global
 latent_process: rw
 debut_prev_score_source: train_mean

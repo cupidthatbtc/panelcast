@@ -126,8 +126,12 @@ class PriorConfig:
     # (only used when latent_process == "ar1"; truncated to (-0.99, 0.99)).
     phi_loc: float = 0.0
     phi_scale: float = 0.5
-    # Target transform: "identity" (soft-clip on mu, legacy default) or
-    # "offset_logit" (Smithson-Verkuilen logit; model runs on logit scale).
+    # Target transform: "identity" (soft-clip on mu) or "offset_logit"
+    # (Smithson-Verkuilen logit; model runs on logit scale). Deliberately NOT
+    # flipped with the 0.5.0 pipeline default: this is the direct-constructor
+    # baseline the tests and the likelihood_parity golden are pinned to, and
+    # the orchestrator always passes target_transform explicitly — the
+    # pipeline default lives in PipelineConfig/base.yaml, not here.
     target_transform: str = "identity"
     # Half-count continuity offset for the offset-logit transform.
     logit_offset: float = 0.5

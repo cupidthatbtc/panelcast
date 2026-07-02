@@ -37,7 +37,7 @@ def _invoke(captured: dict, *args: str) -> PipelineConfig:
 class TestGateFlagDefaults:
     def test_defaults(self, captured_config):
         config = _invoke(captured_config)
-        assert config.target_transform == "identity"
+        assert config.target_transform == "offset_logit"
         assert config.ar_center == "global"
         assert config.latent_process == "rw"
         assert config.debut_prev_score_source == "train_mean"
@@ -47,8 +47,9 @@ class TestGateFlagDefaults:
 
 class TestGateFlagDispatch:
     def test_target_transform(self, captured_config):
-        config = _invoke(captured_config, "--target-transform", "offset_logit")
-        assert config.target_transform == "offset_logit"
+        # identity is the non-default now, so this still proves dispatch.
+        config = _invoke(captured_config, "--target-transform", "identity")
+        assert config.target_transform == "identity"
 
     def test_ar_center(self, captured_config):
         config = _invoke(captured_config, "--ar-center", "none")
