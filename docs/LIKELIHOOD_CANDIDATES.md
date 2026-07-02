@@ -415,7 +415,7 @@ panelcast diagnose
 ## Addendum (0.5.0): the occupied-range Beta (`beta_ceiling`, #42)
 
 One more family, one more clean refutation. `beta_ceiling` rescales the Beta
-onto `[low, train-max + margin]` — the score range the data actually occupies —
+onto `[low, train-max + 0.5]` — the score range the data actually occupies —
 to test whether the skewness/max/q90 pins were an artifact of the unoccupied
 upper support rather than the distribution's shape. They are not: at the
 diagnostic screening (4×2000, identity scale, which the family requires) the
