@@ -13,7 +13,7 @@ from datetime import date
 import pandas as pd
 import structlog
 
-from panelcast.config.descriptor import DEFAULT_DESCRIPTOR, DatasetDescriptor
+from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.lineage import AuditLogger
 
 # Column name mapping from raw to canonical (AOTY default; descriptor-driven
@@ -460,37 +460,3 @@ def filter_for_target_model(
     )
 
     return df
-
-
-def filter_for_user_score_model(
-    df: pd.DataFrame,
-    min_ratings: int,
-    logger: AuditLogger | None = None,
-) -> pd.DataFrame:
-    """
-    Filter dataset for user score modeling (AOTY primary-target wrapper).
-
-    Requires:
-    - Non-empty Artist and Album identifiers
-    - Valid User_Score (0-100)
-    - User_Ratings >= min_ratings
-    """
-    return filter_for_target_model(df, DEFAULT_DESCRIPTOR, min_ratings, logger=logger)
-
-
-def filter_for_critic_score_model(
-    df: pd.DataFrame,
-    min_reviews: int = 1,
-    logger: AuditLogger | None = None,
-) -> pd.DataFrame:
-    """
-    Filter dataset for critic score modeling (AOTY secondary-target wrapper).
-
-    Requires:
-    - Non-empty Artist and Album identifiers
-    - Valid Critic_Score (0-100)
-    - Critic_Reviews >= min_reviews
-    """
-    return filter_for_target_model(
-        df, DEFAULT_DESCRIPTOR, min_reviews, target="secondary", logger=logger
-    )

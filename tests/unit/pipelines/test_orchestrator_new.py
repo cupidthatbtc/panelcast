@@ -598,6 +598,51 @@ class TestBuildCommandStringExtended:
         cmd = orchestrator._build_command_string()
         assert "--prediction-interval 0.9" in cmd
 
+    def test_command_records_every_model_gate(self, tmp_path):
+        """Every output-affecting gate appears flag-style when non-default."""
+        config = PipelineConfig(
+            target_transform="offset_logit",
+            logit_offset=1.0,
+            ar_center="none",
+            latent_process="ar1",
+            debut_prev_score_source="dataset_stats",
+            sigma_obs_prior_type="lognormal",
+            heteroscedastic_entity_obs=True,
+            tau_entity_scale=0.5,
+            errors_in_variables=True,
+            propagate_rw_horizon=True,
+            entity_group_pooling=True,
+            val_albums=100,
+        )
+        orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
+        cmd = orchestrator._build_command_string()
+        assert "--target-transform offset_logit" in cmd
+        assert "--logit-offset 1.0" in cmd
+        assert "--ar-center none" in cmd
+        assert "--latent-process ar1" in cmd
+        assert "--debut-prev-score-source dataset_stats" in cmd
+        assert "--sigma-obs-prior-type lognormal" in cmd
+        assert "--heteroscedastic-entity-obs" in cmd
+        assert "--tau-entity-scale 0.5" in cmd
+        assert "--errors-in-variables" in cmd
+        assert "--propagate-rw-horizon" in cmd
+        assert "--entity-group-pooling" in cmd
+        assert "--val-albums 100" in cmd
+
+    def test_command_omits_default_model_gates(self, tmp_path):
+        """Gates at their defaults leave no trace in the command string."""
+        config = PipelineConfig()
+        orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
+        cmd = orchestrator._build_command_string()
+        for flag in (
+            "--target-transform", "--logit-offset", "--ar-center",
+            "--latent-process", "--debut-prev-score-source",
+            "--sigma-obs-prior-type", "--heteroscedastic-entity-obs",
+            "--tau-entity-scale", "--errors-in-variables",
+            "--propagate-rw-horizon", "--entity-group-pooling", "--val-albums",
+        ):
+            assert flag not in cmd
+
     def test_command_with_chain_method(self, tmp_path):
         """Non-default chain method appears in command string."""
         config = PipelineConfig(chain_method="parallel")

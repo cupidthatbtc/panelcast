@@ -8,11 +8,11 @@ purely through the descriptor.
 import pandas as pd
 import pytest
 
+from panelcast.config.descriptor import DEFAULT_DESCRIPTOR
 from panelcast.data.cleaning import (
     CleaningConfig,
     clean_albums,
     filter_for_target_model,
-    filter_for_user_score_model,
 )
 from panelcast.data.lineage import AuditLogger
 from panelcast.pipelines.prepare_dataset import PrepareConfig
@@ -119,8 +119,8 @@ class TestFilterForTargetModelAero:
         with pytest.raises(ValueError, match="primary"):
             filter_for_target_model(self._cleaned(), _aero_descriptor(), 1, target="tertiary")
 
-    def test_legacy_wrapper_reason_strings_unchanged(self, tmp_path):
-        """The AOTY wrappers must keep their historical audit reasons."""
+    def test_aoty_default_reason_strings_unchanged(self, tmp_path):
+        """The AOTY-default descriptor path must keep its historical audit reasons."""
         df = pd.DataFrame(
             {
                 "Artist": ["A", "B"],
@@ -131,7 +131,7 @@ class TestFilterForTargetModelAero:
             }
         )
         logger = AuditLogger(output_dir=tmp_path, run_id="aoty")
-        filter_for_user_score_model(df, min_ratings=10, logger=logger)
+        filter_for_target_model(df, DEFAULT_DESCRIPTOR, 10, logger=logger)
         assert [s.filter_name for s in logger.filter_stats] == [
             "missing_artist_or_album_identifier",
             "missing_user_score",

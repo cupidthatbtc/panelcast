@@ -1437,31 +1437,6 @@ class TestStageRunFunctions:
 
 
 # ============================================================================
-# Stages: PIPELINE_STAGES module-level list
-# ============================================================================
-
-
-class TestPipelineStagesModule:
-    """Test module-level PIPELINE_STAGES list."""
-
-    def test_pipeline_stages_is_populated(self):
-        """PIPELINE_STAGES module-level list has stages."""
-        from panelcast.pipelines.stages import PIPELINE_STAGES
-
-        assert len(PIPELINE_STAGES) == 7
-        names = {s.name for s in PIPELINE_STAGES}
-        assert names == {"data", "splits", "features", "train", "evaluate", "predict", "report"}
-
-    def test_all_stages_have_run_fn(self):
-        """All built stages have non-None run functions."""
-        from panelcast.pipelines.stages import PIPELINE_STAGES
-
-        for stage in PIPELINE_STAGES:
-            assert stage.run_fn is not None, f"Stage {stage.name} has no run_fn"
-            assert callable(stage.run_fn)
-
-
-# ============================================================================
 # Orchestrator: invalid stage in get_execution_order
 # ============================================================================
 

@@ -336,7 +336,7 @@ Parses `All_Artists` column (pipe-delimited `" | "` separator):
 
 After cleaning, separate datasets are created for each model type.
 
-**User Score Filtering** (`filter_for_user_score_model`):
+**User Score Filtering** (`filter_for_target_model`, primary target):
 
 Applied at three thresholds (5, 10, 25) via `PrepareConfig.min_ratings_thresholds`:
 
@@ -349,7 +349,7 @@ Each filter step is logged via `apply_exclusion_filter()` which records:
 - Reason string (e.g., `"missing_user_score"`, `"below_min_ratings_10"`)
 - Optional value column for audit detail
 
-**Critic Score Filtering** (`filter_for_critic_score_model`):
+**Critic Score Filtering** (`filter_for_target_model`, `target="secondary"`):
 
 1. `Critic_Score` must not be NaN
 2. `Critic_Score` must be in range [0, 100]
@@ -1962,8 +1962,7 @@ Key entities referenced in this document:
 - [ ] `clean_albums()` in `cleaning.py`
 - [ ] `RAW_TO_CANONICAL` dict in `cleaning.py`
 - [ ] `CleaningConfig` dataclass in `cleaning.py`
-- [ ] `filter_for_user_score_model()` in `cleaning.py`
-- [ ] `filter_for_critic_score_model()` in `cleaning.py`
+- [ ] `filter_for_target_model()` in `cleaning.py`
 - [ ] `load_raw_albums()` in `ingest.py`
 - [ ] `create_splits()` in `create_splits.py`
 - [ ] `SplitConfig` dataclass in `create_splits.py`

@@ -30,6 +30,10 @@ class GenreBlock(BaseFeatureBlock):
     n_components : int or None, default=30
         Number of PCA components. Set to None to skip PCA.
 
+    genre_col : str, default="Genres"
+        Column holding the comma-separated genre string (constructor kwarg,
+        not a params entry).
+
     Attributes
     ----------
     _genre_vocab_ : tuple[str, ...]
@@ -54,10 +58,11 @@ class GenreBlock(BaseFeatureBlock):
 
     name = "genre"
     requires: ClassVar[list[str]] = []
-    required_columns: ClassVar[list[str]] = ["Genres"]
 
-    def __init__(self, params: dict[str, Any] | None = None) -> None:
+    def __init__(self, params: dict[str, Any] | None = None, *, genre_col: str = "Genres") -> None:
         super().__init__(params)
+        self.genre_col = genre_col
+        self.required_columns = [genre_col]
         self._genre_vocab_: tuple[str, ...] = ()
         self._genre_to_idx_: dict[str, int] = {}
         self._pca_: PCA | None = None
@@ -93,7 +98,7 @@ class GenreBlock(BaseFeatureBlock):
 
         # Parse all genres and count frequencies
         genre_counts: dict[str, int] = {}
-        for genres_str in df["Genres"].fillna(""):
+        for genres_str in df[self.genre_col].fillna(""):
             if not genres_str:
                 continue
             for g in genres_str.split(", "):
@@ -144,7 +149,7 @@ class GenreBlock(BaseFeatureBlock):
             return np.zeros((len(df), 0), dtype=np.float32)
 
         X = np.zeros((len(df), n_genres), dtype=np.float32)
-        for i, genres_str in enumerate(df["Genres"].fillna("")):
+        for i, genres_str in enumerate(df[self.genre_col].fillna("")):
             if not genres_str:
                 continue
             for g in genres_str.split(", "):

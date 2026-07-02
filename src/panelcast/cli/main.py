@@ -10,7 +10,6 @@ from panelcast.cli import app
 # Quick preflight uses fixed estimates rather than loading actual data (~1s vs ~30-60s).
 # These are conservative defaults for the memory estimation formula.
 # For accurate checking with real data dimensions, use --preflight-full.
-QUICK_PREFLIGHT_OBSERVATIONS = 1000  # Conservative observation count
 QUICK_PREFLIGHT_FEATURES = 20  # Typical feature count from feature builder
 QUICK_PREFLIGHT_ARTISTS = 100  # Moderate artist count
 

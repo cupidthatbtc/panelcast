@@ -217,27 +217,6 @@ def validate_raw_dataframe(
     return schema.validate(df, lazy=lazy)
 
 
-def validate_raw_schema(df: pd.DataFrame) -> None:
-    """
-    Legacy function for backward compatibility.
-
-    Raises ValueError if required columns are missing.
-    """
-    missing = [col for col in REQUIRED_RAW_COLUMNS if col not in df.columns]
-    if missing:
-        raise ValueError(f"Missing required raw columns: {missing}")
-
-
-# Post-cleaning canonical column names
-REQUIRED_CLEANED_COLUMNS = [
-    "Artist",
-    "Album",
-    "Year",
-    "User_Score",
-    "User_Ratings",
-]
-
-
 def validate_cleaned_dataframe(
     df: pd.DataFrame,
     lazy: bool = True,

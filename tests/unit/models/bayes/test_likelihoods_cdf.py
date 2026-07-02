@@ -104,8 +104,11 @@ class TestRoundedDistribution:
     def _make(self, mu=70.0, sigma=8.0):
         import jax.scipy.stats as jss
         base = dist.Normal(mu, sigma)
+
         # Use jax.scipy.stats.norm.cdf directly; jnp has no .erf
-        cdf_fn = lambda v: jss.norm.cdf(v, loc=mu, scale=sigma)
+        def cdf_fn(v):
+            return jss.norm.cdf(v, loc=mu, scale=sigma)
+
         return RoundedDistribution(base, cdf_fn)
 
     def test_init_inherits_batch_shape(self):
@@ -308,6 +311,54 @@ class TestNormalPredictDrawsDiscretize:
         )
         y = np.asarray(out["y"])
         assert np.array_equal(y, np.round(y))
+
+
+class TestNormalFamilyUsesNormalBase:
+    """The 'normal' family predicts from a Normal base at any df, unlike studentt."""
+
+    def _draw_kwargs(self, df):
+        from panelcast.models.bayes.transforms import get_transform
+
+        return {
+            "sites": {},
+            "df": df,
+            "bounds": (0.0, 100.0),
+            "skew_tailweight": 1.0,
+            "transform": get_transform("identity", target_bounds=(0.0, 100.0)),
+            "discretize": False,
+        }
+
+    def test_low_df_draws_differ_from_studentt(self):
+        from panelcast.models.bayes.likelihoods import (
+            _normal_predict_draws,
+            _studentt_predict_draws,
+        )
+
+        key = random.PRNGKey(0)
+        mu_pred = jnp.zeros(2000)
+        sigma_scaled = jnp.full(2000, 5.0)
+        normal_draws = _normal_predict_draws(key, mu_pred, sigma_scaled, **self._draw_kwargs(4.0))
+        studentt_draws = _studentt_predict_draws(
+            key, mu_pred, sigma_scaled, **self._draw_kwargs(4.0)
+        )
+        assert not jnp.allclose(normal_draws, studentt_draws)
+
+    def test_low_df_matches_studentt_high_df_normal_limit(self):
+        """Same key: normal-family draws at df=4 must equal studentt's Normal-limit
+        draws (df>=100), since both then sample the identical random.normal base."""
+        from panelcast.models.bayes.likelihoods import (
+            _normal_predict_draws,
+            _studentt_predict_draws,
+        )
+
+        key = random.PRNGKey(0)
+        mu_pred = jnp.zeros(2000)
+        sigma_scaled = jnp.full(2000, 5.0)
+        normal_draws = _normal_predict_draws(key, mu_pred, sigma_scaled, **self._draw_kwargs(4.0))
+        studentt_high_df_draws = _studentt_predict_draws(
+            key, mu_pred, sigma_scaled, **self._draw_kwargs(200.0)
+        )
+        assert jnp.array_equal(normal_draws, studentt_high_df_draws)
 
 
 class TestSkewStudenttPredictMissingSite:

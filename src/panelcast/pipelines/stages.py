@@ -655,10 +655,6 @@ def build_optional_stages() -> list[PipelineStage]:
     return [make_stage_sensitivity()]
 
 
-# Default stages list for backward compatibility (uses default min_ratings=10)
-PIPELINE_STAGES: list[PipelineStage] = build_pipeline_stages()
-
-
 def get_execution_order(
     stages: list[str] | None = None,
     min_ratings: int = 10,

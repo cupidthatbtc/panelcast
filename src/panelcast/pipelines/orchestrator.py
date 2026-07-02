@@ -260,6 +260,12 @@ class PipelineConfig:
                 f"discretize_observation=True is not supported by likelihood_family "
                 f"'{self.likelihood_family}'. Supported: {', '.join(supported)}."
             )
+        if self.discretize_observation and self.target_transform != "identity":
+            raise ValueError(
+                "discretize_observation=True requires target_transform='identity': "
+                "discretization interval-censors integers on the raw score scale, "
+                f"but target_transform='{self.target_transform}' moves y off that scale."
+            )
         if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
             raise ValueError(
                 f"Invalid debut_prev_score_source: '{self.debut_prev_score_source}'. "
@@ -805,6 +811,33 @@ class PipelineOrchestrator:
             parts.append(f"--likelihood-family {self.config.likelihood_family}")
         if self.config.discretize_observation != defaults.discretize_observation:
             parts.append("--discretize-observation")
+        # Model gates. The YAML-only knobs (logit_offset through
+        # entity_group_pooling) have no CLI flags — they are recorded
+        # flag-style for provenance and reproduced via run_config.yaml.
+        if self.config.target_transform != defaults.target_transform:
+            parts.append(f"--target-transform {self.config.target_transform}")
+        if self.config.logit_offset != defaults.logit_offset:
+            parts.append(f"--logit-offset {self.config.logit_offset}")
+        if self.config.ar_center != defaults.ar_center:
+            parts.append(f"--ar-center {self.config.ar_center}")
+        if self.config.latent_process != defaults.latent_process:
+            parts.append(f"--latent-process {self.config.latent_process}")
+        if self.config.debut_prev_score_source != defaults.debut_prev_score_source:
+            parts.append(f"--debut-prev-score-source {self.config.debut_prev_score_source}")
+        if self.config.sigma_obs_prior_type != defaults.sigma_obs_prior_type:
+            parts.append(f"--sigma-obs-prior-type {self.config.sigma_obs_prior_type}")
+        if self.config.heteroscedastic_entity_obs:
+            parts.append("--heteroscedastic-entity-obs")
+        if self.config.tau_entity_scale != defaults.tau_entity_scale:
+            parts.append(f"--tau-entity-scale {self.config.tau_entity_scale}")
+        if self.config.errors_in_variables:
+            parts.append("--errors-in-variables")
+        if self.config.propagate_rw_horizon:
+            parts.append("--propagate-rw-horizon")
+        if self.config.entity_group_pooling:
+            parts.append("--entity-group-pooling")
+        if self.config.val_albums != defaults.val_albums:
+            parts.append(f"--val-albums {self.config.val_albums}")
         if self.config.calibration_intervals != defaults.calibration_intervals:
             interval_str = ",".join(f"{p:.4g}" for p in self.config.calibration_intervals)
             parts.append(f"--calibration-intervals {interval_str}")
