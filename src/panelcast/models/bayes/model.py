@@ -547,6 +547,8 @@ def make_score_model(score_type: str) -> Callable:
         target_bounds: tuple[float, float] = (0.0, 100.0),
         ar_center: float | jnp.ndarray = 0.0,
         prev_meas_sigma: jnp.ndarray | None = None,
+        group_idx_by_artist: jnp.ndarray | None = None,
+        n_groups: int | None = None,
     ) -> None:
         """Centered parameterization of score model (internal).
 
@@ -650,9 +652,39 @@ def make_score_model(score_type: str) -> Callable:
             ),
         )
 
+        # === Genre/group pooling level (gated; default off => legacy path) ===
+        # A ZeroSumNormal group offset between the global mean and the entity
+        # effects: each entity's init-effect location becomes
+        # mu_artist + group_offset[group(entity)]. Zero-sum keeps the offsets
+        # identified against mu_artist. Gate-off creates no sites, so the
+        # legacy draw sequence stays bit-identical; gate-on inserts sites
+        # mid-sequence (they must feed the init-effect loc), which legitimately
+        # reshuffles downstream RNG.
+        if priors.entity_group_pooling:
+            if group_idx_by_artist is None or n_groups is None:
+                raise ValueError(
+                    "entity_group_pooling=True requires group_idx_by_artist and "
+                    "n_groups (per-entity group indices; set entity_group_col "
+                    "in the dataset descriptor)."
+                )
+            sigma_group = numpyro.sample(
+                f"{prefix}sigma_group",
+                dist.HalfNormal(priors.sigma_group_scale),
+            )
+            group_offset_z = numpyro.sample(
+                f"{prefix}group_offset_z",
+                dist.ZeroSumNormal(1.0, event_shape=(n_groups,)),
+            )
+            group_offset = numpyro.deterministic(
+                f"{prefix}group_offset", sigma_group * group_offset_z
+            )
+            mu_entity = mu_artist + group_offset[group_idx_by_artist]
+        else:
+            mu_entity = mu_artist
+
         # === Initial artist effects (partial pooling; parameterization seam) ===
         init_artist_effect = _sample_init_artist_effect(
-            prefix, n_artists, mu_artist, sigma_artist, priors
+            prefix, n_artists, mu_entity, sigma_artist, priors
         )
 
         # === Time-varying artist effects (latent process seam) ===

@@ -126,6 +126,10 @@ class DatasetDescriptor(BaseModel):
     # --- identity / sequencing ------------------------------------------
     entity_col: str = "Artist"
     event_col: str = "Album"
+    # Optional per-event group column for the entity_group_pooling gate (an
+    # entity's modal value over its training rows becomes its group). None
+    # makes the gate unusable for the domain.
+    entity_group_col: str | None = "primary_genre"
     date_col: str = "Release_Date"
     parsed_date_col: str = "Release_Date_Parsed"
     year_col: str = "Year"

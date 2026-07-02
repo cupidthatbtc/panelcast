@@ -108,6 +108,15 @@ class TrainingSummary(BaseModel):
     # derives prev_meas_sigma = global_std_score / sqrt(prev_n_reviews) at
     # predict/eval time (None on legacy summaries -> EIV unavailable downstream).
     global_std_score: float | None = None
+    # Genre/group pooling gate (#41). group_to_idx maps group names to offset
+    # indices (cold-start lookup); group_idx_by_artist is the per-entity index
+    # vector the primary-split log-lik recompute conditions on. All None on
+    # legacy / gate-off summaries.
+    entity_group_pooling: bool | None = None
+    entity_group_col: str | None = None
+    group_to_idx: dict[str, int] | None = None
+    group_idx_by_artist: list[int] | None = None
+    n_groups: int | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
         """Serialize preserving declaration order.

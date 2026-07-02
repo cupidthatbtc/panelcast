@@ -286,6 +286,7 @@ def predict_new_entity(
     likelihood_family: str = "studentt",
     skew_tailweight: float = 1.0,
     discretize_observation: bool = False,
+    group_idx_new: jnp.ndarray | int = -1,
 ) -> NewEntityPrediction:
     """Predict for an unseen entity using the population distribution.
 
@@ -344,6 +345,12 @@ def predict_new_entity(
         trained without centering. Must be on the model scale (i.e.
         forward-transformed under a non-identity target_transform), the
         same scale as prev_score.
+    group_idx_new : jnp.ndarray or int, default -1
+        Per-event group index for models fit with entity_group_pooling
+        (looked up via the training summary's group_to_idx). -1 marks a
+        group unseen in training: its offset is zero, falling back to the
+        population distribution (legacy behavior). Ignored when the
+        posterior has no {prefix}group_offset site.
 
     Returns
     -------
@@ -417,6 +424,9 @@ def predict_new_entity(
     family_sites = {
         name: posterior_samples.get(f"{prefix}{name}") for name in spec.required_sites
     }
+    # Genre/group pooling (entity_group_pooling fits): fitted per-group offsets,
+    # (n_samples, n_groups). None on gate-off fits -> group_idx_new is ignored.
+    group_offset = posterior_samples.get(f"{prefix}group_offset")
 
     n_samples = mu_artist.shape[0]
 
@@ -449,6 +459,8 @@ def predict_new_entity(
             name: (None if arr is None else arr[indices])
             for name, arr in family_sites.items()
         }
+        if group_offset is not None:
+            group_offset = group_offset[indices]
         # Handle exponent samples based on learned vs fixed mode
         if has_learned_exponent:
             n_exponent_samples = posterior_samples[f"{prefix}n_exponent"]
@@ -504,10 +516,20 @@ def predict_new_entity(
     # trained without centering; on the model scale under a transform)
     ar_term = rho[:, None] * (prev_score - ar_center)  # (n_samples, 1) or (n_samples, n_albums)
 
+    # Group pooling: shift each event by its group's fitted offset; -1 (unseen
+    # group) contributes zero, recovering the pure population draw.
+    group_term: jnp.ndarray | float = 0.0
+    if group_offset is not None:
+        idx = jnp.atleast_1d(jnp.asarray(group_idx_new, dtype=jnp.int32))
+        safe_idx = jnp.clip(idx, 0, group_offset.shape[1] - 1)
+        group_term = group_offset[:, safe_idx] * (idx >= 0)[None, :]
+
     # Combine terms and map to the likelihood location under the trained
     # transform (identity soft-clips; offset_logit leaves mu on logit scale).
     transform = get_transform(target_transform, target_bounds=target_bounds, offset=logit_offset)
-    mu_pred = transform.transform_mu(new_artist_effect[:, None] + linear_term + ar_term)
+    mu_pred = transform.transform_mu(
+        new_artist_effect[:, None] + linear_term + ar_term + group_term
+    )
 
     # Compute per-observation sigma for predictions
     # Note: At this point mu_pred has shape (n_samples, n_albums) even for single_album

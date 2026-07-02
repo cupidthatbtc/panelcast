@@ -251,7 +251,7 @@ def test_prepare_disjoint_inputs_uses_global_mean_prev_score(mock_summary):
         index=test_df.index,
     )
 
-    _X, prev_score, _n_reviews, y_true = _prepare_disjoint_inputs(
+    _X, prev_score, _n_reviews, y_true, _g = _prepare_disjoint_inputs(
         test_df, test_features, mock_summary
     )
 
@@ -661,7 +661,7 @@ class TestPrepareDisjointInputs:
             },
             index=test_df.index,
         )
-        X, prev_score, n_reviews, y_true = _prepare_disjoint_inputs(
+        X, prev_score, n_reviews, y_true, _g = _prepare_disjoint_inputs(
             test_df, test_features, mock_summary
         )
         # X should be standardized: (1.0 - 1.0) / 0.5 = 0.0
@@ -686,7 +686,7 @@ class TestPrepareDisjointInputs:
             },
             index=test_df.index,
         )
-        _, _, n_reviews, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
+        _, _, n_reviews, _, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
         np.testing.assert_array_equal(n_reviews, np.array([50, 100]))
 
 

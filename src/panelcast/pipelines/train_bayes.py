@@ -118,6 +118,7 @@ def load_training_data(
     target_transform: str = "identity",
     logit_offset: float = 0.5,
     ar_center: str = "global",
+    entity_group_pooling: bool = False,
 ) -> tuple[dict, list[str], pd.DataFrame]:
     """Load training data and prepare model arguments.
 
@@ -168,12 +169,42 @@ def load_training_data(
         target_transform=target_transform,
         logit_offset=logit_offset,
         ar_center=ar_center,
+        entity_group_pooling=entity_group_pooling,
     )
 
     # Apply valid_mask to train_df so it matches the filtered model arrays
     train_df = train_df[valid_mask].copy()
 
     return model_args, feature_cols, train_df
+
+
+def _build_entity_groups(
+    train_df: pd.DataFrame,
+    artists: list,
+    entity_col: str,
+    group_col: str,
+) -> tuple[np.ndarray, dict[str, int]]:
+    """Per-entity group indices for the entity_group_pooling gate.
+
+    Each entity's group is its modal ``group_col`` value over its training
+    rows (pandas mode sorts, so ties break deterministically). Entities with
+    no observed group and groups holding fewer than two entities collapse
+    into the ``__rest__`` bucket at index 0, so every learned offset is
+    informed by at least two entities.
+    """
+    modal = train_df.groupby(entity_col)[group_col].agg(
+        lambda s: s.mode().iloc[0] if not s.mode().empty else None
+    )
+    counts = modal.value_counts()
+    small = set(counts[counts < 2].index)
+    bucketed = {
+        a: ("__rest__" if (g is None or pd.isna(g) or g in small) else g)
+        for a, g in modal.items()
+    }
+    groups_sorted = sorted({g for g in bucketed.values() if g != "__rest__"})
+    group_to_idx = {"__rest__": 0, **{g: i + 1 for i, g in enumerate(groups_sorted)}}
+    group_idx_by_artist = np.array([group_to_idx[bucketed[a]] for a in artists], dtype=np.int32)
+    return group_idx_by_artist, group_to_idx
 
 
 def prepare_model_data(
@@ -185,6 +216,7 @@ def prepare_model_data(
     target_transform: str = "identity",
     logit_offset: float = 0.5,
     ar_center: str = "global",
+    entity_group_pooling: bool = False,
 ) -> tuple[dict, np.ndarray]:
     """Prepare data for NumPyro model fitting.
 
@@ -214,6 +246,10 @@ def prepare_model_data(
             uncentered form (ar_center model arg = 0.0); "artist_running"
             centers each observation on the artist's running mean of
             previous training scores (sensitivity analysis only).
+        entity_group_pooling: When True, build per-entity group indices from
+            the descriptor's entity_group_col (modal value over training
+            rows; sparse/missing groups bucket to "__rest__") and add
+            group_idx_by_artist / n_groups / group_to_idx to model_args.
 
     Returns:
         Tuple of (model_args dict, valid_mask boolean array indicating retained rows).
@@ -426,6 +462,32 @@ def prepare_model_data(
         "ar_center": ar_center_arr,
         "ar_center_value": ar_center_value,
     }
+
+    if entity_group_pooling:
+        group_col = descriptor.entity_group_col
+        if group_col is None:
+            raise ValueError(
+                "entity_group_pooling=True but the dataset descriptor has no "
+                "entity_group_col — the gate is unusable for this domain."
+            )
+        if group_col not in train_df.columns:
+            raise ValueError(
+                f"entity_group_pooling=True but column '{group_col}' is missing "
+                "from the training split."
+            )
+        group_idx_by_artist, group_to_idx = _build_entity_groups(
+            train_df, artists, entity_col, group_col
+        )
+        model_args["group_idx_by_artist"] = group_idx_by_artist
+        model_args["n_groups"] = len(group_to_idx)
+        model_args["group_to_idx"] = group_to_idx
+        log.info(
+            "entity_group_pooling",
+            group_col=group_col,
+            n_groups=len(group_to_idx),
+            n_rest=int(np.sum(group_idx_by_artist == 0)),
+        )
+
     return model_args, valid_mask
 
 
@@ -711,6 +773,7 @@ def train_models(
     target_transform = str(getattr(ctx, "target_transform", "identity"))
     logit_offset = float(getattr(ctx, "logit_offset", 0.5))
     ar_center = str(getattr(ctx, "ar_center", "global"))
+    entity_group_pooling = bool(getattr(ctx, "entity_group_pooling", False))
     model_args, feature_cols, train_df = load_training_data(
         features_path=features_path,
         splits_path=splits_path,
@@ -720,6 +783,7 @@ def train_models(
         target_transform=target_transform,
         logit_offset=logit_offset,
         ar_center=ar_center,
+        entity_group_pooling=entity_group_pooling,
     )
 
     # Compute artists below threshold for metadata
@@ -735,6 +799,7 @@ def train_models(
     # Pop metadata fields before passing to NumPyro model
     artist_album_counts = model_args.pop("artist_album_counts")
     artist_to_idx = model_args.pop("artist_to_idx")
+    group_to_idx = model_args.pop("group_to_idx", None)
     global_mean_score = model_args.pop("global_mean_score")
     # prepare_model_data always supplies this; fall back to the score std for
     # hand-built model_args (test fixtures that bypass prepare_model_data).
@@ -858,6 +923,7 @@ def train_models(
         discretize_observation=bool(getattr(ctx, "discretize_observation", False)),
         errors_in_variables=bool(getattr(ctx, "errors_in_variables", False)),
         propagate_rw_horizon=bool(getattr(ctx, "propagate_rw_horizon", False)),
+        entity_group_pooling=entity_group_pooling,
     )
 
     priors = locate_level_prior(
@@ -1060,6 +1126,12 @@ def train_models(
     summary["ar_center_value"] = ar_center_value
     summary["likelihood_family"] = str(getattr(ctx, "likelihood_family", "studentt"))
     summary["discretize_observation"] = bool(getattr(ctx, "discretize_observation", False))
+    summary["entity_group_pooling"] = entity_group_pooling
+    if entity_group_pooling:
+        summary["entity_group_col"] = descriptor.entity_group_col
+        summary["group_to_idx"] = group_to_idx
+        summary["group_idx_by_artist"] = [int(g) for g in model_args["group_idx_by_artist"]]
+        summary["n_groups"] = int(model_args["n_groups"])
     summary = TrainingSummary(**summary).to_json_dict()
 
     summary_path = model_dir / "training_summary.json"
