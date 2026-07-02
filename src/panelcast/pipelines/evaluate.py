@@ -48,6 +48,7 @@ from panelcast.models.bayes.model import make_score_model
 from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_entity
 from panelcast.models.bayes.priors import PriorConfig
 from panelcast.models.bayes.transforms import get_transform
+from panelcast.pipelines.stamps import DATA_STAGE_ROOTS, read_stamp
 from panelcast.pipelines.train_bayes import _apply_max_albums_cap
 from panelcast.pipelines.training_summary import (
     ar_center_on_model_scale,
@@ -1446,6 +1447,8 @@ def evaluate_models(ctx: StageContext) -> dict:
         "crps": primary["crps"],
         "ppc": primary.get("ppc"),
         "info_criteria": primary.get("info_criteria"),
+        # Provenance for compare --baselines: which features these metrics saw.
+        "feature_stamp": read_stamp(DATA_STAGE_ROOTS["features"]),
     }
 
     metrics_path = output_dir / "metrics.json"
