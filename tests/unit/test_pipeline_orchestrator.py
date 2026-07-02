@@ -1029,6 +1029,12 @@ class TestPipelineConfigValidation:
         with pytest.raises(ValueError, match="discretize_observation"):
             PipelineConfig(likelihood_family="beta", discretize_observation=True)
 
+    def test_discretize_with_non_identity_transform_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="target_transform"):
+            PipelineConfig(discretize_observation=True, target_transform="offset_logit")
+
     def test_invalid_debut_prev_score_source_raises(self):
         import pytest
 

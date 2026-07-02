@@ -260,6 +260,12 @@ class PipelineConfig:
                 f"discretize_observation=True is not supported by likelihood_family "
                 f"'{self.likelihood_family}'. Supported: {', '.join(supported)}."
             )
+        if self.discretize_observation and self.target_transform != "identity":
+            raise ValueError(
+                "discretize_observation=True requires target_transform='identity': "
+                "discretization interval-censors integers on the raw score scale, "
+                f"but target_transform='{self.target_transform}' moves y off that scale."
+            )
         if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
             raise ValueError(
                 f"Invalid debut_prev_score_source: '{self.debut_prev_score_source}'. "
