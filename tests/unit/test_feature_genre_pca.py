@@ -367,6 +367,20 @@ class TestGenreBlockAttributes:
         block = GenreBlock({"n_components": None})
         assert block.n_components is None
 
+    def test_default_genre_col_is_genres(self):
+        block = GenreBlock()
+        assert block.genre_col == "Genres"
+        assert block.required_columns == ["Genres"]
+
+    def test_custom_genre_col(self, ctx):
+        block = GenreBlock({"min_genre_count": 1, "n_components": None}, genre_col="Tags")
+        assert block.genre_col == "Tags"
+        assert block.required_columns == ["Tags"]
+
+        df = pd.DataFrame({"Tags": ["Rock, Alternative", "Rock, Indie Rock"]})
+        block.fit(df, ctx)
+        assert "Rock" in block._genre_vocab_
+
 
 class TestGenreFitBehavior:
     """Tests for fit behavior details."""
