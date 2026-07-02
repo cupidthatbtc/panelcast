@@ -93,8 +93,13 @@ covariates-only headroom is ≈ 0.083, [`.audit/genre_pooling/`](../.audit/genre
 and every method's MAE sits within ~0.7 of the global mean's. The conformal
 wrapper's guarantee assumes exchangeability, false by construction for
 never-seen entities; it degrades accordingly (0.946 → 0.912), though it still
-beats the raw GBM's 0.810. A second, group-level pooling tier for this split is
-tracked in [#41](https://github.com/cupidthatbtc/panelcast/issues/41).
+beats the raw GBM's 0.810. A second, group-level pooling tier for this split
+shipped default-off as `entity_group_pooling` (#41): the paired screening run
+measures a further cold-start gain (MAE −0.14, R² +0.034 — essentially the
+entire genre-block headroom;
+[`.audit/genre_pooling/gate_on_screening.md`](../.audit/genre_pooling/gate_on_screening.md)),
+with the default-on promotion decision deferred to a publication-scale
+bake-off (#75).
 
 ## R² is an average over a steep history gradient
 
