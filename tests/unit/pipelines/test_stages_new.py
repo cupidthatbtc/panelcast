@@ -4,7 +4,6 @@ Covers:
 - Stage run_fn wrappers (_run_splits_stage, _run_features_stage, etc.)
 - _resolve_raw_dataset_path edge cases
 - Stage factory functions (make_stage_*) attributes
-- PIPELINE_STAGES module-level list
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from panelcast.pipelines.stages import (
-    PIPELINE_STAGES,
     PipelineStage,
     StageContext,
     _resolve_raw_dataset_path,
@@ -307,29 +305,6 @@ class TestMakeStageFactories:
         assert stage.name == "report"
         assert stage.depends_on == ["predict"]
         assert len(stage.output_paths) >= 7
-
-
-# ============================================================================
-# PIPELINE_STAGES module-level list
-# ============================================================================
-
-
-class TestPipelineStagesConstant:
-    """Tests for PIPELINE_STAGES module-level list."""
-
-    def test_pipeline_stages_is_list(self):
-        """PIPELINE_STAGES is a list."""
-        assert isinstance(PIPELINE_STAGES, list)
-
-    def test_pipeline_stages_has_all_stages(self):
-        """PIPELINE_STAGES contains all expected stages."""
-        names = {s.name for s in PIPELINE_STAGES}
-        assert names == {"data", "splits", "features", "train", "evaluate", "predict", "report"}
-
-    def test_pipeline_stages_uses_default_min_ratings(self):
-        """PIPELINE_STAGES uses default min_ratings=10."""
-        splits = next(s for s in PIPELINE_STAGES if s.name == "splits")
-        assert "minratings_10" in str(splits.input_paths[0])
 
 
 # ============================================================================

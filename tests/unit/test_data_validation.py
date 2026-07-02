@@ -7,7 +7,6 @@ from panelcast.data.validation import (
     REQUIRED_RAW_COLUMNS,
     RawAlbumSchema,
     validate_raw_dataframe,
-    validate_raw_schema,
 )
 
 
@@ -29,43 +28,6 @@ def _make_valid_raw_df(**overrides) -> pd.DataFrame:
     }
     data.update(overrides)
     return pd.DataFrame(data)
-
-
-# =============================================================================
-# validate_raw_schema (legacy)
-# =============================================================================
-
-
-class TestValidateRawSchema:
-    """Tests for legacy validate_raw_schema function."""
-
-    def test_missing_single_column(self):
-        df = pd.DataFrame({"Artist": ["a"]})
-        with pytest.raises(ValueError, match="Missing required raw columns"):
-            validate_raw_schema(df)
-
-    def test_missing_multiple_columns_lists_all(self):
-        df = pd.DataFrame({"Artist": ["a"], "Album": ["b"]})
-        with pytest.raises(ValueError) as exc_info:
-            validate_raw_schema(df)
-        msg = str(exc_info.value)
-        assert "Year" in msg
-
-    def test_passes_with_all_required_columns(self):
-        data = {col: ["test"] for col in REQUIRED_RAW_COLUMNS}
-        df = pd.DataFrame(data)
-        validate_raw_schema(df)  # Should not raise
-
-    def test_passes_with_extra_columns(self):
-        data = {col: ["test"] for col in REQUIRED_RAW_COLUMNS}
-        data["ExtraCol"] = ["extra"]
-        df = pd.DataFrame(data)
-        validate_raw_schema(df)  # Should not raise
-
-    def test_empty_dataframe_with_required_columns(self):
-        data = {col: [] for col in REQUIRED_RAW_COLUMNS}
-        df = pd.DataFrame(data)
-        validate_raw_schema(df)  # Should not raise
 
 
 # =============================================================================
