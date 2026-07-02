@@ -169,8 +169,9 @@ class PipelineConfig:
     discretize_observation: bool = False
     # Debut prev_score fill source: "train_mean" | "dataset_stats" (legacy)
     debut_prev_score_source: DebutPrevScoreSource = "train_mean"
-    # Target transform gate: "identity" (legacy) | "offset_logit"
-    target_transform: TargetTransform = "identity"
+    # Target transform gate: "offset_logit" (default since 0.5.0 — promoted on
+    # the corrected #63 ledger, +22 held-out elpd) | "identity" (former default)
+    target_transform: TargetTransform = "offset_logit"
     logit_offset: float = 0.5
     # AR(1) centering gate: "global" | "none" (legacy) | "artist_running"
     ar_center: ArCenter = "global"

@@ -116,7 +116,7 @@ class TestRepositoryConfigs:
         assert config.num_samples == 5000
         assert config.num_warmup == 3000
         assert config.target_accept == 0.95
-        assert config.target_transform == "identity"
+        assert config.target_transform == "offset_logit"
         assert config.ar_center == "global"
         assert config.calibration_intervals == (0.80, 0.95)
 

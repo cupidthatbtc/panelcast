@@ -45,17 +45,17 @@ Feature scope (defaults)
 
 Bayesian modeling (adopted gates — validated on 2x500 cheap runs, 2026-06-10)
 - Sampler: NumPyro NUTS
-- `target_transform = identity` — offset_logit HELD as a deliberate values
-  choice, not a failure. The old "failed PPC/PIT/coverage, would not mix (R-hat
-  1.27–1.37)" note was a cheap-2×500 artifact, now refuted: the diagnostic
-  4×1000 transform×latent bake-off (`docs/LIKELIHOOD_CANDIDATES.md`,
-  `.audit/transform_latent_bakeoff/`) shows offset_logit *mixes* (R-hat 1.01,
-  0 div, ~10× slower) and in fact *wins every held-out predictive metric* — LOO
-  +60.1 (paired dse 4.6, z ≈ 13), R² 0.428 vs 0.417, RMSE 8.19 vs 8.27, CRPS
-  4.13 vs 4.19, PIT 0.049 vs 0.056 (at one Pareto-k > 0.7). It is held because it
-  does not move the bounded-skew skewness/max/q90 PPC pins — it relieves q50 only
-  to newly pin q10 — so the project trades a predictive gain for matching the
-  generative distribution. A values choice, not a defect.
+- `target_transform = offset_logit` — ADOPTED in 0.5.0 (#43), reversing the
+  earlier hold. The promotion rode on the corrected held-out lppd estimator
+  (#63): the paired advantage over identity is +22.2 ± 4.5 elpd (z +4.9),
+  reproduced at seeds 42/43/44 (+22.3, +22.0), alongside R² 0.428 vs 0.417,
+  RMSE 8.19 vs 8.27, CRPS 4.13 vs 4.19, PIT 0.049 vs 0.056. The transform
+  bounds predictions by construction (no soft-clip), mixes cleanly at
+  publication settings, and costs ~10× more per step. It reshuffles rather
+  than resolves the structural PPC pins (relieves q50, newly pins q10) — the
+  earlier hold prioritized that generative-shape match; the corrected,
+  seed-stable predictive ledger now outweighs it. `identity` (the former
+  default) remains available via `--target-transform identity`.
 - `ar_center = global` — ADOPTED: corr(rho, mu_artist) -0.997 -> +0.016,
   debut AR terms exactly zero, prior predictive flipped to passing.
 - `latent_process = rw` — ar1 registered behind a LOO-clear-win gate that has

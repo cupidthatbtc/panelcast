@@ -686,14 +686,13 @@ def run(
         ),
     ),
     target_transform: str = typer.Option(
-        "identity",
+        "offset_logit",
         "--target-transform",
         help=(
-            "Score-scale transform: 'identity' (legacy soft-clip) or "
-            "'offset_logit' (model runs on the Smithson-Verkuilen logit scale; "
-            "mixes at 4x1000 but held — better predictive ledger, ~10x slower, "
-            "reshuffles PPC pins without resolving them; see "
-            "LIKELIHOOD_CANDIDATES.md)."
+            "Score-scale transform: 'offset_logit' (default; model runs on the "
+            "Smithson-Verkuilen logit scale — bounds by construction, held-out "
+            "elpd +22 over identity on the corrected #63 estimator) or "
+            "'identity' (the former soft-clip default; faster per step)."
         ),
     ),
     ar_center: str = typer.Option(

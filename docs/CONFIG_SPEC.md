@@ -69,7 +69,7 @@ Likelihood and model gates
 - `likelihood_family`: one of the registry families (default `studentt`)
 - `likelihood_df`: float (default 4.0; >= 100 degrades Student-t to Normal)
 - `discretize_observation`: bool (default false)
-- `target_transform`: `identity` | `offset_logit`
+- `target_transform`: `offset_logit` (default since 0.5.0, #43) | `identity`
 - `logit_offset`: float (offset_logit transform tuning; YAML-only)
 - `ar_center`: `global` | `none` | `artist_running`
 - `latent_process`: `rw` | `ar1`

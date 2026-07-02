@@ -8,14 +8,13 @@
 #       --target-accept 0.95 --strict
 #
 # Adopted gate decisions (validated on 2x500 cheap runs, 2026-06-10):
-# - target_transform: identity — offset_logit HELD on a values choice, not a
-#   failure. The 4×1000 transform × latent bake-off
-#   (.audit/transform_latent_bakeoff/) shows it mixes (R-hat 1.01, 0 div, ~10×
-#   slower) and wins every held-out predictive metric — LOO +60.1 (paired dse
-#   4.6), R² 0.428 vs 0.417, RMSE 8.19 vs 8.27, PIT 0.049 vs 0.056 — but does
-#   not move the structural skewness/max/q90 PPC pins (it only trades the q50 pin
-#   for a new q10 pin). We prioritize the generative-shape match over the
-#   predictive gain. Held.
+# - target_transform: offset_logit — ADOPTED in 0.5.0 (#43), reversing the
+#   earlier hold. Under the corrected held-out lppd estimator (#63) the
+#   advantage is +22.2 ± 4.5 paired elpd over identity (z +4.9), reproduced
+#   at seeds 42/43/44, alongside R² 0.428 vs 0.417, RMSE 8.19 vs 8.27, PIT
+#   0.049 vs 0.056. It reshuffles rather than resolves the structural PPC
+#   pins (q50 -> q10) and samples ~10x slower per step; the predictive ledger
+#   now outweighs that. identity remains available via --target-transform.
 # - ar_center: global — corr(rho, mu_artist) collapsed -0.9974 -> +0.0155,
 #   debut AR terms exactly zero, prior predictive flipped to passing.
 # - artist_effect_param: noncentered, sigma_artist_prior_type: halfnormal —
@@ -57,9 +56,9 @@ rhat_threshold: 1.01
 ess_threshold: 400
 allow_divergences: false
 
-# Adopted model gates (all defaults as of the Phase 5/6 decisions; restated
-# here so the publication run is reproducible even if defaults drift)
-target_transform: identity
+# Adopted model gates (defaults restated here so the publication run is
+# reproducible even if defaults drift)
+target_transform: offset_logit
 ar_center: global
 latent_process: rw
 debut_prev_score_source: train_mean
