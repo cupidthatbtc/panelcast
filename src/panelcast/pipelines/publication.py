@@ -164,15 +164,16 @@ def _parse_point_metrics(primary_metrics: dict[str, Any]) -> _PointMetricsLike |
 
 
 def _parse_loo_result(primary_metrics: dict[str, Any]) -> _LooLike | None:
-    """Parse LOO metrics from evaluation payload."""
+    """Parse held-out ELPD from the evaluation payload (legacy `loo` fallback)."""
     info = primary_metrics.get("info_criteria", {})
     if isinstance(info, dict):
-        loo = info.get("loo", {})
-        if isinstance(loo, dict):
-            elpd = _safe_float(loo.get("elpd"))
-            se = _safe_float(loo.get("se"))
-            if elpd is not None and se is not None:
-                return _LooLike(elpd_loo=elpd, se_elpd=se)
+        for key in ("heldout_elpd", "loo"):
+            payload = info.get(key, {})
+            if isinstance(payload, dict):
+                elpd = _safe_float(payload.get("elpd"))
+                se = _safe_float(payload.get("se"))
+                if elpd is not None and se is not None:
+                    return _LooLike(elpd_loo=elpd, se_elpd=se)
     return None
 
 

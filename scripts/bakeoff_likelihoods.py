@@ -102,7 +102,9 @@ def _read_metrics(eval_dir: Path) -> dict:
         m = json.loads(metrics_path.read_text(encoding="utf-8"))
         point = m.get("point_metrics", {})
         cov95 = (m.get("calibration", {}).get("coverages", {}) or {}).get("0.95", {})
-        loo = (m.get("info_criteria", {}) or {}).get("loo", {})
+        # Direct held-out lppd (#63); pre-#63 metrics.json (PSIS-LOO on test
+        # data) has no heldout_elpd and renders "-" rather than a stale number.
+        elpd = (m.get("info_criteria", {}) or {}).get("heldout_elpd", {}) or {}
         ppc = m.get("ppc", {})
         out.update(
             mae=point.get("mae"),
@@ -113,9 +115,8 @@ def _read_metrics(eval_dir: Path) -> dict:
             crps=(m.get("crps", {}) or {}).get("mean_crps"),
             ppc_pinned=len(ppc.get("extreme_statistics", []) or []),
             ppc_pinned_names=",".join(ppc.get("extreme_statistics", []) or []) or "-",
-            loo_elpd=loo.get("elpd"),
-            pareto_k_max=loo.get("pareto_k_max"),
-            pareto_k_gt07=loo.get("pareto_k_gt_0_7"),
+            elpd=elpd.get("elpd"),
+            elpd_se=elpd.get("se"),
         )
     return out
 
@@ -146,8 +147,8 @@ _COLUMNS = [
     ("cov95", "cov95", ".3f"),
     ("width95", "w95", ".2f"),
     ("crps", "crps", ".2f"),
-    ("loo_elpd", "loo", ".0f"),
-    ("pareto_k_max", "k_max", ".2f"),
+    ("elpd", "elpd", ".0f"),
+    ("elpd_se", "se", ".0f"),
 ]
 
 
