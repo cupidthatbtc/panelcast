@@ -1,10 +1,10 @@
+# Response to the model-spec review
+
 > This document predates a later issue renumbering: what it calls #14 is now
 > [#30](https://github.com/cupidthatbtc/panelcast/issues/30). The "latent-state AR"
 > design it describes in §2 is the design that ultimately shipped as the
 > errors-in-variables regressor gate (`errors_in_variables` in `PipelineConfig`).
 > Kept as a historical record; see current docs for the shipped behavior.
-
-# Response to the model-spec review
 
 Five spec-level points were raised against `models/bayes/model.py` and the
 transform/prior seams. Each is grounded against the code and the on-disk run

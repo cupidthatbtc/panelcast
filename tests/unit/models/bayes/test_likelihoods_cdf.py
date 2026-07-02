@@ -319,14 +319,14 @@ class TestNormalFamilyUsesNormalBase:
     def _draw_kwargs(self, df):
         from panelcast.models.bayes.transforms import get_transform
 
-        return dict(
-            sites={},
-            df=df,
-            bounds=(0.0, 100.0),
-            skew_tailweight=1.0,
-            transform=get_transform("identity", target_bounds=(0.0, 100.0)),
-            discretize=False,
-        )
+        return {
+            "sites": {},
+            "df": df,
+            "bounds": (0.0, 100.0),
+            "skew_tailweight": 1.0,
+            "transform": get_transform("identity", target_bounds=(0.0, 100.0)),
+            "discretize": False,
+        }
 
     def test_low_df_draws_differ_from_studentt(self):
         from panelcast.models.bayes.likelihoods import (
