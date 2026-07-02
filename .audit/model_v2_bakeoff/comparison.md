@@ -21,3 +21,5 @@
 Turning on both model-v2 gates changes nothing measurable. LOO moves **+0.4** (v2 over v1) against a per-model SE of ~29.6 (|z| ≈ 0.01); every point and calibration metric is identical to 3–4 significant figures. This is consistent with the `n_exponent ≈ 0` result — the EIV gate corrects measurement noise the data says is negligible — and confirms the gates are **parity-safe to ship default-off**.
 
 Caveat: the long-horizon RW-variance gate only acts on predictions *past the longest training trajectory* (deep extrapolation), which this within-horizon holdout does not exercise, so its value can only be measured at the full corpus / longer horizons (#15).
+
+Estimator note (#63): the LOO columns were computed under the pre-#63 estimator (PSIS-LOO on held-out data). The null verdict is unaffected — the two cells' log-likelihoods are near-identical, so any estimator puts |z| ≈ 0.

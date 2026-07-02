@@ -37,9 +37,16 @@ likewise stable. Seed noise (MAE SD ≈ 0.002 per cell) sits an order of
 magnitude below the 0.03-MAE decision surface the original issue worried
 about, so the bake-off's verdicts were made above the seed-noise floor.
 
-Caveat: the LOO magnitudes inherit the held-out-LOO estimator concern (#63);
-the across-seed *stability* shown here is unaffected, but the absolute +60
-should be re-derived under the corrected estimator before the #43 decision.
+## Post-#63 note: corrected estimator
+
+The LOO rows above were computed under the pre-#63 estimator (PSIS-LOO on
+held-out data — invalid importance sampling; magnitudes inflated). Re-derived
+from the same pointwise log-likelihood snapshots with the direct held-out
+lppd estimator, the paired advantage (offset_logit_rw − identity_rw) is
+**+22.2 ± 4.5 (z +4.91)** at seed 42, **+22.3 ± 4.5 (z +4.93)** at seed 43,
+and **+22.0 ± 4.5 (z +4.86)** at seed 44 — smaller than the old +60 headline
+but equally stable across seeds and still decisive. The #43 decision cites
+these corrected numbers.
 
 Reproduce: `panelcast run --preset diagnostic --stages train,evaluate
 --likelihood-family studentt --target-transform {identity,offset_logit}
