@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from panelcast.models.baselines import (
+    ConformalGBMBaseline,
     EntityMeanBaseline,
     GlobalMeanBaseline,
     LastScoreBaseline,
@@ -72,9 +73,7 @@ class TestPredictors:
         rng = np.random.default_rng(2)
         ridge = RidgeBaseline(train.bounds).fit(train)
         gmean = GlobalMeanBaseline(train.bounds).fit(train)
-        ridge_mae = np.mean(
-            np.abs(ridge.predict(test, 100, rng).point - test.y)
-        )
+        ridge_mae = np.mean(np.abs(ridge.predict(test, 100, rng).point - test.y))
         gmean_mae = np.mean(np.abs(gmean.predict(test, 100, rng).point - test.y))
         assert ridge_mae < gmean_mae
 
@@ -99,7 +98,7 @@ class TestBenchmark:
     def test_benchmark_rows_and_table(self):
         train, test = _panels()
         scores = benchmark_baselines(train, test, split="within_entity_temporal", n_samples=200)
-        assert len(scores) == 5
+        assert len(scores) == 6
         levels = (0.80, 0.95)
         rows = [s.to_row(levels) for s in scores]
         for row in rows:
@@ -109,7 +108,7 @@ class TestBenchmark:
             assert 0.0 <= row["cov95"] <= 1.0
 
         table = create_baseline_benchmark_table(rows, levels=levels)
-        assert len(table) == 5
+        assert len(table) == 6
         # No TBD / empty cells: every cell is a non-empty string.
         assert not (table.astype(str) == "").any().any()
         assert "—" not in table["MAE"].tolist()
@@ -125,3 +124,61 @@ class TestBenchmark:
         table = create_baseline_benchmark_table([], levels=(0.80, 0.95))
         assert table.empty
         assert "Model" in table.columns
+
+
+class TestConformalGBM:
+    def test_coverage_at_nominal_on_exchangeable_data(self):
+        train, test = _panels(n_train=2000, n_test=800, seed=3)
+        bl = ConformalGBMBaseline(train.bounds).fit(train)
+        pred = bl.predict(test, n_samples=2000, rng=np.random.default_rng(4))
+        lo, hi = np.percentile(pred.samples, [2.5, 97.5], axis=0)
+        cov95 = np.mean((test.y >= lo) & (test.y <= hi))
+        assert 0.93 <= cov95 <= 0.995
+        lo80, hi80 = np.percentile(pred.samples, [10.0, 90.0], axis=0)
+        cov80 = np.mean((test.y >= lo80) & (test.y <= hi80))
+        assert 0.76 <= cov80 <= 0.92
+
+    def test_deterministic_given_seeds(self):
+        train, test = _panels(seed=5)
+        a = ConformalGBMBaseline(train.bounds).fit(train)
+        b = ConformalGBMBaseline(train.bounds).fit(train)
+        sa = a.predict(test, n_samples=50, rng=np.random.default_rng(9)).samples
+        sb = b.predict(test, n_samples=50, rng=np.random.default_rng(9)).samples
+        np.testing.assert_array_equal(sa, sb)
+
+    def test_intervals_come_from_calibration_residuals(self):
+        # The predictive spread must track the calibration residual pool, not
+        # a Gaussian wrapper: every sampled deviation (before clipping) is an
+        # element of the pool.
+        train, test = _panels(n_train=400, n_test=10, seed=7)
+        bl = ConformalGBMBaseline(train.bounds).fit(train)
+        pred = bl.predict(test, n_samples=200, rng=np.random.default_rng(2))
+        interior = (pred.samples > train.bounds[0]) & (pred.samples < train.bounds[1])
+        deviations = (pred.samples - pred.point[None, :])[interior]
+        pool = np.sort(bl._residual_pool)
+        idx = np.clip(np.searchsorted(pool, deviations), 0, pool.size - 1)
+        nearest = np.minimum(
+            np.abs(pool[idx] - deviations),
+            np.abs(pool[np.maximum(idx - 1, 0)] - deviations),
+        )
+        assert np.max(nearest) < 1e-9
+
+    def test_invalid_calibration_fraction_raises(self):
+        with pytest.raises(ValueError, match="calibration_fraction"):
+            ConformalGBMBaseline(calibration_fraction=1.5)
+
+    def test_tiny_train_falls_back_without_error(self):
+        rng = np.random.default_rng(0)
+        train = PanelData(
+            X=rng.standard_normal((2, 3)),
+            y=np.array([50.0, 70.0]),
+            entity=np.array(["a", "b"]),
+        )
+        test = PanelData(
+            X=rng.standard_normal((2, 3)),
+            y=np.array([55.0, 65.0]),
+            entity=np.array(["a", "b"]),
+        )
+        pred = ConformalGBMBaseline().fit(train).predict(test, 20, np.random.default_rng(1))
+        assert np.all(np.isfinite(pred.samples))
+        assert pred.samples.shape == (20, 2)
