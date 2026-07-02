@@ -1083,6 +1083,8 @@ class PipelineOrchestrator:
         # Create stage context
         ctx = self._create_stage_context()
 
+        stage_started = time()
+
         # Execute the stage's run function
         if stage.run_fn is None:
             log.warning(
@@ -1120,6 +1122,11 @@ class PipelineOrchestrator:
         if self.manifest:
             self.manifest.stages_completed.append(stage.name)
             self.manifest.stage_hashes[stage.name] = stage.compute_input_hash()
+            self.manifest.stage_durations[stage.name] = round(time() - stage_started, 3)
+            if isinstance(run_result, dict) and isinstance(
+                run_result.get("resource_usage"), dict
+            ):
+                self.manifest.resources[stage.name] = run_result["resource_usage"]
             if stage.name in DATA_STAGE_ROOTS:
                 self.manifest.data_stamps[stage.name] = write_stamp(
                     DATA_STAGE_ROOTS[stage.name],
@@ -1130,7 +1137,11 @@ class PipelineOrchestrator:
             self._record_stage_outputs(stage, run_result=run_result)
             save_run_manifest(self.manifest, self.run_dir)
 
-        log.info("stage_completed", stage=stage.name)
+        log.info(
+            "stage_completed",
+            stage=stage.name,
+            duration_seconds=round(time() - stage_started, 3),
+        )
 
     def _handle_failure(self, error: Exception, stage: str) -> None:
         """Handle pipeline failure with cleanup.
