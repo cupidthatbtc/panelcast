@@ -162,7 +162,7 @@ class TestDisjointInputsTransform:
         if transform.name == "identity":
             pytest.skip("logit transform reported as identity in this build")
 
-        _X, prev_score, _n, _y = _prepare_disjoint_inputs(test_df, test_features, s)
+        _X, prev_score, _n, _y, _g = _prepare_disjoint_inputs(test_df, test_features, s)
         # prev_score should differ from the raw global_mean (70.0) because
         # the transform was applied.
         assert not np.allclose(prev_score, 70.0)
@@ -1100,7 +1100,7 @@ class TestPrepareDisjointInputsExtended:
             index=test_df.index,
         )
 
-        X, _, _, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
+        X, _, _, _, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
         assert X[0, 0] == pytest.approx(0.0)  # (1.0-1.0)/0.5
 
     def test_length_mismatch_raises(self, mock_summary):
@@ -1162,7 +1162,7 @@ class TestPrepareDisjointInputsExtended:
             index=test_df.index,
         )
 
-        _, _, n_reviews, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
+        _, _, n_reviews, _, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
         assert n_reviews[0] == 42
 
     def test_missing_n_reviews_and_user_ratings_raises(self, mock_summary):
@@ -1202,7 +1202,7 @@ class TestPrepareDisjointInputsExtended:
             index=test_df.index,
         )
 
-        X, _, n_reviews, y_true = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
+        X, _, n_reviews, y_true, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
         assert len(y_true) == 1
         assert n_reviews[0] == 50
 
@@ -2454,7 +2454,9 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true = _prepare_disjoint_inputs(test_df, test_features, summary)
+        X, prev_score, n_reviews, y_true, _ = _prepare_disjoint_inputs(
+            test_df, test_features, summary
+        )
 
         assert X.shape == (2, 1)
         assert len(y_true) == 2
@@ -2478,7 +2480,9 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true = _prepare_disjoint_inputs(test_df, test_features, summary)
+        X, prev_score, n_reviews, y_true, _ = _prepare_disjoint_inputs(
+            test_df, test_features, summary
+        )
         assert X.shape == (1, 1)
 
     def test_invalid_n_reviews_filtered(self):
@@ -2497,7 +2501,9 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true = _prepare_disjoint_inputs(test_df, test_features, summary)
+        X, prev_score, n_reviews, y_true, _ = _prepare_disjoint_inputs(
+            test_df, test_features, summary
+        )
         assert len(y_true) == 1
 
     def test_length_mismatch_raises(self):
@@ -2550,7 +2556,9 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true = _prepare_disjoint_inputs(test_df, test_features, summary)
+        X, prev_score, n_reviews, y_true, _ = _prepare_disjoint_inputs(
+            test_df, test_features, summary
+        )
         assert len(y_true) == 1
         assert n_reviews[0] == 15
 
@@ -2588,6 +2596,8 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true = _prepare_disjoint_inputs(test_df, test_features, summary)
+        X, prev_score, n_reviews, y_true, _ = _prepare_disjoint_inputs(
+            test_df, test_features, summary
+        )
         # All prev_score should be global mean = 75.0
         np.testing.assert_allclose(prev_score, [75.0, 75.0, 75.0])

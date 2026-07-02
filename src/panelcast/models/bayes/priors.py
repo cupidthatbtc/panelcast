@@ -261,6 +261,17 @@ class PriorConfig:
     # and deep-extrapolation intervals widen by ~sqrt(h - max_seq) * sigma_rw.
     # Pure prediction-path knob: no model.py change, training stays identical.
     propagate_rw_horizon: bool = False
+    # Genre/group pooling level between the global mean and the entity effects
+    # (default off => legacy path, no new sites, bit-identical RNG). When True
+    # the model adds a ZeroSumNormal group offset so each entity's init-effect
+    # location becomes mu_artist + group_offset[group(entity)]; new entities
+    # from a seen group start at that group's level instead of the population
+    # mean. Requires group_idx_by_artist / n_groups model args (built from the
+    # descriptor's entity_group_col). New sites: {prefix}sigma_group,
+    # {prefix}group_offset_z (+ deterministic {prefix}group_offset).
+    entity_group_pooling: bool = False
+    # HalfNormal scale for sigma_group (the between-group spread).
+    sigma_group_scale: float = 0.5
 
 
 def priors_for_transform(target_transform: str = "identity", **overrides) -> PriorConfig:

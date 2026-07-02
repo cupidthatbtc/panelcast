@@ -534,6 +534,17 @@ def _prepare_test_model_args(
         prev_nrev = test_df["_prev_nrev"].to_numpy(dtype=float)
         test_model_args["prev_meas_sigma"] = _eiv_prev_meas_sigma(prev_nrev, global_std)
 
+    if getattr(priors_obj, "entity_group_pooling", False):
+        group_idx_by_artist = summary.get("group_idx_by_artist")
+        n_groups = summary.get("n_groups")
+        if group_idx_by_artist is None or n_groups is None:
+            raise ValueError(
+                "entity_group_pooling is on but the training summary lacks "
+                "group_idx_by_artist/n_groups — re-run the train stage."
+            )
+        test_model_args["group_idx_by_artist"] = np.asarray(group_idx_by_artist, dtype=np.int32)
+        test_model_args["n_groups"] = int(n_groups)
+
     return test_model_args, y_true
 
 
@@ -608,8 +619,15 @@ def _prepare_disjoint_inputs(
     test_df: pd.DataFrame,
     test_features: pd.DataFrame,
     summary: dict,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Prepare inputs for artist-disjoint cold-start evaluation."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+    """Prepare inputs for artist-disjoint cold-start evaluation.
+
+    The fifth element is the per-row group index for entity_group_pooling
+    fits (each unseen artist's modal group over its test rows, mapped through
+    the training group_to_idx; -1 = group unseen in training). None when the
+    gate is off or the group column is unavailable. Leakage-safe: the group
+    is a prediction-time covariate of the new entity, not a label.
+    """
     ds = _summary_dataset(summary)
     # Cold-start protocol: do NOT derive prev_score from held-out labels.
     # Use training global mean as neutral prior for all unseen-artist rows.
@@ -654,7 +672,20 @@ def _prepare_disjoint_inputs(
     if transform.name != "identity":
         prev_score = np.asarray(transform.forward(prev_score), dtype=np.float32)
     n_reviews = n_reviews_raw.astype(np.int32)
-    return X, prev_score, n_reviews, y_true
+
+    group_idx_new: np.ndarray | None = None
+    group_to_idx = summary.get("group_to_idx")
+    group_col = summary.get("entity_group_col")
+    if summary.get("entity_group_pooling") and group_to_idx and group_col in df.columns:
+        modal = df.groupby(ds["entity_col"])[group_col].agg(
+            lambda s: s.mode().iloc[0] if not s.mode().empty else None
+        )
+        per_row = df[ds["entity_col"]].map(modal.map(group_to_idx))
+        group_idx_new = per_row.fillna(-1).to_numpy(dtype=np.int32)
+        n_seen = int(np.sum(group_idx_new >= 0))
+        log.info("disjoint_group_pooling", n_rows=len(group_idx_new), n_seen_group=n_seen)
+
+    return X, prev_score, n_reviews, y_true, group_idx_new
 
 
 def _run_new_artist_predictive(
@@ -664,6 +695,7 @@ def _run_new_artist_predictive(
     prev_score: np.ndarray,
     n_reviews: np.ndarray,
     seed: int,
+    group_idx_new: np.ndarray | None = None,
 ) -> np.ndarray:
     """Generate predictions for unseen artists via population distribution."""
     kwargs: dict[str, Any] = {
@@ -687,6 +719,9 @@ def _run_new_artist_predictive(
         kwargs["n_reviews_new"] = jnp.asarray(n_reviews, dtype=jnp.float32)
         if not learn_n_exponent and fixed_n_exponent != 0.0:
             kwargs["fixed_n_exponent"] = fixed_n_exponent
+
+    if group_idx_new is not None:
+        kwargs["group_idx_new"] = jnp.asarray(group_idx_new, dtype=jnp.int32)
 
     pred = predict_new_entity(**kwargs)
     y_pred = np.asarray(pred["y"])
@@ -1316,7 +1351,7 @@ def evaluate_models(ctx: StageContext) -> dict:
         if secondary_test_path.exists() and secondary_feat_path.exists():
             secondary_test_df = pd.read_parquet(secondary_test_path)
             secondary_test_features = pd.read_parquet(secondary_feat_path)
-            X, prev_score, n_reviews, secondary_y_true = _prepare_disjoint_inputs(
+            X, prev_score, n_reviews, secondary_y_true, group_idx_new = _prepare_disjoint_inputs(
                 secondary_test_df,
                 secondary_test_features,
                 summary,
@@ -1328,6 +1363,7 @@ def evaluate_models(ctx: StageContext) -> dict:
                 prev_score=prev_score,
                 n_reviews=n_reviews,
                 seed=ctx.seed + 1000,
+                group_idx_new=group_idx_new,
             )
             secondary_metrics, secondary_predictions, secondary_calibration = _evaluate_predictions(
                 secondary_y_true,

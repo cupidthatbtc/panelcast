@@ -63,6 +63,12 @@ sigma_obs_prior_type: halfnormal
 heteroscedastic_entity_obs: false
 tau_entity_scale: 0.25
 
+# Genre/group pooling gate (#41; default off => bit-identical to published
+# fits). True adds a zero-sum group offset between the global mean and the
+# entity effects, built from the descriptor's entity_group_col — new entities
+# from a seen group start at the group level instead of the population mean.
+entity_group_pooling: false
+
 # Split configuration
 val_albums: 0
 min_train_albums: 2
