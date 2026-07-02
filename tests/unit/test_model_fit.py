@@ -42,7 +42,7 @@ def minimal_model_data():
     n_features = 2
     max_seq = 3
 
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
 
     # Artist indices (repeated to get multiple albums per artist)
     artist_idx = jnp.array([i % n_artists for i in range(n_obs)], dtype=jnp.int32)
@@ -51,15 +51,15 @@ def minimal_model_data():
     album_seq = jnp.array([(i // n_artists) % max_seq + 1 for i in range(n_obs)], dtype=jnp.int32)
 
     # Previous scores (0 for first album of each artist)
-    prev_score_raw = np.random.randn(n_obs) * 10 + 70
+    prev_score_raw = rng.standard_normal(n_obs) * 10 + 70
     prev_score_raw[album_seq == 1] = 0  # Zero for debut albums
     prev_score = jnp.array(prev_score_raw)
 
     # Feature matrix (standardized)
-    X = jnp.array(np.random.randn(n_obs, n_features))
+    X = jnp.array(rng.standard_normal((n_obs, n_features)))
 
     # Target scores (realistic range: mean ~70, std ~10)
-    y = jnp.array(np.random.randn(n_obs) * 10 + 70)
+    y = jnp.array(rng.standard_normal(n_obs) * 10 + 70)
 
     return {
         "artist_idx": artist_idx,

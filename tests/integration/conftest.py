@@ -54,24 +54,24 @@ def generate_synthetic_albums(
     pd.DataFrame
         Synthetic album dataset with required columns.
     """
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
 
     records = []
     base_year = 2010
 
     for artist_idx in range(n_artists):
         artist_name = f"Artist_{artist_idx:03d}"
-        artist_base_score = np.random.uniform(60, 85)
+        artist_base_score = rng.uniform(60, 85)
 
         for album_idx in range(albums_per_artist):
             year = base_year + album_idx
             release_date = pd.Timestamp(
-                year=year, month=np.random.randint(1, 13), day=np.random.randint(1, 28)
+                year=year, month=rng.integers(1, 13), day=rng.integers(1, 28)
             )
 
             # Scores vary around artist baseline
-            user_score = np.clip(artist_base_score + np.random.normal(0, 8), 0, 100)
-            critic_score = np.clip(artist_base_score + np.random.normal(0, 10), 0, 100)
+            user_score = np.clip(artist_base_score + rng.normal(0, 8), 0, 100)
+            critic_score = np.clip(artist_base_score + rng.normal(0, 10), 0, 100)
 
             records.append(
                 {
@@ -82,13 +82,13 @@ def generate_synthetic_albums(
                     "Release_Date_Parsed": release_date,
                     "User_Score": user_score,
                     "Critic_Score": critic_score,
-                    "User_Ratings": np.random.randint(100, 5000),
-                    "Critic_Reviews": np.random.randint(5, 50),
-                    "Album_Type": np.random.choice(["Album", "EP", "Mixtape"], p=[0.7, 0.2, 0.1]),
-                    "Genres": np.random.choice(
+                    "User_Ratings": rng.integers(100, 5000),
+                    "Critic_Reviews": rng.integers(5, 50),
+                    "Album_Type": rng.choice(["Album", "EP", "Mixtape"], p=[0.7, 0.2, 0.1]),
+                    "Genres": rng.choice(
                         ["Rock, Indie", "Pop, Dance", "Hip Hop, Rap", "Electronic, Ambient"]
                     ),
-                    "date_risk": np.random.choice(["low", "medium", "high"], p=[0.8, 0.15, 0.05]),
+                    "date_risk": rng.choice(["low", "medium", "high"], p=[0.8, 0.15, 0.05]),
                     "original_row_id": artist_idx * albums_per_artist + album_idx,
                 }
             )
@@ -121,7 +121,7 @@ def create_mock_posterior_samples(
     xr.Dataset
         Mock posterior samples.
     """
-    np.random.seed(seed)
+    rng = np.random.default_rng(seed)
     param_shapes = param_shapes or {
         "user_beta": (5,),
         "user_sigma_obs": (),
@@ -134,7 +134,7 @@ def create_mock_posterior_samples(
         full_shape = (n_chains, n_draws) + shape
         data_vars[name] = (
             ("chain", "draw") + tuple(f"dim_{i}" for i in range(len(shape))),
-            np.random.normal(0, 1, full_shape),
+            rng.normal(0, 1, full_shape),
         )
 
     return xr.Dataset(
@@ -257,7 +257,7 @@ def mock_idata() -> az.InferenceData:
     az.InferenceData
         Mock inference data for evaluation tests.
     """
-    np.random.seed(42)
+    rng = np.random.default_rng(42)
     n_chains = 4
     n_draws = 500
     n_obs = 50
@@ -267,16 +267,16 @@ def mock_idata() -> az.InferenceData:
         {
             "user_beta": (
                 ["chain", "draw", "beta_dim"],
-                np.random.normal(0, 1, (n_chains, n_draws, 5)),
+                rng.normal(0, 1, (n_chains, n_draws, 5)),
             ),
             "user_sigma_obs": (
                 ["chain", "draw"],
-                np.abs(np.random.normal(10, 2, (n_chains, n_draws))),
+                np.abs(rng.normal(10, 2, (n_chains, n_draws))),
             ),
-            "user_mu_artist": (["chain", "draw"], np.random.normal(70, 5, (n_chains, n_draws))),
+            "user_mu_artist": (["chain", "draw"], rng.normal(70, 5, (n_chains, n_draws))),
             "user_sigma_artist": (
                 ["chain", "draw"],
-                np.abs(np.random.normal(5, 1, (n_chains, n_draws))),
+                np.abs(rng.normal(5, 1, (n_chains, n_draws))),
             ),
         },
         coords={"chain": range(n_chains), "draw": range(n_draws)},
@@ -284,7 +284,7 @@ def mock_idata() -> az.InferenceData:
 
     # Observed data
     observed_data = xr.Dataset(
-        {"y": (["y_dim"], np.random.uniform(50, 90, n_obs))},
+        {"y": (["y_dim"], rng.uniform(50, 90, n_obs))},
         coords={"y_dim": range(n_obs)},
     )
 
@@ -292,7 +292,7 @@ def mock_idata() -> az.InferenceData:
     sample_stats = xr.Dataset(
         {
             "diverging": (["chain", "draw"], np.zeros((n_chains, n_draws), dtype=bool)),
-            "tree_depth": (["chain", "draw"], np.random.randint(5, 10, (n_chains, n_draws))),
+            "tree_depth": (["chain", "draw"], rng.integers(5, 10, (n_chains, n_draws))),
         },
         coords={"chain": range(n_chains), "draw": range(n_draws)},
     )
@@ -313,14 +313,14 @@ def mock_idata_with_log_lik(mock_idata: az.InferenceData) -> az.InferenceData:
     az.InferenceData
         Mock inference data with log_likelihood group.
     """
-    np.random.seed(43)
+    rng = np.random.default_rng(43)
     n_chains = mock_idata.posterior.sizes["chain"]
     n_draws = mock_idata.posterior.sizes["draw"]
     n_obs = mock_idata.observed_data.sizes["y_dim"]
 
     # Log-likelihood (negative values, typical for log probs)
     log_likelihood = xr.Dataset(
-        {"y": (["chain", "draw", "y_dim"], np.random.normal(-5, 1, (n_chains, n_draws, n_obs)))},
+        {"y": (["chain", "draw", "y_dim"], rng.normal(-5, 1, (n_chains, n_draws, n_obs)))},
         coords={
             "chain": range(n_chains),
             "draw": range(n_draws),
@@ -346,16 +346,16 @@ def mock_predictions() -> dict:
         - hdi_low: Lower bound of 94% HDI (n_obs,)
         - hdi_high: Upper bound of 94% HDI (n_obs,)
     """
-    np.random.seed(44)
+    rng = np.random.default_rng(44)
     n_obs = 50
     n_samples = 2000
 
     # True values centered around 70 with some spread
-    y_true = np.random.uniform(50, 90, n_obs)
+    y_true = rng.uniform(50, 90, n_obs)
 
     # Predictions centered on true with some noise
     # Well-calibrated model: predictions should bracket truth ~95% of time
-    noise = np.random.normal(0, 8, (n_samples, n_obs))
+    noise = rng.normal(0, 8, (n_samples, n_obs))
     y_pred_samples = y_true + noise
 
     mean = y_pred_samples.mean(axis=0)
