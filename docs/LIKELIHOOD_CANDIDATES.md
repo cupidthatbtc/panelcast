@@ -411,3 +411,19 @@ panelcast run --likelihood-family mixture --discretize-observation
 # Re-present the convergence + PPC of any run:
 panelcast diagnose
 ```
+
+## Addendum (0.5.0): the occupied-range Beta (`beta_ceiling`, #42)
+
+One more family, one more clean refutation. `beta_ceiling` rescales the Beta
+onto `[low, train-max + margin]` — the score range the data actually occupies —
+to test whether the skewness/max/q90 pins were an artifact of the unoccupied
+upper support rather than the distribution's shape. They are not: at the
+diagnostic screening (4×2000, identity scale, which the family requires) the
+upper-tail pins do not move (skewness p = 1.000, max 0.995, q90 1.000) and the
+squeezed support re-pins the lower tail (q10/q50/min), netting six pinned
+statistics against the shipped `offset_logit` default's four. The one genuine
+finding: the ceiling *fixes plain `beta`'s mixing pathology* (bulk ESS 435 and
+0 divergences, vs 304 with a divergence) — the unoccupied range was a sampling
+problem, but the pins are the shape mismatch itself. Not adopted; available as
+`--likelihood-family beta_ceiling` (identity transform only). Full result:
+[`.audit/beta_ceiling/screening.md`](../.audit/beta_ceiling/screening.md).
