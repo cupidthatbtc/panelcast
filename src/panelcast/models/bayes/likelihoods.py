@@ -477,6 +477,45 @@ def _beta_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews)
         numpyro.sample(f"{prefix}y", beta, obs=y_obs)
 
 
+def _beta_ceiling_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews):
+    _reject_discretization(priors, "beta_ceiling")
+    if priors.target_transform not in ("identity", None):
+        raise ValueError(
+            "likelihood_family='beta_ceiling' requires target_transform='identity' "
+            f"(got '{priors.target_transform}'); the Beta likelihood assumes "
+            "mu is on the score scale."
+        )
+    if priors.effective_ceiling is None:
+        raise ValueError(
+            "likelihood_family='beta_ceiling' requires priors.effective_ceiling "
+            "(train max + margin); prepare_model_data derives it from the "
+            "training split."
+        )
+    low = float(bounds[0])
+    high = float(priors.effective_ceiling)
+    if not low < high <= float(bounds[1]):
+        raise ValueError(
+            f"effective_ceiling must satisfy low < ceiling <= high, got "
+            f"{high} for bounds {bounds}."
+        )
+    span = high - low
+    eps = priors.beta_boundary_eps
+    mu01 = jnp.clip((mu - low) / span, eps, 1.0 - eps)
+    phi = numpyro.sample(
+        f"{prefix}phi",
+        dist.Gamma(priors.beta_precision_concentration, priors.beta_precision_rate),
+    )
+    # Persist the data-derived ceiling as a (constant) posterior site so the
+    # cold-start predict path can rebuild the support without a priors object.
+    numpyro.deterministic(f"{prefix}effective_ceiling", jnp.asarray(high))
+    a = mu01 * phi
+    b = (1.0 - mu01) * phi
+    beta = dist.TransformedDistribution(dist.Beta(a, b), AffineTransform(low, span))
+    y_obs = None if y is None else jnp.clip(y, low + span * eps, high - span * eps)
+    with numpyro.plate(f"{prefix}obs", n_obs):
+        numpyro.sample(f"{prefix}y", beta, obs=y_obs)
+
+
 def _beta_binomial_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews):
     _reject_discretization(priors, "beta_binomial")
     if priors.target_transform not in ("identity", None):
@@ -641,6 +680,28 @@ def _beta_predict_draws(
     return low + span * beta01
 
 
+def _beta_ceiling_predict_draws(
+    key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
+    n_reviews=None,
+):
+    phi = sites.get("phi")
+    ceiling = sites.get("effective_ceiling")
+    if phi is None or ceiling is None:
+        raise ValueError(
+            "beta_ceiling likelihood requires '{prefix}phi' and "
+            "'{prefix}effective_ceiling' in posterior_samples; the model must "
+            "have been trained with --likelihood-family beta_ceiling."
+        )
+    low = float(bounds[0])
+    high = float(jnp.asarray(ceiling).reshape(-1)[0])
+    span = high - low
+    eps = DEFAULT_BETA_BOUNDARY_EPS
+    mu01 = jnp.clip((mu_pred - low) / span, eps, 1.0 - eps)
+    phi = phi[:, None]
+    beta01 = random.beta(key, mu01 * phi, (1.0 - mu01) * phi)
+    return low + span * beta01
+
+
 def _beta_binomial_predict_draws(
     key, mu_pred, sigma_scaled, *, sites, df, bounds, skew_tailweight, transform, discretize,
     n_reviews=None, max_n_reviews=DEFAULT_BETABINOM_MAX_N,
@@ -745,6 +806,14 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         supports_discretization=False,
         sample_obs=_beta_binomial_sample_obs,
         predict_draws=_beta_binomial_predict_draws,
+        cdf=None,
+    ),
+    "beta_ceiling": LikelihoodSpec(
+        name="beta_ceiling",
+        required_sites=("phi", "effective_ceiling"),
+        supports_discretization=False,
+        sample_obs=_beta_ceiling_sample_obs,
+        predict_draws=_beta_ceiling_predict_draws,
         cdf=None,
     ),
 }
