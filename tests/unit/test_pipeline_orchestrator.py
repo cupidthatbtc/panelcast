@@ -1145,6 +1145,8 @@ class TestOrchestratorCommandString:
             likelihood_df=8.0,
             likelihood_family="skew_normal",
             discretize_observation=True,
+            # discretization requires the raw score scale (identity)
+            target_transform="identity",
             dataset="aero",
         )
         orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
