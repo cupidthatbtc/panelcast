@@ -66,11 +66,22 @@ def run_family(family: str) -> dict[str, np.ndarray]:
     return {k: np.asarray(v) for k, v in mcmc.get_samples().items()}
 
 
+def test_golden_fixture_present():
+    """Fast tier: the golden file must exist — a silent skip would void the parity guard."""
+    assert _GOLDEN.exists(), f"golden fixture missing: {_GOLDEN}"
+    assert _GOLDEN.stat().st_size > 10_000, "golden fixture is implausibly small"
+    golden = np.load(_GOLDEN)
+    for family in FAMILIES:
+        assert any(k.startswith(f"{family}__") for k in golden.files), (
+            f"golden fixture has no draws for family '{family}'"
+        )
+
+
 @pytest.mark.slow
 @pytest.mark.parametrize("family", FAMILIES)
 def test_registry_refactor_is_bit_identical(family: str):
     if not _GOLDEN.exists():
-        pytest.skip(f"golden fixture missing: {_GOLDEN}")
+        pytest.fail(f"golden fixture missing: {_GOLDEN}")
     golden = np.load(_GOLDEN)
     draws = run_family(family)
     keys = [k for k in golden.files if k.startswith(f"{family}__")]
