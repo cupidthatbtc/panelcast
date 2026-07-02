@@ -446,6 +446,13 @@ def prepare_model_data(
             "This indicates a mismatch between artist mapping and filtered data."
         )
 
+    # beta_ceiling support bound: train max + half-point margin, clamped to the
+    # theoretical bound. Only meaningful on the raw score scale.
+    effective_ceiling = None
+    if target_transform == "identity" and len(y):
+        high = float(descriptor.target_bounds[1])
+        effective_ceiling = float(min(high, float(np.max(y)) + 0.5))
+
     model_args = {
         "artist_idx": artist_idx,
         "album_seq": album_seq,
@@ -459,6 +466,7 @@ def prepare_model_data(
         "artist_to_idx": artist_to_idx,
         "global_mean_score": global_mean,
         "global_std_score": global_std_score,
+        "effective_ceiling": effective_ceiling,
         "ar_center": ar_center_arr,
         "ar_center_value": ar_center_value,
     }
@@ -807,6 +815,7 @@ def train_models(
         "global_std_score",
         float(np.std(model_args["y"])) if model_args.get("y") is not None else 0.0,
     )
+    effective_ceiling = model_args.pop("effective_ceiling", None)
     ar_center_value = model_args.pop("ar_center_value")
 
     # Apply max_albums cap from CLI/config (uses most recent albums per artist)
@@ -924,6 +933,7 @@ def train_models(
         errors_in_variables=bool(getattr(ctx, "errors_in_variables", False)),
         propagate_rw_horizon=bool(getattr(ctx, "propagate_rw_horizon", False)),
         entity_group_pooling=entity_group_pooling,
+        effective_ceiling=effective_ceiling,
     )
 
     priors = locate_level_prior(

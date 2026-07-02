@@ -261,6 +261,12 @@ class PriorConfig:
     # and deep-extrapolation intervals widen by ~sqrt(h - max_seq) * sigma_rw.
     # Pure prediction-path knob: no model.py change, training stays identical.
     propagate_rw_horizon: bool = False
+    # beta_ceiling: data-derived effective upper bound (train max + margin, on
+    # the raw score scale), computed by prepare_model_data and required by the
+    # beta_ceiling family. The scaled Beta then spends its density on the
+    # occupied range instead of the sparse span up to the theoretical bound.
+    # None for every other family.
+    effective_ceiling: float | None = None
     # Genre/group pooling level between the global mean and the entity effects
     # (default off => legacy path, no new sites, bit-identical RNG). When True
     # the model adds a ZeroSumNormal group offset so each entity's init-effect

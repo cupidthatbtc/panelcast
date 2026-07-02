@@ -409,6 +409,36 @@ class TestPrepareModelData:
         with pytest.raises(ValueError, match="n_reviews column not found"):
             prepare_model_data(df, ["feature_1"], min_albums_filter=1)
 
+    def test_effective_ceiling_from_train_max(self, sample_train_df):
+        """identity: ceiling = train max + 0.5 margin."""
+        model_args, _ = prepare_model_data(
+            sample_train_df, ["feature_1"], min_albums_filter=1
+        )
+        assert model_args["effective_ceiling"] == 90.5
+
+    def test_effective_ceiling_clamped_to_bounds(self):
+        """A train max near the theoretical bound clamps to the bound."""
+        df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "B"],
+                "User_Score": [70.0, 99.8, 80.0],
+                "feature_1": [1.0, 2.0, 3.0],
+                "n_reviews": [10, 20, 30],
+            }
+        )
+        model_args, _ = prepare_model_data(df, ["feature_1"], min_albums_filter=1)
+        assert model_args["effective_ceiling"] == 100.0
+
+    def test_effective_ceiling_none_for_non_identity(self, sample_train_df):
+        """The ceiling is score-scale only; transformed targets get None."""
+        model_args, _ = prepare_model_data(
+            sample_train_df,
+            ["feature_1"],
+            min_albums_filter=1,
+            target_transform="offset_logit",
+        )
+        assert model_args["effective_ceiling"] is None
+
 
 class TestApplyMaxAlbumsCap:
     """Tests for _apply_max_albums_cap function."""

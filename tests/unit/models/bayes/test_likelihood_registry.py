@@ -29,6 +29,9 @@ def _model_args(family: str, **prior_kw) -> dict:
     rng = np.random.default_rng(0)
     artist_idx = jnp.array([i % N_ART for i in range(N_OBS)], dtype=jnp.int32)
     album_seq = jnp.array([(i // N_ART) + 1 for i in range(N_OBS)], dtype=jnp.int32)
+    if family == "beta_ceiling":
+        # Normally derived from the training split by prepare_model_data.
+        prior_kw.setdefault("effective_ceiling", 95.0)
     return dict(
         artist_idx=artist_idx,
         album_seq=album_seq,
@@ -125,7 +128,9 @@ class TestDiscretization:
             assert jnp.isfinite(g_mu), f"{name}: non-finite d log_prob / d mu at tail"
             assert jnp.isfinite(g_sigma), f"{name}: non-finite d log_prob / d sigma at tail"
 
-    @pytest.mark.parametrize("family", ("beta", "skew_studentt", "beta_binomial"))
+    @pytest.mark.parametrize(
+        "family", ("beta", "skew_studentt", "beta_binomial", "beta_ceiling")
+    )
     def test_discretization_rejected_for_unsupported(self, family):
         with pytest.raises(ValueError, match="discretiz"):
             trace(seed(make_score_model("user"), random.PRNGKey(0))).get_trace(
@@ -133,5 +138,39 @@ class TestDiscretization:
             )
 
     def test_non_discretizable_have_no_cdf(self):
-        for family in ("beta", "skew_studentt", "beta_binomial"):
+        for family in ("beta", "skew_studentt", "beta_binomial", "beta_ceiling"):
             assert REGISTRY[family].cdf is None
+
+
+class TestBetaCeiling:
+    def test_missing_effective_ceiling_raises(self):
+        args = _model_args("beta_ceiling")
+        args["priors"] = PriorConfig(likelihood_family="beta_ceiling")
+        with pytest.raises(ValueError, match="effective_ceiling"):
+            trace(seed(make_score_model("user"), random.PRNGKey(0))).get_trace(y=None, **args)
+
+    def test_ceiling_above_bounds_rejected(self):
+        with pytest.raises(ValueError, match="low < ceiling"):
+            trace(seed(make_score_model("user"), random.PRNGKey(0))).get_trace(
+                y=None, **_model_args("beta_ceiling", effective_ceiling=150.0)
+            )
+
+    def test_non_identity_transform_rejected(self):
+        with pytest.raises(ValueError, match="target_transform='identity'"):
+            trace(seed(make_score_model("user"), random.PRNGKey(0))).get_trace(
+                y=None, **_model_args("beta_ceiling", target_transform="offset_logit")
+            )
+
+    def test_ceiling_persisted_as_posterior_site(self):
+        tr = trace(seed(make_score_model("user"), random.PRNGKey(0))).get_trace(
+            y=None, **_model_args("beta_ceiling")
+        )
+        assert float(tr["user_effective_ceiling"]["value"]) == 95.0
+
+    def test_replicated_draws_respect_ceiling(self):
+        pred = Predictive(make_score_model("user"), num_samples=50)
+        draws = np.asarray(
+            pred(random.PRNGKey(1), y=None, **_model_args("beta_ceiling"))["user_y"]
+        )
+        assert draws.max() <= 95.0
+        assert draws.min() >= 0.0
