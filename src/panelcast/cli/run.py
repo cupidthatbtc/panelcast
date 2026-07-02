@@ -691,7 +691,9 @@ def run(
         help=(
             "Score-scale transform: 'identity' (legacy soft-clip) or "
             "'offset_logit' (model runs on the Smithson-Verkuilen logit scale; "
-            "tested but held — did not mix; see LIKELIHOOD_CANDIDATES.md)."
+            "mixes at 4x1000 but held — better predictive ledger, ~10x slower, "
+            "reshuffles PPC pins without resolving them; see "
+            "LIKELIHOOD_CANDIDATES.md)."
         ),
     ),
     ar_center: str = typer.Option(

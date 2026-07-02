@@ -77,7 +77,7 @@ Bayesian hierarchical regression with four key components:
 4. **Heteroscedastic observation noise** (sigma_ref parameterization): Albums with more reviews have lower observation noise. The model samples sigma_ref (noise at the median review count n_ref) and derives per-observation noise as: sigma_obs = sigma_ref * n_ref^n_exponent, then sigma_i = sigma_obs / n_reviews_i^n_exponent. This reparameterization breaks the multiplicative funnel between sigma_obs and n_exponent that causes divergent transitions in MCMC sampling.
 
 Mathematical form:
-- y_ij ~ Normal(mu_ij, sigma_i)
+- y_ij ~ StudentT(df=4, mu_ij, sigma_i)  (family configurable; see below)
 - mu_ij = artist_effect_jt + X_ij @ beta + rho * (prev_score_ij - ar_center)
 - artist_effect_jt evolves via random walk from initial effect
 - sigma_i = sigma_obs / n_reviews_i^n_exponent (heteroscedastic mode)

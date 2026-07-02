@@ -45,7 +45,7 @@ things you'd actually bring up when explaining the project.
 
 ## Fitting
 
-**NUTS** — No-U-Turn Sampler. Hamiltonian Monte Carlo with automatic trajectory length. Our settings: `max_tree_depth=10`, `target_accept_prob=0.90`. We run 4 chains, 1000 warmup + 1000 samples each = 4000 total posterior draws. These are standard publication settings.
+**NUTS** — No-U-Turn Sampler. Hamiltonian Monte Carlo with automatic trajectory length. Our settings: `max_tree_depth=10`, `target_accept_prob=0.90`. The diagnostic preset runs 4 chains, 1000 warmup + 1000 samples each = 4000 total posterior draws; the publication preset scales to 4 chains x 5000 with 3000 warmup.
 
 **Divergent transitions** — NUTS's way of saying "the posterior geometry is too curved here." A few are OK; many mean the model needs reparameterization. This is why we use non-centered parameterization and switched from Beta to logit-normal for n_exponent.
 
@@ -89,11 +89,11 @@ things you'd actually bring up when explaining the project.
 
 ## Pipeline
 
-**8 stages** — prepare_dataset -> create_splits -> build_features -> train_bayes -> evaluate -> predict_next -> publication -> sensitivity. Run all with `panelcast run`, or one at a time with `panelcast stage <name>`.
+**8 stages** — data -> splits -> features -> train -> evaluate -> predict -> report -> sensitivity. Run all with `panelcast run`, or one at a time with `panelcast stage <name>`.
 
 **FeaturePipeline** — Orchestrates feature blocks with fit/transform separation. PCA, vocabularies, and scalers are always learned from training data only. This prevents leakage.
 
-**GenreBlock + PCA(30)** — Genres as comma-separated strings -> multi-hot encoding -> PCA to 30 components. Captures genre similarity without a 200-column sparse matrix.
+**GenreBlock + PCA(10)** — Genres as comma-separated strings -> multi-hot encoding -> PCA to 10 components. Captures genre similarity without a 200-column sparse matrix.
 
 **training_summary.json** — The bridge between stages. train_bayes saves scaler params, artist mapping, feature names. evaluate and predict_next load it to ensure identical preprocessing.
 
@@ -178,7 +178,7 @@ highlights; this section is the complete inventory.
 
 **mcmc.get_extra_fields()["diverging"]** — Boolean array flagging divergent transitions. Divergences mean NUTS hit a region of posterior geometry it couldn't navigate (usually a funnel). We log the count but don't fail — the evaluate stage checks against thresholds.
 
-**MCMCConfig** — Frozen dataclass for MCMC settings. Default: 1000 warmup + 1000 samples across 4 chains = 4000 total posterior draws. These are standard publication settings. The config is saved to JSON inside the model manifest for reproducibility.
+**MCMCConfig** — Frozen dataclass for MCMC settings. Default: 1000 warmup + 1000 samples across 4 chains = 4000 total posterior draws (the diagnostic tier; the publication preset uses 4 chains x 5000 with 3000 warmup). The config is saved to JSON inside the model manifest for reproducibility.
 
 **FitResult** — Container returned by `fit_model()`. Holds the MCMC object, ArviZ InferenceData, divergence count, runtime in seconds, and GPU info string. Everything downstream (predict, evaluate, save) takes a FitResult.
 
@@ -288,7 +288,7 @@ highlights; this section is the complete inventory.
 
 **BaseFeatureBlock** — Abstract base class for feature blocks. Each block has a `name`, a `requires` list (dependencies on other blocks), and `fit()`/`transform()` methods. New features are added by subclassing this.
 
-**GenreBlock / sklearn.decomposition.PCA** — Converts comma-separated genre strings into numeric features. Pipeline: parse genres -> filter rare genres (< 20 occurrences) -> multi-hot encode -> PCA to 30 components. PCA is fitted on training data only. The 30 components capture genre similarity without a 200-column sparse matrix.
+**GenreBlock / sklearn.decomposition.PCA** — Converts comma-separated genre strings into numeric features. Pipeline: parse genres -> filter rare genres (< 20 occurrences) -> multi-hot encode -> PCA to 10 components. PCA is fitted on training data only. The 10 components capture genre similarity without a 200-column sparse matrix.
 
 **ArtistBlock** — Computes per-artist features: album count (`n_albums`), appearance rank (`artist_appearance`), and the previous album's score (`prev_score`) for the AR(1) term. Previous score is 0.0 for debut albums.
 
@@ -320,7 +320,7 @@ highlights; this section is the complete inventory.
 
 **StageContext** — The shared context passed to every stage's `run()` function. Contains: run directory, seed, MCMC settings, convergence thresholds, feature toggles, calibration parameters. This is how configuration flows from CLI to stages without globals.
 
-**PipelineStage** — Dataclass defining a single stage: name, dependencies, run function, input/output paths for skip detection. The pipeline has 8 stages in order: prepare_dataset -> create_splits -> build_features -> train_bayes -> evaluate -> predict_next -> publication -> sensitivity.
+**PipelineStage** — Dataclass defining a single stage: name, dependencies, run function, input/output paths for skip detection. The pipeline has 8 stages in order: data -> splits -> features -> train -> evaluate -> predict -> report -> sensitivity.
 
 **get_execution_order()** — Topological sort of pipeline stages. Ensures train_bayes runs after build_features, evaluate runs after train_bayes, etc. Returns a flat list of stages in valid execution order.
 

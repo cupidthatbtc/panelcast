@@ -755,9 +755,9 @@ The hierarchical Bayesian model predicts album scores using a combination of:
 For observation `i` by artist `j` at album sequence position `t`:
 
 ```
-y_ij ~ Normal(mu_ij, sigma_ij)
+y_ij ~ StudentT(df=4, mu_ij, sigma_ij)   # family configurable via --likelihood-family
 
-mu_ij = artist_effect_jt + X_ij @ beta + rho * prev_score_ij
+mu_ij = artist_effect_jt + X_ij @ beta + rho * (prev_score_ij - ar_center)
 ```
 
 **Time-varying artist effects (random walk):**
