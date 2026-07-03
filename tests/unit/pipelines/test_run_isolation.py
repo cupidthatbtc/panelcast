@@ -188,3 +188,21 @@ class TestRunIsolation:
         manifest = json.loads((out / "runB" / "manifest.json").read_text(encoding="utf-8"))
         assert "data" in manifest["stages_skipped"]
         assert (out / "runB" / "models" / "model.txt").read_text(encoding="utf-8") == "runB"
+
+
+class TestLatestPointerFailure:
+    def test_pointer_write_failure_is_nonfatal(self, tmp_path, monkeypatch):
+        """A failed latest.json replace warns instead of failing the run."""
+        import panelcast.pipelines.orchestrator as orch_mod
+
+        out = tmp_path / "outputs"
+        orch = PipelineOrchestrator(PipelineConfig(), output_base=out)
+        orch.run_dir = out / "runX"
+        orch.run_dir.mkdir(parents=True)
+
+        def boom(*args, **kwargs):
+            raise OSError("boom")
+
+        monkeypatch.setattr(orch_mod.os, "replace", boom)
+        orch._write_latest_pointer()
+        assert not (out / "latest.json").exists()
