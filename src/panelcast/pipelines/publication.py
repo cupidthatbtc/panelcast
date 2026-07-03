@@ -19,6 +19,7 @@ import structlog
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.evaluation.calibration import ReliabilityData
 from panelcast.models.bayes.io import load_manifest, load_model
+from panelcast.paths import ArtifactPaths
 from panelcast.reporting.figures import (
     get_trace_plot_vars,
     save_artist_prediction_plot,
@@ -501,13 +502,16 @@ def _load_publication_inputs(ctx: StageContext) -> _PublicationInputs:
     """
     log.info("publication_pipeline_start")
 
-    reports_dir = Path("reports")
+    # Roots come from ctx.paths but are rebuilt through the module-local Path
+    # so test patches keep applying.
+    paths = ArtifactPaths.from_ctx(ctx)
+    reports_dir = Path(paths.reports)
     figures_dir = reports_dir / "figures"
     tables_dir = reports_dir / "tables"
     figures_dir.mkdir(parents=True, exist_ok=True)
     tables_dir.mkdir(parents=True, exist_ok=True)
 
-    model_dir = Path("models")
+    model_dir = Path(paths.models)
     manifest = load_manifest(model_dir)
     site_prefix, model_key = _resolve_model_key(model_dir)
     if manifest is None or model_key not in manifest.current:
@@ -516,7 +520,7 @@ def _load_publication_inputs(ctx: StageContext) -> _PublicationInputs:
     log.info("loading_model", path=str(model_path))
     idata = load_model(model_path)
 
-    eval_dir = Path("outputs/evaluation")
+    eval_dir = Path(paths.evaluation)
     input_errors: list[dict[str, str]] = []
 
     def _load_json(path: Path, log_event: str, artifact: str) -> dict[str, Any]:
@@ -558,7 +562,7 @@ def _load_publication_inputs(ctx: StageContext) -> _PublicationInputs:
         primary_metrics=primary_metrics,
         primary_split_name=primary_split_name,
         point_metrics=_parse_point_metrics(primary_metrics),
-        known_csv=Path("outputs/predictions/next_event_known_entities.csv"),
+        known_csv=Path(paths.predictions) / "next_event_known_entities.csv",
         input_errors=input_errors,
     )
 

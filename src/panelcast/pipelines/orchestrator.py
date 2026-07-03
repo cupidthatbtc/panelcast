@@ -42,6 +42,7 @@ from panelcast.config.gates import (
     SigmaObsPriorType,
     TargetTransform,
 )
+from panelcast.paths import ArtifactPaths
 from panelcast.pipelines.errors import (
     ConvergenceError,
     EnvironmentError,
@@ -953,6 +954,8 @@ class PipelineOrchestrator:
         """
         return StageContext(
             run_dir=self.run_dir or Path("outputs"),
+            # PR (ii) of #81 flips this to ArtifactPaths.for_run(run_dir).
+            paths=ArtifactPaths.flat(),
             seed=self.config.seed,
             strict=self.config.strict,
             verbose=self.config.verbose,

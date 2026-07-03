@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from panelcast.config.descriptor import DatasetDescriptor
+from panelcast.paths import ArtifactPaths
 from panelcast.utils.hashing import sha256_path
 
 if TYPE_CHECKING:
@@ -143,6 +144,8 @@ class StageContext:
     predict_artist_batch_size: int = 50
     # Dataset descriptor (default reproduces AOTY behavior exactly)
     descriptor: DatasetDescriptor = field(default_factory=DatasetDescriptor)
+    # Artifact roots (flat default reproduces the legacy layout exactly)
+    paths: ArtifactPaths = field(default_factory=ArtifactPaths.flat)
 
 
 @dataclass
@@ -332,6 +335,7 @@ def _run_data_stage(ctx: StageContext):
     result = prepare_datasets(
         PrepareConfig(
             raw_path=str(_resolve_raw_dataset_path(descriptor)),
+            output_dir=ctx.paths.processed.as_posix(),
             min_ratings_thresholds=list(descriptor.min_obs_thresholds),
             primary_min_ratings=descriptor.primary_min_obs,
             dataset_hash_output=str(ctx.run_dir / "dataset_hash.txt"),
@@ -366,7 +370,8 @@ def _run_splits_stage(ctx: StageContext):
         entity_col=ctx.descriptor.entity_col,
         date_col=ctx.descriptor.parsed_date_col,
         event_col=ctx.descriptor.event_col,
-        source_path=Path("data/processed")
+        output_dir=ctx.paths.splits,
+        source_path=ctx.paths.processed
         / f"{ctx.descriptor.processed_name(ctx.min_ratings)}.parquet",
     )
     return create_splits(config)

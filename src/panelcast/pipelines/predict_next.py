@@ -27,6 +27,7 @@ from panelcast.models.bayes.model import make_score_model
 from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_entity
 from panelcast.models.bayes.priors import PriorConfig
 from panelcast.models.bayes.transforms import get_transform
+from panelcast.paths import ArtifactPaths
 from panelcast.pipelines.training_summary import (
     ar_center_on_model_scale,
     load_training_summary,
@@ -539,7 +540,10 @@ def predict_next_events(ctx: StageContext) -> dict:
 
     # Load the typed training summary first: it records the dataset the
     # model was trained on, which drives the model key and site prefix.
-    model_dir = Path("models")
+    # Roots come from ctx.paths but are rebuilt through the module-local Path
+    # (with the original string form) so test patches keep applying.
+    paths = ArtifactPaths.from_ctx(ctx)
+    model_dir = Path(paths.models)
     summary_path = model_dir / "training_summary.json"
     summary = load_training_summary(summary_path).to_json_dict()
     ds_block = summary.get("dataset") or {}
@@ -577,9 +581,9 @@ def predict_next_events(ctx: StageContext) -> dict:
 
     # Load training data to get per-artist last album info
     train_df = pd.read_parquet(
-        resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL) / "train.parquet"
+        resolve_split_dir(Path(paths.splits), SplitType.WITHIN_ENTITY_TEMPORAL) / "train.parquet"
     )
-    train_features = pd.read_parquet("data/features/train_features.parquet")
+    train_features = pd.read_parquet(paths.features / "train_features.parquet")
 
     # Join on the stable original_row_id key (legacy parquets fall back to
     # positional index alignment inside the helper).
@@ -639,7 +643,7 @@ def predict_next_events(ctx: StageContext) -> dict:
     log.info("new_predictions_complete", n_rows=len(new_df))
 
     # Save outputs
-    output_dir = Path("outputs/predictions")
+    output_dir = Path(paths.predictions.as_posix())
     output_dir.mkdir(parents=True, exist_ok=True)
 
     known_df.to_csv(output_dir / "next_event_known_entities.csv", index=False)
