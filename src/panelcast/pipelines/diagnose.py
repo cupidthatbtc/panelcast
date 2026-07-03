@@ -14,7 +14,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from panelcast.paths import resolve_latest
+from panelcast.paths import resolve_evaluation_dir
 
 # A PPC p-value at/near 0 or 1 is the signature of a misspecified statistic
 # (e.g. the symmetric-likelihood / left-skewed-target mismatch).
@@ -163,8 +163,7 @@ def run_diagnose(
     to the legacy flat location when no latest pointer exists.
     """
     if eval_dir is None:
-        latest = resolve_latest()
-        eval_dir = latest / "evaluation" if latest is not None else Path("outputs/evaluation")
+        eval_dir = resolve_evaluation_dir()
     report = build_report(eval_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     md_path = output_dir / "diagnostics_report.md"

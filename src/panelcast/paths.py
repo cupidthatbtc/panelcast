@@ -82,3 +82,9 @@ def resolve_latest(output_base: Path = Path("outputs")) -> Path | None:
     except OSError:
         pass
     return None
+
+
+def resolve_evaluation_dir(output_base: Path = Path("outputs")) -> Path:
+    """Latest run's evaluation dir, or the legacy flat location."""
+    latest = resolve_latest(output_base)
+    return latest / "evaluation" if latest is not None else output_base / "evaluation"
