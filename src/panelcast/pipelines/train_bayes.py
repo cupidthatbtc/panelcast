@@ -20,8 +20,8 @@ import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
-from panelcast.gpu_memory import estimate_memory_gb
 from panelcast.data.split_types import SplitType, resolve_split_dir
+from panelcast.gpu_memory import estimate_memory_gb
 from panelcast.models.bayes.diagnostics import check_convergence
 from panelcast.models.bayes.fit import MCMCConfig, fit_model
 from panelcast.models.bayes.io import save_model

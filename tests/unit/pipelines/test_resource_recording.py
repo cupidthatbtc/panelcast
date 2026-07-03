@@ -12,8 +12,8 @@ from panelcast.pipelines.manifest import (
 )
 from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
 from panelcast.pipelines.stages import PipelineStage
-from panelcast.pipelines.training_summary import TrainingSummary
 from panelcast.pipelines.train_bayes import _build_resource_usage
+from panelcast.pipelines.training_summary import TrainingSummary
 
 
 def _model_args(n_obs=100, n_features=5, n_artists=20, max_seq=8):
