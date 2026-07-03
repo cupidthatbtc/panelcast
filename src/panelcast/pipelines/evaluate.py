@@ -48,6 +48,7 @@ from panelcast.models.bayes.model import make_score_model
 from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_entity
 from panelcast.models.bayes.priors import PriorConfig
 from panelcast.models.bayes.transforms import get_transform
+from panelcast.paths import ArtifactPaths
 from panelcast.pipelines.stamps import DATA_STAGE_ROOTS, read_stamp
 from panelcast.pipelines.train_bayes import _apply_max_albums_cap
 from panelcast.pipelines.training_summary import (
@@ -549,16 +550,18 @@ def _prepare_test_model_args(
     return test_model_args, y_true
 
 
-def _resolve_feature_split_dir(split_name: str) -> Path:
+def _resolve_feature_split_dir(split_name: str, features_root: Path | None = None) -> Path:
     """Resolve feature directory with backward compatibility fallback.
 
     Prefers the canonical directory, falls back to a legacy-named directory if
-    only that exists, and finally to the flat ``data/features`` root for the
-    primary split (the legacy layout that mirrored primary features there).
-    Unknown split names (not a SplitType) are returned as-is so callers can
-    point at arbitrary directories.
+    only that exists, and finally to the flat features root for the primary
+    split (the legacy layout that mirrored primary features there). Unknown
+    split names (not a SplitType) are returned as-is so callers can point at
+    arbitrary directories.
     """
-    candidate = Path("data/features") / split_name
+    # Rebuilt through the module-local Path so test patches keep applying.
+    root = Path("data/features") if features_root is None else Path(features_root)
+    candidate = root / split_name
     if candidate.exists():
         return candidate
     try:
@@ -568,11 +571,11 @@ def _resolve_feature_split_dir(split_name: str) -> Path:
     if split_type is not None:
         legacy = legacy_split_name(split_type)
         if legacy is not None:
-            legacy_path = Path("data/features") / legacy
+            legacy_path = root / legacy
             if legacy_path.exists():
                 return legacy_path
         if split_type is SplitType.WITHIN_ENTITY_TEMPORAL:
-            return Path("data/features")
+            return root
     return candidate
 
 
@@ -984,8 +987,11 @@ def _run_training_prior_predictive(
         from panelcast.evaluation.prior_predictive import run_prior_predictive
 
         # Build training model_args from training data
-        primary_split_dir_pp = resolve_split_dir(Path("data/splits"), PRIMARY_SPLIT)
-        primary_features_dir_pp = _resolve_feature_split_dir(PRIMARY_SPLIT)
+        paths = ArtifactPaths.from_ctx(ctx)
+        primary_split_dir_pp = resolve_split_dir(Path(paths.splits), PRIMARY_SPLIT)
+        primary_features_dir_pp = _resolve_feature_split_dir(
+            PRIMARY_SPLIT, features_root=paths.features
+        )
         train_df_pp = pd.read_parquet(primary_split_dir_pp / "train.parquet")
         train_features_pp = pd.read_parquet(primary_features_dir_pp / "train_features.parquet")
 
@@ -1112,8 +1118,9 @@ def _evaluate_primary_split(
     intervals: tuple[float, ...],
     discretize_obs: bool,
 ) -> tuple[dict, dict]:
-    primary_split_dir = resolve_split_dir(Path("data/splits"), PRIMARY_SPLIT)
-    primary_features_dir = _resolve_feature_split_dir(PRIMARY_SPLIT)
+    paths = ArtifactPaths.from_ctx(ctx)
+    primary_split_dir = resolve_split_dir(Path(paths.splits), PRIMARY_SPLIT)
+    primary_features_dir = _resolve_feature_split_dir(PRIMARY_SPLIT, features_root=paths.features)
     primary_test_df = pd.read_parquet(primary_split_dir / "test.parquet")
     primary_train_df = pd.read_parquet(primary_split_dir / "train.parquet")
     primary_test_features = pd.read_parquet(primary_features_dir / "test_features.parquet")
@@ -1249,7 +1256,10 @@ def evaluate_models(ctx: StageContext) -> dict:
     observed_stamps = getattr(getattr(ctx, "manifest", None), "data_stamps", None) or {}
     feature_stamp = observed_stamps.get("features") or read_stamp(DATA_STAGE_ROOTS["features"])
 
-    model_dir = Path("models")
+    # Roots come from ctx.paths but are rebuilt through the module-local Path
+    # so test patches keep applying.
+    paths = ArtifactPaths.from_ctx(ctx)
+    model_dir = Path(paths.models)
 
     # A missing manifest means no trained model at all -- report that before
     # touching the training summary so the error names the actual gap.
@@ -1350,8 +1360,10 @@ def evaluate_models(ctx: StageContext) -> dict:
 
     # Secondary split: artist-disjoint cold-start predictive path
     if ctx.evaluate_secondary_split:
-        secondary_split_dir = resolve_split_dir(Path("data/splits"), SECONDARY_SPLIT)
-        secondary_features_dir = _resolve_feature_split_dir(SECONDARY_SPLIT)
+        secondary_split_dir = resolve_split_dir(Path(paths.splits), SECONDARY_SPLIT)
+        secondary_features_dir = _resolve_feature_split_dir(
+            SECONDARY_SPLIT, features_root=paths.features
+        )
         secondary_test_path = secondary_split_dir / "test.parquet"
         secondary_feat_path = secondary_features_dir / "test_features.parquet"
 
@@ -1422,7 +1434,7 @@ def evaluate_models(ctx: StageContext) -> dict:
                     f"(tolerance={ctx.coverage_tolerance})."
                 )
 
-    output_dir = Path(_EVAL_OUTPUT_DIR)
+    output_dir = Path(paths.evaluation)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     diagnostics_path = output_dir / "diagnostics.json"

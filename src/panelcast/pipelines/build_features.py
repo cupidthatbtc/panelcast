@@ -20,6 +20,7 @@ from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.features.base import FeatureContext
 from panelcast.features.pipeline import FeaturePipeline
 from panelcast.features.registry import FeatureSpec, build_default_registry
+from panelcast.paths import ArtifactPaths
 
 if TYPE_CHECKING:
     from panelcast.pipelines.stages import StageContext
@@ -223,9 +224,11 @@ def build_features(ctx: StageContext) -> dict:
         gbm_offset=gbm_offset,
     )
 
-    # Define paths
-    splits_root = Path("data/splits")
-    features_dir = Path("data/features")
+    # Roots come from ctx.paths but are rebuilt through the module-local Path
+    # so test patches keep applying.
+    paths = ArtifactPaths.from_ctx(ctx)
+    splits_root = Path(paths.splits)
+    features_dir = Path(paths.features)
     features_dir.mkdir(parents=True, exist_ok=True)
     split_names = [
         str(SplitType.WITHIN_ENTITY_TEMPORAL.value),

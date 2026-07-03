@@ -28,6 +28,7 @@ from panelcast.models.bayes.io import save_model
 from panelcast.models.bayes.model import compute_sigma_scaled, make_score_model
 from panelcast.models.bayes.priors import priors_for_transform
 from panelcast.models.bayes.transforms import get_transform
+from panelcast.paths import ArtifactPaths
 from panelcast.pipelines.errors import ConvergenceError
 from panelcast.pipelines.training_summary import TrainingSummary
 from panelcast.utils.hashing import hash_dataframe
@@ -801,10 +802,12 @@ def train_models(
     descriptor = getattr(ctx, "descriptor", None) or DatasetDescriptor()
     prefix = descriptor.model_prefix
 
-    # Load training data using shared function
-    features_path = features_path or Path("data/features/train_features.parquet")
+    # Load training data using shared function. Roots come from ctx.paths but
+    # are rebuilt through the module-local Path so test patches keep applying.
+    paths = ArtifactPaths.from_ctx(ctx)
+    features_path = features_path or Path(paths.features) / "train_features.parquet"
     splits_path = splits_path or (
-        resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL) / "train.parquet"
+        resolve_split_dir(Path(paths.splits), SplitType.WITHIN_ENTITY_TEMPORAL) / "train.parquet"
     )
 
     debut_prev_score_source = str(getattr(ctx, "debut_prev_score_source", "train_mean"))
@@ -1079,7 +1082,7 @@ def train_models(
     data_hash = hash_dataframe(train_df)
 
     # Save model
-    model_dir = Path("models")
+    model_dir = Path(paths.models)
     model_path, manifest = save_model(
         fit_result=fit_result,
         model_type=f"{prefix}_score",

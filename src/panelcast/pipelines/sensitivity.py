@@ -36,6 +36,7 @@ from panelcast.evaluation.metrics import CRPSResult
 from panelcast.models.bayes.diagnostics import ConvergenceDiagnostics, check_convergence
 from panelcast.models.bayes.fit import MCMCConfig, fit_model
 from panelcast.models.bayes.priors import PriorConfig, get_default_priors
+from panelcast.paths import ArtifactPaths
 
 __all__ = [
     "SensitivityResult",
@@ -1156,7 +1157,6 @@ def run_sensitivity_suite(ctx) -> dict:
     reports/sensitivity/oat_summary.csv (when prior axes ran).
     """
     import json
-    from pathlib import Path
 
     from panelcast.models.bayes.model import make_score_model
     from panelcast.models.bayes.predict import extract_posterior_samples
@@ -1169,13 +1169,14 @@ def run_sensitivity_suite(ctx) -> dict:
 
     descriptor = ctx.descriptor
     prefix = descriptor.model_prefix
+    paths = ArtifactPaths.from_ctx(ctx)
     axes = tuple(getattr(ctx, "sensitivity_axes", ("priors", "ablation", "split_seed")))
-    summary = load_training_summary(Path("models/training_summary.json")).to_json_dict()
+    summary = load_training_summary(paths.models / "training_summary.json").to_json_dict()
 
     # Replicate the training-stage data prep (same gates as the fitted model).
     model_args, feature_cols, _train_df = load_training_data(
-        features_path=Path("data/features/train_features.parquet"),
-        splits_path=resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL)
+        features_path=paths.features / "train_features.parquet",
+        splits_path=resolve_split_dir(paths.splits, SplitType.WITHIN_ENTITY_TEMPORAL)
         / "train.parquet",
         min_albums_filter=getattr(ctx, "min_albums_filter", 2),
         descriptor=descriptor,
@@ -1253,14 +1254,14 @@ def run_sensitivity_suite(ctx) -> dict:
     if "split_seed" in axes:
         import arviz as az_local
 
-        manifest = json.loads(Path("models/manifest.json").read_text(encoding="utf-8"))
+        manifest = json.loads((paths.models / "manifest.json").read_text(encoding="utf-8"))
         model_name = manifest["current"][f"{prefix}_score"]
-        model_path = Path("models") / model_name
+        model_path = paths.models / model_name
         if model_path.suffix != ".nc":
             model_path = model_path.with_suffix(".nc")
         idata = az_local.from_netcdf(model_path)
         posterior_samples = extract_posterior_samples(idata)
-        source_path = Path("data/processed") / (
+        source_path = paths.processed / (
             descriptor.processed_name(getattr(ctx, "min_ratings", None)) + ".parquet"
         )
         source_df = pd.read_parquet(source_path)
@@ -1271,7 +1272,7 @@ def run_sensitivity_suite(ctx) -> dict:
             seeds=tuple(getattr(ctx, "sensitivity_split_seeds", (42, 43))),
         )
 
-    out_dir = Path("reports/sensitivity")
+    out_dir = paths.reports / "sensitivity"
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "sensitivity_results.json"
     with open(out_path, "w", encoding="utf-8") as f:
