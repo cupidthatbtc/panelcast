@@ -34,7 +34,7 @@
 - **Version:** 0.5.0
 - **Authors:** panelcast project
 - **Created:** 2026-06-11
-- **Last updated:** 2026-07-02
+- **Last updated:** 2026-07-03
 
 ## Intended Use
 
@@ -140,7 +140,7 @@ Prior distributions are weakly informative, chosen to regularize inference while
 
 ## Evaluation Results
 
-### Real-data subset re-baseline (2026-07-02, `offset_logit` default)
+### Real-data subset re-baseline (2026-07-03, 0.6.0 defaults)
 
 The published baseline is a fresh publication-configuration fit under the
 promoted `offset_logit` target transform (#43). Data: a representative subset
@@ -150,26 +150,29 @@ ratings across 653 multi-album artists, observed user-score skewness −2.08
 (the full corpus is −2.06) — fit on GPU (RTX 5090) at 4 chains × 5,000,
 warmup 3,000, Student-t likelihood on the transformed scale.
 
-- **Convergence gate: PASS** — R-hat (max) 1.00, bulk ESS 2,333 (≥ 400), 0
+- **Convergence gate: PASS** — R-hat (max) 1.00, bulk ESS 2,612 (≥ 400), 0
   divergences.
-- **Predictive** (within-entity temporal test, n = 653): MAE 5.66, RMSE 8.19,
-  R² 0.429, CRPS 4.13; held-out ELPD (test lppd) −2205.3 (SE 21.9),
-  −3.38/obs. Against the prior `identity` baseline: RMSE 8.26 → 8.19,
-  R² 0.417 → 0.429, CRPS 4.19 → 4.13, paired held-out ELPD +22.2 ± 4.5
-  (z ≈ +4.9, stable across seeds 42/43/44); MAE 5.64 → 5.66 (the Student-t
-  robust-loss trade, unchanged by the transform).
-- **Calibration:** 80% coverage 0.864 (width 20.0; slightly over-covering,
-  outside the ±0.03 tolerance), 95% coverage 0.959 (width 33.4; within
-  tolerance) — same profile as the identity baseline.
-- **PPC — pins reduced from seven to four:** mean (p = 0.51), sd (0.28),
-  q50 (0.054) and min (0.96) are now interior; the remaining pins are
-  skewness (1.00), max (0.999), q90 (0.999) — the structural bounded-skew
-  signature — plus q10 (0.003), the transform's known trade for relieving
+- **Predictive** (within-entity temporal test, n = 653): MAE 5.30, RMSE 7.65,
+  R² 0.501, CRPS 3.87; held-out ELPD (test lppd) −2163.5 (SE 22.4),
+  −3.31/obs. Against the 0.5.0 baseline (`offset_logit`, both 0.6.0 gates
+  off): MAE 5.66 → 5.30, R² 0.429 → 0.501, CRPS 4.13 → 3.87, paired held-out
+  ELPD +224.2 ± 12.6 (z ≈ +17.9) — the 0.6.0 promotions (`gbm_offset`
+  stacking block #86 + genre pooling #85, both screened multi-seed and
+  confirmed at publication scale).
+- **Calibration:** 80% coverage 0.853 (width 18.0; slightly over-covering,
+  outside the ±0.03 tolerance), 95% coverage 0.963 (width 31.5; within
+  tolerance) — intervals *narrowed* by ~2 points at the same coverage
+  profile.
+- **PPC — pin profile unchanged, interiors healthier:** mean (p = 0.51),
+  sd (0.556), q50 (0.077) and min (0.955) are interior; the remaining pins
+  are skewness (1.00), max (0.999), q90 (0.998) — the structural bounded-skew
+  signature — plus q10 (0.002), the transform's known trade for relieving
   q50. See Limitations.
-- **Baselines on the same real splits:** competitive with ridge and behind
-  gradient boosting on point accuracy, better calibrated than both. Cold-start
-  (artist-disjoint) improves from R² ≈ 0 under identity to R² 0.095 (MAE 7.01)
-  under the transform, though it stays the model's weakest split. Regenerated
+- **Baselines on the same real splits:** as of 0.6.0 the model leads the
+  within-entity table on MAE, RMSE, R², and CRPS with calibrated intervals
+  (the stacking block carries the point signal a flexible regressor used to
+  win on). Cold-start (artist-disjoint) also leads at R² 0.113 (MAE 6.91),
+  though it stays the model's weakest split in absolute terms. Regenerated
   table: [`docs/BASELINES.md`](docs/BASELINES.md).
 - **Likelihood decision (historical):** the bounded Beta candidate was tested
   on this real subset and did **not** win — more pinned PPC statistics and
@@ -185,41 +188,44 @@ heteroscedastic exponent collapsing to zero and the entity-disjoint R² ≈ 0 �
 are one finding: the predictive mass lives in the per-entity intercept, with
 measurement-noise modeling and covariates both ~null. See
 [`docs/decisions/what_carries_the_signal.md`](docs/decisions/what_carries_the_signal.md). The
-`offset_logit` re-baseline softens the second half (cold-start R² 0.095), but
-the intercept-carries-the-signal conclusion stands.
+`offset_logit` re-baseline softened the second half, and the 0.6.0 promotions
+revise the first: with the `gbm_offset` covariate in the mean the model now
+extracts the exogenous point signal too (cold-start R² 0.113, within-entity
+R² 0.501) — the intercept still carries the largest single share, but
+"covariates ~null" no longer describes the shipped default.
 
-### Convergence Diagnostics (publication-scale snapshot, 2026-07-02)
+### Convergence Diagnostics (publication-scale snapshot, 2026-07-03)
 
 Convergence status: **PASS**
 
 - R-hat (max): 1.00 (threshold: < 1.01)
-- ESS bulk (min): 2,333 (threshold: ≥ 400)
+- ESS bulk (min): 2,612 (threshold: ≥ 400)
 - Divergent transitions: 0
 
 ### Calibration
 
 Credible interval coverage (within-entity temporal test):
-- 80% CI: 86.4% empirical coverage, mean width = 19.99
-- 95% CI: 95.9% empirical coverage, mean width = 33.44
+- 80% CI: 85.3% empirical coverage, mean width = 17.98
+- 95% CI: 96.3% empirical coverage, mean width = 31.53
 
 **Posterior Predictive Checks:**
-- mean: T(y_obs)=68.79, p=0.513
-- sd: T(y_obs)=10.83, p=0.284
+- mean: T(y_obs)=68.79, p=0.509
+- sd: T(y_obs)=10.83, p=0.556
 - skewness: T(y_obs)=-2.08, p=1.000
-- min: T(y_obs)=3.00, p=0.962
+- min: T(y_obs)=3.00, p=0.955
 - max: T(y_obs)=88.00, p=0.999
-- q10: T(y_obs)=58.00, p=0.003
-- q50: T(y_obs)=71.00, p=0.054
-- q90: T(y_obs)=79.00, p=0.999
+- q10: T(y_obs)=58.00, p=0.002
+- q50: T(y_obs)=71.00, p=0.077
+- q90: T(y_obs)=79.00, p=0.998
 
 ### Predictive Performance
 
 Point prediction metrics (within-entity temporal test, n = 653):
 
-- MAE: 5.66
-- RMSE: 8.19
-- R-squared: 0.429
-- **Held-out ELPD (test lppd):** −2205.3 (SE: 21.9), −3.38 per observation
+- MAE: 5.30
+- RMSE: 7.65
+- R-squared: 0.501
+- **Held-out ELPD (test lppd):** −2163.5 (SE: 22.4), −3.31 per observation
 
 ## Limitations
 
