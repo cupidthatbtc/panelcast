@@ -22,6 +22,7 @@ from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.models.baselines import PanelData, benchmark_baselines
 from panelcast.models.baselines.core import BaselineScore
+from panelcast.pipelines.stamps import verify_stamps
 from panelcast.reporting.tables import create_baseline_benchmark_table, export_table
 
 log = structlog.get_logger()
@@ -217,6 +218,21 @@ def _bayes_rows_from_metrics(
     return [row]
 
 
+def _verify_features_match_metrics(metrics_path: Path) -> None:
+    """Fail fast when data/features was regenerated since the evaluation ran.
+
+    The bayes row comes from metrics.json while baselines fit on the current
+    feature parquets; mixing provenances would make the table incomparable.
+    """
+    try:
+        with open(metrics_path, encoding="utf-8") as f:
+            recorded = json.load(f).get("feature_stamp")
+    except (OSError, json.JSONDecodeError):
+        return
+    if recorded:
+        verify_stamps({"features": recorded}, "compare")
+
+
 def run_baseline_comparison(
     dataset: str | None = None,
     splits: tuple[SplitType, ...] = DEFAULT_SPLITS,
@@ -228,6 +244,8 @@ def run_baseline_comparison(
     metrics_path: Path = Path("outputs/evaluation/metrics.json"),
 ) -> ComparisonResult:
     """Fit and score every baseline on each split; write the benchmark table."""
+    if include_bayes:
+        _verify_features_match_metrics(metrics_path)
     descriptor = load_descriptor(dataset)
     all_rows: list[dict] = []
     all_scores: list[BaselineScore] = []
