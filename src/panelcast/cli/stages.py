@@ -36,6 +36,11 @@ _STAGE_NO_PROGRESS_OPTION = typer.Option(
         "only when stderr is a TTY (piped/redirected logs stay readable)."
     ),
 )
+_STAGE_DRY_RUN_OPTION = typer.Option(
+    False,
+    "--dry-run",
+    help="Show the execution plan without running the stage.",
+)
 
 
 # Individual stage commands
@@ -47,6 +52,7 @@ def stage_data(
     dataset: str | None = _STAGE_DATASET_OPTION,
     config_files: list[str] | None = _STAGE_CONFIG_OPTION,
     preset: str | None = _STAGE_PRESET_OPTION,
+    dry_run: bool = _STAGE_DRY_RUN_OPTION,
 ) -> None:
     """Run data preparation stage only.
 
@@ -63,6 +69,7 @@ def stage_data(
         dataset=dataset,
         config_files=config_files,
         preset=preset,
+        dry_run=dry_run,
     )
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)
@@ -76,6 +83,7 @@ def stage_splits(
     dataset: str | None = _STAGE_DATASET_OPTION,
     config_files: list[str] | None = _STAGE_CONFIG_OPTION,
     preset: str | None = _STAGE_PRESET_OPTION,
+    dry_run: bool = _STAGE_DRY_RUN_OPTION,
 ) -> None:
     """Run split creation stage only.
 
@@ -92,6 +100,7 @@ def stage_splits(
         dataset=dataset,
         config_files=config_files,
         preset=preset,
+        dry_run=dry_run,
     )
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)
@@ -105,6 +114,7 @@ def stage_features(
     dataset: str | None = _STAGE_DATASET_OPTION,
     config_files: list[str] | None = _STAGE_CONFIG_OPTION,
     preset: str | None = _STAGE_PRESET_OPTION,
+    dry_run: bool = _STAGE_DRY_RUN_OPTION,
 ) -> None:
     """Run feature building stage only.
 
@@ -120,6 +130,7 @@ def stage_features(
         dataset=dataset,
         config_files=config_files,
         preset=preset,
+        dry_run=dry_run,
     )
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)
@@ -159,6 +170,7 @@ def stage_train(
     dataset: str | None = _STAGE_DATASET_OPTION,
     config_files: list[str] | None = _STAGE_CONFIG_OPTION,
     preset: str | None = _STAGE_PRESET_OPTION,
+    dry_run: bool = _STAGE_DRY_RUN_OPTION,
 ) -> None:
     """Run model training stage only.
 
@@ -179,6 +191,7 @@ def stage_train(
         ess_threshold=ess_threshold,
         allow_divergences=allow_divergences,
         progress_bar=False if no_progress else None,
+        dry_run=dry_run,
     )
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)
@@ -192,6 +205,7 @@ def stage_evaluate(
     dataset: str | None = _STAGE_DATASET_OPTION,
     config_files: list[str] | None = _STAGE_CONFIG_OPTION,
     preset: str | None = _STAGE_PRESET_OPTION,
+    dry_run: bool = _STAGE_DRY_RUN_OPTION,
 ) -> None:
     """Run evaluation stage only.
 
@@ -207,6 +221,7 @@ def stage_evaluate(
         dataset=dataset,
         config_files=config_files,
         preset=preset,
+        dry_run=dry_run,
     )
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)
@@ -220,6 +235,7 @@ def stage_predict(
     dataset: str | None = _STAGE_DATASET_OPTION,
     config_files: list[str] | None = _STAGE_CONFIG_OPTION,
     preset: str | None = _STAGE_PRESET_OPTION,
+    dry_run: bool = _STAGE_DRY_RUN_OPTION,
 ) -> None:
     """Run next-event prediction stage only.
 
@@ -235,6 +251,7 @@ def stage_predict(
         dataset=dataset,
         config_files=config_files,
         preset=preset,
+        dry_run=dry_run,
     )
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)
@@ -253,6 +270,7 @@ def stage_report(
     dataset: str | None = _STAGE_DATASET_OPTION,
     config_files: list[str] | None = _STAGE_CONFIG_OPTION,
     preset: str | None = _STAGE_PRESET_OPTION,
+    dry_run: bool = _STAGE_DRY_RUN_OPTION,
 ) -> None:
     """Run report generation stage only.
 
@@ -269,6 +287,7 @@ def stage_report(
         config_files=config_files,
         preset=preset,
         strict=strict,
+        dry_run=dry_run,
     )
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)
@@ -301,6 +320,7 @@ def stage_sensitivity(
         help="Apply the in-sampler memory gate to the sensitivity refits.",
     ),
     no_progress: bool = _STAGE_NO_PROGRESS_OPTION,
+    dry_run: bool = _STAGE_DRY_RUN_OPTION,
 ) -> None:
     """Run the opt-in sensitivity analysis stage.
 
@@ -321,6 +341,7 @@ def stage_sensitivity(
         dataset=dataset,
         exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
         progress_bar=False if no_progress else None,
+        dry_run=dry_run,
     )
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)
