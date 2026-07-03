@@ -110,6 +110,8 @@ def _build_stage_config(
         config_kwargs = _apply_config_layers(ctx, config_kwargs, effective_config_files)
         config_kwargs["stages"] = [stage_name]
         return PipelineConfig(**config_kwargs)
+    except FileNotFoundError as e:
+        raise typer.BadParameter(f"Config file not found: {e.filename or e}") from e
     except ValueError as e:
         raise typer.BadParameter(str(e)) from e
 
@@ -414,6 +416,14 @@ def run(
         "--verbose",
         "-v",
         help="Enable DEBUG logging",
+    ),
+    no_progress: bool = typer.Option(
+        False,
+        "--no-progress",
+        help=(
+            "Disable MCMC progress bars. Without this flag they are shown "
+            "only when stderr is a TTY (piped/redirected logs stay readable)."
+        ),
     ),
     preflight: bool = typer.Option(
         False,
@@ -781,6 +791,8 @@ def run(
         strict=strict,
         enforce_lockfile=not allow_unlocked_env,
         verbose=verbose,
+        # None = auto-detect (stderr TTY); --no-progress forces off.
+        progress_bar=False if no_progress else None,
         resume=resume,
         max_albums=max_albums,
         # MCMC config
@@ -830,6 +842,8 @@ def run(
     try:
         config_kwargs = _apply_config_layers(ctx, config_kwargs, effective_config_files)
         config = PipelineConfig(**config_kwargs)
+    except FileNotFoundError as e:
+        raise typer.BadParameter(f"Config file not found: {e.filename or e}") from e
     except ValueError as e:
         raise typer.BadParameter(str(e)) from e
 

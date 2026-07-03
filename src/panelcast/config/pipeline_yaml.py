@@ -80,6 +80,7 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "strict": _spec("strict", "strict"),
     "enforce_lockfile": _spec("enforce_lockfile", "allow_unlocked_env"),
     "verbose": _spec("verbose", "verbose"),
+    "progress_bar": _spec("progress_bar", "no_progress"),
     "max_albums": _spec("max_albums", "max_albums"),
     # MCMC configuration
     "num_chains": _spec("num_chains", "num_chains"),

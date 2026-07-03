@@ -555,7 +555,10 @@ def predict_next_events(ctx: StageContext) -> dict:
     manifest = load_manifest(model_dir)
 
     if manifest is None or model_key not in manifest.current:
-        raise ValueError(f"No trained {model_key} model found in models/manifest.json")
+        raise ValueError(
+            f"No trained {model_key} model found in {model_dir / 'manifest.json'}. "
+            "Run `panelcast stage train` first."
+        )
 
     model_filename = manifest.current[model_key]
     model_path = model_dir / model_filename
@@ -774,7 +777,10 @@ def predict_entity_next(
     manifest = load_manifest(model_dir)
     model_key = f"{prefix}_score"
     if manifest is None or model_key not in manifest.current:
-        raise ValueError(f"No trained {model_key} model found in {model_dir}/manifest.json")
+        raise ValueError(
+            f"No trained {model_key} model found in {model_dir / 'manifest.json'}. "
+            "Run `panelcast stage train` first."
+        )
     idata = load_model(model_dir / manifest.current[model_key])
     posterior_samples = _extract_posterior_samples(idata)
 
