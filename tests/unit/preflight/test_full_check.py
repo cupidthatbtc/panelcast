@@ -1245,6 +1245,52 @@ class TestRunMiniMcmcSubprocess:
         finally:
             temp_path.unlink(missing_ok=True)
 
+    @mock.patch("subprocess.run")
+    def test_default_command_has_no_new_flags(self, mock_run):
+        """Default kwargs keep the legacy command line byte-for-byte."""
+        output = {"success": True, "peak_memory_bytes": 1, "runtime_seconds": 0.1}
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(output), stderr=""
+        )
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            f.write(b"{}")
+            temp_path = Path(f.name)
+        try:
+            _run_mini_mcmc_subprocess(temp_path, timeout_seconds=60)
+            command = mock_run.call_args[0][0]
+            assert "--target-transform" not in command
+            assert "--chain-method" not in command
+            assert "--entity-group-pooling" not in command
+        finally:
+            temp_path.unlink(missing_ok=True)
+
+    @mock.patch("subprocess.run")
+    def test_new_flags_threaded_to_command(self, mock_run):
+        """Non-default transform/chain-method/pooling appear on the command line."""
+        output = {"success": True, "peak_memory_bytes": 1, "runtime_seconds": 0.1}
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=[], returncode=0, stdout=json.dumps(output), stderr=""
+        )
+        with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as f:
+            f.write(b"{}")
+            temp_path = Path(f.name)
+        try:
+            _run_mini_mcmc_subprocess(
+                temp_path,
+                timeout_seconds=60,
+                target_transform="offset_logit",
+                chain_method="vectorized",
+                entity_group_pooling=True,
+            )
+            command = mock_run.call_args[0][0]
+            i = command.index("--target-transform")
+            assert command[i + 1] == "offset_logit"
+            i = command.index("--chain-method")
+            assert command[i + 1] == "vectorized"
+            assert "--entity-group-pooling" in command
+        finally:
+            temp_path.unlink(missing_ok=True)
+
 
 class TestCreateDummyCalibration:
     """Tests for _create_dummy_calibration."""

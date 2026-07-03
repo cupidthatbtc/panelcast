@@ -270,7 +270,7 @@ class TestParseArgsBasic:
 
     def test_minimal_args(self):
         """Single positional arg returns defaults for warmup and samples."""
-        path, warmup, samples, chains, prefix, excl = _parse_args(["model_args.json"])
+        path, warmup, samples, chains, prefix, excl, *_ = _parse_args(["model_args.json"])
         assert path == Path("model_args.json")
         assert warmup == 10
         assert samples == 1
@@ -279,21 +279,21 @@ class TestParseArgsBasic:
 
     def test_custom_warmup(self):
         """--num-warmup overrides default."""
-        path, warmup, samples, _, _, _ = _parse_args(["args.json", "--num-warmup", "25"])
+        path, warmup, samples, *_ = _parse_args(["args.json", "--num-warmup", "25"])
         assert path == Path("args.json")
         assert warmup == 25
         assert samples == 1
 
     def test_custom_samples(self):
         """--num-samples overrides default."""
-        path, warmup, samples, _, _, _ = _parse_args(["args.json", "--num-samples", "100"])
+        path, warmup, samples, *_ = _parse_args(["args.json", "--num-samples", "100"])
         assert path == Path("args.json")
         assert warmup == 10
         assert samples == 100
 
     def test_both_custom_args(self):
         """Both --num-warmup and --num-samples can be set together."""
-        path, warmup, samples, _, _, _ = _parse_args(
+        path, warmup, samples, *_ = _parse_args(
             ["args.json", "--num-warmup", "20", "--num-samples", "50"]
         )
         assert path == Path("args.json")
@@ -302,7 +302,7 @@ class TestParseArgsBasic:
 
     def test_args_order_independent(self):
         """--num-samples before --num-warmup works."""
-        _, warmup, samples, _, _, _ = _parse_args(
+        _, warmup, samples, *_ = _parse_args(
             ["args.json", "--num-samples", "50", "--num-warmup", "20"]
         )
         assert warmup == 20
@@ -310,7 +310,7 @@ class TestParseArgsBasic:
 
     def test_custom_chains_and_prefix(self):
         """--num-chains and --prefix override the defaults."""
-        _, _, _, chains, prefix, _ = _parse_args(
+        _, _, _, chains, prefix, *_ = _parse_args(
             ["args.json", "--num-chains", "2", "--prefix", "perf"]
         )
         assert chains == 2
@@ -686,24 +686,24 @@ class TestRunAndMeasureModelCreation:
 
 class TestParseArgsExcludeCollection:
     def test_single_site(self):
-        _, _, _, _, _, excl = _parse_args(["args.json", "--exclude-collection", "mu_artist"])
+        _, _, _, _, _, excl, *_ = _parse_args(["args.json", "--exclude-collection", "mu_artist"])
         assert excl == ("mu_artist",)
 
     def test_comma_separated_sites(self):
-        _, _, _, _, _, excl = _parse_args(
+        _, _, _, _, _, excl, *_ = _parse_args(
             ["args.json", "--exclude-collection", "mu_artist,sigma_obs,rho"]
         )
         assert excl == ("mu_artist", "sigma_obs", "rho")
 
     def test_spaces_stripped(self):
-        _, _, _, _, _, excl = _parse_args(
+        _, _, _, _, _, excl, *_ = _parse_args(
             ["args.json", "--exclude-collection", " mu_artist , sigma_obs "]
         )
         assert excl == ("mu_artist", "sigma_obs")
 
     def test_empty_segments_ignored(self):
         # Trailing comma and double comma both produce clean tuple
-        _, _, _, _, _, excl = _parse_args(["args.json", "--exclude-collection", "mu_artist,,"])
+        _, _, _, _, _, excl, *_ = _parse_args(["args.json", "--exclude-collection", "mu_artist,,"])
         assert excl == ("mu_artist",)
 
     def test_missing_value_raises(self):
@@ -711,7 +711,7 @@ class TestParseArgsExcludeCollection:
             _parse_args(["args.json", "--exclude-collection"])
 
     def test_combined_with_other_flags(self):
-        _, warmup, _, chains, prefix, excl = _parse_args(
+        _, warmup, _, chains, prefix, excl, *_ = _parse_args(
             [
                 "args.json",
                 "--num-warmup",
@@ -730,7 +730,7 @@ class TestParseArgsExcludeCollection:
         assert excl == ("mu_artist", "beta")
 
     def test_default_is_empty_tuple(self):
-        _, _, _, _, _, excl = _parse_args(["args.json"])
+        _, _, _, _, _, excl, *_ = _parse_args(["args.json"])
         assert excl == ()
 
 
@@ -1020,7 +1020,7 @@ class TestParseArgsEdgeCases:
 
     def test_both_args_with_path(self):
         """Both warmup and samples along with path return correct tuple."""
-        path, warmup, samples, _, _, _ = _parse_args(
+        path, warmup, samples, *_ = _parse_args(
             ["/tmp/model.json", "--num-warmup", "5", "--num-samples", "10"]
         )
         assert path == Path("/tmp/model.json")
@@ -1029,7 +1029,7 @@ class TestParseArgsEdgeCases:
 
     def test_samples_before_warmup(self):
         """--num-samples can appear before --num-warmup."""
-        _, warmup, samples, _, _, _ = _parse_args(
+        _, warmup, samples, *_ = _parse_args(
             ["a.json", "--num-samples", "20", "--num-warmup", "15"]
         )
         assert warmup == 15
@@ -1142,3 +1142,289 @@ class TestRunAndMeasureEdgeCases:
             assert "learn_n_exponent" not in call_kwargs
         finally:
             Path(temp_path).unlink()
+
+
+# --- 0.7.0 preflight ladder flags (#104) ---
+
+
+class TestParseArgsNewFlags:
+    def test_defaults(self):
+        _, _, _, _, _, _, transform, method, pooling = _parse_args(["args.json"])
+        assert transform == "identity"
+        assert method == "sequential"
+        assert pooling is False
+
+    def test_target_transform_offset_logit(self):
+        _, _, _, _, _, _, transform, _, _ = _parse_args(
+            ["args.json", "--target-transform", "offset_logit"]
+        )
+        assert transform == "offset_logit"
+
+    def test_target_transform_invalid_raises(self):
+        with pytest.raises(ValueError, match="--target-transform must be"):
+            _parse_args(["args.json", "--target-transform", "logit"])
+
+    def test_target_transform_missing_value_raises(self):
+        with pytest.raises(ValueError, match="--target-transform requires a value"):
+            _parse_args(["args.json", "--target-transform"])
+
+    def test_chain_method_vectorized(self):
+        _, _, _, _, _, _, _, method, _ = _parse_args(["args.json", "--chain-method", "vectorized"])
+        assert method == "vectorized"
+
+    def test_chain_method_invalid_raises(self):
+        with pytest.raises(ValueError, match="--chain-method must be"):
+            _parse_args(["args.json", "--chain-method", "parallel"])
+
+    def test_chain_method_missing_value_raises(self):
+        with pytest.raises(ValueError, match="--chain-method requires a value"):
+            _parse_args(["args.json", "--chain-method"])
+
+    def test_entity_group_pooling_flag(self):
+        _, _, _, _, _, _, _, _, pooling = _parse_args(["args.json", "--entity-group-pooling"])
+        assert pooling is True
+
+    def test_combined_with_existing_flags(self):
+        (path, warmup, _, chains, prefix, excl, transform, method, pooling) = _parse_args(
+            [
+                "args.json",
+                "--num-warmup",
+                "5",
+                "--num-chains",
+                "2",
+                "--prefix",
+                "perf",
+                "--exclude-collection",
+                "perf_rw_raw",
+                "--target-transform",
+                "offset_logit",
+                "--chain-method",
+                "vectorized",
+                "--entity-group-pooling",
+            ]
+        )
+        assert warmup == 5
+        assert chains == 2
+        assert prefix == "perf"
+        assert excl == ("perf_rw_raw",)
+        assert transform == "offset_logit"
+        assert method == "vectorized"
+        assert pooling is True
+
+
+def _capture_run_kwargs(model_args: dict, **kwargs) -> tuple[dict, dict]:
+    """Run run_and_measure with mocked MCMC; return (MCMC ctor, mcmc.run) kwargs."""
+    with (
+        mock.patch("panelcast.models.bayes.model.make_score_model", return_value="model"),
+        mock.patch("numpyro.infer.NUTS", return_value="kernel"),
+        mock.patch("numpyro.infer.MCMC") as mock_mcmc_cls,
+        mock.patch("panelcast.gpu_memory.measure.get_jax_memory_stats") as mock_stats,
+    ):
+        mock_mcmc = mock.Mock()
+        mock_mcmc_cls.return_value = mock_mcmc
+        mock_stats.return_value = mock.Mock(peak_bytes_in_use=1024, peak_gb=0.001)
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(model_args, f)
+            temp_path = Path(f.name)
+        try:
+            run_and_measure(temp_path, **kwargs)
+        finally:
+            temp_path.unlink()
+        return mock_mcmc_cls.call_args[1], mock_mcmc.run.call_args[1]
+
+
+class TestRunAndMeasureTargetTransform:
+    def test_offset_logit_transforms_y_and_prev_score(self):
+        import numpy as np
+
+        from panelcast.models.bayes.transforms import get_transform
+
+        model_args = {
+            "artist_idx": [0, 1],
+            "album_seq": [1, 1],
+            "prev_score": [72.5, 60.0],
+            "X": [[1.0], [2.0]],
+            "y": [70.0, 80.0],
+            "n_artists": 2,
+            "max_seq": 1,
+            "target_bounds": [0.0, 100.0],
+        }
+        _, run_kwargs = _capture_run_kwargs(model_args, target_transform="offset_logit")
+
+        transform = get_transform("offset_logit", target_bounds=(0.0, 100.0))
+        np.testing.assert_allclose(
+            np.asarray(run_kwargs["y"]),
+            np.asarray(transform.forward(np.array([70.0, 80.0], dtype=np.float32))),
+            rtol=1e-6,
+        )
+        np.testing.assert_allclose(
+            np.asarray(run_kwargs["prev_score"]),
+            np.asarray(transform.forward(np.array([72.5, 60.0], dtype=np.float32))),
+            rtol=1e-6,
+        )
+
+    def test_offset_logit_priors_mirror_production(self):
+        model_args = {
+            "artist_idx": [0],
+            "album_seq": [1],
+            "prev_score": [50.0],
+            "X": [[1.0]],
+            "y": [70.0],
+            "n_artists": 1,
+            "max_seq": 1,
+        }
+        _, run_kwargs = _capture_run_kwargs(model_args, target_transform="offset_logit")
+
+        priors = run_kwargs["priors"]
+        assert priors.target_transform == "offset_logit"
+        # priors_for_transform right-sizes the noise scales on the logit scale
+        assert priors.sigma_obs_scale == 0.5
+        assert run_kwargs["target_bounds"] == (0.0, 100.0)
+
+    def test_custom_bounds_from_json(self):
+        import numpy as np
+
+        from panelcast.models.bayes.transforms import get_transform
+
+        model_args = {
+            "artist_idx": [0],
+            "album_seq": [1],
+            "prev_score": [5.0],
+            "X": [[1.0]],
+            "y": [7.0],
+            "n_artists": 1,
+            "max_seq": 1,
+            "target_bounds": [0.0, 10.0],
+        }
+        _, run_kwargs = _capture_run_kwargs(model_args, target_transform="offset_logit")
+
+        transform = get_transform("offset_logit", target_bounds=(0.0, 10.0))
+        np.testing.assert_allclose(
+            np.asarray(run_kwargs["y"]),
+            np.asarray(transform.forward(np.array([7.0], dtype=np.float32))),
+            rtol=1e-6,
+        )
+        assert run_kwargs["target_bounds"] == (0.0, 10.0)
+
+    def test_identity_default_stays_legacy(self):
+        import numpy as np
+
+        model_args = {
+            "artist_idx": [0],
+            "album_seq": [1],
+            "prev_score": [50.0],
+            "X": [[1.0]],
+            "y": [70.0],
+            "n_artists": 1,
+            "max_seq": 1,
+        }
+        mcmc_kwargs, run_kwargs = _capture_run_kwargs(model_args)
+
+        assert "priors" not in run_kwargs
+        assert "target_bounds" not in run_kwargs
+        np.testing.assert_allclose(np.asarray(run_kwargs["y"]), [70.0])
+        assert mcmc_kwargs["chain_method"] == "sequential"
+
+    def test_chain_method_vectorized_passed_to_mcmc(self):
+        model_args = {
+            "artist_idx": [0],
+            "album_seq": [1],
+            "prev_score": [50.0],
+            "X": [[1.0]],
+            "y": [70.0],
+            "n_artists": 1,
+            "max_seq": 1,
+        }
+        mcmc_kwargs, _ = _capture_run_kwargs(model_args, chain_method="vectorized")
+        assert mcmc_kwargs["chain_method"] == "vectorized"
+
+
+class TestRunAndMeasureEntityGroupPooling:
+    def test_missing_group_keys_raises(self):
+        model_args = {
+            "artist_idx": [0],
+            "album_seq": [1],
+            "prev_score": [50.0],
+            "X": [[1.0]],
+            "y": [70.0],
+            "n_artists": 1,
+            "max_seq": 1,
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(model_args, f)
+            temp_path = Path(f.name)
+        try:
+            with pytest.raises(ValueError, match="group_idx_by_artist"):
+                run_and_measure(temp_path, entity_group_pooling=True)
+        finally:
+            temp_path.unlink()
+
+    def test_pooling_args_passed_to_model(self):
+        import numpy as np
+
+        model_args = {
+            "artist_idx": [0, 1],
+            "album_seq": [1, 1],
+            "prev_score": [50.0, 50.0],
+            "X": [[1.0], [2.0]],
+            "y": [70.0, 80.0],
+            "n_artists": 2,
+            "max_seq": 1,
+            "group_idx_by_artist": [0, 1],
+            "n_groups": 2,
+        }
+        _, run_kwargs = _capture_run_kwargs(model_args, entity_group_pooling=True)
+
+        np.testing.assert_array_equal(np.asarray(run_kwargs["group_idx_by_artist"]), [0, 1])
+        assert run_kwargs["n_groups"] == 2
+        assert run_kwargs["priors"].entity_group_pooling is True
+
+    def test_pooling_tiny_fit_runs(self):
+        """Real CPU mini-fit through the pooling + offset_logit gates."""
+        model_args = {
+            "artist_idx": [0, 0, 1, 1, 2, 2],
+            "album_seq": [1, 2, 1, 2, 1, 2],
+            "prev_score": [70.0, 68.0, 75.0, 74.0, 60.0, 62.0],
+            "X": [[0.1], [0.2], [-0.1], [0.0], [0.3], [-0.2]],
+            "y": [68.0, 71.0, 74.0, 76.0, 62.0, 61.0],
+            "n_artists": 3,
+            "max_seq": 2,
+            "group_idx_by_artist": [0, 1, 1],
+            "n_groups": 2,
+            "target_bounds": [0.0, 100.0],
+        }
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(model_args, f)
+            temp_path = Path(f.name)
+
+        mock_stats = mock.Mock(peak_bytes_in_use=1024, peak_gb=0.001)
+        try:
+            with mock.patch(
+                "panelcast.gpu_memory.measure.get_jax_memory_stats", return_value=mock_stats
+            ):
+                result = run_and_measure(
+                    temp_path,
+                    num_warmup=2,
+                    num_samples=2,
+                    target_transform="offset_logit",
+                    entity_group_pooling=True,
+                )
+            assert result["success"] is True
+            assert result["exit_code"] == 0
+        finally:
+            temp_path.unlink()
+
+
+class TestSubprocessNewFlagErrors:
+    def test_invalid_target_transform_outputs_error_json(self):
+        rc, output = _run_mini("dummy.json", "--target-transform", "bogus")
+        assert rc == 1
+        assert output["success"] is False
+        assert "--target-transform must be" in output["error"]
+
+    def test_invalid_chain_method_outputs_error_json(self):
+        rc, output = _run_mini("dummy.json", "--chain-method", "parallel")
+        assert rc == 1
+        assert output["success"] is False
+        assert "--chain-method must be" in output["error"]

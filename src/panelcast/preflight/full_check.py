@@ -148,6 +148,9 @@ def _run_mini_mcmc_subprocess(
     num_chains: int = 1,
     prefix: str = "user",
     exclude_collection: tuple[str, ...] = (),
+    target_transform: str = "identity",
+    chain_method: str = "sequential",
+    entity_group_pooling: bool = False,
 ) -> dict:
     """Run mini-MCMC in subprocess and return measured memory.
 
@@ -163,6 +166,11 @@ def _run_mini_mcmc_subprocess(
         prefix: Posterior-site prefix / score type (default "user").
         exclude_collection: Site names excluded from in-sampler collection
             (mirrors the production fit's memory gate).
+        target_transform: Target transform for the mini-run ("identity"
+            default; "offset_logit" mirrors the production config).
+        chain_method: NumPyro chain_method ("sequential" default).
+        entity_group_pooling: Enable the group-pooling gate (args JSON must
+            carry group_idx_by_artist / n_groups).
 
     Returns:
         Dictionary with keys:
@@ -192,6 +200,13 @@ def _run_mini_mcmc_subprocess(
     ]
     if exclude_collection:
         command.extend(["--exclude-collection", ",".join(exclude_collection)])
+    # Defaults stay off the command line so the legacy invocation is unchanged.
+    if target_transform != "identity":
+        command.extend(["--target-transform", target_transform])
+    if chain_method != "sequential":
+        command.extend(["--chain-method", chain_method])
+    if entity_group_pooling:
+        command.append("--entity-group-pooling")
 
     try:
         result = subprocess.run(
