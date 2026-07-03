@@ -66,7 +66,9 @@ def _family_values() -> tuple[str, ...]:
 def _family_compatible(
     value: Any, descriptor: DatasetDescriptor, columns: frozenset[str] | None
 ) -> bool:
-    return not (REGISTRY[value].requires_aggregation_count and not descriptor.n_obs_is_aggregation_count)
+    if not REGISTRY[value].requires_aggregation_count:
+        return True
+    return descriptor.n_obs_is_aggregation_count
 
 
 def _pooling_compatible(
