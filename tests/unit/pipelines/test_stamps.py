@@ -118,6 +118,7 @@ class TestOrchestratorIntegration:
         stamp = read_stamp(DATA_STAGE_ROOTS["data"])
         assert stamp is not None
         assert stamp["run_id"] == "run-A"
+        assert stamp["input_hash"] == orch.manifest.stage_hashes["data"]
         assert orch.manifest.data_stamps["data"] == stamp
 
     def test_consumer_observes_existing_stamps(self, tmp_path, monkeypatch):

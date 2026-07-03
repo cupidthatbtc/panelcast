@@ -9,7 +9,7 @@ silently consuming a foreign run's data.
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from panelcast.pipelines.errors import StaleArtifactError
@@ -38,7 +38,7 @@ def write_stamp(root: Path, stage: str, input_hash: str, run_id: str) -> dict:
         "stage": stage,
         "input_hash": input_hash,
         "run_id": run_id,
-        "written_at": datetime.now().isoformat(),
+        "written_at": datetime.now(timezone.utc).isoformat(),
     }
     path = stamp_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)

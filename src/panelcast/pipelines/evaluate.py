@@ -1243,6 +1243,12 @@ def evaluate_models(ctx: StageContext) -> dict:
     """Evaluate fitted models on primary and secondary test splits."""
     log.info("evaluation_pipeline_start")
 
+    # Pin the features provenance now, preferring the stamp this run observed
+    # at stage start (a live read at metrics-write time would reopen the
+    # mid-stage regeneration window the stamps exist to close).
+    observed_stamps = getattr(getattr(ctx, "manifest", None), "data_stamps", None) or {}
+    feature_stamp = observed_stamps.get("features") or read_stamp(DATA_STAGE_ROOTS["features"])
+
     model_dir = Path("models")
 
     # A missing manifest means no trained model at all -- report that before
@@ -1448,7 +1454,7 @@ def evaluate_models(ctx: StageContext) -> dict:
         "ppc": primary.get("ppc"),
         "info_criteria": primary.get("info_criteria"),
         # Provenance for compare --baselines: which features these metrics saw.
-        "feature_stamp": read_stamp(DATA_STAGE_ROOTS["features"]),
+        "feature_stamp": feature_stamp,
     }
 
     metrics_path = output_dir / "metrics.json"
