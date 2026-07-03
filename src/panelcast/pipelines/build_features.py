@@ -46,6 +46,7 @@ def get_feature_blocks(
     enable_artist: bool = True,
     enable_temporal: bool = True,
     descriptor: DatasetDescriptor | None = None,
+    gbm_offset: bool = False,
 ) -> list:
     """Get feature blocks for a descriptor, filtered by ablation flags.
 
@@ -58,6 +59,8 @@ def get_feature_blocks(
         enable_artist: Keep the descriptor's "artist" ablation group if True.
         enable_temporal: Keep the descriptor's "temporal" ablation group if True.
         descriptor: Dataset descriptor (None = AOTY defaults).
+        gbm_offset: Append the stacked-GBM offset block over the enabled
+            blocks' outputs (#86). Default off: block absent, X unchanged.
 
     Returns:
         List of enabled feature blocks in dependency order.
@@ -79,7 +82,12 @@ def get_feature_blocks(
         for spec in descriptor.feature_blocks
         if spec.name not in disabled
     ]
-    return registry.build_all(specs)
+    blocks = registry.build_all(specs)
+    if gbm_offset:
+        from panelcast.features.gbm_offset import GbmOffsetBlock
+
+        blocks.append(GbmOffsetBlock(list(blocks), target_col=descriptor.target_col))
+    return blocks
 
 
 def get_default_feature_blocks() -> list:
@@ -204,12 +212,15 @@ def build_features(ctx: StageContext) -> dict:
         col for col in (descriptor.target_col, descriptor.secondary_target_col) if col is not None
     )
 
+    gbm_offset = bool(getattr(ctx, "gbm_offset", False))
+
     log.info(
         "feature_pipeline_start",
         seed=ctx.seed,
         enable_genre=ctx.enable_genre,
         enable_artist=ctx.enable_artist,
         enable_temporal=ctx.enable_temporal,
+        gbm_offset=gbm_offset,
     )
 
     # Define paths
@@ -258,6 +269,7 @@ def build_features(ctx: StageContext) -> dict:
             enable_artist=ctx.enable_artist,
             enable_temporal=ctx.enable_temporal,
             descriptor=descriptor,
+            gbm_offset=gbm_offset,
         )
         pipeline = FeaturePipeline(blocks)
 
@@ -333,6 +345,7 @@ def build_features(ctx: StageContext) -> dict:
             enable_artist=ctx.enable_artist,
             enable_temporal=ctx.enable_temporal,
             descriptor=descriptor,
+            gbm_offset=gbm_offset,
         )
     ]
     manifest = {
@@ -343,6 +356,7 @@ def build_features(ctx: StageContext) -> dict:
             "enable_artist": ctx.enable_artist,
             "enable_temporal": ctx.enable_temporal,
         },
+        "gbm_offset": gbm_offset,
         "feature_names": feature_names,
         "n_reviews_included": True,
         "target_label_leakage_prevention": {

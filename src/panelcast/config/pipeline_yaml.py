@@ -124,6 +124,8 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "propagate_rw_horizon": _spec("propagate_rw_horizon", None),
     # Genre/group pooling gate (#41; no CLI flag).
     "entity_group_pooling": _spec("entity_group_pooling", None),
+    # Stacked-GBM offset feature block (#86; no CLI flag).
+    "gbm_offset": _spec("gbm_offset", None),
     "exclude_rw_raw_from_collection": _spec(
         "exclude_rw_raw_from_collection", "exclude_rw_raw_from_collection"
     ),
