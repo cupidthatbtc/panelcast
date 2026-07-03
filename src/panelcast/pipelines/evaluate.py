@@ -1255,7 +1255,10 @@ def evaluate_models(ctx: StageContext) -> dict:
     # touching the training summary so the error names the actual gap.
     manifest = load_manifest(model_dir)
     if manifest is None:
-        raise ValueError("No trained user_score model found in models/manifest.json")
+        raise ValueError(
+            f"No trained user_score model found in {model_dir / 'manifest.json'}. "
+            "Run `panelcast stage train` first."
+        )
 
     # The typed training summary records the dataset the model was trained
     # on, which drives the model key and posterior-site prefix.
@@ -1266,7 +1269,10 @@ def evaluate_models(ctx: StageContext) -> dict:
     model_key = f"{prefix}_score"
 
     if model_key not in manifest.current:
-        raise ValueError(f"No trained {model_key} model found in models/manifest.json")
+        raise ValueError(
+            f"No trained {model_key} model found in {model_dir / 'manifest.json'}. "
+            "Run `panelcast stage train` first."
+        )
 
     model_filename = manifest.current[model_key]
     model_path = model_dir / model_filename

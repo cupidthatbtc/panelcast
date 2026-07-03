@@ -23,7 +23,7 @@ from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.gpu_memory import estimate_memory_gb
 from panelcast.models.bayes.diagnostics import check_convergence
-from panelcast.models.bayes.fit import MCMCConfig, fit_model
+from panelcast.models.bayes.fit import MCMCConfig, fit_model, resolve_progress_bar
 from panelcast.models.bayes.io import save_model
 from panelcast.models.bayes.model import compute_sigma_scaled, make_score_model
 from panelcast.models.bayes.priors import priors_for_transform
@@ -1013,7 +1013,7 @@ def train_models(
         model=make_score_model(prefix),
         model_args=model_args,
         config=mcmc_config,
-        progress_bar=True,  # Always show MCMC progress for real-time feedback
+        progress_bar=resolve_progress_bar(getattr(ctx, "progress_bar", None)),
         # Large tensors, exclude to prevent OOM
         exclude_from_idata=tuple(idata_excludes),
         # Opt-in in-sampler exclusion: never store these draws on device

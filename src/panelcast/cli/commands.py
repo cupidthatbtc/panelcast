@@ -225,7 +225,12 @@ def compare(
     include_bayes: bool = typer.Option(
         True,
         "--bayes/--no-bayes",
-        help="Append the current Bayesian model's metrics from outputs/evaluation/metrics.json.",
+        help="Append the current Bayesian model's metrics from the --metrics file.",
+    ),
+    metrics: str = typer.Option(
+        "outputs/evaluation/metrics.json",
+        "--metrics",
+        help="Evaluation metrics.json supplying the Bayesian model's row (with --bayes).",
     ),
 ) -> None:
     """Benchmark simple baselines against the model on the existing splits.
@@ -257,6 +262,7 @@ def compare(
             seed=seed,
             output_dir=Path(output_dir),
             include_bayes=include_bayes,
+            metrics_path=Path(metrics),
         )
     except FileNotFoundError as e:
         typer.echo(

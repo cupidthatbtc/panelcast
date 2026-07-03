@@ -34,7 +34,7 @@ from panelcast.evaluation.cv import (
 )
 from panelcast.evaluation.metrics import CRPSResult
 from panelcast.models.bayes.diagnostics import ConvergenceDiagnostics, check_convergence
-from panelcast.models.bayes.fit import MCMCConfig, fit_model
+from panelcast.models.bayes.fit import MCMCConfig, fit_model, resolve_progress_bar
 from panelcast.models.bayes.priors import PriorConfig, get_default_priors
 
 __all__ = [
@@ -205,6 +205,7 @@ def run_prior_sensitivity(
     compute_loo_cv: bool = True,
     obs_name: str = "user_y",
     coefficient_vars: list[str] | None = None,
+    progress_bar: bool = True,
 ) -> dict[str, SensitivityResult]:
     """Run prior sensitivity analysis (SENS-01).
 
@@ -266,7 +267,9 @@ def run_prior_sensitivity(
         args_with_priors = {**model_args, "priors": prior_config}
 
         # Fit model
-        fit_result = fit_model(model, args_with_priors, config=mcmc_config, progress_bar=True)
+        fit_result = fit_model(
+            model, args_with_priors, config=mcmc_config, progress_bar=progress_bar
+        )
 
         # Check convergence (allow divergences for sensitivity analysis)
         convergence = check_convergence(fit_result.idata, allow_divergences=True)
@@ -319,6 +322,7 @@ def run_threshold_sensitivity(
     compute_loo_cv: bool = True,
     obs_name: str = "user_y",
     coefficient_vars: list[str] | None = None,
+    progress_bar: bool = True,
 ) -> dict[int, SensitivityResult]:
     """Run threshold sensitivity analysis (SENS-02).
 
@@ -379,7 +383,7 @@ def run_threshold_sensitivity(
         logger.info("Loaded observations", n_obs=n_obs, threshold=threshold)
 
         # Fit model
-        fit_result = fit_model(model, model_args, config=mcmc_config, progress_bar=True)
+        fit_result = fit_model(model, model_args, config=mcmc_config, progress_bar=progress_bar)
 
         # Check convergence
         convergence = check_convergence(fit_result.idata, allow_divergences=True)
@@ -433,6 +437,7 @@ def run_feature_ablation(
     obs_name: str = "user_y",
     coefficient_vars: list[str] | None = None,
     baseline: SensitivityResult | None = None,
+    progress_bar: bool = True,
 ) -> dict[str, SensitivityResult]:
     """Run feature ablation study (SENS-03).
 
@@ -505,7 +510,7 @@ def run_feature_ablation(
     else:
         # Fit the full model as baseline
         logger.info("Feature ablation: fitting full model (baseline)")
-        fit_result = fit_model(model, model_args, config=mcmc_config, progress_bar=True)
+        fit_result = fit_model(model, model_args, config=mcmc_config, progress_bar=progress_bar)
         convergence = check_convergence(fit_result.idata, allow_divergences=True)
         coefficients = extract_coefficient_summary(fit_result.idata, var_names=coefficient_vars)
 
@@ -554,7 +559,7 @@ def run_feature_ablation(
         ablated_args = {**model_args, "X": X_ablated}
 
         # Fit model
-        fit_result = fit_model(model, ablated_args, config=mcmc_config, progress_bar=True)
+        fit_result = fit_model(model, ablated_args, config=mcmc_config, progress_bar=progress_bar)
         convergence = check_convergence(fit_result.idata, allow_divergences=True)
         coefficients = extract_coefficient_summary(fit_result.idata, var_names=coefficient_vars)
 
@@ -1212,6 +1217,7 @@ def run_sensitivity_suite(ctx) -> dict:
     )
     model = make_score_model(prefix)
     obs_name = f"{prefix}_y"
+    progress_bar = resolve_progress_bar(getattr(ctx, "progress_bar", None))
 
     payload: dict = {"axes": list(axes), "prefix": prefix}
     prior_results: dict[str, SensitivityResult] = {}
@@ -1233,6 +1239,7 @@ def run_sensitivity_suite(ctx) -> dict:
             mcmc_config=mcmc_config,
             configs=located,
             obs_name=obs_name,
+            progress_bar=progress_bar,
         )
         payload["priors"] = aggregate_sensitivity_results(prior_results).to_dict(orient="records")
 
@@ -1245,6 +1252,7 @@ def run_sensitivity_suite(ctx) -> dict:
             mcmc_config=mcmc_config,
             obs_name=obs_name,
             baseline=prior_results.get("default"),
+            progress_bar=progress_bar,
         )
         payload["ablation"] = aggregate_sensitivity_results(ablation_results).to_dict(
             orient="records"

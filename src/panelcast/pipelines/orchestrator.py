@@ -137,6 +137,9 @@ class PipelineConfig:
     strict: bool = False
     enforce_lockfile: bool = True
     verbose: bool = False
+    # MCMC progress bars: None = auto (stderr TTY only), False = --no-progress.
+    # Execution mechanics only — never affects outputs, skip detection, or resume.
+    progress_bar: bool | None = None
     resume: str | None = None
     max_albums: int = 50
     # MCMC configuration
@@ -519,6 +522,7 @@ class PipelineOrchestrator:
                 "strict": self.config.strict,
                 "enforce_lockfile": self.config.enforce_lockfile,
                 "verbose": self.config.verbose,
+                "progress_bar": self.config.progress_bar,
                 "resume": self.config.resume,
                 "max_albums": self.config.max_albums,
                 # MCMC config
@@ -630,7 +634,9 @@ class PipelineOrchestrator:
     )
     # Flags that should not invalidate input-hash skip detection.
     # These only affect execution mechanics, not stage outputs.
-    SKIP_FLAG_IGNORE = frozenset({"skip_existing", "dry_run", "verbose", "resume"})
+    SKIP_FLAG_IGNORE = frozenset(
+        {"skip_existing", "dry_run", "verbose", "resume", "progress_bar"}
+    )
 
     def _skip_flag_differences(self, previous_manifest: RunManifest) -> list[str]:
         """Return output-affecting flag keys that changed since previous run.
@@ -771,6 +777,8 @@ class PipelineOrchestrator:
             parts.append("--allow-unlocked-env")
         if self.config.verbose:
             parts.append("--verbose")
+        if self.config.progress_bar is False:
+            parts.append("--no-progress")
         if self.config.max_albums != defaults.max_albums:
             parts.append(f"--max-albums {self.config.max_albums}")
         # MCMC config
@@ -956,6 +964,7 @@ class PipelineOrchestrator:
             seed=self.config.seed,
             strict=self.config.strict,
             verbose=self.config.verbose,
+            progress_bar=self.config.progress_bar,
             manifest=self.manifest,
             max_albums=self.config.max_albums,
             # MCMC configuration

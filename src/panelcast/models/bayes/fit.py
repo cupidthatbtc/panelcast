@@ -11,6 +11,7 @@ with GPU acceleration via JAX. Key features:
 import gc
 import logging
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -27,9 +28,21 @@ __all__ = [
     "FitResult",
     "fit_model",
     "get_gpu_info",
+    "resolve_progress_bar",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_progress_bar(progress_bar: bool | None) -> bool:
+    """Resolve a tri-state progress-bar setting to a concrete bool.
+
+    None means auto: show the bar only when stderr is a TTY — tqdm's
+    carriage returns make piped/redirected logs unreadable.
+    """
+    if progress_bar is None:
+        return sys.stderr.isatty()
+    return bool(progress_bar)
 
 
 @dataclass(frozen=True)

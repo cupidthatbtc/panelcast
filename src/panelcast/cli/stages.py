@@ -28,6 +28,14 @@ _STAGE_PRESET_OPTION = typer.Option(
     "--preset",
     help="Named config preset {quick,dev,diagnostic,publication}, layered first.",
 )
+_STAGE_NO_PROGRESS_OPTION = typer.Option(
+    False,
+    "--no-progress",
+    help=(
+        "Disable MCMC progress bars. Without this flag they are shown "
+        "only when stderr is a TTY (piped/redirected logs stay readable)."
+    ),
+)
 
 
 # Individual stage commands
@@ -147,6 +155,7 @@ def stage_train(
         "--allow-divergences",
         help="Don't fail on divergences (for exploratory runs)",
     ),
+    no_progress: bool = _STAGE_NO_PROGRESS_OPTION,
     dataset: str | None = _STAGE_DATASET_OPTION,
     config_files: list[str] | None = _STAGE_CONFIG_OPTION,
     preset: str | None = _STAGE_PRESET_OPTION,
@@ -169,6 +178,7 @@ def stage_train(
         rhat_threshold=rhat_threshold,
         ess_threshold=ess_threshold,
         allow_divergences=allow_divergences,
+        progress_bar=False if no_progress else None,
     )
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)
@@ -290,6 +300,7 @@ def stage_sensitivity(
         "--exclude-rw-raw-from-collection",
         help="Apply the in-sampler memory gate to the sensitivity refits.",
     ),
+    no_progress: bool = _STAGE_NO_PROGRESS_OPTION,
 ) -> None:
     """Run the opt-in sensitivity analysis stage.
 
@@ -309,6 +320,7 @@ def stage_sensitivity(
         num_warmup=num_warmup,
         dataset=dataset,
         exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
+        progress_bar=False if no_progress else None,
     )
     exit_code = run_pipeline(config)
     raise typer.Exit(code=exit_code)

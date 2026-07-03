@@ -74,6 +74,8 @@ class StageContext:
     strict: bool
     verbose: bool
     manifest: RunManifest
+    # MCMC progress bars: None = auto (stderr TTY only), False = disabled.
+    progress_bar: bool | None = None
     max_albums: int = 50
     # MCMC configuration
     num_chains: int = 4
