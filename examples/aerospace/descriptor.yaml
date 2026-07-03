@@ -36,6 +36,9 @@ optional_raw_columns: []
 # --- identity / sequencing ------------------------------------------------
 entity_col: Airframe
 event_col: Flight_ID
+# No per-event group column in this domain — the entity_group_pooling gate is
+# structurally unusable (inheriting AOTY's primary_genre would misdescribe it).
+entity_group_col: null
 date_col: Flight_Date
 parsed_date_col: Flight_Date_Parsed
 year_col: Year
@@ -46,6 +49,9 @@ target_col: Perf_Score
 target_bounds: [0.0, 10.0]
 model_prefix: perf
 n_obs_col: Sensor_Samples
+# Sensor samples count telemetry points, not independent raters whose mean is the
+# score, so the beta_binomial likelihood is not meaningful here.
+n_obs_is_aggregation_count: false
 secondary_target_col: null
 secondary_prefix: null
 secondary_n_obs_col: null

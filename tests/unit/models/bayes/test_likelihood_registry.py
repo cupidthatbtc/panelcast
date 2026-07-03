@@ -76,6 +76,38 @@ class TestRegistryContract:
         assert draws.shape == (20, N_OBS)
         assert np.isfinite(draws).all()
 
+    def test_structural_flags_declared(self):
+        # The select candidate space prunes on these; adding a bounded family
+        # means deciding its flags here, consciously.
+        assert {f for f, s in REGISTRY.items() if s.requires_identity_transform} == {
+            "beta",
+            "beta_ceiling",
+            "beta_binomial",
+        }
+        assert {f for f, s in REGISTRY.items() if s.requires_aggregation_count} == {
+            "beta_binomial"
+        }
+
+    @pytest.mark.parametrize(
+        "family", sorted(f for f, s in REGISTRY.items() if s.requires_identity_transform)
+    )
+    def test_identity_requirement_enforced(self, family):
+        with pytest.raises(ValueError, match="target_transform='identity'"):
+            trace(seed(make_score_model("user"), random.PRNGKey(0))).get_trace(
+                y=None, **_model_args(family, target_transform="offset_logit")
+            )
+
+    @pytest.mark.parametrize(
+        "family", sorted(f for f, s in REGISTRY.items() if s.requires_aggregation_count)
+    )
+    def test_aggregation_count_requirement_enforced(self, family):
+        args = _model_args(family)
+        args["n_reviews"] = None
+        with pytest.raises(ValueError, match="aggregation count"):
+            trace(seed(make_score_model("user"), random.PRNGKey(0))).get_trace(
+                y=None, **args
+            )
+
 
 class TestDiscretization:
     @pytest.mark.parametrize("family", DISCRETIZABLE)

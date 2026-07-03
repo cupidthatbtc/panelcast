@@ -723,7 +723,13 @@ def _beta_binomial_predict_draws(
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class LikelihoodSpec:
-    """Everything the model + prediction paths need to use one likelihood family."""
+    """Everything the model + prediction paths need to use one likelihood family.
+
+    ``requires_identity_transform`` and ``requires_aggregation_count`` declare
+    the structural constraints the family's ``sample_obs`` enforces at runtime,
+    so the select candidate space (``panelcast.select.space``) can prune arms
+    without restating them.
+    """
 
     name: str
     required_sites: tuple[str, ...]
@@ -731,6 +737,8 @@ class LikelihoodSpec:
     sample_obs: Callable
     predict_draws: Callable
     cdf: Callable | None = None
+    requires_identity_transform: bool = False
+    requires_aggregation_count: bool = False
 
 
 REGISTRY: dict[str, LikelihoodSpec] = {
@@ -765,6 +773,7 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         sample_obs=_beta_sample_obs,
         predict_draws=_beta_predict_draws,
         cdf=None,
+        requires_identity_transform=True,
     ),
     "skew_normal": LikelihoodSpec(
         name="skew_normal",
@@ -798,6 +807,8 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         sample_obs=_beta_binomial_sample_obs,
         predict_draws=_beta_binomial_predict_draws,
         cdf=None,
+        requires_identity_transform=True,
+        requires_aggregation_count=True,
     ),
     "beta_ceiling": LikelihoodSpec(
         name="beta_ceiling",
@@ -806,5 +817,6 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         sample_obs=_beta_ceiling_sample_obs,
         predict_draws=_beta_ceiling_predict_draws,
         cdf=None,
+        requires_identity_transform=True,
     ),
 }
