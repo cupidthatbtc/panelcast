@@ -87,6 +87,8 @@ def estimate_memory_gb(
     num_warmup: int,
     jit_buffer_percent: float = 0.10,
     exclude_rw_raw_from_collection: bool = False,
+    collection_overhead_factor: float = COLLECTION_OVERHEAD_FACTOR,
+    fixed_overhead_gb: float = FIXED_OVERHEAD_GB,
 ) -> MemoryEstimate:
     """Estimate GPU memory for MCMC run.
 
@@ -156,12 +158,13 @@ def estimate_memory_gb(
         + n_params * bytes_per_float * 3
         + n_observations * n_features * bytes_per_float
     )
-    base_gb = base_bytes / gib + FIXED_OVERHEAD_GB
+    base_gb = base_bytes / gib + fixed_overhead_gb
 
     # Per-chain collected samples: post-warmup draws only. Sequential chains
     # accumulate on device, and the end-of-run concatenation duplicates the
-    # storage once more — covered by COLLECTION_OVERHEAD_FACTOR.
-    per_chain_bytes = collected_params * num_samples * bytes_per_float * COLLECTION_OVERHEAD_FACTOR
+    # storage once more — covered by the collection-overhead factor (shipped
+    # constant, or this machine's own calibration via calibration_store).
+    per_chain_bytes = collected_params * num_samples * bytes_per_float * collection_overhead_factor
     per_chain_gb = per_chain_bytes / gib
 
     # Proportional allocator-slack buffer on the subtotal.
