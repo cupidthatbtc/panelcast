@@ -71,6 +71,12 @@ tau_entity_scale: 0.25
 # from a seen group start at the group level instead of the population mean.
 entity_group_pooling: false
 
+# Stacked-GBM offset feature block (#86; default off => block absent, feature
+# matrix unchanged). True appends a gbm_offset column — a gradient-boosted
+# prediction of the target from the other blocks' outputs — to X, out-of-fold
+# for train rows so no row's own label leaks into its feature.
+gbm_offset: false
+
 # Split configuration
 val_albums: 0
 min_train_albums: 2

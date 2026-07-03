@@ -1743,3 +1743,33 @@ class TestPredictEntityNext:
             )
 
         assert isinstance(result, pd.DataFrame)
+
+
+class TestGbmOffsetColdStart:
+    """The gbm_offset covariate zero-fills for hypothetical entities (#86).
+
+    Zero on the standardized scale is the train-mean offset, so cold-start
+    predictions degrade to the population-level effect rather than crashing
+    or extrapolating.
+    """
+
+    def test_x_new_zero_fills_gbm_offset_slot(self, mock_posterior_samples, mock_summary):
+        summary = dict(mock_summary)
+        summary["feature_cols"] = [*summary["feature_cols"], "gbm_offset"]
+        mock_jax = _make_jax_mock()
+        rng = np.random.RandomState(77)
+        predict_return = {"y": rng.randn(10).astype(np.float32)}
+
+        with (
+            patch("panelcast.pipelines.predict_next.jax", mock_jax),
+            patch(
+                "panelcast.pipelines.predict_next.predict_new_entity",
+                return_value=predict_return,
+            ) as mock_predict,
+        ):
+            _predict_new_entities(mock_posterior_samples, summary)
+
+        for call in mock_predict.call_args_list:
+            x_new = np.asarray(call.kwargs["X_new"])
+            assert x_new.shape == (3,)
+            assert (x_new == 0.0).all()

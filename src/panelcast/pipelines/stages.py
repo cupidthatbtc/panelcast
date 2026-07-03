@@ -126,6 +126,8 @@ class StageContext:
     propagate_rw_horizon: bool = False
     # Genre/group pooling level between the global mean and entity effects (#41)
     entity_group_pooling: bool = False
+    # Stacked-GBM offset feature block (#86)
+    gbm_offset: bool = False
     # Opt-in in-sampler exclusion of the rw_raw tensor (peak-GPU cut)
     exclude_rw_raw_from_collection: bool = False
     # Split configuration

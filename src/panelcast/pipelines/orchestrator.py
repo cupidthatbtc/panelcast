@@ -198,6 +198,11 @@ class PipelineConfig:
     # (#41): each entity's init-effect location shifts by a learned zero-sum
     # group offset. Default off => legacy path. No CLI flag.
     entity_group_pooling: bool = False
+    # Stacked-GBM offset feature block (#86): a gradient-boosted prediction of
+    # the target from the other blocks' outputs enters X as one more covariate
+    # (out-of-fold for train rows). Default off => block absent, X unchanged.
+    # No CLI flag.
+    gbm_offset: bool = False
     # Opt-in in-sampler exclusion of the rw_raw tensor: never store its draws
     # on device during sampling (~96% peak-GPU cut at production settings;
     # posterior parity for all other sites guarded by tests).
@@ -547,6 +552,7 @@ class PipelineOrchestrator:
                 "errors_in_variables": self.config.errors_in_variables,
                 "propagate_rw_horizon": self.config.propagate_rw_horizon,
                 "entity_group_pooling": self.config.entity_group_pooling,
+                "gbm_offset": self.config.gbm_offset,
                 "exclude_rw_raw_from_collection": self.config.exclude_rw_raw_from_collection,
                 "val_albums": self.config.val_albums,
                 "min_train_albums": self.config.min_train_albums,
@@ -602,6 +608,7 @@ class PipelineOrchestrator:
         "errors_in_variables",
         "propagate_rw_horizon",
         "entity_group_pooling",
+        "gbm_offset",
         "exclude_rw_raw_from_collection",
         "max_albums",
         "min_ratings",
@@ -837,6 +844,8 @@ class PipelineOrchestrator:
             parts.append("--propagate-rw-horizon")
         if self.config.entity_group_pooling:
             parts.append("--entity-group-pooling")
+        if self.config.gbm_offset:
+            parts.append("--gbm-offset")
         if self.config.val_albums != defaults.val_albums:
             parts.append(f"--val-albums {self.config.val_albums}")
         if self.config.calibration_intervals != defaults.calibration_intervals:
@@ -980,6 +989,7 @@ class PipelineOrchestrator:
             errors_in_variables=self.config.errors_in_variables,
             propagate_rw_horizon=self.config.propagate_rw_horizon,
             entity_group_pooling=self.config.entity_group_pooling,
+            gbm_offset=self.config.gbm_offset,
             exclude_rw_raw_from_collection=self.config.exclude_rw_raw_from_collection,
             val_albums=self.config.val_albums,
             min_train_albums=self.config.min_train_albums,
