@@ -6,7 +6,7 @@ import logging
 
 import typer
 
-from panelcast.cli import app
+from panelcast.cli import app, runs_app
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,8 @@ def demo(
     descriptor_path: str = typer.Option(
         "examples/aerospace/descriptor.yaml",
         "--descriptor",
-        help="Descriptor YAML for the demo dataset.",
+        "--dataset",
+        help="Descriptor YAML for the demo dataset (--dataset is an alias, as in run/stage).",
     ),
     num_chains: int = typer.Option(1, "--num-chains", min=1, help="MCMC chains (default 1)."),
     num_samples: int = typer.Option(
@@ -328,3 +329,68 @@ def diagnose(
     typer.echo("")
     for path in report.artifacts:
         typer.echo(f"  wrote {path}")
+
+
+@runs_app.command("list")
+def runs_list(
+    output_dir: str = typer.Option(
+        "outputs", "--output-dir", help="Directory holding the pipeline run directories."
+    ),
+) -> None:
+    """List pipeline runs with their manifest summary.
+
+    Shows each run directory (any directory with a manifest.json, skipping
+    latest/failed) with its creation time, success status, and completed-stage
+    count, and marks the run the latest symlink points at.
+
+    Examples:
+        panelcast runs list
+        panelcast runs list --output-dir other_outputs
+    """
+    import json
+    from pathlib import Path
+
+    base = Path(output_dir)
+    if not base.is_dir():
+        typer.echo(f"No runs found: {base} does not exist.")
+        raise typer.Exit(code=0)
+
+    # Resolve the `latest` symlink/junction to the run id it points at.
+    latest_target: str | None = None
+    try:
+        latest = base / "latest"
+        if latest.exists():
+            resolved = latest.resolve()
+            if resolved != latest and resolved.name != "latest":
+                latest_target = resolved.name
+    except OSError:
+        latest_target = None
+
+    rows: list[tuple[str, str, str, str, str]] = []
+    for run_dir in sorted(p for p in base.iterdir() if p.is_dir()):
+        if run_dir.name in ("latest", "failed"):
+            continue
+        manifest_path = run_dir / "manifest.json"
+        if not manifest_path.exists():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            manifest = {}
+        created_at = str(manifest.get("created_at") or "?")
+        # Failed runs are moved to outputs/failed/, so a success=False manifest
+        # still here is in-progress (or died before the move).
+        status = "ok" if manifest.get("success") else "incomplete"
+        n_stages = str(len(manifest.get("stages_completed") or []))
+        marker = "*" if run_dir.name == latest_target else " "
+        rows.append((marker, run_dir.name, created_at, status, n_stages))
+
+    if not rows:
+        typer.echo(f"No runs found under {base}.")
+        raise typer.Exit(code=0)
+
+    typer.echo(f"  {'run_id':<24} {'created_at':<28} {'status':<10} stages")
+    for marker, run_id, created_at, status, n_stages in rows:
+        typer.echo(f"{marker} {run_id:<24} {created_at:<28} {status:<10} {n_stages}")
+    if latest_target is not None:
+        typer.echo(f"\n* = {base / 'latest'} -> {latest_target}")

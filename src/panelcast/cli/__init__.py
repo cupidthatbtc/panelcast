@@ -15,7 +15,7 @@ from __future__ import annotations
 import typer
 
 app = typer.Typer(
-    add_completion=False,
+    add_completion=True,
     help="panelcast - hierarchical Bayesian prediction for bounded scores over entity histories.",
     invoke_without_command=True,
 )
@@ -23,6 +23,10 @@ app = typer.Typer(
 # Stage subcommand group
 stage_app = typer.Typer(help="Run individual pipeline stages")
 app.add_typer(stage_app, name="stage")
+
+# Runs subcommand group
+runs_app = typer.Typer(help="Inspect pipeline run directories")
+app.add_typer(runs_app, name="runs")
 
 # Import the command submodules for their decorator side effects: importing each
 # one runs the @app.command / @stage_app.command decorators that register the
@@ -38,4 +42,4 @@ from panelcast.cli import commands as _commands  # noqa: E402, F401
 __version__ = _main.__version__
 main = _main.main
 
-__all__ = ["__version__", "app", "main", "stage_app"]
+__all__ = ["__version__", "app", "main", "runs_app", "stage_app"]
