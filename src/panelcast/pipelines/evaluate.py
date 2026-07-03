@@ -48,6 +48,7 @@ from panelcast.models.bayes.model import make_score_model
 from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_entity
 from panelcast.models.bayes.priors import PriorConfig
 from panelcast.models.bayes.transforms import get_transform
+from panelcast.pipelines.stamps import DATA_STAGE_ROOTS, read_stamp
 from panelcast.pipelines.train_bayes import _apply_max_albums_cap
 from panelcast.pipelines.training_summary import (
     ar_center_on_model_scale,
@@ -1242,6 +1243,12 @@ def evaluate_models(ctx: StageContext) -> dict:
     """Evaluate fitted models on primary and secondary test splits."""
     log.info("evaluation_pipeline_start")
 
+    # Pin the features provenance now, preferring the stamp this run observed
+    # at stage start (a live read at metrics-write time would reopen the
+    # mid-stage regeneration window the stamps exist to close).
+    observed_stamps = getattr(getattr(ctx, "manifest", None), "data_stamps", None) or {}
+    feature_stamp = observed_stamps.get("features") or read_stamp(DATA_STAGE_ROOTS["features"])
+
     model_dir = Path("models")
 
     # A missing manifest means no trained model at all -- report that before
@@ -1446,6 +1453,8 @@ def evaluate_models(ctx: StageContext) -> dict:
         "crps": primary["crps"],
         "ppc": primary.get("ppc"),
         "info_criteria": primary.get("info_criteria"),
+        # Provenance for compare --baselines: which features these metrics saw.
+        "feature_stamp": feature_stamp,
     }
 
     metrics_path = output_dir / "metrics.json"

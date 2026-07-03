@@ -57,6 +57,13 @@ from panelcast.pipelines.manifest import (
     save_run_manifest,
 )
 from panelcast.pipelines.stages import PipelineStage, StageContext, get_execution_order
+from panelcast.pipelines.stamps import (
+    CONSUMER_STAGES,
+    DATA_STAGE_ROOTS,
+    read_stamp,
+    verify_stamps,
+    write_stamp,
+)
 from panelcast.utils.environment import ensure_environment_locked, verify_environment
 from panelcast.utils.git_state import capture_git_state
 from panelcast.utils.hashing import sha256_path
@@ -992,6 +999,22 @@ class PipelineOrchestrator:
             descriptor=self.descriptor,
         )
 
+    def _observe_data_stamps(self) -> None:
+        """Record on-disk data-root stamps this run hasn't produced or seen yet.
+
+        Covers consumer-only runs (``--stages train,evaluate``) and skipped
+        data stages: the first consumer pins the world it starts from, so a
+        later consumer in the same run detects a foreign regeneration.
+        """
+        if self.manifest is None:
+            return
+        for stage_name, root in DATA_STAGE_ROOTS.items():
+            if stage_name in self.manifest.data_stamps:
+                continue
+            current = read_stamp(root)
+            if current is not None:
+                self.manifest.data_stamps[stage_name] = current
+
     def _capture_stage_input_hashes(self, stage: PipelineStage) -> dict[str, str]:
         """Capture per-path input hashes for manifest provenance."""
         hashes: dict[str, str] = {}
@@ -1053,6 +1076,10 @@ class PipelineOrchestrator:
                 save_run_manifest(self.manifest, self.run_dir)
             return
 
+        if stage.name in CONSUMER_STAGES and self.manifest is not None:
+            self._observe_data_stamps()
+            verify_stamps(self.manifest.data_stamps, stage.name)
+
         # Create stage context
         ctx = self._create_stage_context()
 
@@ -1093,6 +1120,13 @@ class PipelineOrchestrator:
         if self.manifest:
             self.manifest.stages_completed.append(stage.name)
             self.manifest.stage_hashes[stage.name] = stage.compute_input_hash()
+            if stage.name in DATA_STAGE_ROOTS:
+                self.manifest.data_stamps[stage.name] = write_stamp(
+                    DATA_STAGE_ROOTS[stage.name],
+                    stage.name,
+                    self.manifest.stage_hashes[stage.name],
+                    self.manifest.run_id,
+                )
             self._record_stage_outputs(stage, run_result=run_result)
             save_run_manifest(self.manifest, self.run_dir)
 
