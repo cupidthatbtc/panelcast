@@ -117,6 +117,9 @@ class TrainingSummary(BaseModel):
     group_to_idx: dict[str, int] | None = None
     group_idx_by_artist: list[int] | None = None
     n_groups: int | None = None
+    # Expected-vs-actual fit resources (#78): estimator projection, measured
+    # peak GPU memory, their ratio, and MCMC wall clock.
+    resource_usage: dict[str, Any] | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
         """Serialize preserving declaration order.

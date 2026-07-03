@@ -21,6 +21,7 @@ import structlog
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
 from panelcast.data.split_types import SplitType, resolve_split_dir
+from panelcast.gpu_memory import estimate_memory_gb
 from panelcast.models.bayes.diagnostics import check_convergence
 from panelcast.models.bayes.fit import MCMCConfig, fit_model
 from panelcast.models.bayes.io import save_model
@@ -723,6 +724,35 @@ def _build_heteroscedastic_summary(
     }
 
 
+def _build_resource_usage(
+    model_args: dict,
+    mcmc_config: MCMCConfig,
+    fit_result,
+    exclude_rw_raw_from_collection: bool,
+) -> dict:
+    """Expected-vs-actual fit resources (#78): every fit becomes a calibration
+    datapoint for the memory estimator and the wall-clock planning numbers."""
+    expected_gb = estimate_memory_gb(
+        n_observations=len(model_args["y"]),
+        n_features=int(model_args["X"].shape[1]),
+        n_artists=int(model_args["n_artists"]),
+        max_seq=int(model_args["max_seq"]),
+        num_chains=mcmc_config.num_chains,
+        num_samples=mcmc_config.num_samples,
+        num_warmup=mcmc_config.num_warmup,
+        exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
+    ).total_gb
+    peak = fit_result.peak_gpu_memory_bytes
+    expected = round(expected_gb, 3)
+    actual = round(peak / (1024**3), 3) if peak is not None else None
+    return {
+        "expected_gb": expected,
+        "actual_peak_gb": actual,
+        "ratio": round(actual / expected, 3) if actual is not None and expected > 0 else None,
+        "wall_clock_seconds": fit_result.runtime_seconds,
+    }
+
+
 def train_models(
     ctx: StageContext,
     features_path: Path | None = None,
@@ -1001,6 +1031,11 @@ def train_models(
         tree_depth_saturation=fit_result.tree_depth_saturation,
     )
 
+    resource_usage = _build_resource_usage(
+        model_args, mcmc_config, fit_result, exclude_rw_raw_from_collection
+    )
+    log.info("resource_usage", **resource_usage)
+
     # Check convergence using CLI-provided thresholds
     diagnostics = check_convergence(
         fit_result.idata,
@@ -1142,6 +1177,7 @@ def train_models(
         summary["group_to_idx"] = group_to_idx
         summary["group_idx_by_artist"] = [int(g) for g in model_args["group_idx_by_artist"]]
         summary["n_groups"] = int(model_args["n_groups"])
+    summary["resource_usage"] = resource_usage
     summary = TrainingSummary(**summary).to_json_dict()
 
     summary_path = model_dir / "training_summary.json"
