@@ -193,13 +193,24 @@ def demo(
     exit_code = run_pipeline(config)
 
     if exit_code == 0:
+        from panelcast.paths import resolve_latest
+
+        run_dir = resolve_latest()
+        if run_dir is not None:
+            artifacts = (
+                run_dir / "reports" / "MODEL_CARD.md",
+                run_dir / "reports" / "tables" / "metrics_summary.csv",
+                run_dir / "evaluation" / "metrics.json",
+            )
+        else:
+            artifacts = (
+                Path("reports/MODEL_CARD.md"),
+                Path("reports/tables/metrics_summary.csv"),
+                Path("outputs/evaluation/metrics.json"),
+            )
         typer.echo("\nDemo complete. Generated artifacts:")
-        for artifact in (
-            "reports/MODEL_CARD.md",
-            "reports/tables/metrics_summary.csv",
-            "outputs/evaluation/metrics.json",
-        ):
-            marker = "✓" if Path(artifact).exists() else "·"
+        for artifact in artifacts:
+            marker = "✓" if artifact.exists() else "·"
             typer.echo(f"  {marker} {artifact}")
     raise typer.Exit(code=exit_code)
 
@@ -228,10 +239,13 @@ def compare(
         "--bayes/--no-bayes",
         help="Append the current Bayesian model's metrics from the --metrics file.",
     ),
-    metrics: str = typer.Option(
-        "outputs/evaluation/metrics.json",
+    metrics: str | None = typer.Option(
+        None,
         "--metrics",
-        help="Evaluation metrics.json supplying the Bayesian model's row (with --bayes).",
+        help=(
+            "Evaluation metrics.json supplying the Bayesian model's row (with "
+            "--bayes). Default: the latest run's evaluation metrics."
+        ),
     ),
 ) -> None:
     """Benchmark simple baselines against the model on the existing splits.
@@ -263,7 +277,7 @@ def compare(
             seed=seed,
             output_dir=Path(output_dir),
             include_bayes=include_bayes,
-            metrics_path=Path(metrics),
+            metrics_path=Path(metrics) if metrics is not None else None,
         )
     except FileNotFoundError as e:
         typer.echo(
@@ -281,10 +295,13 @@ def compare(
 
 @app.command("diagnose")
 def diagnose(
-    eval_dir: str = typer.Option(
-        "outputs/evaluation",
+    eval_dir: str | None = typer.Option(
+        None,
         "--eval-dir",
-        help="Directory holding diagnostics.json / metrics.json from an evaluate run.",
+        help=(
+            "Directory holding diagnostics.json / metrics.json from an evaluate "
+            "run (default: the latest run's evaluation dir)."
+        ),
     ),
     output_dir: str = typer.Option(
         "reports/diagnostics", "--output", "-o", help="Directory for the diagnostics report."
@@ -306,7 +323,10 @@ def diagnose(
     from panelcast.pipelines.diagnose import run_diagnose
 
     try:
-        report = run_diagnose(eval_dir=Path(eval_dir), output_dir=Path(output_dir))
+        report = run_diagnose(
+            eval_dir=Path(eval_dir) if eval_dir else None,
+            output_dir=Path(output_dir),
+        )
     except FileNotFoundError as e:
         typer.echo(f"Error: {e}")
         raise typer.Exit(code=1) from e

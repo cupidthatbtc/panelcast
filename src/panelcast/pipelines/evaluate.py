@@ -68,16 +68,16 @@ _EVAL_OUTPUT_DIR = "outputs/evaluation"  # str so use sites build Path() at call
 _SAVE_LOG_LIKELIHOOD_ENV = "PANELCAST_SAVE_LOG_LIKELIHOOD"
 
 
-def _log_likelihood_save_path() -> Path | None:
+def _log_likelihood_save_path(output_dir: Path | None = None) -> Path | None:
     """Opt-in destination for the primary-split pointwise log-likelihood idata.
 
     Off by default; set ``PANELCAST_SAVE_LOG_LIKELIHOOD=1`` to persist
-    ``outputs/evaluation/log_likelihood.nc`` so a downstream cross-model LOO
-    comparison (the transform x latent bake-off) can run ``az.compare`` on a
-    common test set. Returns None when the gate is unset.
+    ``log_likelihood.nc`` under the evaluation output dir so a downstream
+    cross-model LOO comparison (the transform x latent bake-off) can run
+    ``az.compare`` on a common test set. Returns None when the gate is unset.
     """
     if os.environ.get(_SAVE_LOG_LIKELIHOOD_ENV):
-        return Path(_EVAL_OUTPUT_DIR) / "log_likelihood.nc"
+        return (output_dir or Path(_EVAL_OUTPUT_DIR)) / "log_likelihood.nc"
     return None
 
 
@@ -1182,7 +1182,7 @@ def _evaluate_primary_split(
             y_raw=primary_y_true,
             seed=ctx.seed,
             batch_size=int(getattr(ctx, "predictive_batch_size", 500)),
-            log_likelihood_path=_log_likelihood_save_path(),
+            log_likelihood_path=_log_likelihood_save_path(Path(paths.evaluation)),
         )
     except Exception as e:
         if ctx.strict:

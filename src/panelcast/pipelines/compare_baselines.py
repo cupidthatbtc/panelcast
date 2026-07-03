@@ -22,6 +22,7 @@ from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.models.baselines import PanelData, benchmark_baselines
 from panelcast.models.baselines.core import BaselineScore
+from panelcast.paths import resolve_latest
 from panelcast.pipelines.stamps import verify_stamps
 from panelcast.reporting.tables import create_baseline_benchmark_table, export_table
 
@@ -241,9 +242,20 @@ def run_baseline_comparison(
     seed: int = 0,
     output_dir: Path = Path("reports/baselines"),
     include_bayes: bool = True,
-    metrics_path: Path = Path("outputs/evaluation/metrics.json"),
+    metrics_path: Path | None = None,
 ) -> ComparisonResult:
-    """Fit and score every baseline on each split; write the benchmark table."""
+    """Fit and score every baseline on each split; write the benchmark table.
+
+    metrics_path=None resolves to the latest run's evaluation metrics,
+    falling back to the legacy flat location when no latest pointer exists.
+    """
+    if metrics_path is None:
+        latest = resolve_latest()
+        metrics_path = (
+            latest / "evaluation" / "metrics.json"
+            if latest is not None
+            else Path("outputs/evaluation/metrics.json")
+        )
     if include_bayes:
         _verify_features_match_metrics(metrics_path)
     descriptor = load_descriptor(dataset)

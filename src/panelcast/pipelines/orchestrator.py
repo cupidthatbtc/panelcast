@@ -11,6 +11,7 @@ stages in dependency order, with features for:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -42,7 +43,7 @@ from panelcast.config.gates import (
     SigmaObsPriorType,
     TargetTransform,
 )
-from panelcast.paths import ArtifactPaths
+from panelcast.paths import ArtifactPaths, resolve_latest
 from panelcast.pipelines.errors import (
     ConvergenceError,
     EnvironmentError,
@@ -451,6 +452,7 @@ class PipelineOrchestrator:
                 min_ratings=self.config.min_ratings,
                 descriptor=self.descriptor,
                 descriptor_path=self.descriptor_path,
+                paths=self._artifact_paths(),
             )
         except KeyError as e:
             log.error("invalid_stage", error=str(e))
@@ -897,14 +899,10 @@ class PipelineOrchestrator:
         # Load previous manifest for skip detection
         previous_manifest: RunManifest | None = None
         if self.config.skip_existing and self.run_dir:
-            latest_link = self.output_base / "latest"
-            try:
-                link_exists = latest_link.exists()
-            except OSError:
-                link_exists = False
-            if link_exists:
+            previous_run = resolve_latest(self.output_base)
+            if previous_run is not None:
                 try:
-                    prev_manifest_path = latest_link / "manifest.json"
+                    prev_manifest_path = previous_run / "manifest.json"
                     if prev_manifest_path.exists():
                         previous_manifest = load_run_manifest(prev_manifest_path)
                 except OSError as e:
@@ -964,6 +962,10 @@ class PipelineOrchestrator:
                 self._execute_stage(stage)
                 progress.advance(task_id)
 
+    def _artifact_paths(self) -> ArtifactPaths:
+        """Run-scoped artifact roots; flat layout before a run dir exists."""
+        return ArtifactPaths.for_run(self.run_dir) if self.run_dir else ArtifactPaths.flat()
+
     def _create_stage_context(self) -> StageContext:
         """Create StageContext for stage execution.
 
@@ -972,8 +974,7 @@ class PipelineOrchestrator:
         """
         return StageContext(
             run_dir=self.run_dir or Path("outputs"),
-            # PR (ii) of #81 flips this to ArtifactPaths.for_run(run_dir).
-            paths=ArtifactPaths.flat(),
+            paths=self._artifact_paths(),
             seed=self.config.seed,
             strict=self.config.strict,
             verbose=self.config.verbose,
@@ -1240,7 +1241,7 @@ class PipelineOrchestrator:
             root_logger.removeHandler(handler)
 
     def _finalize_success(self) -> None:
-        """Finalize successful run with manifest update and symlink."""
+        """Finalize successful run with manifest update and latest pointer."""
         # Update manifest
         if self.manifest:
             self.manifest.success = True
@@ -1248,8 +1249,10 @@ class PipelineOrchestrator:
             if self.run_dir:
                 save_run_manifest(self.manifest, self.run_dir)
 
-        # Create latest symlink
+        # latest.json is the authoritative pointer; the link is opportunistic
+        # convenience (symlink/junction creation can fail on Windows/NTFS).
         if self.run_dir:
+            self._write_latest_pointer()
             self._create_latest_link()
 
         log.info(
@@ -1259,6 +1262,26 @@ class PipelineOrchestrator:
             stages_completed=len(self.manifest.stages_completed) if self.manifest else 0,
             stages_skipped=len(self.manifest.stages_skipped) if self.manifest else 0,
         )
+
+    def _write_latest_pointer(self) -> None:
+        """Atomically write outputs/latest.json pointing at the current run."""
+        if not self.run_dir:
+            return
+        try:
+            run_dir_rel = self.run_dir.relative_to(self.output_base)
+        except ValueError:
+            run_dir_rel = Path(self.run_dir.name)
+        payload = {
+            "run_id": self.manifest.run_id if self.manifest else self.run_dir.name,
+            "run_dir": run_dir_rel.as_posix(),
+        }
+        pointer = self.output_base / "latest.json"
+        tmp = self.output_base / "latest.json.tmp"
+        try:
+            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            os.replace(tmp, pointer)
+        except OSError as e:
+            log.warning("failed_to_write_latest_pointer", error=str(e))
 
     def _create_latest_link(self) -> None:
         """Create outputs/latest symlink/junction to current run."""

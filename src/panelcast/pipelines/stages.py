@@ -527,8 +527,15 @@ def make_stage_features() -> PipelineStage:
     )
 
 
-def make_stage_train() -> PipelineStage:
-    """Create model training stage."""
+def make_stage_train(paths: ArtifactPaths | None = None) -> PipelineStage:
+    """Create model training stage.
+
+    Args:
+        paths: Artifact roots for the mutable products (None = legacy flat
+            layout). Skip detection and output recording resolve against
+            these, so a run-scoped orchestrator must pass its own.
+    """
+    paths = paths or ArtifactPaths.flat()
     return PipelineStage(
         name="train",
         description="Fit Bayesian models on training data",
@@ -538,81 +545,84 @@ def make_stage_train() -> PipelineStage:
             Path("data/features/validation_features.parquet"),
         ],
         output_paths=[
-            Path("models/manifest.json"),
-            Path("models/training_summary.json"),
+            paths.models / "manifest.json",
+            paths.models / "training_summary.json",
         ],
         depends_on=["features"],
     )
 
 
-def make_stage_evaluate() -> PipelineStage:
+def make_stage_evaluate(paths: ArtifactPaths | None = None) -> PipelineStage:
     """Create model evaluation stage."""
+    paths = paths or ArtifactPaths.flat()
     return PipelineStage(
         name="evaluate",
         description="Run model evaluation and diagnostics",
         run_fn=_run_evaluate_stage,
         input_paths=[
-            Path("models/manifest.json"),
-            Path("models/training_summary.json"),
+            paths.models / "manifest.json",
+            paths.models / "training_summary.json",
             Path("data/features/within_entity_temporal/test_features.parquet"),
             Path("data/features/entity_disjoint/test_features.parquet"),
         ],
         output_paths=[
-            Path("outputs/evaluation/metrics.json"),
-            Path("outputs/evaluation/diagnostics.json"),
-            Path("outputs/evaluation/within_entity_temporal/predictions.json"),
-            Path("outputs/evaluation/entity_disjoint/predictions.json"),
+            paths.evaluation / "metrics.json",
+            paths.evaluation / "diagnostics.json",
+            paths.evaluation / "within_entity_temporal/predictions.json",
+            paths.evaluation / "entity_disjoint/predictions.json",
         ],
         depends_on=["train"],
     )
 
 
-def make_stage_predict() -> PipelineStage:
+def make_stage_predict(paths: ArtifactPaths | None = None) -> PipelineStage:
     """Create next-event prediction stage."""
+    paths = paths or ArtifactPaths.flat()
     return PipelineStage(
         name="predict",
         description="Generate next-event predictions for known and new entities",
         run_fn=_run_predict_stage,
         input_paths=[
-            Path("models/manifest.json"),
-            Path("models/training_summary.json"),
+            paths.models / "manifest.json",
+            paths.models / "training_summary.json",
             Path("data/splits/within_entity_temporal/train.parquet"),
             Path("data/features/train_features.parquet"),
         ],
         output_paths=[
-            Path("outputs/predictions/next_event_known_entities.csv"),
-            Path("outputs/predictions/next_event_new_entity.csv"),
-            Path("outputs/predictions/prediction_summary.json"),
+            paths.predictions / "next_event_known_entities.csv",
+            paths.predictions / "next_event_new_entity.csv",
+            paths.predictions / "prediction_summary.json",
         ],
         depends_on=["evaluate"],
     )
 
 
-def make_stage_report() -> PipelineStage:
+def make_stage_report(paths: ArtifactPaths | None = None) -> PipelineStage:
     """Create publication artifacts stage."""
+    paths = paths or ArtifactPaths.flat()
     return PipelineStage(
         name="report",
         description="Generate publication artifacts (figures, tables)",
         run_fn=_run_report_stage,
         input_paths=[
-            Path("outputs/evaluation/metrics.json"),
-            Path("outputs/evaluation/diagnostics.json"),
-            Path("outputs/predictions/prediction_summary.json"),
+            paths.evaluation / "metrics.json",
+            paths.evaluation / "diagnostics.json",
+            paths.predictions / "prediction_summary.json",
         ],
         output_paths=[
-            Path("reports/artifact_status.json"),
-            Path("reports/tables/coefficients.csv"),
-            Path("reports/tables/diagnostics.csv"),
-            Path("reports/tables/metrics_summary.csv"),
-            Path("reports/figures/trace_plot.pdf"),
-            Path("reports/figures/posterior_plot.pdf"),
-            Path("reports/MODEL_CARD.md"),
+            paths.reports / "artifact_status.json",
+            paths.reports / "tables/coefficients.csv",
+            paths.reports / "tables/diagnostics.csv",
+            paths.reports / "tables/metrics_summary.csv",
+            paths.reports / "figures/trace_plot.pdf",
+            paths.reports / "figures/posterior_plot.pdf",
+            paths.reports / "MODEL_CARD.md",
         ],
         depends_on=["predict"],
     )
 
 
-def make_stage_sensitivity() -> PipelineStage:
+def make_stage_sensitivity(paths: ArtifactPaths | None = None) -> PipelineStage:
     """Create the opt-in sensitivity analysis stage.
 
     Not part of the default stage list: it refits the model several times
@@ -620,17 +630,18 @@ def make_stage_sensitivity() -> PipelineStage:
     explicitly (``--stages sensitivity`` or ``panelcast stage
     sensitivity``) after an evaluate run has produced its artifacts.
     """
+    paths = paths or ArtifactPaths.flat()
     return PipelineStage(
         name="sensitivity",
         description="Sensitivity analyses (priors, ablations, split seed)",
         run_fn=_run_sensitivity_stage,
         input_paths=[
-            Path("models/training_summary.json"),
+            paths.models / "training_summary.json",
             Path("data/features/train_features.parquet"),
             Path("data/splits/within_entity_temporal/train.parquet"),
         ],
         output_paths=[
-            Path("reports/sensitivity/sensitivity_results.json"),
+            paths.reports / "sensitivity/sensitivity_results.json",
         ],
         depends_on=["evaluate"],
     )
@@ -640,6 +651,7 @@ def build_pipeline_stages(
     min_ratings: int = 10,
     descriptor: DatasetDescriptor | None = None,
     descriptor_path: Path | None = None,
+    paths: ArtifactPaths | None = None,
 ) -> list[PipelineStage]:
     """Build pipeline stages list with runtime configuration.
 
@@ -648,6 +660,8 @@ def build_pipeline_stages(
             to ensure input_paths point to the correct parquet file.
         descriptor: Dataset descriptor (None = AOTY defaults).
         descriptor_path: YAML path the descriptor was loaded from, if any.
+        paths: Artifact roots for the mutable-product stages (None = legacy
+            flat layout). Data stages always declare flat paths.
 
     Returns:
         List of PipelineStage objects configured for the given dataset.
@@ -658,16 +672,16 @@ def build_pipeline_stages(
         make_stage_data(descriptor=descriptor, descriptor_path=descriptor_path),
         make_stage_splits(min_ratings=min_ratings, descriptor=descriptor),
         make_stage_features(),
-        make_stage_train(),
-        make_stage_evaluate(),
-        make_stage_predict(),
-        make_stage_report(),
+        make_stage_train(paths=paths),
+        make_stage_evaluate(paths=paths),
+        make_stage_predict(paths=paths),
+        make_stage_report(paths=paths),
     ]
 
 
-def build_optional_stages() -> list[PipelineStage]:
+def build_optional_stages(paths: ArtifactPaths | None = None) -> list[PipelineStage]:
     """Opt-in stages: available by name, never part of a default run."""
-    return [make_stage_sensitivity()]
+    return [make_stage_sensitivity(paths=paths)]
 
 
 def get_execution_order(
@@ -675,6 +689,7 @@ def get_execution_order(
     min_ratings: int = 10,
     descriptor: DatasetDescriptor | None = None,
     descriptor_path: Path | None = None,
+    paths: ArtifactPaths | None = None,
 ) -> list[PipelineStage]:
     """Get stages in dependency-respecting execution order.
 
@@ -684,6 +699,8 @@ def get_execution_order(
             dependencies between the specified stages.
         min_ratings: Minimum user ratings per album. Determines which parquet
             file the splits stage uses as input.
+        paths: Artifact roots the mutable-product stages declare their
+            input/output paths against (None = legacy flat layout).
 
     Returns:
         List of PipelineStage objects in execution order.
@@ -706,6 +723,7 @@ def get_execution_order(
         min_ratings=min_ratings,
         descriptor=descriptor,
         descriptor_path=descriptor_path,
+        paths=paths,
     )
 
     if stages is None:
@@ -713,7 +731,7 @@ def get_execution_order(
         return _topological_sort(pipeline_stages)
 
     # Named selection may include opt-in stages.
-    all_stages = pipeline_stages + build_optional_stages()
+    all_stages = pipeline_stages + build_optional_stages(paths=paths)
 
     # Validate stage names
     valid_names = {s.name for s in all_stages}

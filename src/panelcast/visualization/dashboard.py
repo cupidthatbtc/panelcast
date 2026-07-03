@@ -21,6 +21,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from panelcast.paths import resolve_latest
 from panelcast.visualization.charts import (
     create_forest_plot,
     create_predictions_plot,
@@ -447,9 +448,13 @@ def load_dashboard_data(run_dir: Path | None = None) -> DashboardData:  # noqa: 
     # Start with empty data
     data = DashboardData()
 
-    # Determine run directory
+    # Determine run directory: the latest pointer first, then the legacy
+    # scan over timestamped dirs for outputs written by older checkouts.
     if run_dir is None:
-        # Look for most recent timestamped run in outputs/
+        run_dir = resolve_latest()
+        if run_dir is not None:
+            logger.info("Using latest run: %s", run_dir)
+    if run_dir is None:
         outputs_dir = Path("outputs")
         if outputs_dir.exists():
             run_dirs = sorted(
@@ -498,8 +503,11 @@ def load_dashboard_data(run_dir: Path | None = None) -> DashboardData:  # noqa: 
     except (FileNotFoundError, ValueError, OSError, ImportError, TypeError) as e:
         logger.warning("Could not load inference data: %s", e)
 
-    # Try to load predictions from evaluation output
+    # Evaluation artifacts live under the run dir in the run-scoped layout;
+    # the flat path keeps pre-run-scoping outputs readable.
     eval_dir = Path("outputs/evaluation")
+    if run_dir is not None and (run_dir / "evaluation").exists():
+        eval_dir = run_dir / "evaluation"
     try:
         pred_path = eval_dir / "predictions.json"
         if pred_path.exists():

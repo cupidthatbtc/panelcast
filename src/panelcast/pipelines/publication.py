@@ -1119,7 +1119,14 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
                 f"Publication readiness checks failed. See {readiness_json_path} for details."
             )
 
-    if ctx.run_dir and ctx.run_dir.exists():
+    # Legacy convenience for the flat layout only: with run-scoped paths the
+    # artifacts already live under run_dir/reports, so copying would be a
+    # same-file error.
+    if (
+        ctx.run_dir
+        and ctx.run_dir.exists()
+        and Path(inp.reports_dir).resolve() != (ctx.run_dir / "reports").resolve()
+    ):
         _copy_artifacts_to_run_dir(
             ctx, artifacts, status_path, readiness_json_path, readiness_md_path
         )
