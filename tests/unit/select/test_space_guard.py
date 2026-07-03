@@ -96,3 +96,11 @@ class TestValueCoverage:
                 assert set(knob.values) == {True, False}, knob.name
             if knob.kind == "tristate":
                 assert set(knob.values) == {None, True, False}, knob.name
+
+    def test_transform_registry_matches_the_literal(self):
+        # The transform factories are a fourth enumeration surface; a transform
+        # registered without a Literal value (or vice versa) must not slip past
+        # the candidate space.
+        from panelcast.models.bayes.transforms import _TRANSFORM_FACTORIES
+
+        assert set(_TRANSFORM_FACTORIES) == set(get_args(gates.TargetTransform))
