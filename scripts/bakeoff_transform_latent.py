@@ -128,34 +128,19 @@ def _read_metrics(eval_dir: Path) -> dict:
     return out
 
 
-def _pointwise_elpd(nc_path: Path):
-    """Per-observation elpd_i from a persisted pointwise log-likelihood idata."""
-    import arviz as az
-    import numpy as np
-    from scipy.special import logsumexp
-
-    idata = az.from_netcdf(str(nc_path))
-    arr = np.asarray(idata.log_likelihood["y"].values)  # (chain, draw, obs)
-    n_samples = arr.shape[0] * arr.shape[1]
-    return logsumexp(arr.reshape(n_samples, arr.shape[2]), axis=0) - np.log(n_samples)
-
-
 def _pairwise_elpd(rows: list[dict], out_dir: Path, default_cell: str = DEFAULT_CELL) -> list[dict]:
     """Paired per-point held-out elpd_diff +/- dse of each cell vs the kept default.
 
-    Loads the two cells' persisted pointwise log-likelihoods (identical test
-    rows), takes d_i = elpd_i(cell) - elpd_i(default), and reports
-    `sum(d_i) +/- sqrt(n * var(d_i, ddof=1))` — the paired SE, smaller (and the
-    honest significance number) than each cell's marginal SE. The diff is signed
-    cell-minus-default (positive = beats the default). Returns [] when the
-    default cell's snapshot is absent.
+    The per-point estimator and the pairing math live in
+    `panelcast.select.scoring` (#101); this wraps them in the bake-off's cell
+    layout. The diff is signed cell-minus-default (positive = beats the
+    default). Returns [] when the default cell's snapshot is absent.
     """
-    import numpy as np
+    from panelcast.select.scoring import paired_elpd
 
     default_nc = out_dir / default_cell / "log_likelihood.nc"
     if not default_nc.exists():
         return []
-    elpd_default = _pointwise_elpd(default_nc)
 
     pairwise: list[dict] = []
     for row in rows:
@@ -164,25 +149,11 @@ def _pairwise_elpd(rows: list[dict], out_dir: Path, default_cell: str = DEFAULT_
         if name == default_cell or not cell_nc.exists():
             continue
         try:
-            elpd_cell = _pointwise_elpd(cell_nc)
-            if elpd_cell.shape != elpd_default.shape:
-                raise ValueError(
-                    f"pointwise shapes differ: {elpd_cell.shape} vs {elpd_default.shape}"
-                )
-            d = elpd_cell - elpd_default
-            dse = float(np.sqrt(d.size * np.var(d, ddof=1)))
+            pair = paired_elpd(cell_nc, default_nc)
         except Exception as exc:  # noqa: BLE001 — audit script: degrade, don't abort
             print(f"  ! pairwise diff failed for {name}: {type(exc).__name__}: {exc}")
             continue
-        elpd_diff = float(np.sum(d))
-        pairwise.append(
-            {
-                "name": name,
-                "elpd_diff": elpd_diff,
-                "dse": dse,
-                "z": (elpd_diff / dse) if dse else None,
-            }
-        )
+        pairwise.append({"name": name, "elpd_diff": pair.diff, "dse": pair.dse, "z": pair.z})
     return pairwise
 
 
@@ -277,6 +248,8 @@ def _collect_rows_from_snapshots(out_dir: Path) -> list[dict]:
     """
     import numpy as np
 
+    from panelcast.select.scoring import pointwise_elpd
+
     rows: list[dict] = []
     for cell in CELLS:
         row = {"name": cell["name"], "transform": cell["transform"], "latent": cell["latent"]}
@@ -288,7 +261,7 @@ def _collect_rows_from_snapshots(out_dir: Path) -> list[dict]:
         nc = dest / "log_likelihood.nc"
         if nc.exists():
             try:
-                elpd_i = _pointwise_elpd(nc)
+                elpd_i = pointwise_elpd(nc)
                 row["elpd"] = float(np.sum(elpd_i))
                 row["elpd_se"] = float(np.sqrt(elpd_i.size * np.var(elpd_i, ddof=1)))
             except Exception as exc:  # noqa: BLE001 — audit script: degrade, don't abort
