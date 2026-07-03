@@ -18,7 +18,7 @@ Usage:
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import arviz as az
 import numpy as np
@@ -1179,6 +1179,9 @@ def run_sensitivity_suite(ctx) -> dict:
     summary = load_training_summary(paths.models / "training_summary.json").to_json_dict()
 
     # Replicate the training-stage data prep (same gates as the fitted model).
+    # The pooling gate reuses the EFFECTIVE value the train stage resolved and
+    # recorded, not the configured tri-state.
+    entity_group_pooling = bool(summary.get("entity_group_pooling", False))
     model_args, feature_cols, _train_df = load_training_data(
         features_path=paths.features / "train_features.parquet",
         splits_path=resolve_split_dir(paths.splits, SplitType.WITHIN_ENTITY_TEMPORAL)
@@ -1189,10 +1192,12 @@ def run_sensitivity_suite(ctx) -> dict:
         target_transform=summary.get("target_transform", "identity"),
         logit_offset=float(summary.get("logit_offset", 0.5)),
         ar_center=(summary.get("priors") or {}).get("ar_center", "global"),
+        entity_group_pooling=entity_group_pooling,
     )
     artist_album_counts = model_args.pop("artist_album_counts")
     model_args.pop("artist_to_idx", None)
     model_args.pop("global_mean_score", None)
+    model_args.pop("group_to_idx", None)
     ar_center_value = float(model_args.pop("ar_center_value", 0.0))
     model_args = _apply_max_albums_cap(
         model_args, getattr(ctx, "max_albums", 50), artist_album_counts
@@ -1226,7 +1231,7 @@ def run_sensitivity_suite(ctx) -> dict:
     if "priors" in axes:
         located = {
             name: locate_level_prior(
-                config,
+                replace(config, entity_group_pooling=entity_group_pooling),
                 ar_center_value=ar_center_value,
                 target_transform=summary.get("target_transform", "identity"),
                 logit_offset=float(summary.get("logit_offset", 0.5)),

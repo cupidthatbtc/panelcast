@@ -64,6 +64,12 @@ ar_center: global
 latent_process: rw
 debut_prev_score_source: train_mean
 likelihood_df: 4.0
+# Promoted to default in 0.6.0 (#85/#86: screening + publication-scale
+# confirmation, +224 paired held-out ELPD vs the 0.5.0 baseline). Pooling is
+# pinned true here (AOTY defines primary_genre; the default null would
+# auto-resolve to on anyway).
+entity_group_pooling: true
+gbm_offset: true
 
 # Likelihood family. The symmetric Student-t pins a few bounded/skew PPC
 # statistics (skewness, max, q50, q90), so the bounded mean-precision `beta`

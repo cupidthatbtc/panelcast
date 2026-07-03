@@ -154,7 +154,8 @@ class TestAeroStagesOnly:
         manifest = json.loads(
             (aero_stages_run / "data" / "features" / "manifest.json").read_text(encoding="utf-8")
         )
-        assert manifest["blocks"] == ["temporal", "entity_history", "core_numeric"]
+        # gbm_offset trails the roster: default-on since 0.6.0, domain-agnostic.
+        assert manifest["blocks"] == ["temporal", "entity_history", "core_numeric", "gbm_offset"]
         assert manifest["target_label_leakage_prevention"]["masked_score_columns"] == ["Perf_Score"]
 
 

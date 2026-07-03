@@ -612,6 +612,7 @@ class TestBuildCommandStringExtended:
             errors_in_variables=True,
             propagate_rw_horizon=True,
             entity_group_pooling=True,
+            gbm_offset=False,
             val_albums=100,
         )
         orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
@@ -627,7 +628,15 @@ class TestBuildCommandStringExtended:
         assert "--errors-in-variables" in cmd
         assert "--propagate-rw-horizon" in cmd
         assert "--entity-group-pooling" in cmd
+        assert "--no-gbm-offset" in cmd
         assert "--val-albums 100" in cmd
+
+    def test_command_records_explicit_pooling_off(self, tmp_path):
+        """Explicit entity_group_pooling=False (vs the None auto default) is recorded."""
+        config = PipelineConfig(entity_group_pooling=False)
+        orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
+        cmd = orchestrator._build_command_string()
+        assert "--no-entity-group-pooling" in cmd
 
     def test_command_omits_default_model_gates(self, tmp_path):
         """Gates at their defaults leave no trace in the command string."""
@@ -639,7 +648,8 @@ class TestBuildCommandStringExtended:
             "--latent-process", "--debut-prev-score-source",
             "--sigma-obs-prior-type", "--heteroscedastic-entity-obs",
             "--tau-entity-scale", "--errors-in-variables",
-            "--propagate-rw-horizon", "--entity-group-pooling", "--val-albums",
+            "--propagate-rw-horizon", "--entity-group-pooling",
+            "--gbm-offset", "--val-albums",
         ):
             assert flag not in cmd
 

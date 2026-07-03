@@ -16,6 +16,7 @@ import arviz as az
 import jax.numpy as jnp
 import numpy as np
 import pandas as pd
+import pyarrow.parquet as pq
 import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
@@ -178,6 +179,36 @@ def load_training_data(
     train_df = train_df[valid_mask].copy()
 
     return model_args, feature_cols, train_df
+
+
+def resolve_entity_group_pooling(
+    configured: bool | None,
+    descriptor: DatasetDescriptor,
+    train_columns: "set[str] | frozenset[str] | list[str]",
+) -> bool:
+    """Resolve the tri-state entity_group_pooling gate to an effective bool.
+
+    None means auto (the default since 0.6.0): on exactly when the descriptor
+    names an entity_group_col AND that column exists in the training split.
+    An explicit True/False always wins — True keeps the hard-fail in
+    prepare_model_data when the domain cannot support the gate.
+    """
+    group_col = descriptor.entity_group_col
+    if configured is not None:
+        effective, reason = bool(configured), "explicit"
+    elif group_col is None:
+        effective, reason = False, "descriptor has no entity_group_col"
+    elif group_col not in train_columns:
+        effective, reason = False, f"column '{group_col}' missing from train split"
+    else:
+        effective, reason = True, f"entity_group_col '{group_col}' present in train split"
+    log.info(
+        "entity_group_pooling_resolved",
+        configured=configured,
+        effective=effective,
+        reason=reason,
+    )
+    return effective
 
 
 def _build_entity_groups(
@@ -814,7 +845,15 @@ def train_models(
     target_transform = str(getattr(ctx, "target_transform", "identity"))
     logit_offset = float(getattr(ctx, "logit_offset", 0.5))
     ar_center = str(getattr(ctx, "ar_center", "global"))
-    entity_group_pooling = bool(getattr(ctx, "entity_group_pooling", False))
+    # Resolve the tri-state pooling gate once, before any data loads: the
+    # merged train frame's columns are the split's plus the features', read
+    # cheaply from the parquet schemas.
+    train_columns = set(pq.read_schema(splits_path).names) | set(
+        pq.read_schema(features_path).names
+    )
+    entity_group_pooling = resolve_entity_group_pooling(
+        getattr(ctx, "entity_group_pooling", None), descriptor, train_columns
+    )
     model_args, feature_cols, train_df = load_training_data(
         features_path=features_path,
         splits_path=splits_path,
