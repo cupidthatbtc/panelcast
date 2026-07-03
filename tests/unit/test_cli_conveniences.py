@@ -137,6 +137,29 @@ class TestRunsList:
         assert "2026-07-01_0900" in marked
         assert "-> 2026-07-01_0900" in output
 
+    def test_corrupt_manifest_gets_distinct_status(self, tmp_path):
+        _write_manifest(tmp_path / "2026-06-30_1200", "2026-06-30_1200", True, ["data"])
+        bad = tmp_path / "2026-07-01_0900"
+        bad.mkdir()
+        (bad / "manifest.json").write_text("{not json", encoding="utf-8")
+        result = runner.invoke(app, ["runs", "list", "--output-dir", str(tmp_path)])
+        assert result.exit_code == 0
+        output = strip_ansi(result.output)
+        bad_line = next(li for li in output.splitlines() if "2026-07-01_0900" in li)
+        assert "corrupt" in bad_line
+        assert "incomplete" not in bad_line
+
+    def test_unreadable_output_dir_scan_degrades_to_empty(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        def boom(self):
+            raise OSError("scan failed")
+
+        monkeypatch.setattr(Path, "iterdir", boom)
+        result = runner.invoke(app, ["runs", "list", "--output-dir", str(tmp_path)])
+        assert result.exit_code == 0
+        assert "No runs found" in strip_ansi(result.output)
+
 
 class TestDemoDatasetAlias:
     """demo accepts --dataset as an alias for --descriptor."""
