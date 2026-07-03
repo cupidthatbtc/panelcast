@@ -168,9 +168,10 @@ class TestAeroStagesOnly:
 class TestAeroTinyMcmc:
     @pytest.fixture(scope="class")
     def aero_full_run(self, tmp_path_factory: pytest.TempPathFactory) -> Path:
+        """Returns the run dir: mutable products are run-scoped (#81)."""
         tmp = tmp_path_factory.mktemp("aero_full")
         _write_aero_raw(tmp)
-        exit_code, _ = _run_pipeline_in(
+        exit_code, orchestrator = _run_pipeline_in(
             tmp,
             tmp / "outputs",
             stages=["data", "splits", "features", "train", "evaluate", "predict"],
@@ -184,7 +185,7 @@ class TestAeroTinyMcmc:
             ess_threshold=100,
         )
         assert exit_code == 0, "Aero full pipeline failed"
-        return tmp
+        return orchestrator.run_dir
 
     def test_training_summary_carries_aero_domain(self, aero_full_run):
         summary_path = aero_full_run / "models" / "training_summary.json"
@@ -206,7 +207,7 @@ class TestAeroTinyMcmc:
         assert not any(name.startswith("user_") for name in site_names), site_names
 
     def test_known_airframe_predictions_in_bounds(self, aero_full_run):
-        pred_dir = aero_full_run / "outputs" / "predictions"
+        pred_dir = aero_full_run / "predictions"
         preds = pd.read_csv(pred_dir / "next_event_known_entities.csv")
         assert len(preds) > 0
         assert "entity" in preds.columns

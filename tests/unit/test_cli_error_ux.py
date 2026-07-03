@@ -57,7 +57,8 @@ class TestCompareMetricsOption:
         captured = self._mock_comparison(monkeypatch)
         result = runner.invoke(app, ["compare", "--baselines"])
         assert result.exit_code == 0
-        assert captured["metrics_path"] == Path("outputs/evaluation/metrics.json")
+        # None defers resolution to run_baseline_comparison (latest run or flat fallback).
+        assert captured["metrics_path"] is None
 
     def test_metrics_custom_path(self, monkeypatch):
         captured = self._mock_comparison(monkeypatch)

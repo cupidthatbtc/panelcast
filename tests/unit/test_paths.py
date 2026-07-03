@@ -1,5 +1,6 @@
 """Tests for the ArtifactPaths module."""
 
+import json
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
@@ -64,3 +65,23 @@ class TestContextIntegration:
 
     def test_from_ctx_falls_back_to_flat_when_absent(self):
         assert ArtifactPaths.from_ctx(SimpleNamespace()) == ArtifactPaths.flat()
+
+
+class TestResolveEvaluationDir:
+    def test_prefers_latest_run(self, tmp_path):
+        from panelcast.paths import resolve_evaluation_dir
+
+        out = tmp_path / "outputs"
+        run = out / "runA"
+        run.mkdir(parents=True)
+        (out / "latest.json").write_text(
+            json.dumps({"run_id": "runA", "run_dir": "runA"}), encoding="utf-8"
+        )
+        assert resolve_evaluation_dir(out) == run / "evaluation"
+
+    def test_falls_back_to_flat(self, tmp_path):
+        from panelcast.paths import resolve_evaluation_dir
+
+        out = tmp_path / "outputs"
+        out.mkdir()
+        assert resolve_evaluation_dir(out) == out / "evaluation"

@@ -1,7 +1,7 @@
 """Convergence + PPC report over an existing evaluation run.
 
-Reads the artifacts the evaluate stage already wrote
-(``outputs/evaluation/diagnostics.json`` and ``metrics.json``) and renders a
+Reads the artifacts the evaluate stage already wrote (``diagnostics.json``
+and ``metrics.json`` under the run's evaluation dir) and renders a
 focused convergence + posterior-predictive-check report — the two things the
 review flagged (a failing convergence gate, PPC p-values pinned at the
 extremes). No model refit; this just re-presents what the run produced.
@@ -13,6 +13,8 @@ import json
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from panelcast.paths import resolve_evaluation_dir
 
 # A PPC p-value at/near 0 or 1 is the signature of a misspecified statistic
 # (e.g. the symmetric-likelihood / left-skewed-target mismatch).
@@ -152,10 +154,16 @@ def render_markdown(report: DiagnoseReport) -> str:
 
 
 def run_diagnose(
-    eval_dir: Path = Path("outputs/evaluation"),
+    eval_dir: Path | None = None,
     output_dir: Path = Path("reports/diagnostics"),
 ) -> DiagnoseReport:
-    """Build the report and write it as Markdown + JSON."""
+    """Build the report and write it as Markdown + JSON.
+
+    eval_dir=None resolves to the latest run's evaluation dir, falling back
+    to the legacy flat location when no latest pointer exists.
+    """
+    if eval_dir is None:
+        eval_dir = resolve_evaluation_dir()
     report = build_report(eval_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     md_path = output_dir / "diagnostics_report.md"

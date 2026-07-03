@@ -7,6 +7,7 @@ predictions/reports) can be scoped under a run directory.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,3 +59,32 @@ class ArtifactPaths:
         """
         paths = getattr(ctx, "paths", None)
         return paths if isinstance(paths, cls) else cls.flat()
+
+
+def resolve_latest(output_base: Path = Path("outputs")) -> Path | None:
+    """Locate the most recent successful run directory.
+
+    Prefers the ``latest.json`` pointer the orchestrator writes on success;
+    falls back to the ``latest`` link for outputs written by older checkouts.
+    Returns None when neither exists.
+    """
+    try:
+        data = json.loads((output_base / "latest.json").read_text(encoding="utf-8"))
+        run_dir = output_base / str(data["run_dir"])
+        if run_dir.exists():
+            return run_dir
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    link = output_base / "latest"
+    try:
+        if link.exists():
+            return link
+    except OSError:
+        pass
+    return None
+
+
+def resolve_evaluation_dir(output_base: Path = Path("outputs")) -> Path:
+    """Latest run's evaluation dir, or the legacy flat location."""
+    latest = resolve_latest(output_base)
+    return latest / "evaluation" if latest is not None else output_base / "evaluation"

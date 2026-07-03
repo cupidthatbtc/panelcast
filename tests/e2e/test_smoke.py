@@ -22,7 +22,7 @@ from tests.e2e.test_domain_portability import (
 @pytest.mark.e2e
 def test_demo_pipeline_smoke(tmp_path):
     _write_aero_raw(tmp_path)
-    exit_code, _ = _run_pipeline_in(
+    exit_code, orchestrator = _run_pipeline_in(
         tmp_path,
         tmp_path / "outputs",
         stages=["data", "splits", "features", "train", "evaluate", "predict", "report"],
@@ -38,5 +38,6 @@ def test_demo_pipeline_smoke(tmp_path):
         ess_threshold=100,
     )
     assert exit_code == 0, "demo smoke pipeline failed"
-    assert (tmp_path / "reports" / "MODEL_CARD.md").exists(), "no model card produced"
-    assert (tmp_path / "outputs" / "evaluation" / "metrics.json").exists()
+    run_dir = orchestrator.run_dir
+    assert (run_dir / "reports" / "MODEL_CARD.md").exists(), "no model card produced"
+    assert (run_dir / "evaluation" / "metrics.json").exists()
