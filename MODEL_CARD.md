@@ -184,7 +184,7 @@ Two convergent negative results from the identity era — the learned
 heteroscedastic exponent collapsing to zero and the entity-disjoint R² ≈ 0 —
 are one finding: the predictive mass lives in the per-entity intercept, with
 measurement-noise modeling and covariates both ~null. See
-[`docs/WHAT_CARRIES_THE_SIGNAL.md`](docs/WHAT_CARRIES_THE_SIGNAL.md). The
+[`docs/decisions/what_carries_the_signal.md`](docs/decisions/what_carries_the_signal.md). The
 `offset_logit` re-baseline softens the second half (cold-start R² 0.095), but
 the intercept-carries-the-signal conclusion stands.
 

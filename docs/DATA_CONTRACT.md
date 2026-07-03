@@ -73,8 +73,7 @@ Mapping implementation
 - See `src/panelcast/data/cleaning.py` for `RAW_TO_CANONICAL`.
 
 Source reference
-- See `docs/lineage/DATA_LINEAGE_DETAILED.md` for full lineage and derived columns.
-- See `docs/RAW_SCHEMA_SNAPSHOT.md` for a snapshot of the raw CSV headers and sample dtypes.
+- See `docs/DATA_LINEAGE.md` for full lineage and derived columns.
 
 Cleaning rules (baseline)
 - Min ratings thresholds produced by data stage: 5, 10, 25.

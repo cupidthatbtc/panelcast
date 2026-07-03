@@ -17,14 +17,14 @@ and `docs/LIKELIHOOD_CANDIDATES.md` (§ Transform × latent process).
 
 Promoting a new default is **out of scope**: it would re-baseline every
 published number and regenerate the golden fixtures, so it is gated as its own
-decision (`docs/DECISIONS_TO_LOCK.md`, Reproducibility).
+decision (`docs/decisions/DECISIONS.md`, Reproducibility).
 
 ---
 
 ## 1. "`offset_logit` is the un-tried in-tree fix for the pinned skew/max" — corrected
 
 **Largely refuted by the repo, with one genuine gap now closed.** `offset_logit`
-was already implemented, evaluated, and HELD (`docs/DECISIONS_TO_LOCK.md:48`,
+was already implemented, evaluated, and HELD (`docs/decisions/DECISIONS.md:48`,
 `docs/LIKELIHOOD_CANDIDATES.md`, `MODEL_CARD.md:208`), and bounded-support
 likelihoods (`beta`, `beta_binomial`, `skew_normal`, `split_normal`, `mixture`)
 each pinned *more* PPC statistics, not fewer. The real gap: every HELD verdict
@@ -73,7 +73,7 @@ the >0.99 flag (within the borderline noise the existing waves note), and leaves
 MAE/RMSE/coverage unchanged. It buys no PPC or predictive gain at a real mixing
 cost.
 
-**Disposition:** rationale recorded (`docs/DECISIONS_TO_LOCK.md:55`); `ar1` stays
+**Disposition:** rationale recorded (`docs/decisions/DECISIONS.md:55`); `ar1` stays
 gated for the LOO-clear-win condition, `latent_process = rw` stays the default.
 
 ## 4. `seq_idx` clipping understates long-horizon variance — confirmed
@@ -96,7 +96,7 @@ latent option opt-in, parity-tested) keeps the legacy path the default, so the
 published numbers and golden fixtures stay valid without re-running. The
 trade-off is that adopting a better default is not a one-line flip.
 
-**Disposition:** recorded in `docs/DECISIONS_TO_LOCK.md` (Reproducibility) — a
+**Disposition:** recorded in `docs/decisions/DECISIONS.md` (Reproducibility) — a
 default change re-baselines every published metric and regenerates the golden
 fixtures, so it is gated as its own decision rather than bundled with the
 experiment that motivates it.

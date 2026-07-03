@@ -12,16 +12,16 @@ heteroscedastic ablation let the data choose how strongly observation noise
 should shrink with review count (`sigma ∝ n^-exponent`, diffuse prior centered
 near 0.5). The posterior collapses to zero: 0.010 ± 0.005, 95% HDI
 [0.003, 0.021] at 4 chains × 1000 (R-hat 1.00, bulk ESS 6224, 0 divergences;
-[`.audit/n_exponent_posterior_analysis.md`](../.audit/n_exponent_posterior_analysis.md)).
+[`.audit/n_exponent_posterior_analysis.md`](../../.audit/n_exponent_posterior_analysis.md)).
 Review count carries essentially no within-observation variance signal; the
 homoscedastic default stands.
 
 **Covariates are ~null (across entities).** On the entity-disjoint split —
 never-seen artists, where only covariates can help — R² is 0.003 (RMSE 10.8,
 n = 799), against 0.418 within-entity
-([`.audit/baseline_metrics.json`](../.audit/baseline_metrics.json)). This is
+([`.audit/baseline_metrics.json`](../../.audit/baseline_metrics.json)). This is
 not a model deficiency: every baseline (ridge, GBM) collapses the same way on
-the same split ([`BASELINES.md`](BASELINES.md)). The features simply do not
+the same split ([`BASELINES.md`](../BASELINES.md)). The features simply do not
 transfer across entities.
 
 ## Why it is one result
@@ -38,11 +38,11 @@ Corollaries the thesis ties together:
   Errors-in-variables corrects measurement noise in the lagged regressor — noise
   the n_exponent posterior says is negligible. The v1-vs-v2 bake-off confirmed
   it: LOO +0.4 against an SE of ~29.6
-  ([`.audit/model_v2_bakeoff/comparison.md`](../.audit/model_v2_bakeoff/comparison.md)).
+  ([`.audit/model_v2_bakeoff/comparison.md`](../../.audit/model_v2_bakeoff/comparison.md)).
 - **Cold-start is the open frontier, not a tuning problem** (#41). With
   covariates ~null, improving never-seen-entity prediction needs new signal
   (a second pooling level, richer features), not a better likelihood.
-- **It pairs with the durable PPC pins** ([`LIKELIHOOD_CANDIDATES.md`](LIKELIHOOD_CANDIDATES.md)):
+- **It pairs with the durable PPC pins** ([`LIKELIHOOD_CANDIDATES.md`](../LIKELIHOOD_CANDIDATES.md)):
   six likelihood families moved neither the upper-tail pins nor the predictive
   ledger much — again, the likelihood is not where the signal is.
 

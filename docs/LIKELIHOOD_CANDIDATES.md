@@ -111,10 +111,10 @@ configuration (4 chains × 1000, warmup 1000; user-score model). This is a
 subset, not the full corpus — but it is real, strongly left-skewed data at the
 scale the synthetic experiment was standing in for.
 
-| Family | R-hat (max) | ESS bulk (min) | Divergences | PPC pinned (p<0.01 or >0.99) | LOO Pareto-k > 0.7 |
-|--------|-------------|----------------|-------------|------------------------------|--------------------|
-| `studentt` | 1.01 | **795** | **0** | skewness, max, q50, q90 (**4**) | **0** |
-| `beta` | 1.01 | 304 | 1 | skewness, min, max, q10, q50, q90 (**6**) | **35** |
+| Family | R-hat (max) | ESS bulk (min) | Divergences | PPC pinned (p<0.01 or >0.99) |
+|--------|-------------|----------------|-------------|------------------------------|
+| `studentt` | 1.01 | **795** | **0** | skewness, max, q50, q90 (**4**) |
+| `beta` | 1.01 | 304 | 1 | skewness, min, max, q10, q50, q90 (**6**) |
 
 Point/calibration were close (studentt MAE 5.64 / RMSE 8.27 / R² 0.42, 95%
 coverage 0.957; beta MAE 5.67 / RMSE 8.08 / R² 0.44, 95% coverage 0.965; CRPS
@@ -128,9 +128,7 @@ coverage 0.957; beta MAE 5.67 / RMSE 8.08 / R² 0.44, 95% coverage 0.965; CRPS
   scores, pull the tail/quantile statistics back to the interior; the boundary
   squeeze concentrates mass and the pins sharpen. More MCMC samples sharpen
   pinned p-values further, so this is not a sample-count artifact.
-- **`beta` mixes worse and breaks LOO.** Bulk ESS 304 vs 795 with one
-  divergence, and 35 observations with Pareto-k > 0.7 (vs none for Student-t),
-  which makes its LOO estimate unreliable.
+- **`beta` mixes worse.** Bulk ESS 304 vs 795, with one divergence.
 - **Decision: keep `studentt` as the publication default.** The unilateral
   switch to `beta` in `configs/publication.yaml` (made on the synthetic evidence
   alone) has been reverted. `beta` remains available via `--likelihood-family`
@@ -164,19 +162,18 @@ Run from the GPU venv (`~/aoty-gpu`) after the data/splits/features stages exist
 on disk. The continuous families were fit at diagnostic scale (4 chains × 1000);
 the result is a **clean negative**:
 
-| combo | rhat | ess | div | ppc_pin | pinned | skew p | mae | rmse | cov95 | crps | k_max |
-|-------|------|-----|-----|---------|--------|--------|-----|------|-------|------|-------|
-| `studentt` | 1.01 | **819** | 0 | **3** | max,q50,q90 | **0.99** | **5.64** | **8.27** | 0.957 | **4.19** | **0.55** |
-| `skew_normal` | 1.04 | 123 | 1 | 5 | mean,skewness,max,q10,q50 | **1.00** | 6.48 | 8.94 | 0.974 | 4.56 | — |
-| `split_normal` | 1.02 | 206 | 0 | 6 | mean,skewness,min,max,q10,q50 | **1.00** | 6.22 | 8.62 | 0.965 | 4.42 | 15.45 |
+| combo | rhat | ess | div | ppc_pin | pinned | skew p | mae | rmse | cov95 | crps |
+|-------|------|-----|-----|---------|--------|--------|-----|------|-------|------|
+| `studentt` | 1.01 | **819** | 0 | **3** | max,q50,q90 | **0.99** | **5.64** | **8.27** | 0.957 | **4.19** |
+| `skew_normal` | 1.04 | 123 | 1 | 5 | mean,skewness,max,q10,q50 | **1.00** | 6.48 | 8.94 | 0.974 | 4.56 |
+| `split_normal` | 1.02 | 206 | 0 | 6 | mean,skewness,min,max,q10,q50 | **1.00** | 6.22 | 8.62 | 0.965 | 4.42 |
 
 **Neither skew-light family helps.** The whole point of the second wave was to
 move the `skewness` PPC p-value off Student-t's 0.99 pin. Both candidates pin it
 *harder* — `skew_normal` and `split_normal` each land at exactly **1.00** and
 newly trip `skewness` as an extreme statistic (Student-t's 0.99 sits just under
 the >0.99 flag). They also pin *more* statistics overall (5 and 6 vs 3), mix worse
-(bulk ESS 123 / 206 vs 819), cost ~0.6–0.8 MAE, and — for `split_normal` — break
-LOO (Pareto-k 15.45). The learned skewness parameter does not relieve the
+(bulk ESS 123 / 206 vs 819), and cost ~0.6–0.8 MAE. The learned skewness parameter does not relieve the
 left-skew misspecification on these bounded, integer scores; it concentrates the
 upper cluster and sharpens the pins, mirroring what `beta` did in the first wave.
 
@@ -190,12 +187,12 @@ behind `_DISCRETIZE_MODE`). The `+discretize` combos now run (fresh diagnostic
 4×1000; splits regenerated, so the Student-t baseline recomputes to ESS 779 / 4
 pins — within sampling noise of the published run, same integer-quantile pins):
 
-| combo | rhat | ess | div | ppc_pin | pinned | mae | rmse | cov95 | crps | k_max |
-|-------|------|-----|-----|---------|--------|-----|------|-------|------|-------|
-| `studentt` | 1.01 | 779 | 0 | 4 | skewness,max,q50,q90 | 5.64 | 8.27 | 0.957 | 4.19 | 0.67 |
-| `studentt+discretize` | 1.01 | 753 | **0** | **3** | skewness,max,q90 | **5.64** | 8.28 | 0.957 | 4.20 | 0.61 |
-| `skew_normal+discretize` | 1.03 | 86 | 0 | 6 | mean,skewness,max,q10,q50,q90 | 6.46 | 8.92 | 0.975 | 4.55 | — |
-| `split_normal+discretize` | 1.02 | 191 | 0 | 7 | mean,skewness,min,max,q10,q50,q90 | 6.21 | 8.61 | 0.969 | 4.42 | 15.91 |
+| combo | rhat | ess | div | ppc_pin | pinned | mae | rmse | cov95 | crps |
+|-------|------|-----|-----|---------|--------|-----|------|-------|------|
+| `studentt` | 1.01 | 779 | 0 | 4 | skewness,max,q50,q90 | 5.64 | 8.27 | 0.957 | 4.19 |
+| `studentt+discretize` | 1.01 | 753 | **0** | **3** | skewness,max,q90 | **5.64** | 8.28 | 0.957 | 4.20 |
+| `skew_normal+discretize` | 1.03 | 86 | 0 | 6 | mean,skewness,max,q10,q50,q90 | 6.46 | 8.92 | 0.975 | 4.55 |
+| `split_normal+discretize` | 1.02 | 191 | 0 | 7 | mean,skewness,min,max,q10,q50,q90 | 6.21 | 8.61 | 0.969 | 4.42 |
 
 The numerics pathology is gone — **0 divergences** everywhere, R-hat ≤ 1.03, finite
 gradients (a `jax.grad` finiteness test guards the tails). And on `studentt` the
@@ -220,7 +217,7 @@ continuous form won't converge; the discretized form re-pins — see below).
 
 At the full publication configuration (4 chains × 5000, warmup 3000) the
 Student-t model **passes the convergence gate** on the subset — R-hat 1.00, bulk
-ESS **3,134**, 0 divergences, and a reliable LOO (Pareto-k max 0.43, none > 0.7).
+ESS **3,134**, 0 divergences.
 It is well-calibrated (95% coverage 0.957, 80% 0.856) and accurate (MAE 5.64,
 RMSE 8.27, CRPS 4.19). It nonetheless **still pins the same four PPC statistics**
 — skewness (p 0.99), max (1.00), q50 (0.006), q90 (1.00). Five times the posterior
@@ -293,14 +290,14 @@ label-switching. On a *synthetic*, cleanly bimodal panel it mixes perfectly
 
 On the real subset (same diagnostic 4×1000 bake-off, vs the `studentt` baseline):
 
-| combo | conv | rhat | ess | div | pins | mae | k_max |
-|-------|------|------|-----|-----|------|-----|-------|
-| `studentt` | — | 1.01 | 789 | 0 | 4 (skewness,max,q50,q90) | 5.64 | 0.58 |
-| `mixture` | **FAIL** | **1.53** | **7** | 0 | 4 (skewness,max,q10,q50) | 5.93 | 2.04 |
-| `mixture+discretize` | PASS | 1.01 | 507 | 0 | 3 (skewness,max,q90) | 5.74 | 1.09 |
+| combo | conv | rhat | ess | div | pins | mae |
+|-------|------|------|-----|-----|------|-----|
+| `studentt` | — | 1.01 | 789 | 0 | 4 (skewness,max,q50,q90) | 5.64 |
+| `mixture` | **FAIL** | **1.53** | **7** | 0 | 4 (skewness,max,q10,q50) | 5.93 |
+| `mixture+discretize` | PASS | 1.01 | 507 | 0 | 3 (skewness,max,q90) | 5.74 |
 
-**The continuous mixture does not converge on real data** (R-hat 1.53, bulk ESS 7,
-72 obs with Pareto-k > 0.7). Real AOTY scores are a bounded-skew *continuum*, not a
+**The continuous mixture does not converge on real data** (R-hat 1.53, bulk
+ESS 7). Real AOTY scores are a bounded-skew *continuum*, not a
 clean two-component mixture, so the second component is weakly identified and the
 sampler cannot separate the two — the opposite of the synthetic case. Dequantizing
 the likelihood (`mixture+discretize`) regularizes it enough to converge (ESS 507), but
@@ -308,7 +305,7 @@ it then **re-pins the structural statistics**: skewness 0.99 → 1.00, max 1.00,
 q90 0.9998 all stay pinned; only **q50 is relieved (0.008 → 0.124)** — and that relief
 is the dequantization's (integer heaping), exactly what `studentt+discretize` already
 delivered, not the mixture component's. It costs ~0.1 MAE and ~280 bulk ESS vs
-`studentt` and weakens LOO (Pareto-k max 1.09 vs 0.58).
+`studentt`.
 
 **Verdict: a measured negative — `studentt` stays the default.** The two-component
 mixture relieves the q90/max/skewness bounded-skew pins no more than the four
@@ -386,7 +383,7 @@ six likelihood families reached from the other direction: the bounded-skew
 mismatch is **structural**, not a transform-or-latent-process gap. Adopting
 `offset_logit` and/or `ar1` as a new default is **out of scope here** — it would
 re-baseline every published number and regenerate the golden fixtures, so it is
-gated as its own decision (see `docs/DECISIONS_TO_LOCK.md`). Per-point review
+gated as its own decision (see `docs/decisions/DECISIONS.md`). Per-point review
 disposition: `.audit/REVIEW_RESPONSE.md`.
 
 ## Adopting a candidate
