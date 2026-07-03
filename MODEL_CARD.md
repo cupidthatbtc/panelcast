@@ -163,10 +163,10 @@ warmup 3,000, Student-t likelihood on the transformed scale.
   outside the ±0.03 tolerance), 95% coverage 0.963 (width 31.5; within
   tolerance) — intervals *narrowed* by ~2 points at the same coverage
   profile.
-- **PPC — pins reduced from seven to four:** mean (p = 0.51), sd (0.28),
-  q50 (0.054) and min (0.96) are now interior; the remaining pins are
-  skewness (1.00), max (0.999), q90 (0.999) — the structural bounded-skew
-  signature — plus q10 (0.003), the transform's known trade for relieving
+- **PPC — pin profile unchanged, interiors healthier:** mean (p = 0.51),
+  sd (0.556), q50 (0.077) and min (0.955) are interior; the remaining pins
+  are skewness (1.00), max (0.999), q90 (0.998) — the structural bounded-skew
+  signature — plus q10 (0.002), the transform's known trade for relieving
   q50. See Limitations.
 - **Baselines on the same real splits:** as of 0.6.0 the model leads the
   within-entity table on MAE, RMSE, R², and CRPS with calibrated intervals

@@ -20,8 +20,8 @@ posterior-mean metrics match `evaluation/metrics.json` to 6 decimals
 
 ## Verdict
 
-The median estimator buys ~0.076 MAE (−1.3%) and ~0.20 median-AE, with RMSE
-and R² unchanged — exactly the L1-vs-L2 textbook trade, realized through the
+The median estimator buys ~0.076 MAE (−1.3%) and ~0.20 median-AE, with only
+tiny RMSE/R² shifts (−0.006 / +0.0008) — the L1-vs-L2 textbook trade, realized through the
 skewed Student-t predictive (median sits below the mean, hence the −0.61
 systematic bias). This is not the point-accuracy lever: the GBM gap is ~0.4
 MAE. **Keep the posterior mean as the shipped point estimate** (unbiasedness
