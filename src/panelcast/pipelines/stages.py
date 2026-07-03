@@ -127,9 +127,15 @@ class StageContext:
     errors_in_variables: bool = False
     # Propagate the random walk past the training horizon at predict time (model-v2)
     propagate_rw_horizon: bool = False
-    # Genre/group pooling level between the global mean and entity effects (#41)
-    entity_group_pooling: bool = False
-    # Stacked-GBM offset feature block (#86)
+    # Genre/group pooling level between the global mean and entity effects
+    # (#41). None = auto: on where the descriptor names an entity_group_col
+    # present in the training split (the orchestrator always passes the
+    # configured PipelineConfig value; train resolves it).
+    entity_group_pooling: bool | None = None
+    # Stacked-GBM offset feature block (#86). Stays False here so bare test
+    # contexts keep the legacy roster; the orchestrator always passes the
+    # config value (default on since 0.6.0), mirroring the 0.5.0
+    # target_transform flip that left this context at "identity".
     gbm_offset: bool = False
     # Opt-in in-sampler exclusion of the rw_raw tensor (peak-GPU cut)
     exclude_rw_raw_from_collection: bool = False

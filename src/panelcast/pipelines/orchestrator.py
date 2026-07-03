@@ -207,13 +207,19 @@ class PipelineConfig:
     propagate_rw_horizon: bool = False
     # Genre/group pooling level between the global mean and the entity effects
     # (#41): each entity's init-effect location shifts by a learned zero-sum
-    # group offset. Default off => legacy path. No CLI flag.
-    entity_group_pooling: bool = False
+    # group offset. None = auto (default since 0.6.0, promoted on the #85
+    # screening + publication confirmation): on where the domain supports it —
+    # the descriptor names an entity_group_col and the training split has that
+    # column. Explicit True/False always wins (True hard-fails on unsupported
+    # domains). No CLI flag.
+    entity_group_pooling: bool | None = None
     # Stacked-GBM offset feature block (#86): a gradient-boosted prediction of
     # the target from the other blocks' outputs enters X as one more covariate
-    # (out-of-fold for train rows). Default off => block absent, X unchanged.
-    # No CLI flag.
-    gbm_offset: bool = False
+    # (out-of-fold for train rows). Default on since 0.6.0 (promoted on the
+    # #86 screening + publication confirmation: +224 paired held-out ELPD and
+    # better point accuracy at nominal coverage); works for every domain since
+    # it needs only the descriptor target and row ids. No CLI flag.
+    gbm_offset: bool = True
     # Opt-in in-sampler exclusion of the rw_raw tensor: never store its draws
     # on device during sampling (~96% peak-GPU cut at production settings;
     # posterior parity for all other sites guarded by tests).
@@ -858,10 +864,14 @@ class PipelineOrchestrator:
             parts.append("--errors-in-variables")
         if self.config.propagate_rw_horizon:
             parts.append("--propagate-rw-horizon")
-        if self.config.entity_group_pooling:
-            parts.append("--entity-group-pooling")
-        if self.config.gbm_offset:
-            parts.append("--gbm-offset")
+        if self.config.entity_group_pooling is not None:
+            parts.append(
+                "--entity-group-pooling"
+                if self.config.entity_group_pooling
+                else "--no-entity-group-pooling"
+            )
+        if self.config.gbm_offset != defaults.gbm_offset:
+            parts.append("--gbm-offset" if self.config.gbm_offset else "--no-gbm-offset")
         if self.config.val_albums != defaults.val_albums:
             parts.append(f"--val-albums {self.config.val_albums}")
         if self.config.calibration_intervals != defaults.calibration_intervals:

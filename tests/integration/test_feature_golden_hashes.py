@@ -41,23 +41,25 @@ def _stable_feature_hash(df: pd.DataFrame) -> str:
     return hash_dataframe(rounded)
 
 
-# Frozen on the pre-descriptor implementation (2026-06-10); hashes are over the
-# rounded feature matrices (see _stable_feature_hash).
+# Deliberately regenerated for the 0.6.0 default roster (gbm_offset joined the
+# shipped default blocks; every parquet gains its column). Hashes are over the
+# rounded feature matrices (see _stable_feature_hash); the pre-0.6.0 values
+# were frozen on the pre-descriptor implementation (2026-06-10).
 GOLDEN_FEATURE_HASHES = {
     "within_entity_temporal/train": (
-        "1848368d2d0bfef815dfbd006ff51abdfdbe6fd1488b9797b5462383615a0d42"
+        "46844c6459cb74324df2be1b981bcd22453a8c8242d0eecbfdcc9fe6c81a439d"
     ),
     "within_entity_temporal/validation": (
-        "255cd169ed4ad1e5f0a58f82ad206b823d1282605569cae05d35b96ff00f84c0"
+        "6cd73a3fb0ce81ab75630ddd8ddcee40471554a98c48eee4a496ed3881dbee7d"
     ),
     "within_entity_temporal/test": (
-        "cd3bf6c1fbc7e790086ea40e10292166154dfe2f72a0920fd1a66c767604ca09"
+        "59ad6ec23443101aaf4da9f33e7bb651a0b83bbb64793e6a0af5e7493beac539"
     ),
-    "entity_disjoint/train": ("34b097f3cd48d20af50ebe847a077b276309b675401e81676f71380cc975bfdf"),
+    "entity_disjoint/train": ("75220b7b4091b4475b1584701bc55817a6e655095059d41f9bdb6a65404b1831"),
     "entity_disjoint/validation": (
-        "4f5b2d5ae99d8e9f4846eb1345171eecedf7f5ae81909b060876a5dd30f082e4"
+        "6981f543faaa714f1d4c8e389cdba2034aa26cf76f7323ecd56cf732591d9ae5"
     ),
-    "entity_disjoint/test": ("180845ce1ef30915ef8ae7da2cef02e8e7dc0d4b73bd447b504b60a283934049"),
+    "entity_disjoint/test": ("f79929a90ee7329627d8d093eae5eb725abe70f1f130b1b2ae7fff207cc104ab"),
 }
 
 GOLDEN_FEATURE_NAMES = [
@@ -81,10 +83,18 @@ GOLDEN_FEATURE_NAMES = [
     "is_collaboration",
     "num_artists",
     "collab_type_ordinal",
+    "gbm_offset",
     "n_reviews",
 ]
 
-GOLDEN_BLOCKS = ["temporal", "album_type", "artist_history", "genre", "collaboration"]
+GOLDEN_BLOCKS = [
+    "temporal",
+    "album_type",
+    "artist_history",
+    "genre",
+    "collaboration",
+    "gbm_offset",
+]
 
 
 @pytest.fixture(scope="module")
@@ -116,6 +126,8 @@ def built_features(tmp_path_factory: pytest.TempPathFactory):
             enable_genre=True,
             enable_artist=True,
             enable_temporal=True,
+            # Mirrors the shipped default (on since 0.6.0).
+            gbm_offset=True,
             descriptor=DatasetDescriptor(),
         )
         manifest = build_features(ctx)

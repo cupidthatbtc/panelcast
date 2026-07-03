@@ -20,12 +20,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.pipelines.errors import ConvergenceError
 from panelcast.pipelines.train_bayes import (
     _apply_max_albums_cap,
     _validate_strict_sampling_config,
     load_training_data,
     prepare_model_data,
+    resolve_entity_group_pooling,
     train_models,
 )
 
@@ -182,6 +184,50 @@ class TestLoadTrainingData:
         assert not train_df["feature_1"].isna().any(), "NaN values should be filled"
         assert train_df["feature_1"].iloc[1] == 0.0
         assert train_df["feature_1"].iloc[3] == 0.0
+
+
+class TestResolveEntityGroupPooling:
+    """Tri-state resolution of the entity_group_pooling gate (auto since 0.6.0)."""
+
+    def test_none_with_group_col_in_data_resolves_on(self):
+        effective = resolve_entity_group_pooling(
+            None, DatasetDescriptor(), {"Artist", "User_Score", "primary_genre"}
+        )
+        assert effective is True
+
+    def test_none_with_no_descriptor_group_col_resolves_off(self):
+        descriptor = DatasetDescriptor(entity_group_col=None)
+        effective = resolve_entity_group_pooling(
+            None, descriptor, {"Artist", "User_Score", "primary_genre"}
+        )
+        assert effective is False
+
+    def test_none_with_group_col_absent_from_data_resolves_off_and_logs(self):
+        with patch("panelcast.pipelines.train_bayes.log") as mock_log:
+            effective = resolve_entity_group_pooling(
+                None, DatasetDescriptor(), {"Artist", "User_Score"}
+            )
+        assert effective is False
+        resolved = [
+            c for c in mock_log.info.call_args_list if c.args[0] == "entity_group_pooling_resolved"
+        ]
+        assert resolved, "expected an entity_group_pooling_resolved log line"
+        assert resolved[0].kwargs["configured"] is None
+        assert resolved[0].kwargs["effective"] is False
+        assert "missing" in resolved[0].kwargs["reason"]
+
+    def test_explicit_true_passes_through_even_when_unsupported(self):
+        # The resolver never downgrades an explicit True: prepare_model_data
+        # keeps today's hard-fail (both ValueError sites, covered below in
+        # TestPrepareModelData) when the domain cannot support the gate.
+        descriptor = DatasetDescriptor(entity_group_col=None)
+        assert resolve_entity_group_pooling(True, descriptor, {"Artist"}) is True
+
+    def test_explicit_false_forces_off(self):
+        effective = resolve_entity_group_pooling(
+            False, DatasetDescriptor(), {"Artist", "User_Score", "primary_genre"}
+        )
+        assert effective is False
 
 
 class TestPrepareModelData:

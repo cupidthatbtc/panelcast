@@ -65,17 +65,21 @@ sigma_obs_prior_type: halfnormal
 heteroscedastic_entity_obs: false
 tau_entity_scale: 0.25
 
-# Genre/group pooling gate (#41; default off => bit-identical to published
-# fits). True adds a zero-sum group offset between the global mean and the
-# entity effects, built from the descriptor's entity_group_col — new entities
-# from a seen group start at the group level instead of the population mean.
-entity_group_pooling: false
+# Genre/group pooling gate (#41; promoted to auto-on in 0.6.0 on the #85
+# screening + publication confirmation). null = auto: on where the descriptor
+# names an entity_group_col and the training split has that column, off
+# otherwise. Set true/false to force (true hard-fails on unsupported domains).
+# On, a zero-sum group offset sits between the global mean and the entity
+# effects — new entities from a seen group start at the group level instead
+# of the population mean.
+entity_group_pooling: null
 
-# Stacked-GBM offset feature block (#86; default off => block absent, feature
-# matrix unchanged). True appends a gbm_offset column — a gradient-boosted
-# prediction of the target from the other blocks' outputs — to X, out-of-fold
-# for train rows so no row's own label leaks into its feature.
-gbm_offset: false
+# Stacked-GBM offset feature block (#86; default on since 0.6.0 — +224 paired
+# held-out ELPD over the 0.5.0 baseline with better point accuracy at nominal
+# coverage). Appends a gbm_offset column — a gradient-boosted prediction of
+# the target from the other blocks' outputs — to X, out-of-fold for train rows
+# so no row's own label leaks into its feature. Set false to disable.
+gbm_offset: true
 
 # Split configuration
 val_albums: 0
