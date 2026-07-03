@@ -361,13 +361,18 @@ def runs_list(
         latest = base / "latest"
         if latest.exists():
             resolved = latest.resolve()
-            if resolved != latest and resolved.name != "latest":
+            if resolved.name != "latest":
                 latest_target = resolved.name
     except OSError:
         latest_target = None
 
+    try:
+        run_dirs = sorted(p for p in base.iterdir() if p.is_dir())
+    except OSError:
+        run_dirs = []
+
     rows: list[tuple[str, str, str, str, str]] = []
-    for run_dir in sorted(p for p in base.iterdir() if p.is_dir()):
+    for run_dir in run_dirs:
         if run_dir.name in ("latest", "failed"):
             continue
         manifest_path = run_dir / "manifest.json"
@@ -376,12 +381,15 @@ def runs_list(
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            manifest = {}
-        created_at = str(manifest.get("created_at") or "?")
-        # Failed runs are moved to outputs/failed/, so a success=False manifest
-        # still here is in-progress (or died before the move).
-        status = "ok" if manifest.get("success") else "incomplete"
-        n_stages = str(len(manifest.get("stages_completed") or []))
+            manifest = None
+        if manifest is None:
+            created_at, status, n_stages = "?", "corrupt", "?"
+        else:
+            created_at = str(manifest.get("created_at") or "?")
+            # Failed runs are moved to outputs/failed/, so a success=False
+            # manifest still here is in-progress (or died before the move).
+            status = "ok" if manifest.get("success") else "incomplete"
+            n_stages = str(len(manifest.get("stages_completed") or []))
         marker = "*" if run_dir.name == latest_target else " "
         rows.append((marker, run_dir.name, created_at, status, n_stages))
 
