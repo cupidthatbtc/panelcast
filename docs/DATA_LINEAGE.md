@@ -6,7 +6,7 @@
 **Output Directory:** `outputs/{run_id}/` (timestamped, e.g., `outputs/2026-01-19_143052/`)
 **Primary Code:** 90+ modules under `src/panelcast/` (see [Module Index](#module-index) below)
 **Framework:** NumPyro (JAX backend) hierarchical Bayesian models
-**CLI Entry Point:** `panelcast run` via `src/panelcast/cli.py`
+**CLI Entry Point:** `panelcast run` via `src/panelcast/cli/`
 **Tracked Example:** Kendrick Lamar - "To Pimp a Butterfly" (2015)
 
 > **Split naming:** the split strategies are now role-based —
@@ -162,9 +162,9 @@ The `PipelineOrchestrator` class (`pipelines/orchestrator.py`) manages the full 
 
 ```
 src/panelcast/
-├── cli.py                          # Typer CLI entry point (panelcast)
+├── cli/                            # Typer CLI entry point (panelcast)
 ├── config/
-│   ├── schema.py                   # Pydantic/dataclass config schemas
+│   ├── descriptor.py               # Dataset descriptor schema (Pydantic)
 │   └── loader.py                   # Config file loading
 ├── data/
 │   ├── ingest.py                   # Raw CSV loading with SHA-256 hash
@@ -1119,7 +1119,7 @@ Final arrays passed to `user_score_model`:
 
 ## 7.1 CLI Entry Point
 
-The CLI is built with Typer (`src/panelcast/cli.py`):
+The CLI is built with Typer (`src/panelcast/cli/`):
 
 ```
 panelcast                    # Show help
@@ -1880,8 +1880,8 @@ y[i] = 92 ~ Normal(mu[i], 0.36)
 
 Every file path referenced in this document should exist in the codebase:
 
-- [ ] `src/panelcast/cli.py`
-- [ ] `src/panelcast/config/schema.py`
+- [ ] `src/panelcast/cli/main.py`
+- [ ] `src/panelcast/config/descriptor.py`
 - [ ] `src/panelcast/data/ingest.py`
 - [ ] `src/panelcast/data/cleaning.py`
 - [ ] `src/panelcast/data/validation.py`

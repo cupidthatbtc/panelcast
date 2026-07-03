@@ -39,3 +39,9 @@ Diagnostics
 Model comparison
 - LOO and WAIC computed for the primary split when pointwise log-likelihood is available
 - Secondary split reports info-criteria as unavailable when using the new-entity predictive path
+
+Sensitivity analyses (opt-in `sensitivity` stage, not part of a default run)
+- Min-ratings thresholds (5, 10, 25)
+- Prior variants (default, diffuse, informative; `PRIOR_CONFIGS` in `src/panelcast/pipelines/sensitivity.py`)
+- Feature ablations (remove feature groups to measure importance)
+- Split-seed axis (seeds 42/43)
