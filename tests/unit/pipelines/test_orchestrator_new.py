@@ -121,8 +121,11 @@ class TestExecuteStagesSkipExisting:
             # Should not crash, just proceed
             assert exit_code == 0
 
-    def test_skip_existing_flag_change_disables_skip(self, tmp_path):
+    def test_skip_existing_flag_change_disables_skip(self, tmp_path, monkeypatch):
         """Changed output-affecting flags disable skip detection."""
+        # The completed "data" stage stamps data/processed/.stamp.json relative
+        # to cwd; chdir into tmp so it doesn't touch the repo's real data.
+        monkeypatch.chdir(tmp_path)
         with _mock_env()[0], _mock_env()[1]:
             # First run with default min_ratings=10.
             # Pin distinct run ids: the timestamp-based generator collides when
@@ -256,8 +259,9 @@ class TestExecuteStageRunFn:
             assert orchestrator.manifest.success is False
             assert "disk full" in orchestrator.manifest.error
 
-    def test_stage_already_completed_on_resume(self, tmp_path):
+    def test_stage_already_completed_on_resume(self, tmp_path, monkeypatch):
         """Resumed pipeline skips already-completed stages."""
+        monkeypatch.chdir(tmp_path)  # a completed stage stamps the repo's data dirs
         with _mock_env()[0], _mock_env()[1]:
             # Create initial run with completed stage
             run_id = "2026-01-20_120000"
