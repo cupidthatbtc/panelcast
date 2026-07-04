@@ -5,36 +5,38 @@ The formula intentionally overestimates (within ~2x of measured peaks) to
 avoid OOM surprises during long-running sampling jobs.
 
 The memory model was recalibrated against a ladder of measured peaks on the
-real dataset (scripts/experiment_preflight_validation.py, RTX 5090,
-2026-06-10; results in outputs/experiments/preflight_validation.json):
+real dataset (scripts/experiment_preflight_validation.py, RTX 5090 Laptop,
+2026-07-04; results in .audit/preflight_validation/):
 
 - Warmup iterations are NOT stored: rungs with warmup 50 vs 250 at equal
-  sample counts measured byte-identical peaks. The old formula counted
-  warmup draws as stored samples — its largest error source.
-- Collected draws accumulate across sequential chains and are duplicated
-  once more by the end-of-run concatenation: measured bytes per kept draw
-  were 2.0-2.9x the raw site size. COLLECTION_OVERHEAD_FACTOR = 3.0 keeps
-  the estimate conservative.
-- Fixed JIT/runtime overhead measured ~0.17-0.26 GiB (ladder fit
-  intercept); modeled as FIXED_OVERHEAD_GB plus a 10% proportional buffer
-  (the old 40% multiplicative buffer stacked error on error).
+  sample counts measured byte-identical peaks.
+- Collected draws accumulate across sequential chains and are duplicated once
+  more by the end-of-run concatenation. FACTOR is set so the estimated
+  per-draw slope stays at or above the measured high-end slope, so
+  extrapolation to production (4x1000) and publication (4x5000) scale stays
+  over — never under — measured.
+- The fixed JIT/CUDA-context floor measured ~0.06 GiB (cal_10, cal_50 and
+  2x50 all clustered there); FIXED_OVERHEAD_GB models it, plus a 10%
+  proportional buffer.
 
-Validated ratios (estimate / measured) across the eight ladder rungs:
-1.1x - 2.0x, never under.
+Estimate/measured across the eight ladder rungs: 1.1x - 1.9x, never under;
+the production-scale rungs (2x250, 2x500) land 1.1x - 1.3x. The superseded
+constants (FIXED 0.25 / FACTOR 3.0, from a 2026-06-10 ladder) over-projected
+small runs ~5x and the 4x5000 publication run at 96.9 GB against a
+measurement-consistent ~9 GiB.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Measured bytes-per-collected-draw run 2.0-2.9x the raw site size
-# (per-chain collection buffers live until the end of the run, plus one
-# concatenated copy across chains). 3.0 keeps the estimate conservative.
-COLLECTION_OVERHEAD_FACTOR = 3.0
+# Per-draw collection factor. Set so the estimated per-draw slope stays >= the
+# measured high-end slope (2x250->2x500), keeping 4x1000/4x5000 extrapolation
+# over measured (per-chain buffers live to end-of-run, plus one concat copy).
+COLLECTION_OVERHEAD_FACTOR = 3.4
 
-# Fixed JIT compilation / CUDA workspace overhead (ladder fit intercept
-# measured 0.17-0.26 GiB on the real model).
-FIXED_OVERHEAD_GB = 0.25
+# Fixed JIT / CUDA-context floor (~0.06 GiB measured: cal_10, cal_50, 2x50).
+FIXED_OVERHEAD_GB = 0.06
 
 
 @dataclass(frozen=True)
