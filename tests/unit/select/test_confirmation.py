@@ -34,10 +34,11 @@ def _write_ll(path: Path, ll: np.ndarray) -> None:
     az.InferenceData(log_likelihood=xr.Dataset({"y": da})).to_netcdf(str(path))
 
 
-def _fake_env(tmp_path, monkeypatch, winner_ll_for_seed=None):
+def _fake_env(tmp_path, monkeypatch, winner_ll_for_seed=None, winner_passed_for_seed=None):
     """Fake launcher that writes per-run log-lik snapshots; patches resolve_latest."""
     counter = {"n": 0}
     winner_ll_for_seed = winner_ll_for_seed or (lambda seed: _WINNER_GOOD_LL)
+    winner_passed_for_seed = winner_passed_for_seed or (lambda seed: True)
 
     def launch(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
         name = Path(config_path).stem  # confirm_<label>_seed<seed>
@@ -47,6 +48,10 @@ def _fake_env(tmp_path, monkeypatch, winner_ll_for_seed=None):
         run_dir = tmp_path / "outputs" / f"run_{counter['n']:03d}"
         ll = winner_ll_for_seed(seed) if label == "winner" else _REF_LL
         _write_ll(run_dir / "evaluation" / "log_likelihood.nc", ll)
+        if label == "winner":
+            (run_dir / "evaluation" / "diagnostics.json").write_text(
+                json.dumps({"passed": winner_passed_for_seed(seed)}), encoding="utf-8"
+            )
         (tmp_path / "outputs" / "latest.json").write_text(
             json.dumps({"run_dir": run_dir.name}), encoding="utf-8"
         )
@@ -82,6 +87,20 @@ class TestRunConfirmation:
             {"latent_process": "ar1"}, cfg, seeds=(42, 43, 44), promote_z=2.0, launch=launch
         )
         assert not result.confirmed
+
+    def test_nonconverged_winner_seed_fails_confirmation(self, tmp_path, monkeypatch):
+        # z clears the bar on every seed, but the winner fails the convergence
+        # gate on one — confirmation must still fail (publication-scale gate).
+        cfg, launch = _fake_env(
+            tmp_path, monkeypatch, winner_passed_for_seed=lambda seed: seed != 43
+        )
+        result = run_confirmation(
+            {"latent_process": "ar1"}, cfg, seeds=(42, 43, 44), promote_z=2.0, launch=launch
+        )
+        assert not result.confirmed
+        seed43 = next(s for s in result.seeds if s.seed == 43)
+        assert seed43.winner_converged is False
+        assert seed43.elpd["z"] > 2.0
 
     def test_checkpoint_written_each_seed(self, tmp_path, monkeypatch):
         cfg, launch = _fake_env(tmp_path, monkeypatch)
@@ -143,12 +162,28 @@ class TestRender:
     def test_confirmed_block(self):
         result = ConfirmationResult(
             winner_knobs={"latent_process": "ar1"},
-            seeds=[SeedResult(seed=s, elpd={"diff": 20.0, "dse": 4.0, "z": 5.0}) for s in (42, 43)],
+            seeds=[
+                SeedResult(seed=s, elpd={"diff": 20.0, "dse": 4.0, "z": 5.0}, winner_converged=True)
+                for s in (42, 43)
+            ],
         )
         md = render_confirmation(result)
         assert "CONFIRMED" in md
         assert "manual PR" in md
         assert md.count("| 4") >= 2
+
+    def test_convergence_failure_block(self):
+        result = ConfirmationResult(
+            winner_knobs={"latent_process": "ar1"},
+            seeds=[
+                SeedResult(seed=42, elpd={"diff": 20.0, "dse": 4.0, "z": 5.0}, winner_converged=True),
+                SeedResult(seed=43, elpd={"diff": 20.0, "dse": 4.0, "z": 5.0}, winner_converged=False),
+            ],
+        )
+        md = render_confirmation(result)
+        assert "NOT CONFIRMED" in md
+        assert "convergence gate" in md
+        assert "FAIL" in md
 
     def test_not_confirmed_block(self):
         result = ConfirmationResult(

@@ -21,6 +21,7 @@ class TestLoad:
         assert tiers["quick"].stages == (1,)
         assert not tiers["quick"].confirm
         assert tiers["standard"].include_stage2
+        assert tiers["standard"].publication_confirm["num_samples"] == 5000
         assert tiers["thorough"].stage3_fits == 8
         assert tiers["thorough"].publication_confirm["num_samples"] == 5000
 

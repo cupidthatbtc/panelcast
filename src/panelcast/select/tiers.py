@@ -38,7 +38,16 @@ class EffortTier:
 
 _SHIPPED_TIERS: dict[str, EffortTier] = {
     "quick": EffortTier("quick", (1,), 2, 500, 500, stage3_fits=0, confirm=False),
-    "standard": EffortTier("standard", (1, 2), 4, 1000, 1000, stage3_fits=0, confirm=True),
+    "standard": EffortTier(
+        "standard",
+        (1, 2),
+        4,
+        1000,
+        1000,
+        stage3_fits=0,
+        confirm=True,
+        publication_confirm={"num_chains": 4, "num_samples": 5000, "num_warmup": 5000},
+    ),
     "thorough": EffortTier(
         "thorough",
         (1, 2, 3),

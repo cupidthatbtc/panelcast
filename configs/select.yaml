@@ -30,6 +30,12 @@ tiers:
     num_warmup: 1000
     stage3_fits: 0
     confirm: true
+    # Screen the arms cheaply at 1000, then confirm the candidate at publication
+    # scale, where the convergence gate is enforced (1000 rarely clears rhat/ess).
+    publication_confirm:
+      num_chains: 4
+      num_samples: 5000
+      num_warmup: 5000
   thorough:
     stages: [1, 2, 3]
     num_chains: 4

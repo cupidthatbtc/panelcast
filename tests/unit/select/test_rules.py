@@ -10,6 +10,7 @@ from panelcast.select.rules import (
     DecisionRules,
     evaluate_candidate,
     promotable,
+    screenable,
 )
 from panelcast.select.scoring import ArmScore
 
@@ -116,6 +117,25 @@ class TestEvaluate:
             _passing(elpd_z=0.0, cov95_delta=0.2, converged=False), DecisionRules()
         )
         assert len(verdict.reasons) == 3
+
+
+class TestScreenable:
+    def test_z_and_coverage_screen_even_when_not_converged(self):
+        # The whole point: a non-converged arm can still be a confirmation
+        # candidate (convergence is enforced later, at publication scale).
+        assert screenable(_passing(converged=False), DecisionRules())
+
+    def test_low_z_is_not_screenable(self):
+        assert not screenable(_passing(elpd_z=1.5), DecisionRules())
+
+    def test_missing_elpd_is_not_screenable(self):
+        assert not screenable(_passing(elpd_z=None), DecisionRules())
+
+    def test_coverage_out_of_tolerance_is_not_screenable(self):
+        assert not screenable(_passing(cov95_delta=0.2), DecisionRules())
+
+    def test_missing_coverage_is_not_screenable(self):
+        assert not screenable(_passing(cov80_delta=None), DecisionRules())
 
 
 class TestPromotable:

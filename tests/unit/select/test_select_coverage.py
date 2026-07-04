@@ -252,7 +252,9 @@ class TestConfirmedProperty:
     def test_all_seeds_hold(self):
         result = ConfirmationResult(
             winner_knobs={},
-            seeds=[SeedResult(seed=s, elpd={"z": 5.0}) for s in (42, 43)],
+            seeds=[
+                SeedResult(seed=s, elpd={"z": 5.0}, winner_converged=True) for s in (42, 43)
+            ],
             promote_z=2.0,
         )
         assert result.confirmed

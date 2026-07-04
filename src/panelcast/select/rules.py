@@ -103,10 +103,27 @@ def promotable(scores: list[ArmScore], rules: DecisionRules) -> list[CandidateVe
     return sorted(verdicts, key=lambda v: (not v.promote, v.arm))
 
 
+def screenable(score: ArmScore, rules: DecisionRules) -> bool:
+    """Promotion criteria EXCLUDING convergence — the bar to become a candidate.
+
+    Screening fits (reduced samples) rarely clear the rhat/ess gate, so nothing
+    would ever get confirmed if convergence were required to pick a candidate.
+    Convergence is instead enforced at the publication-scale confirmation fits;
+    the displayed per-arm verdict (``evaluate_candidate``) still honours it.
+    """
+    if score.elpd_z is None or score.elpd_z < rules.promote_z:
+        return False
+    for delta in (score.cov80_delta, score.cov95_delta):
+        if delta is None or abs(delta) > rules.coverage_tolerance:
+            return False
+    return True
+
+
 __all__ = [
     "DEFAULT_RULES_PATH",
     "CandidateVerdict",
     "DecisionRules",
     "evaluate_candidate",
     "promotable",
+    "screenable",
 ]

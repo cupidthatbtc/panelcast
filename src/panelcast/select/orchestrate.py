@@ -17,7 +17,7 @@ from typing import Any
 import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor, load_descriptor
-from panelcast.select.rules import DecisionRules, promotable
+from panelcast.select.rules import DecisionRules, promotable, screenable
 from panelcast.select.runner import SweepConfig, ofat_arms
 from panelcast.select.space import KNOBS, enumerate_space
 from panelcast.select.tiers import EffortTier
@@ -255,16 +255,22 @@ def run_select(
     )
     report_md += "\n" + _render_verdicts(verdicts, rules)
 
-    # A promotable winner is confirmed on multiple seeds before `select`
-    # recommends it — a single-seed z is one draw from the selection lottery.
-    winner = next((v for v in verdicts if v.promote), None)
+    # The confirmation candidate is the highest-z arm that clears the promotion
+    # bar at SCREENING scale (z + coverage) — convergence is NOT required here,
+    # because reduced-sample fits rarely converge and nothing would ever reach
+    # confirmation. Convergence is enforced at the publication-scale confirmation
+    # fits below; a single-seed z is one draw from the selection lottery.
+    winner = max(
+        (s for s in scores if screenable(s, rules)),
+        key=lambda s: s.elpd_z,
+        default=None,
+    )
     confirmed: bool | None = None
     if tier.confirm and winner is not None:
         from panelcast.select.confirmation import render_confirmation, run_confirmation
 
-        winner_score = next((s for s in scores if s.arm == winner.arm), None)
         result = run_confirmation(
-            dict(winner_score.knobs if winner_score else {}),
+            dict(winner.knobs),
             cfg,
             seeds=rules.confirmation_seeds,
             promote_z=rules.promote_z,
