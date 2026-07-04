@@ -183,7 +183,7 @@ def _fake_env(tmp_path, monkeypatch):
     ref_ll = np.zeros((2, 6))
     good_ll = np.log(np.tile(np.array([2.0, 3.0, 4.0, 5.0, 6.0, 7.0]), (2, 1)))
 
-    def launch(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
+    def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
         counter["n"] += 1
         run_dir = tmp_path / "outputs" / f"run_{counter['n']:03d}"
         _write_scored_run(run_dir, ref_ll if counter["n"] == 1 else good_ll)
@@ -263,6 +263,75 @@ class TestRunSelect:
         assert "Prior-predictive screen" in (Path(result["report_dir"]) / "report.md").read_text()
 
 
+def _nonconverged_env(tmp_path, monkeypatch):
+    """Every non-reference arm beats the reference but FAILS the convergence gate,
+    so it is screenable yet held by the strict per-arm verdict."""
+    counter = {"n": 0}
+    ref_ll = np.zeros((2, 6))
+    good_ll = np.log(np.tile(np.array([2.0, 3.0, 4.0, 5.0, 6.0, 7.0]), (2, 1)))
+
+    def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
+        counter["n"] += 1
+        run_dir = tmp_path / "outputs" / f"run_{counter['n']:03d}"
+        is_ref = counter["n"] == 1
+        _write_scored_run(run_dir, ref_ll if is_ref else good_ll, converged=is_ref)
+        (tmp_path / "outputs" / "latest.json").write_text(
+            json.dumps({"run_dir": run_dir.name}), encoding="utf-8"
+        )
+        return 0, "ok"
+
+    import panelcast.paths as paths_mod
+
+    def _latest(output_base=Path("outputs")):
+        data = json.loads((tmp_path / "outputs" / "latest.json").read_text(encoding="utf-8"))
+        return tmp_path / "outputs" / data["run_dir"]
+
+    monkeypatch.setattr(paths_mod, "resolve_latest", _latest)
+    return launch
+
+
+class TestScreeningCandidate:
+    def test_nonconverged_screenable_arm_confirmed_at_publication_scale(
+        self, tmp_path, monkeypatch
+    ):
+        import panelcast.select.confirmation as confirm_mod
+
+        launch = _nonconverged_env(tmp_path, monkeypatch)
+        captured: dict = {}
+
+        class _Result:
+            confirmed = True
+
+            def to_dict(self):
+                return {"confirmed": True}
+
+        def fake_confirm(winner_knobs, cfg, seeds, promote_z, sampler_overrides, launch):
+            captured["overrides"] = sampler_overrides
+            captured["knobs"] = winner_knobs
+            return _Result()
+
+        monkeypatch.setattr(confirm_mod, "run_confirmation", fake_confirm)
+        monkeypatch.setattr(confirm_mod, "render_confirmation", lambda r: "confirmation block\n")
+
+        tier = EffortTier(
+            "standard", (1, 2), 4, 1000, 1000, confirm=True,
+            publication_confirm={"num_chains": 4, "num_samples": 5000, "num_warmup": 5000},
+        )
+        cfg = _cfg(tmp_path, max_fits=3)
+        cfg.include_stage2 = False
+        result = run_select(
+            None, tier, DecisionRules(confirmation_seeds=(42,)), cfg,
+            launch=launch, audit_root=tmp_path / ".audit",
+        )
+        # No arm converged, so the strict verdicts promote nobody...
+        assert result["promotable"] == []
+        # ...yet a screenable candidate was confirmed at publication scale (5000).
+        assert captured["overrides"] == {"num_chains": 4, "num_samples": 5000, "num_warmup": 5000}
+        assert captured["knobs"]  # a real, non-reference arm was chosen
+        assert result["confirmed"] is True
+        assert result["winner_arm"] is not None
+
+
 def _confirm_env(tmp_path, monkeypatch):
     """Fake pipeline that distinguishes reference vs winner fits by config name,
     so the multi-seed confirmation resolves deterministically to confirmed."""
@@ -270,7 +339,7 @@ def _confirm_env(tmp_path, monkeypatch):
     ref_ll = np.zeros((2, 6))
     good_ll = np.log(np.tile(np.array([2.0, 3.0, 4.0, 5.0, 6.0, 7.0]), (2, 1)))
 
-    def launch(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
+    def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
         state["n"] += 1
         name = Path(config_path).stem
         if "confirm_reference" in name:
@@ -324,7 +393,7 @@ class TestConfirmationWiring:
         ref_ll = np.zeros((2, 6))
         good_ll = np.log(np.tile(np.array([2.0, 3.0, 4.0, 5.0, 6.0, 7.0]), (2, 1)))
 
-        def launch(config_path, panelcast_bin):
+        def launch(config_path, panelcast_bin, timeout_seconds=None):
             state["n"] += 1
             name = Path(config_path).stem
             if name.startswith("confirm_"):

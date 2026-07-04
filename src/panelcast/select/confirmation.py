@@ -35,6 +35,7 @@ class SeedResult:
     reference_run: str | None = None
     winner_run: str | None = None
     elpd: dict[str, Any] | None = None
+    winner_converged: bool | None = None
     error: str | None = None
 
 
@@ -48,12 +49,20 @@ class ConfirmationResult:
 
     @property
     def confirmed(self) -> bool:
-        """Direction holds (z at or above threshold) on every measured seed."""
+        """Direction holds AND the winner converges on every measured seed.
+
+        Confirmation is the publication-scale gate: a winner screened at reduced
+        samples only earns a recommendation if, refit at 5000, it clears the
+        pre-registered z on every seed and its rhat/ess gate passes there too.
+        """
         measured = [s for s in self.seeds if s.elpd is not None]
         if len(measured) < len(self.seeds) or not measured:
             return False
         return all(
-            s.elpd.get("z") is not None and s.elpd["z"] >= self.promote_z for s in measured
+            s.elpd.get("z") is not None
+            and s.elpd["z"] >= self.promote_z
+            and s.winner_converged is True
+            for s in measured
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -63,6 +72,19 @@ class ConfirmationResult:
             "confirmed": self.confirmed,
             "seeds": [asdict(s) for s in self.seeds],
         }
+
+
+def _run_converged(run_dir: Path | None) -> bool:
+    """Whether a fit's convergence gate passed; missing/unreadable → not converged."""
+    if run_dir is None:
+        return False
+    try:
+        payload = json.loads(
+            (run_dir / "evaluation" / "diagnostics.json").read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        return False
+    return isinstance(payload, dict) and payload.get("passed") is True
 
 
 def _write_config(
@@ -138,6 +160,7 @@ def run_confirmation(
             seed_result.reference_run = str(ref_run) if ref_run else None
             win_run = _one_fit({**base, **winner_knobs}, seed, "winner")
             seed_result.winner_run = str(win_run) if win_run else None
+            seed_result.winner_converged = _run_converged(win_run)
             if ref_run is None or win_run is None:
                 raise RuntimeError("run directory not resolved after fit")
             pair: PairedElpd = paired_elpd(
@@ -160,34 +183,41 @@ def render_confirmation(result: ConfirmationResult) -> str:
     lines = [
         "## Multi-seed confirmation",
         "",
-        "| seed | elpd_diff | dse | z | runs |",
-        "| --- | --- | --- | --- | --- |",
+        "| seed | elpd_diff | dse | z | converged | runs |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     for s in result.seeds:
+        conv = "-" if s.winner_converged is None else ("PASS" if s.winner_converged else "FAIL")
         if s.elpd and s.elpd.get("z") is not None:
             lines.append(
                 f"| {s.seed} | {s.elpd['diff']:+.1f} | {s.elpd['dse']:.1f} | "
-                f"{s.elpd['z']:+.2f} | ok |"
+                f"{s.elpd['z']:+.2f} | {conv} | ok |"
             )
         elif s.elpd:
             # A zero-variance paired diff leaves z undefined (winner ≈ reference).
             lines.append(
-                f"| {s.seed} | {s.elpd['diff']:+.1f} | {s.elpd['dse']:.1f} | - | degenerate |"
+                f"| {s.seed} | {s.elpd['diff']:+.1f} | {s.elpd['dse']:.1f} "
+                f"| - | {conv} | degenerate |"
             )
         else:
-            lines.append(f"| {s.seed} | - | - | - | {s.error or 'failed'} |")
+            lines.append(f"| {s.seed} | - | - | - | {conv} | {s.error or 'failed'} |")
     lines.append("")
     if result.confirmed:
         lines.append(
-            f"CONFIRMED: the winner clears z ≥ {result.promote_z:g} on every seed. "
-            "`select` recommends promotion; the default flip remains a manual PR "
-            "with this table as its evidence."
+            f"CONFIRMED: the winner clears z ≥ {result.promote_z:g} and converges on "
+            "every seed at publication scale. `select` recommends promotion; the "
+            "default flip remains a manual PR with this table as its evidence."
         )
     else:
-        lines.append(
-            "NOT CONFIRMED: the effect does not hold across seeds at the "
-            "pre-registered threshold. Treat the sweep ranking as noise-level."
+        conv_failed = any(
+            s.winner_converged is False for s in result.seeds if s.elpd is not None
         )
+        reason = (
+            "the winner failed the convergence gate at publication scale on at least one seed"
+            if conv_failed
+            else "the effect does not hold across seeds at the pre-registered threshold"
+        )
+        lines.append(f"NOT CONFIRMED: {reason}. Treat the sweep ranking as noise-level.")
     return "\n".join(lines) + "\n"
 
 

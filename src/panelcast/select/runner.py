@@ -70,6 +70,7 @@ class SweepConfig:
     num_warmup: int | None = None
     extra_config: dict[str, Any] = field(default_factory=dict)
     panelcast_bin: str | None = None
+    arm_timeout_seconds: float | None = None
 
     @property
     def sweep_dir(self) -> Path:
@@ -330,17 +331,28 @@ def _write_arm_config(
     path.write_text(yaml.safe_dump(payload, sort_keys=True), encoding="utf-8")
 
 
-def launch_arm(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
-    """Run one arm as a subprocess; returns (returncode, combined output tail)."""
+def launch_arm(
+    config_path: Path, panelcast_bin: str, timeout_seconds: float | None = None
+) -> tuple[int, str]:
+    """Run one arm as a subprocess; returns (returncode, combined output tail).
+
+    A fit that exceeds ``timeout_seconds`` is killed (subprocess.run reaps the
+    child before raising) and reported as a failure, so one pathological arm
+    can't stall the whole serial sweep.
+    """
     import os
 
     env = {**os.environ, "PANELCAST_SAVE_LOG_LIKELIHOOD": "1"}
-    proc = subprocess.run(
-        [panelcast_bin, "run", "--config", str(config_path)],
-        capture_output=True,
-        text=True,
-        env=env,
-    )
+    try:
+        proc = subprocess.run(
+            [panelcast_bin, "run", "--config", str(config_path)],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired:
+        return -9, f"arm exceeded timeout of {timeout_seconds}s and was killed"
     tail = (proc.stdout + "\n" + proc.stderr)[-4000:]
     return proc.returncode, tail
 
@@ -350,7 +362,7 @@ def run_sweep(
     descriptor: DatasetDescriptor,
     train_df=None,
     available_columns: frozenset[str] | None = None,
-    launch: Callable[[Path, str], tuple[int, str]] | None = None,
+    launch: Callable[..., tuple[int, str]] | None = None,
     scorer: Callable[[Path, Path | None], dict[str, Any]] | None = None,
 ) -> SweepLedger:
     """Execute the staged sweep serially; every arm checkpoints the ledger.
@@ -411,7 +423,7 @@ def run_sweep(
         _write_arm_config(cfg, merged, stages, config_path)
         log.info("arm_start", arm_id=aid, stage=stage, knobs=arm, stages=stages)
         started = time.monotonic()
-        code, tail = launch(config_path, panelcast_bin)
+        code, tail = launch(config_path, panelcast_bin, cfg.arm_timeout_seconds)
         record.wall_clock_seconds = time.monotonic() - started
         if code != 0:
             record.status = "failed"

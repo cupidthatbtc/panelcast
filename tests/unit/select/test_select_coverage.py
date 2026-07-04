@@ -37,7 +37,7 @@ class TestLaunchArm:
             stdout = "ok"
             stderr = ""
 
-        def fake_run(cmd, capture_output, text, env):
+        def fake_run(cmd, capture_output, text, env, timeout=None):
             captured["cmd"] = cmd
             captured["env"] = env
             return _Proc()
@@ -81,7 +81,7 @@ class TestWriteArmConfig:
 def _fake_env(tmp_path, monkeypatch):
     counter = {"n": 0}
 
-    def launch(config_path, panelcast_bin):
+    def launch(config_path, panelcast_bin, timeout_seconds=None):
         counter["n"] += 1
         run_dir = tmp_path / "outputs" / f"run_{counter['n']:03d}"
         run_dir.mkdir(parents=True)
@@ -137,9 +137,9 @@ class TestSweepEdges:
         )
         launches_before = []
 
-        def counting_launch(config_path, panelcast_bin):
+        def counting_launch(config_path, panelcast_bin, timeout_seconds=None):
             launches_before.append(config_path)
-            return launch(config_path, panelcast_bin)
+            return launch(config_path, panelcast_bin, timeout_seconds)
 
         run_sweep(cfg, AOTY, launch=counting_launch)
         assert launches_before == []  # truncated before any new fit
@@ -252,7 +252,9 @@ class TestConfirmedProperty:
     def test_all_seeds_hold(self):
         result = ConfirmationResult(
             winner_knobs={},
-            seeds=[SeedResult(seed=s, elpd={"z": 5.0}) for s in (42, 43)],
+            seeds=[
+                SeedResult(seed=s, elpd={"z": 5.0}, winner_converged=True) for s in (42, 43)
+            ],
             promote_z=2.0,
         )
         assert result.confirmed

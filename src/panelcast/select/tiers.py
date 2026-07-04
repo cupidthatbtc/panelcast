@@ -38,7 +38,16 @@ class EffortTier:
 
 _SHIPPED_TIERS: dict[str, EffortTier] = {
     "quick": EffortTier("quick", (1,), 2, 500, 500, stage3_fits=0, confirm=False),
-    "standard": EffortTier("standard", (1, 2), 4, 1000, 1000, stage3_fits=0, confirm=True),
+    "standard": EffortTier(
+        "standard",
+        (1, 2),
+        4,
+        1000,
+        1000,
+        stage3_fits=0,
+        confirm=True,
+        publication_confirm={"num_chains": 4, "num_samples": 5000, "num_warmup": 5000},
+    ),
     "thorough": EffortTier(
         "thorough",
         (1, 2, 3),
@@ -99,6 +108,7 @@ def tier_to_sweep_config(
     budget_hours: float | None = None,
     promote_z: float = 2.0,
     panelcast_bin: str | None = None,
+    arm_timeout_seconds: float | None = None,
 ) -> SweepConfig:
     """Map a tier (plus raw overrides) onto the runner's SweepConfig."""
     return SweepConfig(
@@ -114,6 +124,7 @@ def tier_to_sweep_config(
         num_samples=tier.num_samples,
         num_warmup=tier.num_warmup,
         panelcast_bin=panelcast_bin,
+        arm_timeout_seconds=arm_timeout_seconds,
     )
 
 

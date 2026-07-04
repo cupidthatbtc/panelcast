@@ -199,7 +199,7 @@ def _fake_env(tmp_path, monkeypatch):
     launches: list[Path] = []
     run_dirs = iter(f"run_{i:03d}" for i in range(999))
 
-    def launch(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
+    def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
         launches.append(Path(config_path))
         (tmp_path / "outputs").mkdir(exist_ok=True)
         current = next(run_dirs)
@@ -256,11 +256,11 @@ class TestRunSweep:
         cfg.include_stage2 = False
         calls = {"n": 0}
 
-        def flaky(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
+        def flaky(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
             calls["n"] += 1
             if calls["n"] == 2:
                 return 1, "boom"
-            return launch(config_path, panelcast_bin)
+            return launch(config_path, panelcast_bin, timeout_seconds)
 
         ledger = run_sweep(cfg, AOTY, launch=flaky)
         failed = [r for r in ledger.records.values() if r.status == "failed"]
@@ -318,3 +318,54 @@ class TestDiagnosticsAreOrderingOnly:
         arms = ofat_arms(AOTY)
         reordered = reorder_arms(arms, {k: True for k in ("target_skewed", "integer_heaped")})
         assert sorted(str(a) for a, _ in arms) == sorted(str(a) for a, _ in reordered)
+
+
+class TestArmTimeout:
+    def test_launch_arm_passes_timeout_through(self, tmp_path, monkeypatch):
+        import panelcast.select.runner as runner_mod
+
+        captured: dict = {}
+
+        class _Proc:
+            returncode = 0
+            stdout = "out"
+            stderr = "err"
+
+        def fake_run(cmd, **kwargs):
+            captured.update(kwargs)
+            return _Proc()
+
+        monkeypatch.setattr(runner_mod.subprocess, "run", fake_run)
+        code, tail = runner_mod.launch_arm(tmp_path / "arm.yaml", "pc", timeout_seconds=123)
+        assert captured["timeout"] == 123
+        assert code == 0
+
+    def test_launch_arm_timeout_returns_kill_tuple(self, tmp_path, monkeypatch):
+        import panelcast.select.runner as runner_mod
+
+        def fake_run(cmd, **kwargs):
+            raise runner_mod.subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+
+        monkeypatch.setattr(runner_mod.subprocess, "run", fake_run)
+        code, tail = runner_mod.launch_arm(tmp_path / "arm.yaml", "pc", timeout_seconds=5)
+        assert code == -9
+        assert "exceeded timeout of 5s" in tail
+
+    def test_timed_out_arm_is_failed_and_sweep_continues(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.arm_timeout_seconds = 1800.0
+        calls = {"n": 0}
+
+        def timing_out(config_path, panelcast_bin, timeout_seconds=None):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                return -9, f"arm exceeded timeout of {timeout_seconds}s and was killed"
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        ledger = run_sweep(cfg, AOTY, launch=timing_out)
+        failed = [r for r in ledger.records.values() if r.status == "failed"]
+        assert len(failed) == 1
+        assert "exceeded timeout of 1800.0s" in failed[0].error
+        # The sweep did not stall: every planned arm still has a record.
+        assert len(ledger.records) == len(ofat_arms(AOTY)) + 1

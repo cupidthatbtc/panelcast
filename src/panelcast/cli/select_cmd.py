@@ -35,6 +35,15 @@ def select(
     budget_hours: float | None = typer.Option(
         None, "--budget-hours", min=0.1, help="GPU-hour budget; stages truncate in priority order."
     ),
+    arm_timeout: float | None = typer.Option(
+        1800.0,
+        "--arm-timeout",
+        help=(
+            "Per-arm wall-clock timeout in seconds; a fit exceeding it is "
+            "killed and marked failed."
+        ),
+        min=1.0,
+    ),
     sweep_id: str = typer.Option(
         "sweep", "--sweep-id", help="Sweep directory name under outputs/select/ (enables --resume)."
     ),
@@ -76,6 +85,7 @@ def select(
         max_fits=max_fits,
         budget_hours=budget_hours,
         promote_z=rules.promote_z,
+        arm_timeout_seconds=arm_timeout,
     )
 
     plan = build_plan(
