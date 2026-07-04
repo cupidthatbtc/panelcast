@@ -92,3 +92,12 @@ class TestSweepConfigMapping:
             promote_z=3.5,
         )
         assert cfg.winner_z == 3.5
+
+    def test_arm_timeout_flows_to_config(self, tmp_path):
+        cfg = tier_to_sweep_config(
+            EffortTier("standard", (1, 2), 4, 1000, 1000),
+            sweep_id="s",
+            output_root=tmp_path,
+            arm_timeout_seconds=1800.0,
+        )
+        assert cfg.arm_timeout_seconds == 1800.0

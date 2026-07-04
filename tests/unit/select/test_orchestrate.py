@@ -183,7 +183,7 @@ def _fake_env(tmp_path, monkeypatch):
     ref_ll = np.zeros((2, 6))
     good_ll = np.log(np.tile(np.array([2.0, 3.0, 4.0, 5.0, 6.0, 7.0]), (2, 1)))
 
-    def launch(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
+    def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
         counter["n"] += 1
         run_dir = tmp_path / "outputs" / f"run_{counter['n']:03d}"
         _write_scored_run(run_dir, ref_ll if counter["n"] == 1 else good_ll)
@@ -270,7 +270,7 @@ def _confirm_env(tmp_path, monkeypatch):
     ref_ll = np.zeros((2, 6))
     good_ll = np.log(np.tile(np.array([2.0, 3.0, 4.0, 5.0, 6.0, 7.0]), (2, 1)))
 
-    def launch(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
+    def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
         state["n"] += 1
         name = Path(config_path).stem
         if "confirm_reference" in name:
@@ -324,7 +324,7 @@ class TestConfirmationWiring:
         ref_ll = np.zeros((2, 6))
         good_ll = np.log(np.tile(np.array([2.0, 3.0, 4.0, 5.0, 6.0, 7.0]), (2, 1)))
 
-        def launch(config_path, panelcast_bin):
+        def launch(config_path, panelcast_bin, timeout_seconds=None):
             state["n"] += 1
             name = Path(config_path).stem
             if name.startswith("confirm_"):
