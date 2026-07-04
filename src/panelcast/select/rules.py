@@ -35,7 +35,7 @@ class DecisionRules:
         path = path or DEFAULT_RULES_PATH
         try:
             payload = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-        except OSError:
+        except (OSError, yaml.YAMLError):
             return cls()
         block = payload.get("rules") or {}
         known = {
