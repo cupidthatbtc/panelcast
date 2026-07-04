@@ -96,6 +96,17 @@ class TestRealRun:
         result = runner.invoke(app, ["select", "--config", CONFIG])
         assert "prior-predictive screen and data diagnostics are skipped" in result.stdout
 
+    def test_cleared_rules_but_unconfirmed(self, monkeypatch):
+        self._patch(
+            monkeypatch,
+            {"report_dir": "rd", "winner_arm": None, "promotable": ["abc123"],
+             "confirmed": False, "n_arms_scored": 3, "ledger": "l"},
+        )
+        result = runner.invoke(app, ["select", "--config", CONFIG])
+        assert result.exit_code == 0
+        assert "did not" in result.stdout
+        assert "confirmation" in result.stdout
+
 
 class TestFrameLoading:
     def test_prepared_paths_and_frame(self, tmp_path, monkeypatch):

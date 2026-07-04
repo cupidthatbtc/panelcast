@@ -18,6 +18,7 @@ from panelcast.select.tiers import EffortTier, tier_to_sweep_config
 AOTY = DatasetDescriptor()
 REPO_ROOT = Path(__file__).resolve().parents[3]
 STANDARD = EffortTier("standard", (1, 2), 4, 1000, 1000, confirm=True)
+NOCONFIRM = EffortTier("screen", (1, 2), 4, 1000, 1000, confirm=False)
 
 
 def _cfg(tmp_path, **kw) -> SweepConfig:
@@ -89,35 +90,35 @@ class TestResolveDims:
     def test_from_features_parquet(self, tmp_path):
         import pandas as pd
 
-        from panelcast.select.orchestrate import _resolve_dims
+        from panelcast.select.orchestrate import resolve_dims
 
         feats = tmp_path / "f.parquet"
         pd.DataFrame(
             {"original_row_id": [0, 1, 2], "x": [1.0, 2, 3], "y": [4.0, 5, 6]}
         ).to_parquet(feats)
-        dims = _resolve_dims({"features": feats, "n_artists": 7})
+        dims = resolve_dims({"features": feats, "n_artists": 7})
         assert dims["n_observations"] == 3
         assert dims["n_features"] == 2  # original_row_id excluded
         assert dims["n_artists"] == 7
 
     def test_none_without_hint(self):
-        from panelcast.select.orchestrate import _resolve_dims
+        from panelcast.select.orchestrate import resolve_dims
 
-        assert _resolve_dims(None) is None
+        assert resolve_dims(None) is None
 
     def test_missing_file_returns_none(self, tmp_path):
-        from panelcast.select.orchestrate import _resolve_dims
+        from panelcast.select.orchestrate import resolve_dims
 
-        assert _resolve_dims({"features": tmp_path / "missing.parquet"}) is None
+        assert resolve_dims({"features": tmp_path / "missing.parquet"}) is None
 
     def test_coarse_entity_estimate_without_hint(self, tmp_path):
         import pandas as pd
 
-        from panelcast.select.orchestrate import _resolve_dims
+        from panelcast.select.orchestrate import resolve_dims
 
         feats = tmp_path / "f.parquet"
         pd.DataFrame({"a": range(50)}).to_parquet(feats)
-        dims = _resolve_dims({"features": feats})
+        dims = resolve_dims({"features": feats})
         assert dims["n_artists"] == 10  # n_obs // 5
 
 
@@ -206,7 +207,7 @@ class TestRunSelect:
         launch = _fake_env(tmp_path, monkeypatch)
         cfg = _cfg(tmp_path, max_fits=4)
         cfg.include_stage2 = False
-        result = run_select(None, STANDARD, DecisionRules(), cfg, launch=launch, audit_root=tmp_path / ".audit")
+        result = run_select(None, NOCONFIRM, DecisionRules(), cfg, launch=launch, audit_root=tmp_path / ".audit")
 
         report_md = Path(result["report_dir"]) / "report.md"
         report_json = Path(result["report_dir"]) / "report.json"
@@ -221,7 +222,7 @@ class TestRunSelect:
         cfg = _cfg(tmp_path, max_fits=4)
         cfg.include_stage2 = False
         # good_ll vs ref gives z well above 2 with in-tolerance coverage + convergence.
-        result = run_select(None, STANDARD, DecisionRules(), cfg, launch=launch, audit_root=tmp_path / ".audit")
+        result = run_select(None, NOCONFIRM, DecisionRules(), cfg, launch=launch, audit_root=tmp_path / ".audit")
         assert result["winner_arm"] is not None
         assert result["promotable"]
 
@@ -229,7 +230,7 @@ class TestRunSelect:
         launch = _fake_env(tmp_path, monkeypatch)
         cfg = _cfg(tmp_path, max_fits=3)
         cfg.include_stage2 = False
-        result = run_select(None, STANDARD, DecisionRules(), cfg, launch=launch, audit_root=tmp_path / ".audit")
+        result = run_select(None, NOCONFIRM, DecisionRules(), cfg, launch=launch, audit_root=tmp_path / ".audit")
         payload = json.loads((Path(result["report_dir"]) / "report.json").read_text())
         assert len(payload["arms"]) == 3
 
@@ -255,8 +256,106 @@ class TestRunSelect:
                 )
         train_df = pd.DataFrame(rows)
         result = run_select(
-            None, STANDARD, DecisionRules(), cfg, train_df=train_df,
+            None, NOCONFIRM, DecisionRules(), cfg, train_df=train_df,
             feature_cols=["f_one", "f_two"], launch=launch, audit_root=tmp_path / ".audit",
         )
         assert (Path(result["report_dir"]) / "prior_screen.json").exists()
         assert "Prior-predictive screen" in (Path(result["report_dir"]) / "report.md").read_text()
+
+
+def _confirm_env(tmp_path, monkeypatch):
+    """Fake pipeline that distinguishes reference vs winner fits by config name,
+    so the multi-seed confirmation resolves deterministically to confirmed."""
+    state = {"n": 0, "sweep_seen": False}
+    ref_ll = np.zeros((2, 6))
+    good_ll = np.log(np.tile(np.array([2.0, 3.0, 4.0, 5.0, 6.0, 7.0]), (2, 1)))
+
+    def launch(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
+        state["n"] += 1
+        name = Path(config_path).stem
+        if "confirm_reference" in name:
+            ll = ref_ll
+        elif "confirm_winner" in name:
+            ll = good_ll
+        elif not state["sweep_seen"]:
+            ll = ref_ll
+            state["sweep_seen"] = True
+        else:
+            ll = good_ll
+        run_dir = tmp_path / "outputs" / f"run_{state['n']:03d}"
+        _write_scored_run(run_dir, ll)
+        (tmp_path / "outputs" / "latest.json").write_text(
+            json.dumps({"run_dir": run_dir.name}), encoding="utf-8"
+        )
+        return 0, "ok"
+
+    import panelcast.paths as paths_mod
+
+    monkeypatch.setattr(
+        paths_mod,
+        "resolve_latest",
+        lambda output_base=Path("outputs"): tmp_path
+        / "outputs"
+        / json.loads((tmp_path / "outputs" / "latest.json").read_text())["run_dir"],
+    )
+    return launch
+
+
+class TestConfirmationWiring:
+    def test_confirmed_winner_recommended(self, tmp_path, monkeypatch):
+        launch = _confirm_env(tmp_path, monkeypatch)
+        cfg = _cfg(tmp_path, max_fits=2)
+        cfg.include_stage2 = False
+        result = run_select(
+            None, STANDARD, DecisionRules(confirmation_seeds=(42, 43)), cfg,
+            launch=launch, audit_root=tmp_path / ".audit",
+        )
+        assert result["confirmed"] is True
+        assert result["winner_arm"] is not None
+        report = (Path(result["report_dir"]) / "report.md").read_text()
+        assert "Multi-seed confirmation" in report
+        assert "CONFIRMED" in report
+        assert (cfg.sweep_dir / "confirmation.json").exists()
+
+    def test_unconfirmed_winner_not_recommended(self, tmp_path, monkeypatch):
+        # Winner passes the sweep rules but the confirmation fits come back flat
+        # (reference == winner), so it must NOT be recommended.
+        state = {"n": 0, "sweep_seen": False}
+        ref_ll = np.zeros((2, 6))
+        good_ll = np.log(np.tile(np.array([2.0, 3.0, 4.0, 5.0, 6.0, 7.0]), (2, 1)))
+
+        def launch(config_path, panelcast_bin):
+            state["n"] += 1
+            name = Path(config_path).stem
+            if name.startswith("confirm_"):
+                ll = ref_ll  # both reference and winner flat -> not confirmed
+            elif not state["sweep_seen"]:
+                ll = ref_ll
+                state["sweep_seen"] = True
+            else:
+                ll = good_ll
+            run_dir = tmp_path / "outputs" / f"run_{state['n']:03d}"
+            _write_scored_run(run_dir, ll)
+            (tmp_path / "outputs" / "latest.json").write_text(
+                json.dumps({"run_dir": run_dir.name}), encoding="utf-8"
+            )
+            return 0, "ok"
+
+        import panelcast.paths as paths_mod
+
+        monkeypatch.setattr(
+            paths_mod,
+            "resolve_latest",
+            lambda output_base=Path("outputs"): tmp_path
+            / "outputs"
+            / json.loads((tmp_path / "outputs" / "latest.json").read_text())["run_dir"],
+        )
+        cfg = _cfg(tmp_path, max_fits=2)
+        cfg.include_stage2 = False
+        result = run_select(
+            None, STANDARD, DecisionRules(confirmation_seeds=(42,)), cfg,
+            launch=launch, audit_root=tmp_path / ".audit",
+        )
+        assert result["confirmed"] is False
+        assert result["winner_arm"] is None
+        assert result["promotable"]  # it cleared the rules, just not confirmation

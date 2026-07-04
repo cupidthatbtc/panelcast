@@ -27,7 +27,7 @@ the candidate space:
 
 ## 2. Dry run — see the space and the cost
 
-```
+```bash
 panelcast select --dataset configs/datasets/<name>.yaml --dry-run
 ```
 
@@ -38,7 +38,7 @@ calibration history. This is the informed-consent step; nothing runs.
 
 ## 3. Select — run the staged sweep
 
-```
+```bash
 # prepare the data once (the sweep rebuilds features per feature-affecting arm)
 panelcast run --dataset <name> --stages splits,features
 

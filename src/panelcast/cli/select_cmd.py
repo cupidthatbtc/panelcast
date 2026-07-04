@@ -10,6 +10,7 @@ a manual PR.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -54,7 +55,7 @@ def select(
         panelcast select --dataset examples/aerospace/descriptor.yaml --effort quick
     """
     from panelcast.config.descriptor import load_descriptor
-    from panelcast.select.orchestrate import build_plan, render_plan, run_select
+    from panelcast.select.orchestrate import build_plan, render_plan, resolve_dims, run_select
     from panelcast.select.rules import DecisionRules
     from panelcast.select.tiers import resolve_tier, tier_to_sweep_config
 
@@ -77,15 +78,13 @@ def select(
         promote_z=rules.promote_z,
     )
 
-    from panelcast.select.orchestrate import _resolve_dims
-
     plan = build_plan(
         descriptor,
         tier,
         cfg,
         dataset_label=label,
         n_confirmation_seeds=len(rules.confirmation_seeds),
-        dims=_resolve_dims(_prepared_paths(descriptor)),
+        dims=resolve_dims(_prepared_paths(descriptor)),
     )
     typer.echo(render_plan(plan))
 
@@ -110,44 +109,49 @@ def select(
     typer.echo(f"\nSweep complete. Report: {result['report_dir']}/report.md")
     if result["winner_arm"]:
         typer.echo(
-            f"Recommended (pre-registered rules): arm {result['winner_arm']}. "
-            "A default flip is a manual PR with the report as evidence."
+            f"Recommended (pre-registered rules + multi-seed confirmation): arm "
+            f"{result['winner_arm']}. A default flip is a manual PR with the report as evidence."
+        )
+    elif result.get("promotable"):
+        typer.echo(
+            f"Candidate(s) {', '.join(result['promotable'])} cleared the rules but did not "
+            "survive multi-seed confirmation; defaults hold."
         )
     else:
         typer.echo("No candidate cleared the pre-registered bar; defaults hold.")
 
 
+_FEATURES_PATH = Path("data/features/train_features.parquet")
+_SPLIT_PATH = Path("data/splits/within_entity_temporal/train.parquet")
+
+
 def _prepared_paths(descriptor) -> dict | None:
     """Feature path plus an entity-count hint (from the split, via the descriptor)."""
-    features = Path("data/features/train_features.parquet")
-    if not features.exists():
+    if not _FEATURES_PATH.exists():
         return None
-    hint: dict = {"features": features}
-    splits = Path("data/splits/within_entity_temporal/train.parquet")
-    if splits.exists():
+    hint: dict = {"features": _FEATURES_PATH}
+    if _SPLIT_PATH.exists():
         try:
             import pandas as pd
 
-            split_df = pd.read_parquet(splits, columns=[descriptor.entity_col])
+            split_df = pd.read_parquet(_SPLIT_PATH, columns=[descriptor.entity_col])
             hint["n_artists"] = int(split_df[descriptor.entity_col].nunique())
         except (OSError, ValueError, KeyError):
             pass
     return hint
 
 
-def _load_prepared_frame():
+def _load_prepared_frame() -> tuple[Any, list[str] | None]:
     """(joined train frame, feature_cols) from prepared artifacts, or (None, None)."""
-    splits = Path("data/splits/within_entity_temporal/train.parquet")
-    features = Path("data/features/train_features.parquet")
-    if not (splits.exists() and features.exists()):
+    if not (_SPLIT_PATH.exists() and _FEATURES_PATH.exists()):
         return None, None
     try:
         import pandas as pd
 
         from panelcast.data.alignment import join_splits_with_features
 
-        split_df = pd.read_parquet(splits)
-        features_df = pd.read_parquet(features)
+        split_df = pd.read_parquet(_SPLIT_PATH)
+        features_df = pd.read_parquet(_FEATURES_PATH)
         joined = join_splits_with_features(split_df, features_df, name="select_train")
         feature_cols = [c for c in features_df.columns if c != "original_row_id"]
         joined[feature_cols] = joined[feature_cols].fillna(0)

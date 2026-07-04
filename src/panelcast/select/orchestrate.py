@@ -24,10 +24,6 @@ from panelcast.select.tiers import EffortTier
 
 log = structlog.get_logger()
 
-# Cold-start planning fallback: the offset_logit numbers recorded this cycle
-# (RTX 5090). Used when the runtime predictor has no local history.
-_PUBLICATION_FIT_MULTIPLIER = 6  # publication fit ≈ 6x a diagnostic fit
-
 
 @dataclass
 class SelectPlan:
@@ -46,7 +42,7 @@ class SelectPlan:
     notes: list[str] = field(default_factory=list)
 
 
-def _resolve_dims(paths_hint: dict | None) -> dict[str, int] | None:
+def resolve_dims(paths_hint: dict | None) -> dict[str, int] | None:
     """Model dimensions for the cost projection from the prepared feature matrix.
 
     Domain-neutral: the entity count and sequence length aren't in the feature
@@ -101,7 +97,8 @@ def build_plan(
     confirm_fits = (2 * n_confirmation_seeds) if tier.confirm else 0
     pub_fits = 2 if (tier.confirm and tier.publication_confirm) else 0
     min_fits = n_stage1 + confirm_fits + pub_fits
-    max_fits_planned = n_stage1 + stage2_upper + tier.stage3_fits + confirm_fits + pub_fits
+    stage3 = tier.stage3_fits if 3 in tier.stages else 0
+    max_fits_planned = n_stage1 + stage2_upper + stage3 + confirm_fits + pub_fits
     if cfg.max_fits is not None:
         max_fits_planned = min(max_fits_planned, cfg.max_fits)
         # A cap below the baseline truncates the sweep mid-stage-1; the floor
@@ -114,7 +111,7 @@ def build_plan(
     notes: list[str] = []
     if dims is not None:
         predicted_hours, predicted_peak, cost_source = _predict_cost(
-            dims, tier, max_fits_planned, n_confirmation_seeds, calibration_store_path
+            dims, tier, max_fits_planned, calibration_store_path
         )
     if cfg.budget_hours is not None:
         notes.append(f"budget cap: {cfg.budget_hours:g} GPU-h (stages truncate in priority order)")
@@ -137,7 +134,6 @@ def _predict_cost(
     dims: dict[str, int],
     tier: EffortTier,
     n_fits: int,
-    n_seeds: int,
     store_path: Path | None,
 ) -> tuple[float, float, str]:
     from panelcast.gpu_memory.calibration_store import estimate_with_calibration
@@ -258,17 +254,40 @@ def run_select(
         title=f"panelcast select — {descriptor.name}",
     )
     report_md += "\n" + _render_verdicts(verdicts, rules)
+
+    # A promotable winner is confirmed on multiple seeds before `select`
+    # recommends it — a single-seed z is one draw from the selection lottery.
+    winner = next((v for v in verdicts if v.promote), None)
+    confirmed: bool | None = None
+    if tier.confirm and winner is not None:
+        from panelcast.select.confirmation import render_confirmation, run_confirmation
+
+        winner_score = next((s for s in scores if s.arm == winner.arm), None)
+        result = run_confirmation(
+            dict(winner_score.knobs if winner_score else {}),
+            cfg,
+            seeds=rules.confirmation_seeds,
+            promote_z=rules.promote_z,
+            sampler_overrides=tier.publication_confirm,
+            launch=launch,
+        )
+        report_md += "\n" + render_confirmation(result)
+        confirmed = result.confirmed
+        report_json["confirmation"] = result.to_dict()
+
     (report_dir / "report.md").write_text(
         (prior_block + "\n" if prior_block else "") + report_md, encoding="utf-8"
     )
     (report_dir / "report.json").write_text(json.dumps(report_json, indent=2), encoding="utf-8")
 
-    winner = next((v for v in verdicts if v.promote), None)
+    # Recommend only what survives confirmation (when the tier confirms).
+    recommend = winner is not None and (confirmed is None or confirmed)
     return {
         "report_dir": str(report_dir),
         "n_arms_scored": len(scores),
         "promotable": [v.arm for v in verdicts if v.promote],
-        "winner_arm": winner.arm if winner else None,
+        "winner_arm": winner.arm if (winner and recommend) else None,
+        "confirmed": confirmed,
         "ledger": str(cfg.sweep_dir / "ledger.json"),
     }
 
@@ -303,5 +322,6 @@ __all__ = [
     "SelectPlan",
     "build_plan",
     "render_plan",
+    "resolve_dims",
     "run_select",
 ]

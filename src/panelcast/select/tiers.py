@@ -62,7 +62,7 @@ def load_tiers(path: Path | None = None) -> dict[str, EffortTier]:
     tiers = dict(_SHIPPED_TIERS)
     try:
         payload = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    except OSError:
+    except (OSError, yaml.YAMLError):
         return tiers
     block = payload.get("tiers") or {}
     for name, spec in block.items():

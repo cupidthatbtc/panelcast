@@ -164,10 +164,15 @@ def render_confirmation(result: ConfirmationResult) -> str:
         "| --- | --- | --- | --- | --- |",
     ]
     for s in result.seeds:
-        if s.elpd:
+        if s.elpd and s.elpd.get("z") is not None:
             lines.append(
                 f"| {s.seed} | {s.elpd['diff']:+.1f} | {s.elpd['dse']:.1f} | "
                 f"{s.elpd['z']:+.2f} | ok |"
+            )
+        elif s.elpd:
+            # A zero-variance paired diff leaves z undefined (winner ≈ reference).
+            lines.append(
+                f"| {s.seed} | {s.elpd['diff']:+.1f} | {s.elpd['dse']:.1f} | - | degenerate |"
             )
         else:
             lines.append(f"| {s.seed} | - | - | - | {s.error or 'failed'} |")
