@@ -11,6 +11,7 @@ import pytest
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.select.runner import (
+    ARM_TIMEOUT_RETURNCODE,
     ArmRecord,
     SweepConfig,
     SweepLedger,
@@ -348,10 +349,10 @@ class TestArmTimeout:
 
         monkeypatch.setattr(runner_mod.subprocess, "run", fake_run)
         code, tail = runner_mod.launch_arm(tmp_path / "arm.yaml", "pc", timeout_seconds=5)
-        assert code == -9
+        assert code == ARM_TIMEOUT_RETURNCODE
         assert "exceeded timeout of 5s" in tail
 
-    def test_timed_out_arm_is_failed_and_sweep_continues(self, tmp_path, monkeypatch):
+    def test_timed_out_arm_is_marked_timeout_and_sweep_continues(self, tmp_path, monkeypatch):
         cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
         cfg.include_stage2 = False
         cfg.arm_timeout_seconds = 1800.0
@@ -360,12 +361,43 @@ class TestArmTimeout:
         def timing_out(config_path, panelcast_bin, timeout_seconds=None):
             calls["n"] += 1
             if calls["n"] == 2:
-                return -9, f"arm exceeded timeout of {timeout_seconds}s and was killed"
+                return (
+                    ARM_TIMEOUT_RETURNCODE,
+                    f"arm exceeded timeout of {timeout_seconds}s and was killed",
+                )
             return launch(config_path, panelcast_bin, timeout_seconds)
 
         ledger = run_sweep(cfg, AOTY, launch=timing_out)
-        failed = [r for r in ledger.records.values() if r.status == "failed"]
-        assert len(failed) == 1
-        assert "exceeded timeout of 1800.0s" in failed[0].error
+        timed_out = [r for r in ledger.records.values() if r.status == "timeout"]
+        assert len(timed_out) == 1
+        assert "exceeded timeout of 1800.0s" in timed_out[0].error
+        assert not any(r.status == "failed" for r in ledger.records.values())
         # The sweep did not stall: every planned arm still has a record.
         assert len(ledger.records) == len(ofat_arms(AOTY)) + 1
+
+    def test_resume_skips_timeout_but_reruns_failed(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+
+        # Two OFAT arms stand in for the terminal (timeout) and retryable (failed)
+        # cases; seed the ledger directly so resume decides purely on status.
+        ofat = ofat_arms(AOTY)
+        timeout_arm = ofat[0][0]
+        failed_arm = ofat[1][0]
+        timeout_id = arm_id(timeout_arm)
+        failed_id = arm_id(failed_arm)
+        ledger = SweepLedger(cfg.sweep_dir / "ledger.json")
+        cfg.sweep_dir.mkdir(parents=True, exist_ok=True)
+        ledger.upsert(ArmRecord(timeout_id, timeout_arm, 1, status="timeout"))
+        ledger.upsert(ArmRecord(failed_id, failed_arm, 1, status="failed"))
+
+        def guarded(config_path, panelcast_bin, timeout_seconds=None):
+            aid = config_path.stem.removeprefix("arm_")
+            if aid == timeout_id:
+                raise AssertionError("timed-out arm must not be re-launched on resume")
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        relaunched = run_sweep(cfg, AOTY, launch=guarded)
+        assert relaunched.records[timeout_id].status == "timeout"
+        # The failed arm is retryable: resume re-ran it and it completed this time.
+        assert relaunched.records[failed_id].status == "completed"
