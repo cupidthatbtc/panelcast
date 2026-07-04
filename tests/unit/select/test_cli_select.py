@@ -55,3 +55,75 @@ class TestArgs:
         )
         assert result.exit_code == 0
         assert "planned fits: " in result.stdout
+
+
+class TestRealRun:
+    def _patch(self, monkeypatch, run_result):
+        import panelcast.cli.select_cmd as sc
+        import panelcast.select.orchestrate as orch
+
+        monkeypatch.setattr(sc, "_prepared_paths", lambda descriptor: None)
+        monkeypatch.setattr(sc, "_load_prepared_frame", lambda: (None, None))
+        monkeypatch.setattr(orch, "run_select", lambda *a, **k: run_result)
+
+    def test_winner_recommended_message(self, monkeypatch):
+        self._patch(
+            monkeypatch,
+            {"report_dir": "rd", "winner_arm": "abc123", "promotable": ["abc123"],
+             "n_arms_scored": 3, "ledger": "l"},
+        )
+        result = runner.invoke(app, ["select", "--effort", "quick", "--config", CONFIG])
+        assert result.exit_code == 0
+        assert "Recommended" in result.stdout
+        assert "manual PR" in result.stdout
+
+    def test_no_winner_message(self, monkeypatch):
+        self._patch(
+            monkeypatch,
+            {"report_dir": "rd", "winner_arm": None, "promotable": [],
+             "n_arms_scored": 3, "ledger": "l"},
+        )
+        result = runner.invoke(app, ["select", "--config", CONFIG])
+        assert result.exit_code == 0
+        assert "defaults hold" in result.stdout
+
+    def test_missing_data_note(self, monkeypatch):
+        self._patch(
+            monkeypatch,
+            {"report_dir": "rd", "winner_arm": None, "promotable": [],
+             "n_arms_scored": 0, "ledger": "l"},
+        )
+        result = runner.invoke(app, ["select", "--config", CONFIG])
+        assert "prior-predictive screen and data diagnostics are skipped" in result.stdout
+
+
+class TestFrameLoading:
+    def test_prepared_paths_and_frame(self, tmp_path, monkeypatch):
+        import pandas as pd
+
+        from panelcast.cli.select_cmd import _load_prepared_frame, _prepared_paths
+        from panelcast.config.descriptor import DatasetDescriptor
+
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "data" / "features").mkdir(parents=True)
+        (tmp_path / "data" / "splits" / "within_entity_temporal").mkdir(parents=True)
+        pd.DataFrame({"original_row_id": [0, 1], "f": [1.0, 2.0]}).to_parquet(
+            tmp_path / "data" / "features" / "train_features.parquet"
+        )
+        pd.DataFrame(
+            {"original_row_id": [0, 1], "Artist": ["a", "b"], "User_Score": [70.0, 80.0]}
+        ).to_parquet(tmp_path / "data" / "splits" / "within_entity_temporal" / "train.parquet")
+
+        hint = _prepared_paths(DatasetDescriptor())
+        assert hint["n_artists"] == 2
+        df, cols = _load_prepared_frame()
+        assert cols == ["f"]
+        assert len(df) == 2
+
+    def test_prepared_paths_none_without_features(self, tmp_path, monkeypatch):
+        from panelcast.cli.select_cmd import _load_prepared_frame, _prepared_paths
+        from panelcast.config.descriptor import DatasetDescriptor
+
+        monkeypatch.chdir(tmp_path)
+        assert _prepared_paths(DatasetDescriptor()) is None
+        assert _load_prepared_frame() == (None, None)

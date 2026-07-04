@@ -85,6 +85,57 @@ class TestRenderPlan:
         assert "GPU-h" in render_plan(plan)
 
 
+class TestResolveDims:
+    def test_from_features_parquet(self, tmp_path):
+        import pandas as pd
+
+        from panelcast.select.orchestrate import _resolve_dims
+
+        feats = tmp_path / "f.parquet"
+        pd.DataFrame(
+            {"original_row_id": [0, 1, 2], "x": [1.0, 2, 3], "y": [4.0, 5, 6]}
+        ).to_parquet(feats)
+        dims = _resolve_dims({"features": feats, "n_artists": 7})
+        assert dims["n_observations"] == 3
+        assert dims["n_features"] == 2  # original_row_id excluded
+        assert dims["n_artists"] == 7
+
+    def test_none_without_hint(self):
+        from panelcast.select.orchestrate import _resolve_dims
+
+        assert _resolve_dims(None) is None
+
+    def test_missing_file_returns_none(self, tmp_path):
+        from panelcast.select.orchestrate import _resolve_dims
+
+        assert _resolve_dims({"features": tmp_path / "missing.parquet"}) is None
+
+    def test_coarse_entity_estimate_without_hint(self, tmp_path):
+        import pandas as pd
+
+        from panelcast.select.orchestrate import _resolve_dims
+
+        feats = tmp_path / "f.parquet"
+        pd.DataFrame({"a": range(50)}).to_parquet(feats)
+        dims = _resolve_dims({"features": feats})
+        assert dims["n_artists"] == 10  # n_obs // 5
+
+
+class TestThoroughCost:
+    def test_publication_fit_included(self, tmp_path):
+        thorough = EffortTier(
+            "thorough", (1, 2, 3), 4, 1000, 1000, stage3_fits=8, confirm=True,
+            publication_confirm={"num_chains": 4, "num_samples": 5000, "num_warmup": 5000},
+        )
+        cfg = tier_to_sweep_config(thorough, "s", output_root=tmp_path / "s")
+        dims = {"n_observations": 5000, "n_features": 40, "n_artists": 900, "max_seq": 30}
+        plan = build_plan(
+            AOTY, thorough, cfg, dataset_label="aoty", dims=dims,
+            calibration_store_path=tmp_path / "c.json",
+        )
+        assert plan.predicted_gpu_hours > 0
+
+
 def _write_scored_run(run_dir: Path, ll: np.ndarray, *, converged: bool = True) -> None:
     ev = run_dir / "evaluation"
     ev.mkdir(parents=True, exist_ok=True)
@@ -181,3 +232,31 @@ class TestRunSelect:
         result = run_select(None, STANDARD, DecisionRules(), cfg, launch=launch, audit_root=tmp_path / ".audit")
         payload = json.loads((Path(result["report_dir"]) / "report.json").read_text())
         assert len(payload["arms"]) == 3
+
+    def test_prior_screen_block_when_frame_given(self, tmp_path, monkeypatch):
+        import pandas as pd
+
+        launch = _fake_env(tmp_path, monkeypatch)
+        cfg = _cfg(tmp_path, max_fits=2)
+        cfg.include_stage2 = False
+        rng = np.random.default_rng(0)
+        rows = []
+        for a in range(6):
+            base = rng.normal(72, 6)
+            for _ in range(5):
+                rows.append(
+                    {
+                        "Artist": f"a{a}",
+                        "User_Score": float(np.clip(base + rng.normal(0, 4), 0, 100)),
+                        "User_Ratings": int(rng.integers(20, 400)),
+                        "f_one": rng.normal(),
+                        "f_two": rng.normal(),
+                    }
+                )
+        train_df = pd.DataFrame(rows)
+        result = run_select(
+            None, STANDARD, DecisionRules(), cfg, train_df=train_df,
+            feature_cols=["f_one", "f_two"], launch=launch, audit_root=tmp_path / ".audit",
+        )
+        assert (Path(result["report_dir"]) / "prior_screen.json").exists()
+        assert "Prior-predictive screen" in (Path(result["report_dir"]) / "report.md").read_text()
