@@ -1,0 +1,21 @@
+# Pre-registered configuration for `panelcast select`.
+#
+# These thresholds are committed BEFORE a sweep runs — never tuned after seeing
+# the ranking. Selection over many candidates on one dataset overfits the
+# selection, so promotion demands pre-declared evidence plus multi-seed
+# confirmation on untouched settings (the invalid-LOO lesson). `select`
+# RECOMMENDS; flipping a shipped default stays a manual PR.
+#
+# The effort tiers and search grid live under `tiers:` / `grid:` (added by the
+# CLI, #103); the `rules:` block below is consumed by panelcast.select.rules.
+
+rules:
+  # Paired held-out ELPD z a candidate must clear vs the reference to promote.
+  # AOTY treated ~±2 as noise and +4.9 as decisive.
+  promote_z: 2.0
+  # Empirical coverage must land within this of nominal at 80% and 95%.
+  coverage_tolerance: 0.03
+  # A candidate that fails the convergence gate cannot be promoted.
+  require_convergence: true
+  # Seeds the winner is re-fit on before `select` recommends it (#40 recipe).
+  confirmation_seeds: [42, 43, 44]
