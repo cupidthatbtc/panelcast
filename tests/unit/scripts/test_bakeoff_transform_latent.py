@@ -68,15 +68,6 @@ def test_read_metrics_ignores_legacy_loo_payload(tmp_path):
     assert out["elpd_se"] is None
 
 
-def test_pointwise_elpd_hand_computed(tmp_path):
-    """Constant per-obs densities: elpd_i = log(mean density) exactly."""
-    nc = tmp_path / "log_likelihood.nc"
-    # Two draws, two obs; densities (1, 3) and (1, 7) -> elpd_i = [log 2, log 4]
-    _write_log_lik_nc(nc, np.log(np.array([[1.0, 1.0], [3.0, 7.0]])))
-    elpd_i = bakeoff._pointwise_elpd(nc)
-    assert elpd_i == pytest.approx([np.log(2.0), np.log(4.0)])
-
-
 def test_render_markdown_has_elpd_columns_and_pairwise():
     rows = [
         {

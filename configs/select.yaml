@@ -1,0 +1,54 @@
+# Pre-registered configuration for `panelcast select`.
+#
+# These thresholds are committed BEFORE a sweep runs — never tuned after seeing
+# the ranking. Selection over many candidates on one dataset overfits the
+# selection, so promotion demands pre-declared evidence plus multi-seed
+# confirmation on untouched settings (the invalid-LOO lesson). `select`
+# RECOMMENDS; flipping a shipped default stays a manual PR.
+#
+# The `rules:` block is consumed by panelcast.select.rules; the `tiers:` block
+# below by panelcast.select.tiers. A domain can ship its own copy of this file
+# to override either.
+
+# Effort tiers — how heavy a sweep runs. Priority-ordered stages degrade
+# gracefully under --max-fits / --budget-hours truncation. quick screens at
+# reduced sampler settings; standard is the diagnostic-tier default; thorough
+# adds the random-sample stage, multi-seed confirmation, and a publication-scale
+# confirmation fit for the winner.
+tiers:
+  quick:
+    stages: [1]
+    num_chains: 2
+    num_samples: 500
+    num_warmup: 500
+    stage3_fits: 0
+    confirm: false
+  standard:
+    stages: [1, 2]
+    num_chains: 4
+    num_samples: 1000
+    num_warmup: 1000
+    stage3_fits: 0
+    confirm: true
+  thorough:
+    stages: [1, 2, 3]
+    num_chains: 4
+    num_samples: 1000
+    num_warmup: 1000
+    stage3_fits: 8
+    confirm: true
+    publication_confirm:
+      num_chains: 4
+      num_samples: 5000
+      num_warmup: 5000
+
+rules:
+  # Paired held-out ELPD z a candidate must clear vs the reference to promote.
+  # AOTY treated ~±2 as noise and +4.9 as decisive.
+  promote_z: 2.0
+  # Empirical coverage must land within this of nominal at 80% and 95%.
+  coverage_tolerance: 0.03
+  # A candidate that fails the convergence gate cannot be promoted.
+  require_convergence: true
+  # Seeds the winner is re-fit on before `select` recommends it (#40 recipe).
+  confirmation_seeds: [42, 43, 44]
