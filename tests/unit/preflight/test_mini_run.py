@@ -270,7 +270,7 @@ class TestParseArgsBasic:
 
     def test_minimal_args(self):
         """Single positional arg returns defaults for warmup and samples."""
-        path, warmup, samples, chains, prefix, excl, *_ = _parse_args(["model_args.json"])
+        path, warmup, samples, chains, prefix, _excl, *_ = _parse_args(["model_args.json"])
         assert path == Path("model_args.json")
         assert warmup == 10
         assert samples == 1
@@ -1185,7 +1185,7 @@ class TestParseArgsNewFlags:
         assert pooling is True
 
     def test_combined_with_existing_flags(self):
-        (path, warmup, _, chains, prefix, excl, transform, method, pooling) = _parse_args(
+        (_path, warmup, _, chains, prefix, excl, transform, method, pooling) = _parse_args(
             [
                 "args.json",
                 "--num-warmup",
