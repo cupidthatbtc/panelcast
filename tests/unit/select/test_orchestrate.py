@@ -59,6 +59,12 @@ class TestBuildPlan:
         plan = build_plan(AOTY, STANDARD, _cfg(tmp_path, max_fits=5), dataset_label="aoty")
         assert plan.max_fits_planned == 5
 
+    def test_cap_below_baseline_keeps_floor_le_ceiling(self, tmp_path):
+        # --max-fits below the stage-1 count truncates mid-stage-1; the range
+        # must not render backwards (floor > ceiling).
+        plan = build_plan(AOTY, STANDARD, _cfg(tmp_path, max_fits=3), dataset_label="aoty")
+        assert plan.min_fits <= plan.max_fits_planned == 3
+
 
 class TestRenderPlan:
     def test_contains_space_and_pruned(self):

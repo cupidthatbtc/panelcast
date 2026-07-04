@@ -104,6 +104,9 @@ def build_plan(
     max_fits_planned = n_stage1 + stage2_upper + tier.stage3_fits + confirm_fits + pub_fits
     if cfg.max_fits is not None:
         max_fits_planned = min(max_fits_planned, cfg.max_fits)
+        # A cap below the baseline truncates the sweep mid-stage-1; the floor
+        # can't exceed the ceiling.
+        min_fits = min(min_fits, max_fits_planned)
 
     predicted_hours: float | None = None
     predicted_peak: float | None = None
