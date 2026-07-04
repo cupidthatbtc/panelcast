@@ -761,28 +761,46 @@ def _build_resource_usage(
     mcmc_config: MCMCConfig,
     fit_result,
     exclude_rw_raw_from_collection: bool,
+    context: dict | None = None,
 ) -> dict:
     """Expected-vs-actual fit resources (#78): every fit becomes a calibration
     datapoint for the memory estimator and the wall-clock planning numbers."""
-    expected_gb = estimate_memory_gb(
-        n_observations=len(model_args["y"]),
-        n_features=int(model_args["X"].shape[1]),
-        n_artists=int(model_args["n_artists"]),
-        max_seq=int(model_args["max_seq"]),
-        num_chains=mcmc_config.num_chains,
-        num_samples=mcmc_config.num_samples,
-        num_warmup=mcmc_config.num_warmup,
-        exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
-    ).total_gb
+    estimate_inputs = {
+        "n_observations": len(model_args["y"]),
+        "n_features": int(model_args["X"].shape[1]),
+        "n_artists": int(model_args["n_artists"]),
+        "max_seq": int(model_args["max_seq"]),
+        "num_chains": mcmc_config.num_chains,
+        "num_samples": mcmc_config.num_samples,
+        "num_warmup": mcmc_config.num_warmup,
+        "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
+    }
+    expected_gb = estimate_memory_gb(**estimate_inputs).total_gb
     peak = fit_result.peak_gpu_memory_bytes
     expected = round(expected_gb, 3)
     actual = round(peak / (1024**3), 3) if peak is not None else None
-    return {
+    usage = {
         "expected_gb": expected,
         "actual_peak_gb": actual,
         "ratio": round(actual / expected, 3) if actual is not None and expected > 0 else None,
         "wall_clock_seconds": fit_result.runtime_seconds,
     }
+    # Only GPU-measured fits become calibration datapoints: CPU runs (tests,
+    # smoke) have no peak and would poison the wall-clock history.
+    if actual is not None:
+        try:
+            from panelcast.gpu_memory.calibration_store import append_record
+
+            append_record(
+                estimate_inputs=estimate_inputs,
+                expected_gb=expected,
+                actual_peak_gb=actual,
+                wall_clock_seconds=fit_result.runtime_seconds,
+                context=context,
+            )
+        except Exception:  # telemetry must never break a fit
+            log.warning("calibration_store_append_failed", exc_info=True)
+    return usage
 
 
 def train_models(
@@ -1074,7 +1092,14 @@ def train_models(
     )
 
     resource_usage = _build_resource_usage(
-        model_args, mcmc_config, fit_result, exclude_rw_raw_from_collection
+        model_args,
+        mcmc_config,
+        fit_result,
+        exclude_rw_raw_from_collection,
+        context={
+            "transform": str(getattr(ctx, "target_transform", "identity")),
+            "dataset": str(getattr(ctx, "dataset", None) or "aoty"),
+        },
     )
     log.info("resource_usage", **resource_usage)
 
