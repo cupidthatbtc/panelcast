@@ -42,6 +42,7 @@ def select(
             "Per-arm wall-clock timeout in seconds; a fit exceeding it is "
             "killed and marked failed."
         ),
+        min=1.0,
     ),
     sweep_id: str = typer.Option(
         "sweep", "--sweep-id", help="Sweep directory name under outputs/select/ (enables --resume)."

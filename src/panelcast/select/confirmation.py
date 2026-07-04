@@ -84,7 +84,7 @@ def _run_converged(run_dir: Path | None) -> bool:
         )
     except (OSError, ValueError):
         return False
-    return payload.get("passed") is True
+    return isinstance(payload, dict) and payload.get("passed") is True
 
 
 def _write_config(
