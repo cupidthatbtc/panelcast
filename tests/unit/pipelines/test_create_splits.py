@@ -205,8 +205,11 @@ class TestSaveSplitParquet:
 class TestCreateSplits:
     """Tests for create_splits pipeline function."""
 
-    def test_default_config_created_when_none(self):
+    def test_default_config_created_when_none(self, tmp_path, monkeypatch):
         """create_splits uses default SplitConfig when None is passed."""
+        # Default SplitConfig writes to the relative "data/splits"; chdir into
+        # tmp so create_splits doesn't touch the repo's real data.
+        monkeypatch.chdir(tmp_path)
         with (
             patch("panelcast.pipelines.create_splits.pd.read_parquet") as mock_read,
             patch(
@@ -745,8 +748,11 @@ class TestCreateSplitsResultFields:
 class TestMainCliEntryPoint:
     """Tests for main() CLI entry point."""
 
-    def test_main_calls_create_splits_and_prints(self, tmp_path, multi_artist_df, capsys):
+    def test_main_calls_create_splits_and_prints(
+        self, tmp_path, monkeypatch, multi_artist_df, capsys
+    ):
         """main() invokes create_splits with defaults and prints summary."""
+        monkeypatch.chdir(tmp_path)  # main() writes the default data/splits
         n = len(multi_artist_df)
         train = multi_artist_df.iloc[: n // 2].copy()
         val = multi_artist_df.iloc[n // 2 : n * 3 // 4].copy()
@@ -840,8 +846,9 @@ def artist_df():
 
 
 class TestMainCliOutput:
-    def test_main_prints_all_sections(self, artist_df, capsys):
+    def test_main_prints_all_sections(self, tmp_path, monkeypatch, artist_df, capsys):
         """main() should print source, temporal, disjoint, and output directory."""
+        monkeypatch.chdir(tmp_path)  # main() writes the default data/splits
         n = len(artist_df)
         train = artist_df.iloc[: n // 2].copy()
         val = artist_df.iloc[n // 2 : n * 3 // 4].copy()
@@ -894,8 +901,11 @@ class TestMainCliOutput:
         assert "Entity-Disjoint Split:" in out
         assert "Output directory:" in out
 
-    def test_main_shows_insufficient_albums_message(self, artist_df, capsys):
+    def test_main_shows_insufficient_albums_message(
+        self, tmp_path, monkeypatch, artist_df, capsys
+    ):
         """main() output should show artists excluded count."""
+        monkeypatch.chdir(tmp_path)  # main() writes the default data/splits
         n = len(artist_df)
         # Use a subset of artists for train to simulate exclusions
         included_artists = artist_df["Artist"].unique()[:8]

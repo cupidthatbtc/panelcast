@@ -288,6 +288,9 @@ class TestPrepareDatasets:
     def test_default_config_when_none(self, tmp_path, monkeypatch):
         """prepare_datasets should use default PrepareConfig when None."""
         monkeypatch.delenv("AOTY_DATASET_PATH", raising=False)
+        # The default PrepareConfig writes to the relative "data/processed" —
+        # chdir into tmp so the write lands there, not in the repo's real data.
+        monkeypatch.chdir(tmp_path)
         raw_df = _make_raw_df()
         load_meta = _make_load_metadata()
         audit_logger = _make_audit_logger_mock()
@@ -442,6 +445,7 @@ class TestMainCli:
     def test_main_prints_summary(self, tmp_path, capsys, monkeypatch):
         """main() should print formatted summary output."""
         monkeypatch.delenv("AOTY_DATASET_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)  # main() writes to the default data/processed
         raw_df = _make_raw_df()
         load_meta = _make_load_metadata()
         audit_logger = _make_audit_logger_mock()
@@ -478,6 +482,7 @@ class TestMainCli:
     def test_main_shows_exclusion_reasons(self, tmp_path, capsys, monkeypatch):
         """main() should list exclusion reasons."""
         monkeypatch.delenv("AOTY_DATASET_PATH", raising=False)
+        monkeypatch.chdir(tmp_path)  # main() writes to the default data/processed
         raw_df = _make_raw_df()
         load_meta = _make_load_metadata()
         audit_logger = _make_audit_logger_mock()

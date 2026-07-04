@@ -1054,10 +1054,13 @@ class TestExecuteStagesResume:
 
     @patch("panelcast.pipelines.orchestrator.ensure_environment_locked")
     @patch("panelcast.pipelines.orchestrator.verify_environment")
-    def test_already_completed_stages_skipped(self, mock_verify, mock_ensure, tmp_path):
+    def test_already_completed_stages_skipped(
+        self, mock_verify, mock_ensure, tmp_path, monkeypatch
+    ):
         """Already-completed stages from manifest are skipped on resume."""
         from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
 
+        monkeypatch.chdir(tmp_path)  # a completed stage stamps the repo's data dirs
         mock_verify.return_value = MagicMock(
             is_reproducible=True, pixi_lock_hash="abc123", warnings=[]
         )
