@@ -39,6 +39,11 @@ from panelcast.select.space import (
 
 log = structlog.get_logger()
 
+# An arm killed for exceeding its per-arm timeout returns this sentinel instead
+# of a real exit code, so resume can tell a budget-kill (terminal — never retry)
+# apart from an ordinary crash. Deliberately out of the range of real signals.
+ARM_TIMEOUT_RETURNCODE = -1000
+
 _FEATURE_STAGES = ["splits", "features", "train", "evaluate"]
 _MODEL_STAGES = ["train", "evaluate"]
 
@@ -84,7 +89,7 @@ class ArmRecord:
     arm_id: str
     knobs: dict[str, Any]
     stage: int
-    status: str = "pending"  # pending | completed | failed | excluded
+    status: str = "pending"  # pending | completed | failed | timeout | excluded
     run_dir: str | None = None
     wall_clock_seconds: float | None = None
     error: str | None = None
@@ -302,7 +307,9 @@ class SweepLedger:
         return {aid for aid, r in self.records.items() if r.status == "completed"}
 
     def fits_done(self) -> int:
-        return sum(1 for r in self.records.values() if r.status in ("completed", "failed"))
+        return sum(
+            1 for r in self.records.values() if r.status in ("completed", "failed", "timeout")
+        )
 
     def hours_spent(self) -> float:
         return sum(r.wall_clock_seconds or 0.0 for r in self.records.values()) / 3600.0
@@ -352,7 +359,7 @@ def launch_arm(
             timeout=timeout_seconds,
         )
     except subprocess.TimeoutExpired:
-        return -9, f"arm exceeded timeout of {timeout_seconds}s and was killed"
+        return ARM_TIMEOUT_RETURNCODE, f"arm exceeded timeout of {timeout_seconds}s and was killed"
     tail = (proc.stdout + "\n" + proc.stderr)[-4000:]
     return proc.returncode, tail
 
@@ -410,10 +417,13 @@ def run_sweep(
         nonlocal reference_run, cache_signature
         aid = arm_id(arm)
         existing = ledger.records.get(aid)
-        if existing and existing.status == "completed":
+        if existing and existing.status in ("completed", "timeout"):
+            # A timed-out arm is terminal too: skip it instead of re-running an arm
+            # that will just time out again. It carries no run_dir, so the reference
+            # bookkeeping below passes it by; the status field keeps the skip visible.
             if not arm and existing.run_dir:
                 reference_run = Path(existing.run_dir)
-            log.info("arm_skipped_resume", arm_id=aid)
+            log.info("arm_skipped_resume", arm_id=aid, status=existing.status)
             return
         merged = {**base, **arm}
         signature = feature_signature(merged)
@@ -426,13 +436,17 @@ def run_sweep(
         code, tail = launch(config_path, panelcast_bin, cfg.arm_timeout_seconds)
         record.wall_clock_seconds = time.monotonic() - started
         if code != 0:
-            record.status = "failed"
+            if code == ARM_TIMEOUT_RETURNCODE:
+                record.status = "timeout"
+                log.warning("arm_timeout", arm_id=aid, returncode=code)
+            else:
+                record.status = "failed"
+                log.warning("arm_failed", arm_id=aid, returncode=code)
             record.error = tail[-1500:]
-            # The failed run may have half-rebuilt the flat caches; force the
-            # next arm to rebuild rather than trust an unknown state.
+            # The killed/failed run may have half-rebuilt the flat caches; force
+            # the next arm to rebuild rather than trust an unknown state.
             cache_signature = None
             ledger.upsert(record)
-            log.warning("arm_failed", arm_id=aid, returncode=code)
             return
         cache_signature = signature
         run_dir = resolve_latest()
