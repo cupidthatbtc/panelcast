@@ -6,8 +6,41 @@
 # confirmation on untouched settings (the invalid-LOO lesson). `select`
 # RECOMMENDS; flipping a shipped default stays a manual PR.
 #
-# The effort tiers and search grid live under `tiers:` / `grid:` (added by the
-# CLI, #103); the `rules:` block below is consumed by panelcast.select.rules.
+# The `rules:` block is consumed by panelcast.select.rules; the `tiers:` block
+# below by panelcast.select.tiers. A domain can ship its own copy of this file
+# to override either.
+
+# Effort tiers — how heavy a sweep runs. Priority-ordered stages degrade
+# gracefully under --max-fits / --budget-hours truncation. quick screens at
+# reduced sampler settings; standard is the diagnostic-tier default; thorough
+# adds the random-sample stage, multi-seed confirmation, and a publication-scale
+# confirmation fit for the winner.
+tiers:
+  quick:
+    stages: [1]
+    num_chains: 2
+    num_samples: 500
+    num_warmup: 500
+    stage3_fits: 0
+    confirm: false
+  standard:
+    stages: [1, 2]
+    num_chains: 4
+    num_samples: 1000
+    num_warmup: 1000
+    stage3_fits: 0
+    confirm: true
+  thorough:
+    stages: [1, 2, 3]
+    num_chains: 4
+    num_samples: 1000
+    num_warmup: 1000
+    stage3_fits: 8
+    confirm: true
+    publication_confirm:
+      num_chains: 4
+      num_samples: 5000
+      num_warmup: 5000
 
 rules:
   # Paired held-out ELPD z a candidate must clear vs the reference to promote.
