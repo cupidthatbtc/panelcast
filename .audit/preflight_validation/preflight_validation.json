@@ -1,0 +1,175 @@
+{
+  "dataset": "aoty",
+  "dimensions": {
+    "n_observations": 4235,
+    "n_artists": 653,
+    "n_features": 33,
+    "max_seq": 50
+  },
+  "measurements": {
+    "2x50": {
+      "name": "2x50",
+      "num_chains": 2,
+      "num_warmup": 50,
+      "num_samples": 50,
+      "peak_gb": 0.06411552429199219,
+      "runtime_seconds": 134.44392964200233
+    },
+    "2x100": {
+      "name": "2x100",
+      "num_chains": 2,
+      "num_warmup": 100,
+      "num_samples": 100,
+      "peak_gb": 0.09024643898010254,
+      "runtime_seconds": 302.83651852598996
+    },
+    "2x250": {
+      "name": "2x250",
+      "num_chains": 2,
+      "num_warmup": 250,
+      "num_samples": 250,
+      "peak_gb": 0.22628188133239746,
+      "runtime_seconds": 692.4691101429926
+    },
+    "2x500": {
+      "name": "2x500",
+      "num_chains": 2,
+      "num_warmup": 500,
+      "num_samples": 500,
+      "peak_gb": 0.45006322860717773,
+      "runtime_seconds": 1365.6050472049974
+    },
+    "2x250_w50": {
+      "name": "2x250_w50",
+      "num_chains": 2,
+      "num_warmup": 50,
+      "num_samples": 250,
+      "peak_gb": 0.22618460655212402,
+      "runtime_seconds": 348.269548116019
+    },
+    "1x250": {
+      "name": "1x250",
+      "num_chains": 1,
+      "num_warmup": 250,
+      "num_samples": 250,
+      "peak_gb": 0.0931084156036377,
+      "runtime_seconds": 344.006751924986
+    },
+    "cal_10": {
+      "name": "cal_10",
+      "num_chains": 1,
+      "num_warmup": 10,
+      "num_samples": 10,
+      "peak_gb": 0.06411480903625488,
+      "runtime_seconds": 12.471758305007825
+    },
+    "cal_50": {
+      "name": "cal_50",
+      "num_chains": 1,
+      "num_warmup": 10,
+      "num_samples": 50,
+      "peak_gb": 0.06411290168762207,
+      "runtime_seconds": 49.40218435501447
+    }
+  },
+  "variants": {
+    "identity_transform": {
+      "peak_gb": 0.22614026069641113,
+      "runtime_seconds": 115.8108791099803,
+      "delta_vs_anchor_gb": -0.00014162063598632812
+    },
+    "exclude_rw_raw": {
+      "peak_gb": 0.06411480903625488,
+      "runtime_seconds": 693.9409801879956,
+      "delta_vs_anchor_gb": -0.16216707229614258
+    },
+    "entity_group_pooling": {
+      "peak_gb": 0.22753596305847168,
+      "runtime_seconds": 747.7506361429987,
+      "delta_vs_anchor_gb": 0.0012540817260742188
+    },
+    "gbm_column_dropped": {
+      "peak_gb": 0.22616791725158691,
+      "runtime_seconds": 675.6912526670203,
+      "delta_vs_anchor_gb": -0.00011396408081054688
+    },
+    "vectorized_chains": {
+      "peak_gb": 0.27013707160949707,
+      "runtime_seconds": 161.4144324499939,
+      "delta_vs_anchor_gb": 0.04385519027709961
+    }
+  },
+  "ladder_fits": {
+    "samples_per_chain": {
+      "intercept_gb": 0.015814341031588037,
+      "per_unit_gb": 0.0008330020537743203,
+      "projected_holdout_gb": 0.43231536791874814,
+      "measured_holdout_gb": 0.45006322860717773,
+      "error_percent": -3.9434149604610793
+    },
+    "total_kept_draws": {
+      "intercept_gb": 0.015814341031588037,
+      "per_unit_gb": 0.00041650102688716014,
+      "projected_holdout_gb": 0.43231536791874814,
+      "measured_holdout_gb": 0.45006322860717773,
+      "error_percent": -3.9434149604610793
+    },
+    "warmup_plus_samples": {
+      "intercept_gb": 0.015814341031588037,
+      "per_unit_gb": 0.00041650102688716014,
+      "projected_holdout_gb": 0.43231536791874814,
+      "measured_holdout_gb": 0.45006322860717773,
+      "error_percent": -3.9434149604610793
+    }
+  },
+  "production_calibration_baseline": {
+    "fixed_overhead_gb": 0.06411528587341309,
+    "per_sample_gb": -4.76837158203125e-08,
+    "target_samples": 1000,
+    "projected_holdout_gb": 0.06406760215759277,
+    "measured_holdout_gb": 0.45006322860717773,
+    "error_percent": -85.764755242088
+  },
+  "quick_formula": {
+    "2x50": {
+      "estimate_gb": 0.31629957295954225,
+      "measured_gb": 0.06411552429199219,
+      "ratio": 4.9332759335954925
+    },
+    "2x100": {
+      "estimate_gb": 0.3564905751496553,
+      "measured_gb": 0.09024643898010254,
+      "ratio": 3.9501899374473277
+    },
+    "2x250": {
+      "estimate_gb": 0.4770635817199945,
+      "measured_gb": 0.22628188133239746,
+      "ratio": 2.1082712363488376
+    },
+    "2x500": {
+      "estimate_gb": 0.6780185926705599,
+      "measured_gb": 0.45006322860717773,
+      "ratio": 1.5064963089049541
+    },
+    "2x250_w50": {
+      "estimate_gb": 0.4770635817199945,
+      "measured_gb": 0.22618460655212402,
+      "ratio": 2.109177936519105
+    },
+    "1x250": {
+      "estimate_gb": 0.37658607624471185,
+      "measured_gb": 0.0931084156036377,
+      "ratio": 4.044597620990974
+    },
+    "cal_10": {
+      "estimate_gb": 0.2801276709884405,
+      "measured_gb": 0.06411480903625488,
+      "ratio": 4.369157066818014
+    },
+    "cal_50": {
+      "estimate_gb": 0.2962040718644857,
+      "measured_gb": 0.06411290168762207,
+      "ratio": 4.620038464452659
+    }
+  }
+}

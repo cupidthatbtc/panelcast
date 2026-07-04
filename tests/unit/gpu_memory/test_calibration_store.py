@@ -15,7 +15,11 @@ from panelcast.gpu_memory.calibration_store import (
     refit_constants,
     resolve_calibration,
 )
-from panelcast.gpu_memory.estimate import estimate_memory_gb
+from panelcast.gpu_memory.estimate import (
+    COLLECTION_OVERHEAD_FACTOR,
+    FIXED_OVERHEAD_GB,
+    estimate_memory_gb,
+)
 
 
 def _inputs(num_samples: int = 500, num_chains: int = 2, n_obs: int = 4000) -> dict:
@@ -120,8 +124,8 @@ class TestRefit:
 class TestResolve:
     def test_cold_start_uses_shipped_constants(self, tmp_path):
         factor, fixed, source = resolve_calibration(tmp_path / "missing.json")
-        assert factor == 3.0
-        assert fixed == 0.25
+        assert factor == COLLECTION_OVERHEAD_FACTOR
+        assert fixed == FIXED_OVERHEAD_GB
         assert "shipped" in source
 
     def test_history_earns_per_machine_source(self, tmp_path):
@@ -130,7 +134,7 @@ class TestResolve:
         path.write_text(json.dumps(payload), encoding="utf-8")
         factor, fixed, source = resolve_calibration(path)
         assert "per-machine" in source
-        assert factor < 3.0  # tighter than shipped on this synthetic machine
+        assert factor < COLLECTION_OVERHEAD_FACTOR  # tighter than shipped on this synthetic machine
 
     def test_estimate_with_calibration_reports_source(self, tmp_path):
         estimate, source = estimate_with_calibration(tmp_path / "missing.json", **_inputs())
