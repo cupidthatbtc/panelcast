@@ -163,8 +163,11 @@ def save_calibration_cache(result: CalibrationResult) -> None:
         with open(temp_file, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
 
-        # Atomic rename
-        temp_file.rename(cache_file)
+        # Atomic replace — overwrites an existing cache on every platform.
+        # (Path.rename raises FileExistsError over an existing dest on Windows,
+        # which the OSError handler below would silently swallow, discarding a
+        # fresh --recalibrate result and leaving the stale cache in place.)
+        temp_file.replace(cache_file)
         logger.debug(f"Cache saved: {cache_file}")
 
     except OSError as e:

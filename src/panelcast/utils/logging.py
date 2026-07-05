@@ -43,8 +43,12 @@ def setup_pipeline_logging(
         This function reconfigures the root logger and structlog globally.
         Call it once at pipeline entry point, before any logging calls.
     """
-    # Clear existing handlers from root logger
+    # Clear existing handlers from root logger, closing each first so a prior
+    # run's FileHandler releases its fd (Windows keeps the log file locked
+    # otherwise, blocking rotation/move until GC).
     root = logging.getLogger()
+    for handler in root.handlers[:]:
+        handler.close()
     root.handlers.clear()
 
     # Set root to DEBUG to capture all (handlers filter by level)

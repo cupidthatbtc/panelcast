@@ -52,6 +52,20 @@ class TestSetupPipelineLogging:
         # After setup, should have exactly 1 console handler (not accumulated)
         assert len(root.handlers) <= initial_count
 
+    def test_closes_prior_file_handler(self, tmp_path):
+        """A prior run's FileHandler is closed (fd released) on reconfigure.
+
+        Merely dropping it from root.handlers leaves the log file locked on
+        Windows until GC; closing releases the handle immediately.
+        """
+        root = logging.getLogger()
+        old_handler = logging.FileHandler(tmp_path / "old.log", encoding="utf-8")
+        old_stream = old_handler.stream
+        root.addHandler(old_handler)
+        setup_pipeline_logging()
+        assert old_handler not in root.handlers
+        assert old_stream.closed
+
     def test_suppresses_jax_debug(self):
         setup_pipeline_logging()
         jax_logger = logging.getLogger("jax")
