@@ -29,3 +29,8 @@ def test_resolves_report_table_columns():
 
 def test_returns_none_when_estimate_or_interval_missing():
     assert _coefficient_columns(pd.DataFrame({"foo": [1], "bar": [2]})) is None
+
+
+def test_returns_none_for_non_dataframe():
+    # export-figures can receive a plain dict (legacy/mocked data); must not crash.
+    assert _coefficient_columns({"beta": [0.5, 0.3]}) is None
