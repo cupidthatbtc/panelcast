@@ -490,9 +490,9 @@ def predict_for_entity(
 def _is_float(token: str) -> bool:
     try:
         float(token)
-        return True
     except ValueError:
         return False
+    return True
 
 
 def main():

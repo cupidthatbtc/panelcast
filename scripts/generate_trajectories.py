@@ -219,7 +219,9 @@ def _predict_at(
     y = np.asarray(preds[y_key]).ravel()
     if target_transform != "identity":
         y = np.asarray(transform.inverse(y))
-    return y
+    # Keep draws within the score bounds (a no-op for offset_logit, whose inverse
+    # already lands in range; matters for identity, whose raw draws can overshoot).
+    return np.clip(y, target_bounds[0], target_bounds[1])
 
 
 # ---------------------------------------------------------------------------
