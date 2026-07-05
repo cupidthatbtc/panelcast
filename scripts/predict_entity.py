@@ -487,6 +487,14 @@ def predict_for_entity(
         print("    (model overall MAE: 5.9, RMSE: 8.6)")
 
 
+def _is_float(token: str) -> bool:
+    try:
+        float(token)
+        return True
+    except ValueError:
+        return False
+
+
 def main():
     # Parse --robust flag
     robust = 0.0
@@ -495,7 +503,9 @@ def main():
     i = 0
     while i < len(args):
         if args[i] == "--robust":
-            if i + 1 < len(args):
+            # Sigma is optional; only consume the next token if it's numeric, so
+            # `--robust "Some Entity"` doesn't crash on float("Some Entity").
+            if i + 1 < len(args) and _is_float(args[i + 1]):
                 robust = float(args[i + 1])
                 i += 2
             else:
