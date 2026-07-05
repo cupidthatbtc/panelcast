@@ -29,9 +29,6 @@ from panelcast.models.bayes.fit import MCMCConfig, fit_model
 from panelcast.models.bayes.model import user_score_model
 from panelcast.models.bayes.priors import PriorConfig
 
-# Path to convergence reference output
-CONVERGENCE_REF_PATH = Path(__file__).resolve().parents[4] / "models" / "convergence_reference.json"
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -175,8 +172,9 @@ class TestConvergenceReference:
     Uses the same module-scope MCMC run as TestFullValidation.
     """
 
-    def test_save_convergence_reference(self, full_fit_result):
+    def test_save_convergence_reference(self, full_fit_result, tmp_path: Path):
         """Build and save convergence reference JSON with diagnostic values."""
+        ref_path = tmp_path / "models" / "convergence_reference.json"
         num_samples = 1000
         num_chains = 2
         num_warmup = 1000
@@ -233,13 +231,13 @@ class TestConvergenceReference:
             "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         }
 
-        # Write to models/convergence_reference.json
-        CONVERGENCE_REF_PATH.parent.mkdir(parents=True, exist_ok=True)
-        CONVERGENCE_REF_PATH.write_text(json.dumps(reference, indent=2) + "\n")
+        # Write under tmp to keep the repo's real models/ dir clean (issues #127, #118).
+        ref_path.parent.mkdir(parents=True, exist_ok=True)
+        ref_path.write_text(json.dumps(reference, indent=2) + "\n")
 
         # Verify the file was written and is valid JSON
-        assert CONVERGENCE_REF_PATH.exists(), "convergence_reference.json was not created"
-        loaded = json.loads(CONVERGENCE_REF_PATH.read_text())
+        assert ref_path.exists(), "convergence_reference.json was not created"
+        loaded = json.loads(ref_path.read_text())
         assert "divergence_rate" in loaded
         assert "diagnostics" in loaded
         assert "passed" in loaded

@@ -143,6 +143,7 @@ class TestFullPipeline:
     def test_pipeline_skip_detection(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Skip detection works when inputs are unchanged.
 
@@ -151,6 +152,10 @@ class TestFullPipeline:
         - Second run with skip_existing=True skips stage
         - Stage appears in stages_skipped list
         """
+        # The data-stage stamp writes to the cwd-relative flat cache; isolate it
+        # under tmp so the run can't touch the repo's real data/ (issues #127, #118).
+        monkeypatch.chdir(tmp_path)
+
         with (
             patch("panelcast.pipelines.orchestrator.ensure_environment_locked"),
             patch("panelcast.pipelines.orchestrator.verify_environment") as mock_verify,
@@ -337,6 +342,7 @@ class TestFullPipeline:
     def test_pipeline_creates_manifest(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Pipeline creates valid manifest.json file.
 
@@ -345,6 +351,10 @@ class TestFullPipeline:
         - Manifest contains required fields
         - Manifest is valid JSON
         """
+        # The data-stage stamp writes to the cwd-relative flat cache; isolate it
+        # under tmp so the run can't touch the repo's real data/ (issues #127, #118).
+        monkeypatch.chdir(tmp_path)
+
         with (
             patch("panelcast.pipelines.orchestrator.ensure_environment_locked"),
             patch("panelcast.pipelines.orchestrator.verify_environment") as mock_verify,
@@ -509,6 +519,7 @@ class TestPipelineResume:
     def test_resume_from_previous_run(
         self,
         tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Pipeline can resume from a previous run.
 
@@ -516,6 +527,10 @@ class TestPipelineResume:
         - Resume finds previous run directory
         - Already completed stages are not re-run
         """
+        # The data-stage stamp writes to the cwd-relative flat cache; isolate it
+        # under tmp so the run can't touch the repo's real data/ (issues #127, #118).
+        monkeypatch.chdir(tmp_path)
+
         with (
             patch("panelcast.pipelines.orchestrator.ensure_environment_locked"),
             patch("panelcast.pipelines.orchestrator.verify_environment") as mock_verify,
