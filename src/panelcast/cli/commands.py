@@ -16,13 +16,17 @@ def _coefficient_columns(coefficients) -> tuple[str, str, str, str] | None:
 
     Handles both arviz-summary columns (mean / hdi_3% / hdi_97% / param) and the
     report's human table (Estimate / CI Lower / CI Upper, param in the unnamed
-    first column). Returns None when the estimate/interval columns can't be found.
+    first column). Returns None when the input isn't a column-bearing table or the
+    estimate/interval columns can't be found.
     """
+    columns = getattr(coefficients, "columns", None)
+    if columns is None:
+        return None
 
     def _norm(name: str) -> str:
         return str(name).strip().lower().replace(" ", "_").replace("%", "")
 
-    by_norm = {_norm(c): c for c in coefficients.columns}
+    by_norm = {_norm(c): c for c in columns}
 
     def pick(candidates: list[str]) -> str | None:
         for cand in candidates:
@@ -35,7 +39,7 @@ def _coefficient_columns(coefficients) -> tuple[str, str, str, str] | None:
     upper = pick(["hdi_97%", "hdi_97.5%", "ci_upper", "upper"])
     if not (estimate and lower and upper):
         return None
-    label = pick(["param", "parameter", "name", "index"]) or coefficients.columns[0]
+    label = pick(["param", "parameter", "name", "index"]) or columns[0]
     return estimate, lower, upper, label
 
 
@@ -115,6 +119,8 @@ def export_figures(
                 upper_col=upper_col,
                 label_col=label_col,
             )
+        else:
+            figures["coefficients"] = create_forest_plot(data.coefficients)
 
     if data.reliability is not None:
         rel = data.reliability
