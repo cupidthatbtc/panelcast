@@ -994,10 +994,10 @@ def _generate_model_card(inp: _PublicationInputs, artifacts: dict[str, Any]) -> 
         write_model_card(model_card_data, model_card_path)
         artifacts["docs"].append(str(model_card_path))
 
-        root_card_path = Path("MODEL_CARD.md")
-        shutil.copy(model_card_path, root_card_path)
-        artifacts["docs"].append(str(root_card_path))
-
+        # The run's card stays run-scoped (#81). It must NOT be copied to the
+        # repo-root MODEL_CARD.md — that is the curated, hand-maintained card, and
+        # overwriting it on every run silently clobbers it (a #118-class leak the
+        # artifact guard misses because the file lives outside the guarded dirs).
         log.info("model_card_saved", path=str(model_card_path))
     except Exception as e:
         log.exception("model_card_failed")
