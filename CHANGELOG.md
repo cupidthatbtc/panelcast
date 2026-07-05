@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] — 2026-07-05
+
+A patch release. The genre-pooling gate (`entity_group_pooling`, default-on
+since 0.6.0) trained correctly but the predict stage never handed its group
+indices to the model, so a standard run trained for hours and then failed at
+predict — producing no next-event predictions or figures. This fixes that, plus
+the GPU fit-time predictor that had been badly over-estimating.
+
+### Fixed
+
+- **Prediction under genre pooling** (#132): `predict` now resolves
+  `group_idx_by_artist` / `n_groups` from the training summary (as `evaluate`
+  already did), so a model trained with `entity_group_pooling` no longer raises
+  `entity_group_pooling=True requires group_idx_by_artist and n_groups` at
+  predict time. Every run on the shipped 0.6.0/0.7.0 defaults was affected.
+- **GPU runtime predictor** (#130): the per-machine fit-time estimate is now
+  affine and model-aware — a shared startup intercept plus a per-transform rate
+  — instead of a naive median rate that a pool of tiny probe fits could inflate
+  (it returned ~29 h for a ~1 h fit). Also closes a test-isolation leak that
+  wrote fake-peak probe records into the real calibration store.
+- **Publication-readiness ESS gate**: the check compared bulk-ESS against
+  `ess_threshold * num_chains`, treating the threshold as per-chain, so a healthy
+  fit (e.g. 623 bulk-ESS, 4 chains) failed against a phantom 1600 floor. It now
+  uses the total floor the evaluate stage applies (`ess_bulk_min >= ess_threshold`).
+- **`export-figures` coefficient plot**: the forest plot read a hardcoded `mean`
+  column and crashed (`KeyError: 'mean'`) on the report's `Estimate` / `CI Lower`
+  / `CI Upper` table; column resolution is now format-agnostic.
+
 ## [0.7.0] — 2026-07-05
 
 A model-selection release. `panelcast select` turns the manual, per-domain hunt

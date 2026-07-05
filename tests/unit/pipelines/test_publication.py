@@ -470,6 +470,31 @@ class TestPublicationReadiness:
         assert payload["ready"] is True
         assert payload["critical_failed"] == []
 
+    def test_ess_threshold_is_total_not_per_chain(self):
+        # Regression: the gate multiplied the total bulk-ESS floor by num_chains,
+        # so a healthy 623 (>= the 400 floor) failed with 4 chains (623 < 1600).
+        payload = _build_publication_readiness(
+            metrics={
+                "primary_split": "within_entity_temporal",
+                "splits": {
+                    "within_entity_temporal": {"calibration": {"within_tolerance": True}},
+                    "entity_disjoint": {"calibration": {"within_tolerance": True}},
+                },
+            },
+            diagnostics={
+                "passed": True,
+                "rhat_max": 1.003,
+                "ess_bulk_min": 623,
+                "ess_threshold": 400,
+            },
+            training_summary={"mcmc_config": {"num_chains": 4}},
+            artifact_errors=[],
+            require_secondary_split=True,
+        )
+        checks = _check_map(payload)
+        assert checks["ess_within_threshold"]["passed"] is True
+        assert payload["ready"] is True
+
     def test_not_ready_for_single_chain_and_missing_secondary(self):
         payload = _build_publication_readiness(
             metrics={
@@ -587,8 +612,8 @@ class TestPublicationReadiness:
             assert "ess_available" in critical_failed
         else:
             assert checks["ess_available"]["passed"] is True
-            assert checks["ess_within_threshold"]["passed"] is (ess_bulk_min >= 400 * num_chains)
-            if ess_bulk_min < 400 * num_chains:
+            assert checks["ess_within_threshold"]["passed"] is (ess_bulk_min >= 400)
+            if ess_bulk_min < 400:
                 assert "ess_within_threshold" in critical_failed
 
         if secondary_state == "missing":
