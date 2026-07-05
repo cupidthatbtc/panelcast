@@ -115,3 +115,18 @@ class TestModelAwareAffine:
             4, 1000, 1000, 4235, transform="identity", store_path=path
         )
         assert off.seconds > 5 * ident.seconds
+
+    def test_thin_history_probe_does_not_skew_rate(self, tmp_path):
+        # <5 records so FIXED collapses to 0; the local-history branch must still
+        # ignore a leak-style probe (no transform) rather than let its ~40x rate
+        # inflate the offset_logit estimate.
+        records = [
+            _record(12.5, num_samples=5, n_obs=100, transform=None),
+            _record(5788.0, num_samples=1000, n_obs=4235),
+        ]
+        path = _store(tmp_path, records)
+        pred = predict_fit_seconds(
+            4, 1000, 1000, 4235, transform="offset_logit", store_path=path
+        )
+        assert "local history (offset_logit)" in pred.source
+        assert pred.hours == pytest.approx(5788.0 / 3600.0, abs=0.05)

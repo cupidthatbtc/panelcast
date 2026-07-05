@@ -20,6 +20,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from panelcast.gpu_memory.calibration_store import (  # noqa: E402  (needs SRC on sys.path)
+    default_store_path as _real_default_store_path,
+)
 from panelcast.paths import ArtifactPaths  # noqa: E402  (needs SRC on sys.path)
 
 # Every cwd-relative artifact root a pipeline stage writes by default. A test
@@ -46,10 +49,14 @@ def _snapshot_artifacts() -> dict[str, tuple[int, int]]:
 
 
 def _calibration_store_state() -> tuple[int, int] | None:
-    """(mtime_ns, size) of the real per-machine GPU calibration store, or None."""
-    path = Path.home() / ".panelcast" / "gpu_calibration.json"
+    """(mtime_ns, size) of the real per-machine GPU calibration store, or None.
+
+    Resolves via the import-time (pre-monkeypatch) ``default_store_path`` reference
+    so the guard tracks the *real* store even while ``_isolate_calibration_store``
+    has redirected the module attribute to a tmp path.
+    """
     try:
-        st = path.stat()
+        st = _real_default_store_path().stat()
         return (st.st_mtime_ns, st.st_size)
     except OSError:
         return None
