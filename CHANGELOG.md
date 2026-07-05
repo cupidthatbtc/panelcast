@@ -4,6 +4,67 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-07-05
+
+A model-selection release. `panelcast select` turns the manual, per-domain hunt
+for a transform / likelihood / gate configuration into a pre-registered,
+budget-aware protocol that any descriptor can run, and the GPU memory it plans
+against is recalibrated to measured hardware. Run against the AOTY flagship, the
+protocol independently reproduces the 0.6.0 defaults — no candidate beats the
+shipped configuration. All selection evidence is committed under `.audit/`.
+
+### Added
+
+- **`panelcast select`** (#78; #98–#103): a portable, staged model-selection
+  protocol. The candidate space is enumerated from the code's own registries, so
+  a frozen option is genuinely re-tried rather than pre-pruned; a
+  prior-predictive screen flags mis-scaled priors before any fit (#99). A
+  budget-aware, resumable sweep runner stages each arm through
+  splits/features/train/evaluate and skips completed work on resume (#100).
+  Paired held-out ELPD (the #63 estimator) with coverage and convergence gates
+  ranks arms into one ledger and a `report.md` (#101). Pre-registered decision
+  rules — paired-ELPD z ≥ 2, coverage within ±0.03, convergence required — with
+  multi-seed confirmation decide promotion; a default flip stays a manual PR
+  (#102). The CLI exposes effort tiers (quick/standard/thorough), a pre-run cost
+  printout, `--dry-run`, and a new-domain playbook (#103), and the recorded
+  selection history is re-verified against the post-#63 estimator (#98).
+- **Per-machine GPU self-calibration** (#112): a calibration store and runtime
+  predictor learn each machine's memory/time profile, so budget planning
+  reflects real hardware instead of a fixed guess.
+- **AOTY reproduction evidence** (`.audit/select_aoty/`): `select` swept the
+  enumerated space against the flagship and promoted nothing — no arm beats the
+  shipped defaults (the closest, disabling `offset_logit`, is −14.9 ± 4.6
+  held-out ELPD, z −3.27). The 0.6.0 `gbm_offset` / genre-pooling /
+  `offset_logit` decisions hold.
+
+### Changed
+
+- **Honest GPU memory expectations** (#106, #113): the preflight ladder extends
+  to the post-0.5.0 model dimensions and the memory estimator is recalibrated
+  against a measured ladder, with cold-start calibration pinned by test.
+- **Sweep mechanics hardened** (#117, #119): a per-arm wall-clock timeout
+  (`--arm-timeout`, default 1800 s) kills a stalled arm instead of hanging the
+  sweep; arms screen at 1000 draws and only a candidate that clears the bar is
+  confirmed at 5000; a timed-out arm is terminal, not retried.
+
+### Fixed
+
+- Test isolation: every `ArtifactPaths` root is guarded and the tests that wrote
+  to the real `data/` dirs are isolated, so a test run can no longer pollute the
+  working tree (#118, #120).
+- The run seed is restored on resume, so a resumed fit reproduces the original
+  posterior (#121).
+- The preflight cache is replaced atomically and stale log handlers are closed,
+  fixing a Windows file-handle leak (#122).
+- Script correctness (#123, #124): the trajectory plot applies the target
+  transform (raw scores no longer leak into the AR term; draws are clipped to
+  bounds), the preflight experiment extrapolates calibration at post-warmup
+  samples, and `predict_entity --robust` no longer crashes when followed by an
+  entity name.
+- Git provenance survives a non-editable install nested in an unrelated repo,
+  and the non-strict `ConvergenceError` path no longer crashes on an unbound
+  local (#123, #125).
+
 ## [0.6.0] — 2026-07-03
 
 A point-accuracy and run-hygiene release: the model takes the lead on the
