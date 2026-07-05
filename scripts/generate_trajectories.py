@@ -30,6 +30,8 @@ from panelcast.models.bayes.io import load_manifest, load_model
 from panelcast.models.bayes.model import user_score_model
 from panelcast.models.bayes.predict import extract_posterior_samples
 from panelcast.models.bayes.priors import PriorConfig
+from panelcast.models.bayes.transforms import get_transform
+from panelcast.pipelines.training_summary import ar_center_on_model_scale
 
 # ---------------------------------------------------------------------------
 # Style
@@ -174,21 +176,38 @@ def _predict_at(
         else 100
     )
 
+    # The shipped model runs on the target's transform scale (offset_logit), so
+    # prev_score must be forwarded onto that scale, ar_center/target_bounds must
+    # be passed, and the sampled draws inverse-transformed back to 0-100 — same
+    # as predict_entity.predict_known_entity. (Was: raw prev, ar_center=0, and a
+    # bare clip of logit-scale draws, which made every PI band nonsense.)
+    ds = summary.get("dataset") or {}
+    target_bounds = tuple(ds.get("target_bounds", (0.0, 100.0)))
+    target_transform = summary.get("target_transform") or "identity"
+    logit_offset = float(summary.get("logit_offset") or 0.5)
+    transform = get_transform(target_transform, target_bounds, logit_offset)
+
+    prev = float(prev_score)
+    if target_transform != "identity":
+        prev = float(np.asarray(transform.forward(prev)))
+
     model_args = {
         "artist_idx": np.array([summary["artist_to_idx"][artist]], dtype=np.int32),
         "album_seq": np.array([min(seq, summary["max_seq"])], dtype=np.int32),
-        "prev_score": np.array([prev_score], dtype=np.float32),
+        "prev_score": np.array([prev], dtype=np.float32),
         "X": X_scaled.reshape(1, -1),
         "y": None,
         "n_reviews": np.array([n_reviews], dtype=np.int32),
         "n_artists": summary["n_artists"],
         "max_seq": summary["max_seq"],
-        "n_exponent": 0.0,
-        "learn_n_exponent": False,
-        "n_exponent_prior": "logit-normal",
+        "n_exponent": summary.get("n_exponent", 0.0),
+        "learn_n_exponent": summary.get("learn_n_exponent", False),
+        "n_exponent_prior": summary.get("n_exponent_prior", "logit-normal"),
         "n_ref": summary.get("n_ref"),
         "likelihood_df": summary.get("likelihood_df", 1000.0),
         "priors": priors,
+        "target_bounds": target_bounds,
+        "ar_center": ar_center_on_model_scale(summary),
     }
 
     n_samples = next(iter(posterior_samples.values())).shape[0]
@@ -197,7 +216,12 @@ def _predict_at(
     predictive = Predictive(user_score_model, posterior_samples=first_ps, batch_ndims=1)
     preds = predictive(random.key(42), **model_args)
     y_key = next(k for k in preds if k.endswith("_y"))
-    return np.clip(np.asarray(preds[y_key]).ravel(), 0, 100)
+    y = np.asarray(preds[y_key]).ravel()
+    if target_transform != "identity":
+        y = np.asarray(transform.inverse(y))
+    # Keep draws within the score bounds (a no-op for offset_logit, whose inverse
+    # already lands in range; matters for identity, whose raw draws can overshoot).
+    return np.clip(y, target_bounds[0], target_bounds[1])
 
 
 # ---------------------------------------------------------------------------

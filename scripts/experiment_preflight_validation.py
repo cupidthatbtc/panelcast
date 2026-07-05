@@ -296,13 +296,14 @@ def main() -> None:
             "error_percent": error_pct,
         }
 
-    # Production calibration baseline: 10/50-point fit, extrapolated on
-    # warmup+samples exactly as run_extrapolated_preflight_check does.
+    # Production calibration baseline: 10/50-point fit, extrapolated at the
+    # post-warmup num_samples exactly as run_extrapolated_preflight_check does
+    # (run.py sets target_samples = config.num_samples; warmup draws aren't stored).
     cal_fixed, cal_per_sample = calculate_calibration(
         (10, measurements["cal_10"]["peak_gb"]),
         (50, measurements["cal_50"]["peak_gb"]),
     )
-    cal_target = holdout["num_warmup"] + holdout["num_samples"]
+    cal_target = holdout["num_samples"]
     cal_projected = cal_fixed + cal_per_sample * cal_target
     cal_error_pct = 100.0 * (cal_projected - holdout["peak_gb"]) / holdout["peak_gb"]
 
