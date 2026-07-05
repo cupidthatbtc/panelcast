@@ -198,12 +198,12 @@ class TestExecuteStageRunFn:
             assert exit_code == 0
             assert "empty" in orchestrator.manifest.stages_completed
 
-    def test_convergence_error_non_strict_fails_with_unbound_local(self, tmp_path):
-        """ConvergenceError in non-strict mode currently fails due to run_result being unbound.
+    def test_convergence_error_non_strict_continues(self, tmp_path):
+        """A non-strict ConvergenceError is warned-through, not crashed on.
 
-        Note: This tests the current behavior where a non-strict ConvergenceError
-        triggers an UnboundLocalError in _execute_stage because run_result is never
-        assigned. The generic exception handler in run() catches this and returns 1.
+        The fit raises before run_result is bound; the handler sets run_result=None
+        so the stage completes and the pipeline continues (exit 0), rather than an
+        UnboundLocalError that the generic handler would otherwise turn into exit 1.
         """
         with _mock_env()[0], _mock_env()[1]:
             config = PipelineConfig(strict=False)
@@ -218,9 +218,8 @@ class TestExecuteStageRunFn:
                 mock_order.return_value = [mock_stage]
                 exit_code = orchestrator.run()
 
-            # Due to run_result being unbound after ConvergenceError catch,
-            # this falls through to generic exception handler with exit code 1
-            assert exit_code == 1
+            assert exit_code == 0
+            assert "train" in orchestrator.manifest.stages_completed
 
     def test_convergence_error_strict_fails(self, tmp_path):
         """ConvergenceError in strict mode fails the pipeline."""

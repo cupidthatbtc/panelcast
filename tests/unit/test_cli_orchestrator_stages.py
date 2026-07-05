@@ -1038,10 +1038,12 @@ class TestConvergenceNonStrict:
             orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
             exit_code = orchestrator.run()
 
-            # Non-strict mode must *catch* the ConvergenceError (not let it
-            # propagate) and report a non-zero exit rather than crashing.
-            assert exit_code == 1
+            # Non-strict mode catches the ConvergenceError, warns, and continues:
+            # the stage completes and the run succeeds (exit 0) rather than
+            # crashing on an unbound run_result.
+            assert exit_code == 0
             assert mock_stage.run_fn.called
+            assert "train" in orchestrator.manifest.stages_completed
 
 
 # ============================================================================
