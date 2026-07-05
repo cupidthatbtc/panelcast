@@ -195,12 +195,40 @@ class TestSaveCalibrationCacheErrors:
         )
 
         with mock.patch("panelcast.preflight.cache.CACHE_DIR", cache_dir):
-            # Make the rename fail with OSError
-            with mock.patch("pathlib.Path.rename", side_effect=OSError("disk full")):
+            # Make the atomic replace fail with OSError
+            with mock.patch("pathlib.Path.replace", side_effect=OSError("disk full")):
                 save_calibration_cache(result)
 
         # Neither the final file nor temp should exist
         assert not (cache_dir / "error_test.json").exists()
+
+    def test_recalibrate_overwrites_existing_cache(self, tmp_path, monkeypatch):
+        """A fresh result replaces a stale cache with the same config_hash.
+
+        On Windows ``Path.rename`` raised over the existing file (swallowed by the
+        OSError handler), so ``--recalibrate`` silently kept the stale numbers;
+        the atomic ``replace`` overwrites on every platform.
+        """
+        monkeypatch.setattr("panelcast.preflight.cache.CACHE_DIR", tmp_path)
+        stale = CalibrationResult(
+            fixed_overhead_gb=1.0,
+            per_sample_gb=0.005,
+            calibration_points=((10, 1.05), (50, 1.25)),
+            config_hash="samehash12345678",
+            calibration_time=30.0,
+        )
+        save_calibration_cache(stale)
+        fresh = CalibrationResult(
+            fixed_overhead_gb=9.9,
+            per_sample_gb=0.09,
+            calibration_points=((10, 9.99), (50, 9.99)),
+            config_hash="samehash12345678",
+            calibration_time=42.0,
+        )
+        save_calibration_cache(fresh)
+        loaded = load_calibration_cache("samehash12345678")
+        assert loaded is not None
+        assert loaded.fixed_overhead_gb == pytest.approx(9.9)
 
     def test_oserror_during_file_open(self, tmp_path):
         """OSError during file write is handled gracefully."""
