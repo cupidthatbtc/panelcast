@@ -202,6 +202,27 @@ def _build_batch_scenario_args(
     )
 
 
+def _group_pooling_args(priors_obj: PriorConfig, summary: dict) -> dict:
+    """Group-pooling model args from the training summary, or empty when off.
+
+    The gated model reads ``group_offset[group_idx_by_artist]`` at both train and
+    predict time; evaluate.py resolves these the same way.
+    """
+    if not priors_obj.entity_group_pooling:
+        return {}
+    group_idx_by_artist = summary.get("group_idx_by_artist")
+    n_groups = summary.get("n_groups")
+    if group_idx_by_artist is None or n_groups is None:
+        raise ValueError(
+            "entity_group_pooling is on but the training summary lacks "
+            "group_idx_by_artist/n_groups — re-run the train stage."
+        )
+    return {
+        "group_idx_by_artist": np.asarray(group_idx_by_artist, dtype=np.int32),
+        "n_groups": int(n_groups),
+    }
+
+
 def _predict_known_entities(
     posterior_samples: dict[str, jnp.ndarray],
     summary: dict,
@@ -324,6 +345,10 @@ def _predict_known_entities(
 
     results = []
 
+    # Genre/group pooling: the model needs the per-entity group indices at
+    # predict time too (same array the train stage saved and evaluate.py reads).
+    group_pooling_args = _group_pooling_args(priors_obj, summary)
+
     cpu_device = jax.devices("cpu")[0]
     with jax.default_device(cpu_device):
         # Process artists in batches
@@ -371,6 +396,7 @@ def _predict_known_entities(
                 }
                 if eiv_on:
                     model_args["prev_meas_sigma"] = built.prev_meas_sigma
+                model_args.update(group_pooling_args)
 
                 # Run Predictive in chunks -- create once, replace posterior_samples
                 # per batch to preserve function identity and avoid JAX recompilation
