@@ -77,19 +77,21 @@ On the ~5,000-album AOTY subset, against baselines fit on the same real splits
 
 | | MAE | R² | 80% cov | 95% cov |
 |---|---:|---:|---:|---:|
-| gradient boosting | **5.41** | **0.486** | 0.770 | 0.899 |
-| ridge | 5.62 | 0.455 | 0.873 | 0.962 |
-| **panelcast** | 5.66 | 0.429 | 0.864 | 0.959 |
+| **panelcast** | **5.30** | **0.501** | 0.853 | 0.963 |
+| ridge | 5.38 | 0.498 | 0.879 | 0.965 |
+| gradient boosting | 5.58 | 0.471 | 0.763 | 0.888 |
 | entity mean | 6.11 | 0.322 | 0.818 | 0.925 |
 
-The model is **mid-pack on point accuracy** — a gradient-boosted regressor beats it
-(MAE 5.41 vs 5.66) — but GBM gets there by **under-covering** (80%/95% interval
-coverage 0.77/0.90 vs the model's 0.86/0.96). On the cold-start (never-seen entity)
-split the model now leads outright (MAE 7.01, R² 0.095, 95% coverage 0.956). The deliverable is *calibrated
-uncertainty* — intervals as a modeled quantity, an interpretable between-entity vs
-residual variance decomposition, and a generative model you can interrogate — **not**
-a point-accuracy score. If you only need a point estimate, a GBM is simpler and
-better. Full table, cold-start behaviour, and the R²-by-history gradient:
+The model now **leads on point accuracy** — the best MAE and R² in the table —
+while carrying the only *modeled* intervals, near-nominal at 0.85/0.96. The margin
+over ridge is modest (5.30 vs 5.38 MAE); the decisive gaps are CRPS and calibration —
+the gradient-boosted regressor lands close on raw error but **under-covers** badly
+(0.76/0.89), its intervals a bolt-on rather than a modeled quantity. On the cold-start
+(never-seen entity) split it leads outright (MAE 6.91, R² 0.113, 95% coverage 0.962).
+Point accuracy was never the deliverable, though — *calibrated uncertainty* is:
+intervals as a modeled quantity, an interpretable between-entity vs residual variance
+decomposition, and a generative model you can interrogate — and the model now wins on
+accuracy too. Full table, cold-start behaviour, and the R²-by-history gradient:
 [`docs/BASELINES.md`](docs/BASELINES.md).
 
 ## Example output
