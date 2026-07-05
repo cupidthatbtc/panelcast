@@ -14,15 +14,35 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from panelcast.models.bayes.priors import PriorConfig
 from panelcast.pipelines.predict_next import (
     SCENARIOS_KNOWN,
     SCENARIOS_NEW,
     _extract_posterior_samples,
+    _group_pooling_args,
     _predict_known_entities,
     _predict_new_entities,
     predict_entity_next,
     predict_next_events,
 )
+
+
+class TestGroupPoolingArgs:
+    def test_off_returns_empty(self):
+        assert _group_pooling_args(PriorConfig(entity_group_pooling=False), {}) == {}
+
+    def test_on_reads_summary(self):
+        args = _group_pooling_args(
+            PriorConfig(entity_group_pooling=True),
+            {"group_idx_by_artist": [0, 1, 0], "n_groups": 2},
+        )
+        assert args["n_groups"] == 2
+        assert args["group_idx_by_artist"].dtype == np.int32
+        np.testing.assert_array_equal(args["group_idx_by_artist"], [0, 1, 0])
+
+    def test_on_missing_summary_raises(self):
+        with pytest.raises(ValueError, match="lacks"):
+            _group_pooling_args(PriorConfig(entity_group_pooling=True), {})
 
 
 def test_scenario_constants():
@@ -497,6 +517,51 @@ class TestPredictKnownEntities:
             mock_artist_mean_features,
         )
         assert not result.empty
+
+    def test_group_pooling_injects_group_args(
+        self,
+        mock_posterior_samples,
+        mock_summary,
+        mock_last_album_info,
+        mock_artist_mean_features,
+    ):
+        """entity_group_pooling injects group_idx_by_artist / n_groups into the
+        known-entity model args. Regression: predict omitted them, so the gated
+        model raised at predict time and the run was marked failed."""
+        summary = dict(mock_summary)
+        summary["priors"] = {**mock_summary["priors"], "entity_group_pooling": True}
+        summary["group_idx_by_artist"] = [0, 1, 0]
+        summary["n_groups"] = 2
+
+        mock_jax = _make_jax_mock()
+        mock_random = MagicMock()
+        mock_random.key.return_value = MagicMock()
+
+        predictive_mock = _make_predictive_mock(10, 3)
+        call_args_list = []
+        original_return = predictive_mock.return_value
+
+        def capture_call(*args, **kwargs):
+            call_args_list.append(kwargs)
+            return original_return.return_value
+
+        original_return.side_effect = capture_call
+
+        with (
+            patch("panelcast.pipelines.predict_next.jax", mock_jax),
+            patch("panelcast.pipelines.predict_next.Predictive", predictive_mock),
+            patch("panelcast.pipelines.predict_next.random", mock_random),
+        ):
+            _predict_known_entities(
+                mock_posterior_samples,
+                summary,
+                mock_last_album_info,
+                mock_artist_mean_features,
+            )
+
+        kwargs = call_args_list[0]
+        assert kwargs["n_groups"] == 2
+        np.testing.assert_array_equal(kwargs["group_idx_by_artist"], [0, 1, 0])
 
     def test_skips_missing_artists(
         self,
