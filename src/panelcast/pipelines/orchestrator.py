@@ -603,6 +603,10 @@ class PipelineOrchestrator:
 
     # MCMC config keys that should be restored from manifest on resume
     RESUME_CONFIG_KEYS = (
+        # The RNG seed governs the whole MCMC draw; a resume that reverts to the
+        # CLI default silently re-fits with a different posterior than the run it
+        # claims to continue (and the manifest still records the original seed).
+        "seed",
         "target_accept",
         "max_tree_depth",
         "chain_method",

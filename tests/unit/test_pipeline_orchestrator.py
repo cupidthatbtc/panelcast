@@ -664,6 +664,20 @@ class TestResumeConfigRestoration:
         orch._restore_config_from_manifest()
         assert config.chain_method == "parallel"
 
+    def test_seed_in_resume_config_keys(self):
+        """The RNG seed governs the whole MCMC draw, so a resumed run must restore
+        it rather than silently re-fit under the CLI default (#seed-resume)."""
+        assert "seed" in PipelineOrchestrator.RESUME_CONFIG_KEYS
+
+    def test_resume_restores_seed_from_manifest(self):
+        """Resume adopts the manifest's seed instead of reverting to the CLI default."""
+        config = PipelineConfig(resume="some-run")
+        orch = PipelineOrchestrator(config)
+        assert config.seed == 42  # CLI default
+        orch.manifest = MagicMock(flags={"seed": 7})
+        orch._restore_config_from_manifest()
+        assert config.seed == 7
+
     @patch("panelcast.pipelines.orchestrator.ensure_environment_locked")
     @patch("panelcast.pipelines.orchestrator.verify_environment")
     @patch("panelcast.pipelines.orchestrator.get_execution_order")
