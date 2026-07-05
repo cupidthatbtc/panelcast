@@ -1149,6 +1149,10 @@ class PipelineOrchestrator:
                     error=str(e),
                     message="Continuing despite convergence issues (strict=False)",
                 )
+                # The fit raised before binding run_result; leave it unset so the
+                # manifest update below treats the stage like a no-result run
+                # instead of raising UnboundLocalError (defeating the "continue").
+                run_result = None
             except PipelineError:
                 raise
             except Exception as e:

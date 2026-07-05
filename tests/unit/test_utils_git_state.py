@@ -11,6 +11,7 @@ import pytest
 
 from panelcast.utils.git_state import (
     GitState,
+    _detect_project_root,
     _find_repo_root,
     capture_git_state,
 )
@@ -271,6 +272,47 @@ class TestFindRepoRoot:
             if result is not None:
                 # If it found one, it must be a real parent repo
                 assert (result / ".git").exists()
+
+
+class TestDetectProjectRoot:
+    """Tests for _detect_project_root (pyproject-marker based)."""
+
+    def test_returns_marker_root_when_found(self):
+        """In a normal checkout the marker resolves to the project root."""
+        root = _detect_project_root()
+        assert root is not None
+        assert (root / "pyproject.toml").exists()
+
+    def test_returns_none_when_marker_missing(self, monkeypatch):
+        """A non-editable install with no pyproject.toml above the source => None."""
+        monkeypatch.setattr(
+            "panelcast.utils.git_state.project_root",
+            MagicMock(side_effect=FileNotFoundError("no pyproject.toml")),
+        )
+        assert _detect_project_root() is None
+
+    def test_capture_works_when_project_root_unknown(self, monkeypatch):
+        """With _PROJECT_REPO_ROOT=None the provenance guard is skipped, so a real
+        working tree still yields a commit, not the not-a-git-repo placeholder."""
+        try:
+            from git import Repo  # noqa: F401
+        except ImportError:
+            pytest.skip("GitPython not installed")
+
+        mock_repo = MagicMock()
+        mock_repo.working_dir = str(Path.cwd().resolve())
+        mock_repo.head.is_detached = False
+        mock_repo.active_branch.name = "main"
+        mock_repo.head.commit.hexsha = "b" * 40
+        mock_repo.is_dirty.return_value = False
+        mock_repo.untracked_files = []
+
+        monkeypatch.setattr("git.Repo", lambda *a, **kw: mock_repo)
+        monkeypatch.setattr("panelcast.utils.git_state._PROJECT_REPO_ROOT", None)
+
+        state = capture_git_state(Path.cwd())
+        assert state.commit == "b" * 40
+        assert state.branch == "main"
 
 
 class TestCaptureGitStateImportError:

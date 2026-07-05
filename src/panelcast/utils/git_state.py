@@ -8,6 +8,8 @@ This information is essential for run manifests and reproducibility verification
 from dataclasses import dataclass
 from pathlib import Path
 
+from panelcast.io.paths import project_root
+
 
 def _find_repo_root(start_path: Path) -> Path | None:
     """Find nearest ancestor containing .git, or None if absent."""
@@ -21,7 +23,22 @@ def _find_repo_root(start_path: Path) -> Path | None:
     return None
 
 
-_PROJECT_REPO_ROOT = _find_repo_root(Path(__file__))
+def _detect_project_root() -> Path | None:
+    """This project's root via the pyproject.toml marker, or None if not found.
+
+    Anchoring to the marker (not the ``.git`` above this source file) keeps the
+    provenance guard below correct under a non-editable install nested in an
+    unrelated repo — where the source's nearest ``.git`` is some ancestor, not
+    the project, which used to void all git state. None => skip the guard and
+    trust the working-tree containment check instead.
+    """
+    try:
+        return project_root()
+    except FileNotFoundError:
+        return None
+
+
+_PROJECT_REPO_ROOT = _detect_project_root()
 
 
 @dataclass(frozen=True)
