@@ -11,6 +11,34 @@ from panelcast.cli import app, runs_app
 logger = logging.getLogger(__name__)
 
 
+def _coefficient_columns(coefficients) -> tuple[str, str, str, str] | None:
+    """Resolve (estimate, lower, upper, label) columns of a coefficient table.
+
+    Handles both arviz-summary columns (mean / hdi_3% / hdi_97% / param) and the
+    report's human table (Estimate / CI Lower / CI Upper, param in the unnamed
+    first column). Returns None when the estimate/interval columns can't be found.
+    """
+
+    def _norm(name: str) -> str:
+        return str(name).strip().lower().replace(" ", "_").replace("%", "")
+
+    by_norm = {_norm(c): c for c in coefficients.columns}
+
+    def pick(candidates: list[str]) -> str | None:
+        for cand in candidates:
+            if _norm(cand) in by_norm:
+                return by_norm[_norm(cand)]
+        return None
+
+    estimate = pick(["mean", "estimate", "coef"])
+    lower = pick(["hdi_3%", "hdi_2.5%", "ci_lower", "lower"])
+    upper = pick(["hdi_97%", "hdi_97.5%", "ci_upper", "upper"])
+    if not (estimate and lower and upper):
+        return None
+    label = pick(["param", "parameter", "name", "index"]) or coefficients.columns[0]
+    return estimate, lower, upper, label
+
+
 @app.command("export-figures")
 def export_figures(
     output_dir: str = typer.Option(
@@ -77,7 +105,16 @@ def export_figures(
             )
 
     if data.coefficients is not None:
-        figures["coefficients"] = create_forest_plot(data.coefficients)
+        cols = _coefficient_columns(data.coefficients)
+        if cols is not None:
+            estimate_col, lower_col, upper_col, label_col = cols
+            figures["coefficients"] = create_forest_plot(
+                data.coefficients,
+                estimate_col=estimate_col,
+                lower_col=lower_col,
+                upper_col=upper_col,
+                label_col=label_col,
+            )
 
     if data.reliability is not None:
         rel = data.reliability

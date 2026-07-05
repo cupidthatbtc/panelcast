@@ -24,6 +24,13 @@ the GPU fit-time predictor that had been badly over-estimating.
   — instead of a naive median rate that a pool of tiny probe fits could inflate
   (it returned ~29 h for a ~1 h fit). Also closes a test-isolation leak that
   wrote fake-peak probe records into the real calibration store.
+- **Publication-readiness ESS gate**: the check compared bulk-ESS against
+  `ess_threshold * num_chains`, treating the threshold as per-chain, so a healthy
+  fit (e.g. 623 bulk-ESS, 4 chains) failed against a phantom 1600 floor. It now
+  uses the total floor the evaluate stage applies (`ess_bulk_min >= ess_threshold`).
+- **`export-figures` coefficient plot**: the forest plot read a hardcoded `mean`
+  column and crashed (`KeyError: 'mean'`) on the report's `Estimate` / `CI Lower`
+  / `CI Upper` table; column resolution is now format-agnostic.
 
 ## [0.7.0] — 2026-07-05
 

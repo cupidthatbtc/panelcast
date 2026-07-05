@@ -302,14 +302,16 @@ def _build_publication_readiness(
         ess_bulk_min is not None,
         f"ess_bulk_min={ess_bulk_min}",
     )
-    if ess_bulk_min is not None and num_chains is not None:
-        ess_threshold_per_chain = _safe_int(diagnostics.get("ess_threshold")) or 400
-        ess_required_total = ess_threshold_per_chain * num_chains
+    if ess_bulk_min is not None:
+        # ess_threshold is a TOTAL bulk-ESS floor (the evaluate stage checks
+        # ess_bulk_min >= ess_threshold directly); it is not per-chain, so don't
+        # multiply by num_chains.
+        ess_threshold = _safe_int(diagnostics.get("ess_threshold")) or 400
         add_check(
             "ess_within_threshold",
             "critical",
-            ess_bulk_min >= ess_required_total,
-            f"ess_bulk_min={ess_bulk_min:.0f}, required_total={ess_required_total}",
+            ess_bulk_min >= ess_threshold,
+            f"ess_bulk_min={ess_bulk_min:.0f}, threshold={ess_threshold}",
         )
 
     primary_metrics = _resolve_primary_metrics(metrics) if isinstance(metrics, dict) else {}
