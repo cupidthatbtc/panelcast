@@ -20,6 +20,9 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from panelcast.gpu_memory.calibration_store import (  # noqa: E402  (needs SRC on sys.path)
+    default_store_path as _real_default_store_path,
+)
 from panelcast.paths import ArtifactPaths  # noqa: E402  (needs SRC on sys.path)
 
 # Every cwd-relative artifact root a pipeline stage writes by default. A test
@@ -45,6 +48,38 @@ def _snapshot_artifacts() -> dict[str, tuple[int, int]]:
     return snap
 
 
+def _calibration_store_state() -> tuple[int, int] | None:
+    """(mtime_ns, size) of the real per-machine GPU calibration store, or None.
+
+    Resolves via the import-time (pre-monkeypatch) ``default_store_path`` reference
+    so the guard tracks the *real* store even while ``_isolate_calibration_store``
+    has redirected the module attribute to a tmp path.
+    """
+    try:
+        st = _real_default_store_path().stat()
+        return (st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _isolate_calibration_store(tmp_path, monkeypatch):
+    """Point the per-machine GPU calibration store at a throwaway path.
+
+    Root-causes a #118-class leak: a test that exercises the recording path
+    (``_build_resource_usage`` -> ``append_record`` with no explicit path, e.g.
+    ``test_gpu_run_records_ratio``) otherwise writes a fake-peak record into the
+    real ``~/.panelcast/gpu_calibration.json`` and poisons the runtime
+    predictor's history. ``_guard_repo_artifact_dirs`` couldn't catch it because
+    the store lives outside the repo. Redirecting the module-level path here
+    means no test can reach the real store.
+    """
+    from panelcast.gpu_memory import calibration_store
+
+    store = tmp_path / ".panelcast" / "gpu_calibration.json"
+    monkeypatch.setattr(calibration_store, "default_store_path", lambda: store)
+
+
 @pytest.fixture(autouse=True)
 def _guard_repo_artifact_dirs(request):
     """Fail the offending test if it mutates the repo's real artifact dirs.
@@ -59,7 +94,15 @@ def _guard_repo_artifact_dirs(request):
     absolute paths here mean correctly-isolated writes under a ``tmp`` cwd don't.
     """
     before = _snapshot_artifacts()
+    before_calib = _calibration_store_state()
     yield
+    if _calibration_store_state() != before_calib:
+        raise AssertionError(
+            f"{request.node.nodeid} wrote to the real GPU calibration store "
+            f"(~/.panelcast/gpu_calibration.json). Tests must not touch it — the "
+            f"_isolate_calibration_store fixture redirects it to a tmp path. See "
+            f"issue #118."
+        )
     after = _snapshot_artifacts()
     if before != after:
         added = sorted(set(after) - set(before))
