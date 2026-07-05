@@ -110,12 +110,6 @@ once the artist level is centered out:
 
 <img src="docs/images/aoty_posterior.png" width="85%" alt="Posterior densities of the headline model parameters (94% HDI)">
 
-Per-feature effects (standardized, 94% HDI): an artist's own prior average
-(`user_prior_mean`) dominates, while critic-rating volume and release recency pull
-the other way — both resolved well away from zero:
-
-<img src="docs/images/aoty_coefficients.png" width="60%" alt="Per-feature standardized coefficient estimates with 94% HDIs">
-
 Convergence and posterior geometry — per-chain traces and densities for the
 headline parameters (4 chains, well-mixed), and their pairwise joint posterior
 (round contours, no funnels — the non-centered parameterization doing its job):
