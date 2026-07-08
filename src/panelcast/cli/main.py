@@ -6,6 +6,7 @@ import typer
 
 from panelcast import __version__
 from panelcast.cli import app
+from panelcast.utils.jax_cache import enable_jax_compilation_cache
 
 # Quick preflight uses fixed estimates rather than loading actual data (~1s vs ~30-60s).
 # These are conservative defaults for the memory estimation formula.
@@ -43,6 +44,9 @@ def main_callback(
             "View online: https://github.com/cupidthatbtc/panelcast/blob/main/docs/GETTING_STARTED.md"
         )
         raise typer.Exit()
+    # Sweep-arm and preflight subprocesses re-enter the CLI, so enabling the
+    # cache here covers every panelcast process.
+    enable_jax_compilation_cache()
     # If no command provided, show help
     if ctx.invoked_subcommand is None:
         typer.echo(ctx.get_help())
