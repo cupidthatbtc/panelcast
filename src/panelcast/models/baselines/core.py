@@ -17,7 +17,8 @@ Predictors:
 - ``entity_mean``  — per-entity train mean, global-mean fallback for unseen
   entities (covers the entity-disjoint split).
 - ``last_score``   — persistence: the entity's previous score.
-- ``ridge``        — ``sklearn`` ridge regression on the feature matrix.
+- ``ridge``        — ``sklearn`` ridge regression on the internally
+  standardized feature matrix.
 - ``gbm``          — ``sklearn`` histogram gradient boosting; residual-scale
   intervals.
 - ``conformal_gbm`` — the same GBM wrapped in split-conformal calibration:
@@ -62,7 +63,9 @@ class PanelData:
     """A split's panel in the shape every baseline consumes.
 
     Attributes:
-        X: Standardized feature matrix, shape (n, p).
+        X: Raw (unscaled) feature matrix, shape (n, p). No standardization
+            happens upstream; scale-sensitive baselines (e.g. ridge) must
+            standardize internally.
         y: Target on the score scale, shape (n,). May contain NaN for held-out
             rows; rows with NaN targets are dropped before scoring.
         entity: Entity id per row, shape (n,).
@@ -260,13 +263,20 @@ class RidgeBaseline(Baseline):
         y = np.asarray(train.y, dtype=float)
         valid = ~np.isnan(y)
         X = np.asarray(train.X, dtype=float)[valid]
+        # Panels carry raw features; standardize so the L2 penalty is not a
+        # function of arbitrary column scales.
+        self._x_mean = X.mean(axis=0)
+        std = X.std(axis=0)
+        self._x_std = np.where(std > 0, std, 1.0)
+        X = (X - self._x_mean) / self._x_std
         self._model = Ridge(alpha=self.alpha)
         self._model.fit(X, y[valid])
         self._sigma = _train_residual_sigma(y[valid] - self._model.predict(X))
         return self
 
     def _point(self, test: PanelData) -> np.ndarray:
-        return self._model.predict(np.asarray(test.X, dtype=float))
+        X = (np.asarray(test.X, dtype=float) - self._x_mean) / self._x_std
+        return self._model.predict(X)
 
 
 class GBMBaseline(Baseline):
