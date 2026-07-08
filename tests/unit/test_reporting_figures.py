@@ -25,6 +25,7 @@ from panelcast.evaluation.ppc import PPCResult, PPCStatistic
 from panelcast.reporting.figures import (
     COLORBLIND_COLORS,
     _ensure_output_dir,
+    _fan_chart_quantiles,
     _save_dual_format,
     get_trace_plot_vars,
     save_artist_prediction_plot,
@@ -448,6 +449,55 @@ class TestSaveArtistPredictionPlot:
             album_labels=albums_for_fan,
             output_dir=tmp_path,
             filename_base="artist_forecast",
+        )
+        assert pdf_path.exists()
+        assert png_path.exists()
+
+    def test_forecast_quantiles_render_exactly(self):
+        """Stored q05/q95 must appear exactly as the plotted band bounds.
+
+        Re-percentiling the 5 stacked quantiles shrinks the outer band
+        (np.percentile interpolates over 5 order statistics); passing them
+        through as forecast_quantiles must recover the stored values.
+        """
+        actual = np.array([70.0, 75.0, 72.0])
+        stored = np.array([60.0, 68.0, 74.0, 80.0, 88.0])  # q05, q25, q50, q75, q95
+        pred_for_fan = np.tile(actual, (5, 1))
+        pred_for_fan = np.column_stack([pred_for_fan, stored[:, None]])
+
+        # Without passthrough the outer band shrinks — the bug being fixed.
+        q05_bad, _, _, _, _, _, q95_bad = _fan_chart_quantiles(pred_for_fan)
+        assert q05_bad[-1] > stored[0]
+        assert q95_bad[-1] < stored[4]
+
+        q05, q10, q25, q50, q75, q90, q95 = _fan_chart_quantiles(pred_for_fan, stored)
+        assert q05[-1] == stored[0]
+        assert q25[-1] == stored[1]
+        assert q50[-1] == stored[2]
+        assert q75[-1] == stored[3]
+        assert q95[-1] == stored[4]
+        # The interpolated 10/90 pair stays inside the exact bands.
+        assert stored[0] < q10[-1] < stored[1]
+        assert stored[3] < q90[-1] < stored[4]
+        # Historical points are untouched by the passthrough.
+        np.testing.assert_array_equal(q05[:-1], actual)
+        np.testing.assert_array_equal(q95[:-1], actual)
+
+    def test_forecast_quantiles_accepted_end_to_end(self, tmp_path):
+        """save_artist_prediction_plot renders with forecast_quantiles supplied."""
+        actual = np.array([70.0, 75.0, 72.0])
+        stored = np.array([60.0, 68.0, 74.0, 80.0, 88.0])
+        pred_for_fan = np.column_stack([np.tile(actual, (5, 1)), stored[:, None]])
+        actual_for_fan = np.append(actual, np.nan)
+
+        pdf_path, png_path = save_artist_prediction_plot(
+            artist="Test Artist",
+            actual_scores=actual_for_fan,
+            pred_samples=pred_for_fan,
+            album_labels=["A1", "A2", "A3", "next"],
+            output_dir=tmp_path,
+            filename_base="artist_forecast_quantiles",
+            forecast_quantiles=stored,
         )
         assert pdf_path.exists()
         assert png_path.exists()

@@ -434,11 +434,13 @@ class TestConvergenceParsing:
         [
             (1200, 1200.0),
             ("1100", 1100.0),
-            (None, 1000.0),
-            ("bad", 1000.0),
+            (None, None),
+            ("bad", None),
         ],
     )
-    def test_parse_convergence_ess_tail_fallback(self, ess_tail_min, expected_tail):
+    def test_parse_convergence_ess_tail_absent_stays_none(self, ess_tail_min, expected_tail):
+        # Regression: an absent ess_tail_min must NOT be silently substituted
+        # with ess_bulk_min (a fabricated diagnostic under the tail label).
         parsed = _parse_convergence(
             {
                 "passed": True,
@@ -449,7 +451,20 @@ class TestConvergenceParsing:
             {},
         )
         assert parsed is not None
-        assert parsed.ess_tail_min == pytest.approx(expected_tail)
+        if expected_tail is None:
+            assert parsed.ess_tail_min is None
+        else:
+            assert parsed.ess_tail_min == pytest.approx(expected_tail)
+
+    def test_parse_convergence_ess_tail_key_missing_entirely(self):
+        # Current evaluate.py payload shape (pre ess_tail_min serialization).
+        parsed = _parse_convergence(
+            {"passed": True, "rhat_max": 1.001, "ess_bulk_min": 1000},
+            {},
+        )
+        assert parsed is not None
+        assert parsed.ess_tail_min is None
+        assert parsed.failing_params == []
 
 
 class TestPublicationReadiness:
@@ -663,6 +678,32 @@ class TestPublicationReadiness:
             expected_recommended_failed
         )
         assert "secondary_split_evaluated" not in payload["critical_failed"]
+        assert payload["ready"] is True
+
+    @pytest.mark.parametrize("available", [True, False])
+    def test_prior_predictive_artifact_check(self, available):
+        payload = _build_publication_readiness(
+            metrics={
+                "primary_split": "within_entity_temporal",
+                "splits": {
+                    "within_entity_temporal": {"calibration": {"within_tolerance": True}},
+                    SECONDARY_SPLIT: {"calibration": {"within_tolerance": True}},
+                },
+            },
+            diagnostics={"passed": True, "rhat_max": 1.003, "ess_bulk_min": 1800},
+            training_summary={"mcmc_config": {"num_chains": 4}},
+            artifact_errors=[],
+            require_secondary_split=True,
+            prior_predictive_available=available,
+        )
+        checks = _check_map(payload)
+        check = checks["prior_predictive_artifact_present"]
+        assert check["severity"] == "recommended"
+        assert check["passed"] is available
+        assert ("prior_predictive_artifact_present" in payload["recommended_failed"]) is (
+            not available
+        )
+        # Recommended severity: absence never blocks readiness.
         assert payload["ready"] is True
 
     def test_readiness_flags_artifact_errors(self):
@@ -1105,6 +1146,52 @@ class TestPublicationTableFailures:
         assert any(e["artifact"] == "metrics_summary_table" for e in artifacts["errors"])
 
 
+class TestDiagnosticsTableThresholds:
+    """The exported diagnostics table must use the run's gate thresholds."""
+
+    def _run_and_capture(self, tmp_path, ctx, diagnostics):
+        _write_json(tmp_path / "outputs/evaluation/metrics.json", _make_metrics())
+        _write_json(tmp_path / "outputs/evaluation/diagnostics.json", diagnostics)
+        _write_json(tmp_path / "models/training_summary.json", _make_training_summary())
+
+        captured = {}
+
+        def _capture_diag_table(idata, rhat_threshold=None, ess_threshold=None):
+            captured["rhat_threshold"] = rhat_threshold
+            captured["ess_threshold"] = ess_threshold
+            return pd.DataFrame({"x": [1]})
+
+        patches = _base_patches(
+            tmp_path,
+            create_diagnostics_table=patch(
+                "panelcast.pipelines.publication.create_diagnostics_table",
+                side_effect=_capture_diag_table,
+            ),
+        )
+        _run_with_patches(tmp_path, ctx, patches)
+        return captured
+
+    def test_thresholds_from_diagnostics_json(self, tmp_path):
+        diagnostics = _make_diagnostics()
+        diagnostics["rhat_threshold"] = 1.02
+        diagnostics["ess_threshold"] = 150
+        captured = self._run_and_capture(tmp_path, _setup_ctx(strict=False), diagnostics)
+        assert captured["rhat_threshold"] == pytest.approx(1.02)
+        assert captured["ess_threshold"] == 150
+
+    def test_thresholds_fall_back_to_ctx_then_defaults(self, tmp_path):
+        ctx = _setup_ctx(strict=False)
+        ctx.rhat_threshold = 1.05
+        ctx.ess_threshold = 200
+        captured = self._run_and_capture(tmp_path, ctx, _make_diagnostics())
+        assert captured["rhat_threshold"] == pytest.approx(1.05)
+        assert captured["ess_threshold"] == 200
+
+        captured = self._run_and_capture(tmp_path, _setup_ctx(strict=False), _make_diagnostics())
+        assert captured["rhat_threshold"] == pytest.approx(1.01)
+        assert captured["ess_threshold"] == 400
+
+
 class TestPublicationFigureFailures:
     def test_trace_plot_failure_recorded(self, tmp_path):
         """Trace plot failure should be recorded, not fatal."""
@@ -1398,6 +1485,27 @@ class TestPublicationOutputFiles:
         md_text = readiness_md.read_text(encoding="utf-8")
         assert "# Publication Readiness" in md_text
 
+    @pytest.mark.parametrize("write_pp", [True, False])
+    def test_readiness_reports_prior_predictive_presence(self, tmp_path, write_pp):
+        """The readiness payload reflects whether evaluate wrote prior_predictive.json."""
+        _write_json(tmp_path / "outputs/evaluation/metrics.json", _make_metrics())
+        _write_json(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics())
+        _write_json(tmp_path / "models/training_summary.json", _make_training_summary())
+        if write_pp:
+            _write_json(
+                tmp_path / "outputs/evaluation/prior_predictive.json",
+                {"reasonable": True, "fraction_in_bounds": 0.99},
+            )
+        ctx = _setup_ctx(strict=False)
+        patches = _base_patches(tmp_path)
+        _run_with_patches(tmp_path, ctx, patches)
+
+        readiness = json.loads(
+            (tmp_path / "reports/publication_readiness.json").read_text(encoding="utf-8")
+        )
+        checks = {c["name"]: c for c in readiness["checks"]}
+        assert checks["prior_predictive_artifact_present"]["passed"] is write_pp
+
     def test_artifact_status_json_written(self, tmp_path):
         """artifact_status.json should always be written with summary counts."""
         _write_json(tmp_path / "outputs/evaluation/metrics.json", _make_metrics())
@@ -1525,6 +1633,65 @@ class TestPublicationModelCardMetadata:
         assert data.hyperparameters["n_artists"] == 100
         assert data.hyperparameters["max_albums"] == 50
         assert data.hyperparameters["num_chains"] == 4
+
+    def test_model_config_rows_recorded_from_training_summary(self, tmp_path):
+        """Per-run model configuration must land in the hyperparameters table."""
+        training = _make_training_summary()
+        training["target_transform"] = "offset_logit"
+        training["likelihood_family"] = "studentt"
+        training["entity_group_pooling"] = True
+        training["feature_cols"] = ["prev_score", "gbm_offset"]
+        _write_json(tmp_path / "outputs/evaluation/metrics.json", _make_metrics())
+        _write_json(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics())
+        _write_json(tmp_path / "models/training_summary.json", training)
+        ctx = _setup_ctx(strict=False)
+
+        captured = {}
+
+        def _capture_update(data, **kwargs):
+            captured["data"] = data
+            return data
+
+        patches = _base_patches(
+            tmp_path,
+            update_model_card_with_results=patch(
+                "panelcast.pipelines.publication.update_model_card_with_results",
+                side_effect=_capture_update,
+            ),
+        )
+        _run_with_patches(tmp_path, ctx, patches)
+
+        hyp = captured["data"].hyperparameters
+        assert hyp["target_transform"] == "offset_logit"
+        assert hyp["likelihood_family"] == "studentt"
+        assert hyp["entity_group_pooling"] is True
+        assert hyp["gbm_offset"] is True
+
+    def test_model_config_rows_omitted_for_legacy_summary(self, tmp_path):
+        """Older summaries without the config keys must not fabricate rows."""
+        _write_json(tmp_path / "outputs/evaluation/metrics.json", _make_metrics())
+        _write_json(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics())
+        _write_json(tmp_path / "models/training_summary.json", _make_training_summary())
+        ctx = _setup_ctx(strict=False)
+
+        captured = {}
+
+        def _capture_update(data, **kwargs):
+            captured["data"] = data
+            return data
+
+        patches = _base_patches(
+            tmp_path,
+            update_model_card_with_results=patch(
+                "panelcast.pipelines.publication.update_model_card_with_results",
+                side_effect=_capture_update,
+            ),
+        )
+        _run_with_patches(tmp_path, ctx, patches)
+
+        hyp = captured["data"].hyperparameters
+        for key in ("target_transform", "likelihood_family", "entity_group_pooling", "gbm_offset"):
+            assert key not in hyp
 
     def test_model_card_with_prior_justification(self, tmp_path):
         """Model card should receive prior justification when priors exist in training summary."""
@@ -2113,6 +2280,7 @@ class TestArtistFanCharts:
         _make_predictions_json(pred_path)
 
         fan_calls = []
+        fan_quantiles = {}
 
         def _fake_fan(
             artist,
@@ -2122,8 +2290,10 @@ class TestArtistFanCharts:
             output_dir,
             filename_base,
             categories=None,
+            forecast_quantiles=None,
         ):
             fan_calls.append(artist)
+            fan_quantiles[artist] = forecast_quantiles
             pdf = output_dir / f"{filename_base}.pdf"
             png = output_dir / f"{filename_base}.png"
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -2146,6 +2316,8 @@ class TestArtistFanCharts:
         artifacts = _run_with_patches_more(tmp_path, ctx, patches)
         # Fan charts should have been attempted for both artists
         assert len(fan_calls) >= 1
+        # The stored CSV quantiles pass through unmodified for the forecast point.
+        assert np.allclose(fan_quantiles["ArtistA"], [65.0, 72.0, 78.0, 84.0, 90.0])
         # No outer error
         error_names = [e["artifact"] for e in artifacts["errors"]]
         assert "artist_fan_charts" not in error_names
@@ -2318,7 +2490,7 @@ class TestOATSummaryLoadFailure:
         _write_json_more(tmp_path / "models/training_summary.json", training)
 
         # Write a file that is there but not a valid CSV for pandas
-        oat_path = tmp_path / "outputs/sensitivity/oat_summary.csv"
+        oat_path = tmp_path / "reports/sensitivity/oat_summary.csv"
         oat_path.parent.mkdir(parents=True, exist_ok=True)
         oat_path.write_bytes(b"\x00\x01\x02\x03")  # binary garbage
 
@@ -2799,8 +2971,9 @@ class TestPriorJustificationLoading:
         _write_json_new(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics_new())
         _write_json_new(tmp_path / "models/training_summary.json", training)
 
-        # Write OAT summary CSV
-        oat_dir = tmp_path / "outputs" / "sensitivity"
+        # The sensitivity stage writes under <reports>/sensitivity, not the
+        # old hardcoded outputs/sensitivity path.
+        oat_dir = tmp_path / "reports" / "sensitivity"
         oat_dir.mkdir(parents=True, exist_ok=True)
         oat_df = pd.DataFrame(
             {
@@ -2812,11 +2985,23 @@ class TestPriorJustificationLoading:
         )
         oat_df.to_csv(oat_dir / "oat_summary.csv", index=False)
 
+        captured = {}
+
+        def _capture_justification(priors, prior_predictive_result=None, sensitivity_summary=None):
+            captured["sensitivity_summary"] = sensitivity_summary
+            return "justification"
+
         ctx = _setup_ctx_new()
         patches = _base_patches_new(tmp_path)
-        # Should not crash when loading OAT summary
-        artifacts = _run_with_patches_new(tmp_path, ctx, patches)
+        with patch(
+            "panelcast.evaluation.prior_predictive.generate_prior_justification_text",
+            side_effect=_capture_justification,
+        ):
+            artifacts = _run_with_patches_new(tmp_path, ctx, patches)
         assert isinstance(artifacts, dict)
+        # The CSV at the real sensitivity-stage path was actually loaded.
+        assert captured["sensitivity_summary"] is not None
+        assert list(captured["sensitivity_summary"]["parameter"]) == ["sigma_beta"]
 
 
 class TestBuildReadinessNew:
