@@ -1352,6 +1352,7 @@ def _evaluate_primary_split(
                 "conformal_calibration_failed",
                 error_type=type(e).__name__,
                 error=str(e)[:500],
+                exc_info=True,
             )
 
     # Ranking metrics (#182): the ordinal read on the held-out slate.
