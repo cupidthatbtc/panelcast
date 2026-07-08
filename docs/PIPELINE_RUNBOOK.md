@@ -23,6 +23,10 @@ End-to-end commands
   panelcast stage predict
   panelcast stage report
   ```
+  Each invocation creates its own run directory for what it writes. A stage
+  whose upstream product (models, evaluation, predictions) is not produced in
+  the same invocation reads it from the most recent successful run that has
+  it; the log records which run supplied each product.
 - Publication helper script
   ```powershell
   .\scripts\run_publication.ps1

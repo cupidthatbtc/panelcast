@@ -61,23 +61,34 @@ class ArtifactPaths:
         return paths if isinstance(paths, cls) else cls.flat()
 
 
+def _is_dry_run_dir(run_dir: Path) -> bool:
+    """Whether a run dir's manifest marks it as a dry run (no artifacts)."""
+    try:
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        return bool(manifest.get("flags", {}).get("dry_run"))
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def resolve_latest(output_base: Path = Path("outputs")) -> Path | None:
     """Locate the most recent successful run directory.
 
     Prefers the ``latest.json`` pointer the orchestrator writes on success;
     falls back to the ``latest`` link for outputs written by older checkouts.
-    Returns None when neither exists.
+    Pointers left behind by older checkouts that targeted dry runs are
+    ignored (a dry-run dir holds only a manifest). Returns None when nothing
+    usable exists.
     """
     try:
         data = json.loads((output_base / "latest.json").read_text(encoding="utf-8"))
         run_dir = output_base / str(data["run_dir"])
-        if run_dir.exists():
+        if run_dir.exists() and not _is_dry_run_dir(run_dir):
             return run_dir
     except (OSError, ValueError, KeyError, TypeError):
         pass
     link = output_base / "latest"
     try:
-        if link.exists():
+        if link.exists() and not _is_dry_run_dir(link):
             return link
     except OSError:
         pass

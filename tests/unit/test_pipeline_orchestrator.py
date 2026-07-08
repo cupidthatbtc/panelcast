@@ -39,12 +39,13 @@ class TestMinRatingsResolution:
         assert config.min_ratings == 7
 
     def test_explicit_min_ratings_wins_over_descriptor(self, tmp_path):
-        """An explicit min_ratings is never overridden by the descriptor."""
+        """An explicit (materialized) min_ratings is never overridden by the
+        descriptor's primary_min_obs."""
         descriptor_yaml = tmp_path / "tiny.yaml"
         descriptor_yaml.write_text(_TINY_DESCRIPTOR_YAML, encoding="utf-8")
-        config = PipelineConfig(dataset=str(descriptor_yaml), min_ratings=25)
+        config = PipelineConfig(dataset=str(descriptor_yaml), min_ratings=9)
         PipelineOrchestrator(config)
-        assert config.min_ratings == 25
+        assert config.min_ratings == 9
 
     def test_min_ratings_in_resume_config_keys(self):
         """min_ratings is restored from the manifest on resume."""
@@ -211,13 +212,14 @@ class TestDryRunMode:
 
     @patch("panelcast.pipelines.orchestrator.ensure_environment_locked")
     @patch("panelcast.pipelines.orchestrator.verify_environment")
-    def test_dry_run_records_stage_in_manifest(
+    def test_dry_run_records_nothing_executed(
         self,
         mock_verify: MagicMock,
         mock_ensure: MagicMock,
         tmp_path: Path,
     ):
-        """Dry run still records stages in manifest."""
+        """Dry run marks itself in flags but claims no completed stages,
+        stage hashes, or latest pointer (it executed nothing)."""
         mock_verify.return_value = MagicMock(
             is_reproducible=True,
             pixi_lock_hash="abc123",
@@ -237,7 +239,11 @@ class TestDryRunMode:
             orchestrator.run()
 
             assert orchestrator.manifest is not None
-            assert "data" in orchestrator.manifest.stages_completed
+            assert orchestrator.manifest.stages_completed == []
+            assert orchestrator.manifest.stage_hashes == {}
+            assert orchestrator.manifest.flags["dry_run"] is True
+            assert not (tmp_path / "latest.json").exists()
+            assert not (tmp_path / "latest").exists()
 
 
 class TestSkipExisting:
@@ -277,9 +283,9 @@ class TestSkipExisting:
 
     def test_skip_flag_differences_detects_output_affecting_changes(self, tmp_path: Path):
         """Changed modeling flags should disable hash-based skip reuse."""
-        config = PipelineConfig(min_ratings=30)
+        config = PipelineConfig(min_ratings=25)
         orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
-        orchestrator.manifest = MagicMock(flags={"seed": 42, "min_ratings": 30})
+        orchestrator.manifest = MagicMock(flags={"seed": 42, "min_ratings": 25})
 
         previous_manifest = MagicMock(flags={"seed": 42, "min_ratings": 10})
 
@@ -1072,6 +1078,76 @@ class TestPipelineConfigValidation:
 
         with pytest.raises(ValueError, match="tau_entity_scale"):
             PipelineConfig(tau_entity_scale=0.0)
+
+    def test_identity_required_family_with_default_transform_raises(self):
+        """Bounded families die inside train under offset_logit; validation
+        must reject the combination up front."""
+        import pytest
+
+        for family in ("beta", "beta_ceiling", "beta_binomial"):
+            with pytest.raises(ValueError, match="target_transform='identity'"):
+                PipelineConfig(likelihood_family=family)
+
+    def test_identity_required_family_with_identity_passes(self):
+        config = PipelineConfig(likelihood_family="beta", target_transform="identity")
+        assert config.likelihood_family == "beta"
+
+    def test_sigma_knobs_rejected_for_sigma_ignoring_family(self):
+        """learn_n_exponent / heteroscedastic_entity_obs / fixed n_exponent are
+        silently inert for the Beta families; validation rejects them."""
+        import pytest
+
+        with pytest.raises(ValueError, match="learn_n_exponent"):
+            PipelineConfig(
+                likelihood_family="beta",
+                target_transform="identity",
+                learn_n_exponent=True,
+            )
+        with pytest.raises(ValueError, match="heteroscedastic_entity_obs"):
+            PipelineConfig(
+                likelihood_family="beta_ceiling",
+                target_transform="identity",
+                heteroscedastic_entity_obs=True,
+            )
+        with pytest.raises(ValueError, match="n_exponent"):
+            PipelineConfig(
+                likelihood_family="beta",
+                target_transform="identity",
+                n_exponent=0.5,
+            )
+
+    def test_sigma_knobs_still_valid_for_sigma_using_families(self):
+        config = PipelineConfig(likelihood_family="studentt", learn_n_exponent=True)
+        assert config.learn_n_exponent is True
+        config = PipelineConfig(likelihood_family="normal", heteroscedastic_entity_obs=True)
+        assert config.heteroscedastic_entity_obs is True
+
+    def test_min_train_albums_default_matches_cli(self):
+        """The dataclass default matches the documented `run` CLI default (2),
+        so `stage splits` / `demo` build the same split population as `run`."""
+        assert PipelineConfig().min_train_albums == 2
+
+
+class TestMinRatingsThresholdValidation:
+    """The orchestrator rejects min_ratings values the data stage never writes."""
+
+    def test_unmaterialized_threshold_raises(self, tmp_path):
+        import pytest
+
+        config = PipelineConfig(min_ratings=7)
+        with pytest.raises(ValueError, match=r"min_ratings=7.*\[5, 10, 25\]"):
+            PipelineOrchestrator(config, output_base=tmp_path)
+
+    def test_descriptor_thresholds_accepted(self, tmp_path):
+        for value in (5, 10, 25):
+            orch = PipelineOrchestrator(
+                PipelineConfig(min_ratings=value), output_base=tmp_path
+            )
+            assert orch.config.min_ratings == value
+
+    def test_none_resolves_to_descriptor_primary(self, tmp_path):
+        orch = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)
+        assert orch.config.min_ratings == 10
 
 
 class TestOrchestratorCommandString:

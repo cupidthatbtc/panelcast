@@ -152,14 +152,18 @@ class TestBetaBinomialGate:
 
     def test_gate_raises_for_non_aggregation_descriptor(self, tmp_path):
         config = PipelineConfig(
-            likelihood_family="beta_binomial", dataset=str(self._yaml(tmp_path, agg=False))
+            likelihood_family="beta_binomial",
+            target_transform="identity",
+            dataset=str(self._yaml(tmp_path, agg=False)),
         )
         with pytest.raises(ValueError, match="aggregation"):
             PipelineOrchestrator(config)
 
     def test_gate_allows_aggregation_descriptor(self, tmp_path):
         config = PipelineConfig(
-            likelihood_family="beta_binomial", dataset=str(self._yaml(tmp_path, agg=True))
+            likelihood_family="beta_binomial",
+            target_transform="identity",
+            dataset=str(self._yaml(tmp_path, agg=True)),
         )
         orch = PipelineOrchestrator(config)
         assert orch.descriptor.n_obs_is_aggregation_count is True
