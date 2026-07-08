@@ -325,3 +325,134 @@ def runs_diff(
             typer.echo(f"  {name}: {va} vs {vb}")
     if same:
         typer.echo(f"  identical: {', '.join(same)}")
+
+
+def _reproduce_config(run_dir: Path, manifest) -> tuple["object", str]:
+    """(PipelineConfig, provenance tier) for re-executing a recorded run."""
+    from panelcast.config.pipeline_yaml import load_resolved_config
+    from panelcast.pipelines.orchestrator import PipelineConfig
+
+    resolved = run_dir / "resolved_config.yaml"
+    if resolved.exists():
+        return PipelineConfig(**load_resolved_config(resolved)), "resolved_config.yaml"
+    # Pre-0.9.0 fallback: rebuild from the manifest's flags dict. Anything the
+    # flags never recorded stays at the current default — weaker provenance.
+    config = PipelineConfig()
+    for key, value in (manifest.flags or {}).items():
+        if key in ("resume", "dataset_descriptor_hash") or not hasattr(config, key):
+            continue
+        if isinstance(getattr(config, key), tuple) and isinstance(value, list):
+            value = tuple(value)
+        setattr(config, key, value)
+    return config, "manifest flags (pre-0.9.0 run; YAML-only gates may be lost)"
+
+
+@runs_app.command("reproduce")
+def runs_reproduce(
+    run_id: str = typer.Argument(..., help="Run id under outputs/ (or 'latest')."),
+    output_base: Path = typer.Option(
+        Path("outputs"), "--output-base", help="Run directory root for old and new runs."
+    ),
+) -> None:
+    """Re-execute a recorded run from its run directory alone, then compare.
+
+    Guards before any compute: the dataset descriptor must hash-match the
+    recorded one, and recorded raw inputs must be unchanged on disk. The
+    environment fingerprint frames the expectation up front — bit-exact within
+    a matching fingerprint, statistical otherwise — and the post-run
+    comparison follows suit (exact output hashes vs headline-metric deltas).
+    """
+    from panelcast.config.descriptor import load_descriptor
+    from panelcast.pipelines.manifest import capture_environment, load_run_manifest
+    from panelcast.utils.hashing import sha256_path
+
+    run_dir = resolve_run_dir(run_id, output_base)
+    manifest = load_run_manifest(run_dir / "manifest.json")
+    config, tier = _reproduce_config(run_dir, manifest)
+    typer.echo(f"reproducing {manifest.run_id} from {tier}")
+
+    recorded_hash = manifest.flags.get("dataset_descriptor_hash")
+    if recorded_hash:
+        current_hash = load_descriptor(config.dataset).descriptor_hash()
+        if current_hash != recorded_hash:
+            typer.echo(
+                f"ABORT: dataset descriptor changed (recorded {recorded_hash}, "
+                f"current {current_hash}); reproduction would not test the same model"
+            )
+            raise typer.Exit(code=1)
+
+    for path_str, recorded in sorted((manifest.input_hashes or {}).items()):
+        path = Path(path_str)
+        if not path.exists():
+            typer.echo(f"ABORT: recorded input missing: {path_str}")
+            raise typer.Exit(code=1)
+        if sha256_path(path) != recorded:
+            typer.echo(f"ABORT: raw input changed since the run: {path_str}")
+            raise typer.Exit(code=1)
+
+    old_fingerprint = manifest.environment.fingerprint
+    new_fingerprint = capture_environment().fingerprint
+    bit_exact = bool(old_fingerprint) and old_fingerprint == new_fingerprint
+    if bit_exact:
+        typer.echo(f"fingerprint match ({new_fingerprint}) — expecting bit-exact outputs")
+    else:
+        typer.echo(
+            f"fingerprint mismatch ({old_fingerprint or 'unrecorded'} vs {new_fingerprint}) "
+            "— expecting statistical reproduction only"
+        )
+
+    # A reproduction is a full fresh execution: never resume, never skip.
+    config.resume = None
+    config.skip_existing = False
+    from panelcast.pipelines.orchestrator import run_pipeline
+
+    exit_code = run_pipeline(config, output_base=output_base)
+    if exit_code != 0:
+        typer.echo(f"reproduction run failed (exit {exit_code})")
+        raise typer.Exit(code=exit_code)
+
+    _compare_reproduction(manifest, output_base, bit_exact)
+
+
+def _compare_reproduction(old_manifest, output_base: Path, bit_exact: bool) -> None:
+    from panelcast.paths import resolve_latest
+    from panelcast.pipelines.manifest import load_run_manifest
+
+    new_dir = resolve_latest(output_base)
+    if new_dir is None or not (Path(new_dir) / "manifest.json").exists():
+        typer.echo("no new run manifest resolved; skipping comparison")
+        return
+    new_dir = Path(new_dir)
+    new_manifest = load_run_manifest(new_dir / "manifest.json")
+    typer.echo(f"new run: {new_manifest.run_id}")
+
+    if bit_exact and old_manifest.output_hashes:
+        old_keys = {k.split(":", 1)[1]: v for k, v in old_manifest.output_hashes.items()}
+        new_keys = {k.split(":", 1)[1]: v for k, v in new_manifest.output_hashes.items()}
+        shared = sorted(set(old_keys) & set(new_keys))
+        exact = [k for k in shared if old_keys[k] == new_keys[k]]
+        typer.echo(f"exact-match: {len(exact)}/{len(shared)} shared artifacts bit-identical")
+        for key in shared:
+            if old_keys[key] != new_keys[key]:
+                typer.echo(f"  differs: {key}")
+        return
+
+    old_leaves = _numeric_leaves(_load_metrics_from_manifest_dir(old_manifest, output_base))
+    new_leaves = _numeric_leaves(_load_metrics(new_dir))
+    keys = sorted(set(old_leaves) & set(new_leaves))
+    if not keys:
+        typer.echo("no shared metrics to compare")
+        return
+    typer.echo("headline metric deltas (new - old):")
+    for key in keys:
+        delta = new_leaves[key] - old_leaves[key]
+        if delta:
+            typer.echo(f"  {key}: {old_leaves[key]:.4g} -> {new_leaves[key]:.4g} ({delta:+.4g})")
+
+
+def _load_metrics_from_manifest_dir(manifest, output_base: Path) -> dict:
+    for root in (output_base, output_base / "failed"):
+        candidate = root / manifest.run_id
+        if (candidate / "manifest.json").exists():
+            return _load_metrics(candidate)
+    return {}
