@@ -143,6 +143,90 @@ class TestFeatureAblationBaselineReuse:
         assert mock_fit.call_count == 2  # full + no_genre
 
 
+class TestSensitivitySuiteRealFitSmoke:
+    """Non-mocked smoke: the suite's model_args must survive a REAL fit.
+
+    Regression: run_sensitivity_suite left global_std_score/effective_ceiling
+    (emitted by prepare_model_data) in model_args; the model function has no
+    **kwargs, so the first real refit died with a TypeError. Suite tests that
+    stub both load_training_data and fit_model could never see it.
+    """
+
+    @pytest.mark.timeout(300)
+    def test_ablation_axis_runs_real_fit(self, tmp_path, monkeypatch):
+        import json
+        from types import SimpleNamespace
+
+        from panelcast.config.descriptor import DatasetDescriptor
+        from panelcast.pipelines.sensitivity import run_sensitivity_suite
+
+        monkeypatch.chdir(tmp_path)
+
+        n_artists, n_per = 3, 3
+        n = n_artists * n_per
+        rng = np.random.default_rng(0)
+        artists = [f"artist_{i}" for i in range(n_artists) for _ in range(n_per)]
+        splits_dir = tmp_path / "data" / "splits" / "within_entity_temporal"
+        splits_dir.mkdir(parents=True)
+        pd.DataFrame(
+            {"Artist": artists, "User_Score": rng.uniform(60, 90, n).astype(np.float32)}
+        ).to_parquet(splits_dir / "train.parquet")
+
+        features_dir = tmp_path / "data" / "features"
+        features_dir.mkdir(parents=True)
+        # Names deliberately match no ablation group -> only the "full"
+        # baseline fits, keeping the smoke to a single tiny MCMC run.
+        pd.DataFrame(
+            {
+                "feature_0": rng.standard_normal(n).astype(np.float32),
+                "feature_1": rng.standard_normal(n).astype(np.float32),
+                "n_reviews": rng.integers(5, 200, n),
+            }
+        ).to_parquet(features_dir / "train_features.parquet")
+
+        models_dir = tmp_path / "models"
+        models_dir.mkdir()
+        summary = {
+            "debut_prev_score_source": "train_mean",
+            "target_transform": "identity",
+            "logit_offset": 0.5,
+            "priors": {"ar_center": "global"},
+            "n_ref": None,
+            "likelihood_df": 4.0,
+        }
+        (models_dir / "training_summary.json").write_text(
+            json.dumps(summary), encoding="utf-8"
+        )
+
+        ctx = SimpleNamespace(
+            descriptor=DatasetDescriptor(),
+            sensitivity_axes=("ablation",),
+            min_albums_filter=2,
+            max_albums=50,
+            num_warmup=15,
+            num_samples=15,
+            num_chains=1,
+            seed=0,
+            target_accept=0.9,
+            max_tree_depth=10,
+            chain_method="sequential",
+            n_exponent=0.0,
+            learn_n_exponent=False,
+            progress_bar=False,
+        )
+
+        result = run_sensitivity_suite(ctx)
+
+        assert "sensitivity_results" in result
+        payload = json.loads(
+            (tmp_path / "reports" / "sensitivity" / "sensitivity_results.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert "ablation" in payload
+        assert payload["ablation"], "no ablation rows recorded"
+
+
 class TestStageSensitivityCli:
     def test_stage_sensitivity_dispatch(self, monkeypatch):
         captured = {}
