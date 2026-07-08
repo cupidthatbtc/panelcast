@@ -4,6 +4,51 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] — 2026-07-08
+
+Trustworthy runs. The manifest system's provenance capture becomes an
+operator-facing payoff: every run is verifiable, comparable, and re-executable
+from its run directory alone, and failures explain themselves.
+
+### Added
+
+- **Environment fingerprint** (#168): every manifest records jaxlib, the
+  accelerator platform and device kind, the machine architecture, and a
+  versioned canonical hash over exactly the fields that bound bit-exactness.
+  "Reproducible" becomes a checkable two-tier claim: bit-exact within a
+  fingerprint, statistical across fingerprints.
+- **Output hashing + `runs verify`** (#169): stage completion records a
+  content hash for every output artifact, and `panelcast runs verify`
+  re-checks the whole chain — outputs (OK/MODIFIED/MISSING per artifact), raw
+  inputs, the shared data-root stamps, and the lockfile — exiting non-zero on
+  any mismatch.
+- **`runs show` / `runs diff` + metric-aware `runs list`** (#160): one run's
+  full provenance on a screen; two runs compared with the same defaults-aware
+  flag semantics skip detection uses, generic numeric metric deltas, and
+  run-fact deltas (warning when descriptor hash or git commit make the
+  comparison not like-for-like); `runs list` gains seed, dataset, git, and
+  headline metric columns.
+- **`resolved_config.yaml` + `runs reproduce`** (#170): every fresh run
+  serializes its fully-resolved config (YAML-only gates included — the
+  provenance hole the manifest command string couldn't express), with
+  round-trip identity test-pinned. `runs reproduce` re-executes a run from
+  its directory alone, guarding descriptor and raw-input hashes first and
+  comparing output hashes or headline metrics per the fingerprint.
+- **Failure epilogue + `runs why`** (#163): failing runs write `failure.json`
+  (stage, exception, traceback tail, recent structured events, hint, resume
+  command) before the move to `failed/`, print a human epilogue with the
+  exact next command, and `runs why` pretty-prints the forensics later.
+- **`panelcast doctor`** (#162): a read-only preflight — lockfile, versions +
+  fingerprint, accelerator, compile cache, git, dataset resolution, data
+  stamps, calibration store, disk — each with a fix hint; `--json` for CI.
+
+### Fixed
+
+- **`chain_method=auto` never picked vectorized on GPU**: the resolution read
+  NVML free VRAM after JAX had already preallocated its pool, so the answer
+  was always "nothing free". It now reads the pool's own limit minus use.
+  Caught by the first #138 GPU validation run.
+
 ## [0.8.0] — 2026-07-08
 
 Inference performance and robustness (#138). Fits and sweeps now plan their
