@@ -947,6 +947,30 @@ class TestCompareCommand:
         assert result.exit_code == 1
         assert "artifacts not found" in strip_ansi(result.output)
 
+    def test_compare_output_wiring(self, monkeypatch):
+        """Omitting --output passes None (run-scoped default); --output passes a Path."""
+        captured = {}
+        fake_result = SimpleNamespace(
+            table=SimpleNamespace(to_string=lambda index: "T"), artifacts=[]
+        )
+
+        def fake_run(**kwargs):
+            captured.update(kwargs)
+            return fake_result
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.compare_baselines.run_baseline_comparison", fake_run
+        )
+        assert runner.invoke(app, ["compare", "--baselines"]).exit_code == 0
+        assert captured["output_dir"] is None
+        assert (
+            runner.invoke(
+                app, ["compare", "--baselines", "--output", "custom/dir"]
+            ).exit_code
+            == 0
+        )
+        assert captured["output_dir"] == Path("custom/dir")
+
 
 class TestDiagnoseCommand:
     """Tests for the diagnose subcommand."""

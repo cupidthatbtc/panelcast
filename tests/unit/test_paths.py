@@ -85,3 +85,23 @@ class TestResolveEvaluationDir:
         out = tmp_path / "outputs"
         out.mkdir()
         assert resolve_evaluation_dir(out) == out / "evaluation"
+
+
+class TestResolveReportsDir:
+    def test_prefers_latest_run(self, tmp_path):
+        from panelcast.paths import resolve_reports_dir
+
+        out = tmp_path / "outputs"
+        run = out / "runA"
+        run.mkdir(parents=True)
+        (out / "latest.json").write_text(
+            json.dumps({"run_id": "runA", "run_dir": "runA"}), encoding="utf-8"
+        )
+        assert resolve_reports_dir(out) == run / "reports"
+
+    def test_falls_back_to_flat(self, tmp_path):
+        from panelcast.paths import resolve_reports_dir
+
+        out = tmp_path / "outputs"
+        out.mkdir()
+        assert resolve_reports_dir(out) == Path("reports")

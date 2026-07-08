@@ -337,3 +337,67 @@ class TestRunBaselineComparison:
         )
         assert "bayes (current)" not in {r["model"] for r in result.rows}
         assert all(r["split"] == "within_entity_temporal" for r in result.rows)
+
+    def test_default_output_dir_is_run_scoped(self, tmp_path, monkeypatch):
+        """output_dir=None writes under the latest run's reports/baselines."""
+        _seed_both_splits(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "panelcast.pipelines.compare_baselines.load_descriptor",
+            lambda dataset=None: make_aero_descriptor(),
+        )
+        run_dir = tmp_path / "outputs" / "runA"
+        run_dir.mkdir(parents=True)
+        (tmp_path / "outputs" / "latest.json").write_text(
+            json.dumps({"run_id": "runA", "run_dir": "runA"}), encoding="utf-8"
+        )
+        result = run_baseline_comparison(
+            dataset=None,
+            splits=(SplitType.WITHIN_ENTITY_TEMPORAL,),
+            n_samples=64,
+            include_bayes=False,
+        )
+        expected = (run_dir / "reports" / "baselines").resolve()
+        assert all(p.resolve().parent == expected for p in result.artifacts)
+        assert (expected / "baseline_comparison.csv").exists()
+
+    def test_explicit_output_dir_overrides_run_scoping(self, tmp_path, monkeypatch):
+        """An explicit output_dir wins even when a latest run exists."""
+        _seed_both_splits(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "panelcast.pipelines.compare_baselines.load_descriptor",
+            lambda dataset=None: make_aero_descriptor(),
+        )
+        run_dir = tmp_path / "outputs" / "runA"
+        run_dir.mkdir(parents=True)
+        (tmp_path / "outputs" / "latest.json").write_text(
+            json.dumps({"run_id": "runA", "run_dir": "runA"}), encoding="utf-8"
+        )
+        custom = tmp_path / "custom_out"
+        result = run_baseline_comparison(
+            dataset=None,
+            splits=(SplitType.WITHIN_ENTITY_TEMPORAL,),
+            n_samples=64,
+            output_dir=custom,
+            include_bayes=False,
+        )
+        assert all(p.resolve().parent == custom.resolve() for p in result.artifacts)
+        assert not (run_dir / "reports" / "baselines").exists()
+
+    def test_default_output_dir_flat_without_latest(self, tmp_path, monkeypatch):
+        """Without a latest pointer the default falls back to flat reports/baselines."""
+        _seed_both_splits(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "panelcast.pipelines.compare_baselines.load_descriptor",
+            lambda dataset=None: make_aero_descriptor(),
+        )
+        result = run_baseline_comparison(
+            dataset=None,
+            splits=(SplitType.WITHIN_ENTITY_TEMPORAL,),
+            n_samples=64,
+            include_bayes=False,
+        )
+        expected = (tmp_path / "reports" / "baselines").resolve()
+        assert all(p.resolve().parent == expected for p in result.artifacts)
