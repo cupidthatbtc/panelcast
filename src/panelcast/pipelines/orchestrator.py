@@ -1304,15 +1304,15 @@ class PipelineOrchestrator:
         stage: PipelineStage,
         run_result: Any | None,
     ) -> None:
-        """Record stage outputs in manifest if artifacts exist."""
+        """Record stage outputs (and their content hashes) in the manifest."""
         if self.manifest is None:
             return
 
+        recorded: dict[str, str] = {}
         # Static stage output declarations
         for output_path in stage.output_paths:
             if output_path.exists():
-                key = f"{stage.name}:{output_path.as_posix()}"
-                self.manifest.outputs[key] = str(output_path)
+                recorded[f"{stage.name}:{output_path.as_posix()}"] = str(output_path)
 
         # Dynamic run_fn result paths
         if isinstance(run_result, dict):
@@ -1320,8 +1320,22 @@ class PipelineOrchestrator:
                 if isinstance(value, (str, Path)):
                     candidate = Path(value)
                     if candidate.exists():
-                        manifest_key = f"{stage.name}:{key}"
-                        self.manifest.outputs[manifest_key] = str(candidate)
+                        recorded[f"{stage.name}:{key}"] = str(candidate)
+
+        self.manifest.outputs.update(recorded)
+        hash_started = time()
+        for manifest_key, path_str in recorded.items():
+            try:
+                self.manifest.output_hashes[manifest_key] = sha256_path(path_str)
+            except OSError as e:
+                log.debug("output_hash_failed", key=manifest_key, error=str(e))
+        if recorded:
+            log.debug(
+                "outputs_hashed",
+                stage=stage.name,
+                n=len(recorded),
+                seconds=round(time() - hash_started, 3),
+            )
 
     def _execute_stage(self, stage: PipelineStage) -> None:
         """Execute a single pipeline stage.
