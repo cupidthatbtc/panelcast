@@ -45,3 +45,13 @@ Sensitivity analyses (opt-in `sensitivity` stage, not part of a default run)
 - Prior variants (default, diffuse, informative; `PRIOR_CONFIGS` in `src/panelcast/pipelines/sensitivity.py`)
 - Feature ablations (remove feature groups to measure importance)
 - Split-seed axis (seeds 42/43)
+
+Reproducibility of MCMC draws is a two-tier claim. Every run manifest records
+an environment **fingerprint** — a canonical hash over python/jax/jaxlib/
+numpyro versions, the accelerator platform and device kind, and the machine
+architecture. Draws reproduce **bit-exactly** only within a matching
+fingerprint; across fingerprints (e.g. a GPU fit re-run on CPU, or a jaxlib
+upgrade) expect **statistical** reproduction — same posterior up to sampling
+noise, different bits. The fingerprint deliberately excludes the pixi.lock
+hash (churn in non-numerical dependencies does not change the exactness
+domain) and the OS release.
