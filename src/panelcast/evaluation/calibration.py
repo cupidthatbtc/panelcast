@@ -559,6 +559,23 @@ def compute_weighted_interval_score(
     )
 
 
+def compute_pit_per_row(y_true: np.ndarray, y_samples: np.ndarray) -> np.ndarray:
+    """Per-observation PIT values under the randomized-rank convention.
+
+    PIT = (#draws < y + 0.5 * #draws == y) / n_draws, shape (n_obs,).
+    """
+    y_true = np.asarray(y_true, dtype=float)
+    y_samples = np.asarray(y_samples, dtype=float)
+    if y_samples.ndim != 2 or y_samples.shape[1] != y_true.shape[0]:
+        raise ValueError(
+            f"y_samples shape {y_samples.shape} incompatible with y_true {y_true.shape}"
+        )
+    n_draws = y_samples.shape[0]
+    below = (y_samples < y_true[None, :]).sum(axis=0)
+    equal = (y_samples == y_true[None, :]).sum(axis=0)
+    return (below + 0.5 * equal) / n_draws
+
+
 def compute_pit_values(
     y_true: np.ndarray,
     y_samples: np.ndarray,
@@ -585,17 +602,7 @@ def compute_pit_values(
         Dict with pit mean/std, histogram counts and bin edges, and the
         max absolute deviation of bin frequency from uniform.
     """
-    y_true = np.asarray(y_true, dtype=float)
-    y_samples = np.asarray(y_samples, dtype=float)
-    if y_samples.ndim != 2 or y_samples.shape[1] != y_true.shape[0]:
-        raise ValueError(
-            f"y_samples shape {y_samples.shape} incompatible with y_true {y_true.shape}"
-        )
-
-    n_draws = y_samples.shape[0]
-    below = (y_samples < y_true[None, :]).sum(axis=0)
-    equal = (y_samples == y_true[None, :]).sum(axis=0)
-    pit = (below + 0.5 * equal) / n_draws
+    pit = compute_pit_per_row(y_true, y_samples)
 
     counts, bin_edges = np.histogram(pit, bins=n_bins, range=(0.0, 1.0))
     freq = counts / counts.sum() if counts.sum() else counts.astype(float)

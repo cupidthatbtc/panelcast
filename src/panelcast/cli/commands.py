@@ -353,8 +353,22 @@ def diagnose(
             "run (default: the latest run's evaluation dir)."
         ),
     ),
-    output_dir: str = typer.Option(
-        "reports/diagnostics", "--output", "-o", help="Directory for the diagnostics report."
+    output_dir: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help=(
+            "Directory for the diagnostics report "
+            "(default: reports/diagnostics; run-scoped for --errors)."
+        ),
+    ),
+    errors: bool = typer.Option(
+        False,
+        "--errors",
+        help=(
+            "Also decompose per-row errors from the identified predictions "
+            "artifact: entity/group/review-count rollups + worst-25 table."
+        ),
     ),
 ) -> None:
     """Summarize convergence + PPC over an existing evaluation run.
@@ -367,19 +381,31 @@ def diagnose(
     Examples:
         panelcast diagnose
         panelcast diagnose --eval-dir outputs/2026-06-23_192630/evaluation
+        panelcast diagnose --errors
     """
     from pathlib import Path
 
-    from panelcast.pipelines.diagnose import run_diagnose
+    from panelcast.pipelines.diagnose import run_diagnose, run_error_decomposition
 
     try:
         report = run_diagnose(
             eval_dir=Path(eval_dir) if eval_dir else None,
-            output_dir=Path(output_dir),
+            output_dir=Path(output_dir) if output_dir else Path("reports/diagnostics"),
         )
     except FileNotFoundError as e:
         typer.echo(f"Error: {e}")
         raise typer.Exit(code=1) from e
+
+    error_artifacts: list[Path] = []
+    if errors:
+        try:
+            error_artifacts = run_error_decomposition(
+                eval_dir=Path(eval_dir) if eval_dir else None,
+                output_dir=Path(output_dir) if output_dir else None,
+            )
+        except (FileNotFoundError, ValueError) as e:
+            typer.echo(f"Error decomposition unavailable: {e}")
+            raise typer.Exit(code=1) from e
 
     typer.echo(f"Verdict: {report.verdict}\n")
     c = report.convergence
@@ -398,6 +424,8 @@ def diagnose(
             typer.echo(f"  {row['statistic']:<10} {row['p_value']:.3f}  [{row['flag']}]")
     typer.echo("")
     for path in report.artifacts:
+        typer.echo(f"  wrote {path}")
+    for path in error_artifacts:
         typer.echo(f"  wrote {path}")
 
 

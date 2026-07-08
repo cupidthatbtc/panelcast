@@ -99,3 +99,59 @@ class TestDiagnose:
         assert (out_dir / "diagnostics_report.md").exists()
         assert (out_dir / "diagnostics_report.json").exists()
         assert report.artifacts
+
+
+class TestErrorDecompositionCommand:
+    """diagnose --errors over the identified predictions artifact (#180)."""
+
+    def _write_predictions(self, tmp_path: Path, *, identified: bool) -> Path:
+        eval_dir = tmp_path / "evaluation"
+        split_dir = eval_dir / "within_entity_temporal"
+        split_dir.mkdir(parents=True)
+        payload = {
+            "y_true": [70.0, 80.0],
+            "y_pred_mean": [72.0, 75.0],
+            "y_pred_lower": [60.0, 65.0],
+            "y_pred_upper": [84.0, 85.0],
+            "residuals": [-2.0, 5.0],
+            "interval_level": 0.8,
+        }
+        if identified:
+            payload |= {
+                "entity": ["A", "B"],
+                "event": ["a1", "b1"],
+                "n_reviews": [10, 20],
+                "train_history": [2, 0],
+                "y_pred_sd": [2.0, 5.0],
+                "pit": [0.2, 0.99],
+                "covered": {"0.80": [True, False]},
+            }
+        (split_dir / "predictions.json").write_text(json.dumps(payload), encoding="utf-8")
+        return eval_dir
+
+    def test_writes_csvs_and_top25(self, tmp_path):
+        from panelcast.pipelines.diagnose import run_error_decomposition
+
+        eval_dir = self._write_predictions(tmp_path, identified=True)
+        out_dir = tmp_path / "reports"
+        artifacts = run_error_decomposition(eval_dir=eval_dir, output_dir=out_dir)
+        assert (out_dir / "error_decomposition_within_entity_temporal.csv").exists()
+        assert (out_dir / "error_rollup_entity_within_entity_temporal.csv").exists()
+        md = (out_dir / "error_top25_within_entity_temporal.md").read_text(encoding="utf-8")
+        assert "| entity |" in md or "| event |" in md
+        assert len(artifacts) >= 3
+
+    def test_pre_feature_payload_degrades_clearly(self, tmp_path):
+        from panelcast.pipelines.diagnose import run_error_decomposition
+
+        eval_dir = self._write_predictions(tmp_path, identified=False)
+        with pytest.raises(ValueError, match="identity fields"):
+            run_error_decomposition(eval_dir=eval_dir, output_dir=tmp_path / "reports")
+
+    def test_no_predictions_raises_file_not_found(self, tmp_path):
+        from panelcast.pipelines.diagnose import run_error_decomposition
+
+        empty = tmp_path / "evaluation"
+        empty.mkdir()
+        with pytest.raises(FileNotFoundError):
+            run_error_decomposition(eval_dir=empty, output_dir=tmp_path / "reports")

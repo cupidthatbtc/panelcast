@@ -162,7 +162,7 @@ class TestDisjointInputsTransform:
         if transform.name == "identity":
             pytest.skip("logit transform reported as identity in this build")
 
-        _X, prev_score, _n, _y, _g = _prepare_disjoint_inputs(test_df, test_features, s)
+        _X, prev_score, _n, _y, _g, _ids = _prepare_disjoint_inputs(test_df, test_features, s)
         # prev_score should differ from the raw global_mean (70.0) because
         # the transform was applied.
         assert not np.allclose(prev_score, 70.0)
@@ -1058,7 +1058,7 @@ class TestPrepareTestModelArgsExtended:
             index=test_df.index,
         )
 
-        model_args, _ = _prepare_test_model_args(test_df, test_features, mock_summary)
+        model_args, _, _ = _prepare_test_model_args(test_df, test_features, mock_summary)
         assert model_args["n_reviews"][0] == 200
 
     def test_missing_n_reviews_and_user_ratings_raises(self, mock_summary):
@@ -1098,7 +1098,7 @@ class TestPrepareTestModelArgsExtended:
             index=test_df.index,
         )
 
-        model_args, y_true = _prepare_test_model_args(test_df, test_features, mock_summary)
+        model_args, y_true, _ = _prepare_test_model_args(test_df, test_features, mock_summary)
         # Only valid row survives
         assert len(y_true) == 1
         assert model_args["n_reviews"][0] == 100
@@ -1144,7 +1144,7 @@ class TestPrepareTestModelArgsExtended:
             index=test_df.index,
         )
 
-        model_args, _ = _prepare_test_model_args(test_df, test_features, summary, train_df=None)
+        model_args, _, _ = _prepare_test_model_args(test_df, test_features, summary, train_df=None)
         # With no training data, prev_score falls back to global mean
         assert model_args["prev_score"][0] == pytest.approx(70.0)
 
@@ -1167,7 +1167,7 @@ class TestPrepareTestModelArgsExtended:
             index=test_df.index,
         )
 
-        model_args, _ = _prepare_test_model_args(test_df, test_features, mock_summary)
+        model_args, _, _ = _prepare_test_model_args(test_df, test_features, mock_summary)
         # feature value should come from test_features, not the overlapping df column
         # After standardization: (1.0 - 1.0) / 0.5 = 0.0
         assert model_args["X"][0, 0] == pytest.approx(0.0)
@@ -1195,7 +1195,7 @@ class TestPrepareDisjointInputsExtended:
             index=test_df.index,
         )
 
-        X, _, _, _, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
+        X, _, _, _, _, _ids = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
         assert X[0, 0] == pytest.approx(0.0)  # (1.0-1.0)/0.5
 
     def test_length_mismatch_raises(self, mock_summary):
@@ -1257,7 +1257,7 @@ class TestPrepareDisjointInputsExtended:
             index=test_df.index,
         )
 
-        _, _, n_reviews, _, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
+        _, _, n_reviews, _, _, _ids = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
         assert n_reviews[0] == 42
 
     def test_missing_n_reviews_and_user_ratings_raises(self, mock_summary):
@@ -1297,7 +1297,7 @@ class TestPrepareDisjointInputsExtended:
             index=test_df.index,
         )
 
-        X, _, n_reviews, y_true, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
+        X, _, n_reviews, y_true, _, _ids = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
         assert len(y_true) == 1
         assert n_reviews[0] == 50
 
@@ -2246,7 +2246,7 @@ class TestPrepareTestModelArgs:
             }
         )
 
-        model_args, y_true = _prepare_test_model_args(
+        model_args, y_true, _ = _prepare_test_model_args(
             test_df, test_features, summary, train_df=train_df
         )
 
@@ -2266,7 +2266,7 @@ class TestPrepareTestModelArgs:
         summary["group_idx_by_artist"] = [1, 0]
         summary["n_groups"] = 2
 
-        model_args, _ = _prepare_test_model_args(test_df, test_features, summary)
+        model_args, _, _ = _prepare_test_model_args(test_df, test_features, summary)
 
         np.testing.assert_array_equal(
             model_args["group_idx_by_artist"], np.array([1, 0], dtype=np.int32)
@@ -2313,7 +2313,7 @@ class TestPrepareTestModelArgs:
             }
         )
 
-        model_args, y_true = _prepare_test_model_args(
+        model_args, y_true, _ = _prepare_test_model_args(
             test_df, test_features, summary, train_df=train_df
         )
 
@@ -2347,7 +2347,7 @@ class TestPrepareTestModelArgs:
             }
         )
 
-        model_args, _ = _prepare_test_model_args(
+        model_args, _, _ = _prepare_test_model_args(
             test_df, test_features, summary, train_df=train_df
         )
         assert "prev_meas_sigma" in model_args
@@ -2377,7 +2377,7 @@ class TestPrepareTestModelArgs:
             }
         )
 
-        model_args, y_true = _prepare_test_model_args(
+        model_args, y_true, _ = _prepare_test_model_args(
             test_df, test_features, summary, train_df=train_df
         )
         # f1 should come from features, not test_df
@@ -2487,7 +2487,7 @@ class TestPrepareTestModelArgs:
             }
         )
 
-        model_args, y_true = _prepare_test_model_args(
+        model_args, y_true, _ = _prepare_test_model_args(
             test_df, test_features, summary, train_df=train_df
         )
         assert len(y_true) == 1
@@ -2509,7 +2509,7 @@ class TestPrepareTestModelArgs:
         )
         summary = self._make_summary()
 
-        model_args, y_true = _prepare_test_model_args(
+        model_args, y_true, _ = _prepare_test_model_args(
             test_df, test_features, summary, train_df=None
         )
         assert len(y_true) == 1
@@ -2537,7 +2537,7 @@ class TestPrepareTestModelArgs:
             }
         )
 
-        model_args, y_true = _prepare_test_model_args(
+        model_args, y_true, _ = _prepare_test_model_args(
             test_df, test_features, summary, train_df=train_df
         )
         assert len(y_true) == 1
@@ -2597,7 +2597,7 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true, group_idx = _prepare_disjoint_inputs(
+        X, prev_score, n_reviews, y_true, group_idx, _ids = _prepare_disjoint_inputs(
             test_df, test_features, summary
         )
 
@@ -2627,7 +2627,7 @@ class TestPrepareDisjointInputs:
         summary["entity_group_col"] = "primary_genre"
         summary["group_to_idx"] = {"__rest__": 0, "Rock": 1}
 
-        *_, group_idx = _prepare_disjoint_inputs(test_df, test_features, summary)
+        *_, group_idx, _ids = _prepare_disjoint_inputs(test_df, test_features, summary)
 
         # Rock was seen in training (idx 1); Techno and missing genres were not.
         np.testing.assert_array_equal(group_idx, np.array([1, 1, -1, -1], dtype=np.int32))
@@ -2649,7 +2649,7 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true, _ = _prepare_disjoint_inputs(
+        X, prev_score, n_reviews, y_true, _, _ids = _prepare_disjoint_inputs(
             test_df, test_features, summary
         )
         assert X.shape == (1, 1)
@@ -2670,7 +2670,7 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true, _ = _prepare_disjoint_inputs(
+        X, prev_score, n_reviews, y_true, _, _ids = _prepare_disjoint_inputs(
             test_df, test_features, summary
         )
         assert len(y_true) == 1
@@ -2725,7 +2725,7 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true, _ = _prepare_disjoint_inputs(
+        X, prev_score, n_reviews, y_true, _, _ids = _prepare_disjoint_inputs(
             test_df, test_features, summary
         )
         assert len(y_true) == 1
@@ -2765,8 +2765,146 @@ class TestPrepareDisjointInputs:
         )
         summary = self._make_summary()
 
-        X, prev_score, n_reviews, y_true, _ = _prepare_disjoint_inputs(
+        X, prev_score, n_reviews, y_true, _, _ids = _prepare_disjoint_inputs(
             test_df, test_features, summary
         )
         # All prev_score should be global mean = 75.0
         np.testing.assert_allclose(prev_score, [75.0, 75.0, 75.0])
+
+
+class TestRowIdentities:
+    """Identity threading through sort + invalid-row drop (#180).
+
+    Row-order misalignment between ids and y arrays would silently corrupt
+    every downstream drill-down, so this pins the exact end-to-end mapping.
+    """
+
+    def test_ids_survive_sort_and_invalid_n_reviews_drop(self, mock_summary):
+        # Deliberately unsorted rows; B1 has an invalid review count.
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["Artist_B", "Artist_A", "Artist_B", "Artist_A"],
+                "Album": ["B2", "A1", "B1", "A2"],
+                "Release_Date_Parsed": pd.to_datetime(
+                    ["2021-01-01", "2020-01-01", "2020-06-01", "2021-06-01"]
+                ),
+                "User_Score": [80.0, 75.0, 70.0, 90.0],
+                "User_Ratings": [50, 100, -5, 30],
+            }
+        )
+        test_features = pd.DataFrame(
+            {
+                "feat_1": [1.0, 2.0, 3.0, 4.0],
+                "feat_2": [2.0, 3.0, 4.0, 5.0],
+                "n_reviews": [50, 100, -5, 30],
+            },
+            index=test_df.index,
+        )
+        train_df = pd.DataFrame(
+            {
+                "Artist": ["Artist_A", "Artist_A", "Artist_A", "Artist_B"],
+                "User_Score": [70.0, 71.0, 72.0, 68.0],
+            }
+        )
+
+        _, y_true, row_ids = _prepare_test_model_args(
+            test_df, test_features, mock_summary, train_df=train_df
+        )
+
+        assert len(row_ids) == len(y_true) == 3
+        expected = {"A1": 75.0, "A2": 90.0, "B2": 80.0}
+        assert row_ids["event"].tolist() == ["A1", "A2", "B2"]
+        for event, y in zip(row_ids["event"], y_true):
+            assert expected[event] == y
+        assert row_ids["entity"].tolist() == ["Artist_A", "Artist_A", "Artist_B"]
+        assert row_ids["n_reviews"].tolist() == [100, 30, 50]
+        assert row_ids["train_history"].tolist() == [3, 3, 1]
+
+    def test_disjoint_ids_have_zero_history(self):
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["New_X", "New_Y"],
+                "Album": ["x1", "y1"],
+                "User_Score": [65.0, 85.0],
+                "User_Ratings": [10, 20],
+            }
+        )
+        test_features = pd.DataFrame(
+            {"f1": [1.0, 2.0], "n_reviews": [10, 20]},
+            index=test_df.index,
+        )
+        summary = {
+            "global_mean_score": 75.0,
+            "feature_cols": ["f1"],
+            "feature_scaler": {"mean": [0.0], "std": [1.0]},
+        }
+
+        *_, row_ids = _prepare_disjoint_inputs(test_df, test_features, summary)
+        assert row_ids["entity"].tolist() == ["New_X", "New_Y"]
+        assert row_ids["event"].tolist() == ["x1", "y1"]
+        assert row_ids["train_history"].tolist() == [0, 0]
+
+
+class TestIdentifiedPredictionsPayload:
+    """_evaluate_predictions extends the payload additively when ids are given."""
+
+    def test_payload_gains_identity_and_per_row_uncertainty(self):
+        rng = np.random.default_rng(0)
+        y_true = np.array([70.0, 80.0, 60.0], dtype=np.float32)
+        y_samples = rng.normal(loc=y_true, scale=5.0, size=(200, 3))
+        row_ids = pd.DataFrame(
+            {
+                "entity": ["A", "A", "B"],
+                "event": ["a1", "a2", "b1"],
+                "n_reviews": [10, 20, 30],
+                "train_history": [2, 2, 0],
+            }
+        )
+
+        _, payload, _ = _evaluate_predictions(
+            y_true,
+            y_samples,
+            calibration_intervals=(0.8, 0.95),
+            coverage_tolerance=0.05,
+            prediction_interval=0.8,
+            row_ids=row_ids,
+        )
+
+        assert payload["entity"] == ["A", "A", "B"]
+        assert payload["event"] == ["a1", "a2", "b1"]
+        assert len(payload["y_pred_sd"]) == 3
+        assert len(payload["pit"]) == 3
+        assert set(payload["covered"]) == {"0.80", "0.95"}
+        assert all(len(v) == 3 for v in payload["covered"].values())
+        # Additive only: the legacy keys are untouched.
+        for key in ("y_true", "y_pred_mean", "y_pred_lower", "y_pred_upper", "residuals"):
+            assert key in payload
+
+    def test_payload_unchanged_without_ids(self):
+        y_true = np.array([70.0, 80.0], dtype=np.float32)
+        y_samples = np.random.default_rng(1).normal(75.0, 5.0, size=(100, 2))
+
+        _, payload, _ = _evaluate_predictions(
+            y_true,
+            y_samples,
+            calibration_intervals=(0.8,),
+            coverage_tolerance=0.05,
+            prediction_interval=0.8,
+        )
+        assert "entity" not in payload
+        assert "pit" not in payload
+
+    def test_misaligned_ids_raise(self):
+        y_true = np.array([70.0, 80.0], dtype=np.float32)
+        y_samples = np.random.default_rng(2).normal(75.0, 5.0, size=(100, 2))
+        row_ids = pd.DataFrame({"entity": ["A"], "n_reviews": [1], "train_history": [0]})
+
+        with pytest.raises(ValueError, match="misalignment"):
+            _evaluate_predictions(
+                y_true,
+                y_samples,
+                calibration_intervals=(0.8,),
+                coverage_tolerance=0.05,
+                prediction_interval=0.8,
+                row_ids=row_ids,
+            )

@@ -37,6 +37,16 @@ Evaluation
 - outputs/<run_id>/evaluation/entity_disjoint/predictions.json
 - outputs/<run_id>/evaluation/entity_disjoint/calibration.json
 
+predictions.json carries parallel per-row arrays. Alongside the legacy keys
+(y_true, y_pred_mean, y_pred_lower, y_pred_upper, residuals) it is identified:
+entity, event, n_reviews, train_history (the entity's training-event count),
+group when the descriptor names an entity_group_col, plus per-row y_pred_sd,
+pit, and covered flags per calibration interval. `panelcast diagnose --errors`
+decomposes these into error_decomposition_<split>.csv, per-entity / group /
+review-count-decile rollup CSVs, and a worst-25 Markdown table under the
+run-scoped reports dir — read-only, so it works on any past run whose payload
+is identified (pre-0.10.0 payloads get a clear re-run message instead).
+
 Predictions
 - outputs/<run_id>/predictions/next_event_known_entities.csv
 - outputs/<run_id>/predictions/next_event_new_entity.csv

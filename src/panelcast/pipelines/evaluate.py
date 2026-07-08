@@ -32,6 +32,7 @@ from panelcast.data.split_types import (
 from panelcast.evaluation.calibration import (
     compute_coverage,
     compute_interval_score,
+    compute_pit_per_row,
     compute_pit_values,
     compute_reliability_data,
     compute_weighted_interval_score,
@@ -123,6 +124,7 @@ def _summary_dataset(summary: dict) -> dict:
     block = summary.get("dataset") or {}
     return {
         "entity_col": block.get("entity_col", "Artist"),
+        "event_col": block.get("event_col", "Album"),
         "target_col": block.get("target_col", "User_Score"),
         "n_obs_col": block.get("n_obs_col", "User_Ratings"),
         "prefix": block.get("model_prefix", "user"),
@@ -313,6 +315,38 @@ def _eiv_prev_meas_sigma(prev_nrev: np.ndarray, global_std: float) -> np.ndarray
         ).astype(np.float32)
 
 
+def _row_identities(
+    df: pd.DataFrame,
+    summary: dict,
+    train_counts: pd.Series,
+    n_reviews: np.ndarray,
+) -> pd.DataFrame:
+    """Per-row identity frame aligned with the FINAL (sorted, filtered) rows.
+
+    Must be built from the same frame the y arrays come from — after the
+    invalid-n_reviews drop — or every downstream drill-down silently
+    misattributes rows.
+    """
+    ds = _summary_dataset(summary)
+    ids = pd.DataFrame(
+        {
+            "entity": df[ds["entity_col"]].astype(str).to_numpy(),
+            "n_reviews": np.asarray(n_reviews, dtype=int),
+            "train_history": df[ds["entity_col"]]
+            .map(train_counts)
+            .fillna(0)
+            .astype(int)
+            .to_numpy(),
+        }
+    )
+    if ds["event_col"] in df.columns:
+        ids["event"] = df[ds["event_col"]].astype(str).to_numpy()
+    group_col = summary.get("entity_group_col")
+    if group_col and group_col in df.columns:
+        ids["group"] = df[group_col].fillna("(missing)").astype(str).to_numpy()
+    return ids
+
+
 def _prepare_test_model_args(
     test_df: pd.DataFrame,
     test_features: pd.DataFrame,
@@ -320,7 +354,7 @@ def _prepare_test_model_args(
     train_df: pd.DataFrame | None = None,
     val_df: pd.DataFrame | None = None,
     strict: bool = False,
-) -> tuple[dict, np.ndarray]:
+) -> tuple[dict, np.ndarray, pd.DataFrame]:
     """Build model_args for test data using training summary metadata."""
     ds = _summary_dataset(summary)
     entity_col = ds["entity_col"]
@@ -547,7 +581,8 @@ def _prepare_test_model_args(
         test_model_args["group_idx_by_artist"] = np.asarray(group_idx_by_artist, dtype=np.int32)
         test_model_args["n_groups"] = int(n_groups)
 
-    return test_model_args, y_true
+    row_ids = _row_identities(test_df, summary, artist_counts_for_filter, n_reviews)
+    return test_model_args, y_true, row_ids
 
 
 def _resolve_feature_split_dir(split_name: str, features_root: Path | None = None) -> Path:
@@ -623,7 +658,7 @@ def _prepare_disjoint_inputs(
     test_df: pd.DataFrame,
     test_features: pd.DataFrame,
     summary: dict,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None, pd.DataFrame]:
     """Prepare inputs for artist-disjoint cold-start evaluation.
 
     The fifth element is the per-row group index for entity_group_pooling
@@ -689,7 +724,9 @@ def _prepare_disjoint_inputs(
         n_seen = int(np.sum(group_idx_new >= 0))
         log.info("disjoint_group_pooling", n_rows=len(group_idx_new), n_seen_group=n_seen)
 
-    return X, prev_score, n_reviews, y_true, group_idx_new
+    # Disjoint entities are unseen in training by construction: history 0.
+    row_ids = _row_identities(df, summary, pd.Series(dtype=int), n_reviews)
+    return X, prev_score, n_reviews, y_true, group_idx_new, row_ids
 
 
 def _run_new_artist_predictive(
@@ -882,6 +919,7 @@ def _evaluate_predictions(
     coverage_tolerance: float,
     prediction_interval: float,
     discretize: bool = False,
+    row_ids: pd.DataFrame | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Compute metrics and export payloads for one split."""
     y_pred_mean = np.mean(y_pred_samples, axis=0)
@@ -968,6 +1006,26 @@ def _evaluate_predictions(
         "residuals": residuals,
         "interval_level": float(prediction_interval),
     }
+    # Identified payload (additive, #180): row identities plus the per-row
+    # predictive spread/PIT/coverage that only exist while y_samples is in
+    # hand — persisting them keeps `diagnose --errors` read-only later.
+    if row_ids is not None:
+        if len(row_ids) != len(y_true):
+            raise ValueError(
+                f"row_ids length {len(row_ids)} does not match y_true {len(y_true)}; "
+                "identity/order misalignment would corrupt every drill-down."
+            )
+        for col in row_ids.columns:
+            predictions_payload[col] = row_ids[col].tolist()
+        predictions_payload["y_pred_sd"] = np.std(y_pred_samples, axis=0).tolist()
+        predictions_payload["pit"] = compute_pit_per_row(y_true, y_pred_samples).tolist()
+        covered: dict[str, list[bool]] = {}
+        for prob in calibration_intervals:
+            a = (1.0 - prob) / 2.0
+            lo = np.percentile(y_pred_samples, 100.0 * a, axis=0)
+            hi = np.percentile(y_pred_samples, 100.0 * (1.0 - a), axis=0)
+            covered[f"{prob:.2f}"] = ((y_true >= lo) & (y_true <= hi)).tolist()
+        predictions_payload["covered"] = covered
     calibration_payload = {
         "predicted_probs": reliability.predicted_probs.tolist(),
         "observed_freq": reliability.observed_freq.tolist(),
@@ -1152,7 +1210,7 @@ def _evaluate_primary_split(
             log.info("validation_split_loaded", path=str(val_path), n_albums=len(primary_val_df))
             break
 
-    primary_model_args, primary_y_true = _prepare_test_model_args(
+    primary_model_args, primary_y_true, primary_row_ids = _prepare_test_model_args(
         primary_test_df,
         primary_test_features,
         summary,
@@ -1179,6 +1237,7 @@ def _evaluate_primary_split(
         coverage_tolerance=ctx.coverage_tolerance,
         prediction_interval=ctx.prediction_interval,
         discretize=discretize_obs,
+        row_ids=primary_row_ids,
     )
     try:
         # Log-likelihood must be evaluated on the model scale; the ELPDs are
@@ -1395,7 +1454,14 @@ def evaluate_models(ctx: StageContext) -> dict:
         if secondary_test_path.exists() and secondary_feat_path.exists():
             secondary_test_df = pd.read_parquet(secondary_test_path)
             secondary_test_features = pd.read_parquet(secondary_feat_path)
-            X, prev_score, n_reviews, secondary_y_true, group_idx_new = _prepare_disjoint_inputs(
+            (
+                X,
+                prev_score,
+                n_reviews,
+                secondary_y_true,
+                group_idx_new,
+                secondary_row_ids,
+            ) = _prepare_disjoint_inputs(
                 secondary_test_df,
                 secondary_test_features,
                 summary,
@@ -1416,6 +1482,7 @@ def evaluate_models(ctx: StageContext) -> dict:
                 coverage_tolerance=ctx.coverage_tolerance,
                 prediction_interval=ctx.prediction_interval,
                 discretize=discretize_obs,
+                row_ids=secondary_row_ids,
             )
             split_results[SECONDARY_SPLIT] = {
                 **secondary_metrics,
