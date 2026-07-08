@@ -32,6 +32,8 @@ jobs:
           plugins: "code-review@claude-code-plugins"
           prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
           claude_args: "--model claude-opus-4-8"
-          # Post the review report as a PR comment even when there are no
-          # findings — otherwise a clean review leaves only the green check.
+          # display_report surfaces the write-up on the Actions run summary;
+          # the sticky comment is the visible per-PR response, updated in
+          # place, present even when the review is clean.
           display_report: "true"
+          use_sticky_comment: "true"
