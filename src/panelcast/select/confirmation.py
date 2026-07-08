@@ -113,18 +113,39 @@ def _write_config(
     path.write_text(yaml.safe_dump(payload, sort_keys=True), encoding="utf-8")
 
 
+def _confirmation_timeout(
+    cfg: SweepConfig, sampler_overrides: dict[str, int] | None
+) -> float | None:
+    """Per-fit timeout for confirmation, scaled from the screening arm timeout.
+
+    Confirmation may run at publication scale (5-10x the screening sampler):
+    reusing the screening timeout would kill legitimate fits, while no timeout
+    lets one hang stall `panelcast select` forever. The screening timeout is
+    the floor.
+    """
+    if cfg.arm_timeout_seconds is None:
+        return None
+    overrides = sampler_overrides or {}
+    base = (cfg.num_samples or 1000) + (cfg.num_warmup or 1000)
+    scaled = overrides.get("num_samples", cfg.num_samples or 1000) + overrides.get(
+        "num_warmup", cfg.num_warmup or 1000
+    )
+    return cfg.arm_timeout_seconds * max(1.0, scaled / base)
+
+
 def run_confirmation(
     winner_knobs: dict[str, Any],
     cfg: SweepConfig,
     seeds: tuple[int, ...] = (42, 43, 44),
     promote_z: float = 2.0,
     sampler_overrides: dict[str, int] | None = None,
-    launch: Callable[[Path, str], tuple[int, str]] | None = None,
+    launch: Callable[..., tuple[int, str]] | None = None,
 ) -> ConfirmationResult:
     """Fit reference + winner on each seed, pair per seed, demand consistency.
 
-    ``sampler_overrides`` lets the thorough tier run the final pair at
-    publication scale. Results checkpoint to
+    ``sampler_overrides`` applies to EVERY confirmation fit (both sides of
+    every seed), so tiers with ``publication_confirm`` run the whole
+    confirmation at publication scale. Results checkpoint to
     ``<sweep_dir>/confirmation.json`` after every seed.
     """
     from panelcast.paths import resolve_latest
@@ -135,13 +156,14 @@ def run_confirmation(
     cfg.sweep_dir.mkdir(parents=True, exist_ok=True)
     base = default_arm()
     result = ConfirmationResult(winner_knobs=winner_knobs, promote_z=promote_z)
+    timeout = _confirmation_timeout(cfg, sampler_overrides)
 
     def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:
         config_path = cfg.sweep_dir / f"confirm_{label}_seed{seed}.yaml"
         _write_config(cfg, merged, seed, config_path, sampler_overrides)
-        log.info("confirmation_fit_start", label=label, seed=seed)
+        log.info("confirmation_fit_start", label=label, seed=seed, timeout=timeout)
         started = time.monotonic()
-        code, tail = launch(config_path, panelcast_bin)
+        code, tail = launch(config_path, panelcast_bin, timeout)
         log.info(
             "confirmation_fit_done",
             label=label,
@@ -151,7 +173,9 @@ def run_confirmation(
         )
         if code != 0:
             raise RuntimeError(f"{label} fit failed on seed {seed}: {tail[-500:]}")
-        return resolve_latest()
+        run_dir = resolve_latest()
+        # Dereference so the pairing survives the mutable `latest` link moving.
+        return run_dir.resolve() if run_dir is not None else None
 
     for seed in seeds:
         seed_result = SeedResult(seed=seed)
@@ -163,6 +187,11 @@ def run_confirmation(
             seed_result.winner_converged = _run_converged(win_run)
             if ref_run is None or win_run is None:
                 raise RuntimeError("run directory not resolved after fit")
+            if win_run == ref_run:
+                raise RuntimeError(
+                    f"winner fit resolved to the reference run ({ref_run}); "
+                    "stale latest pointer — refusing to self-pair"
+                )
             pair: PairedElpd = paired_elpd(
                 win_run / "evaluation" / "log_likelihood.nc",
                 ref_run / "evaluation" / "log_likelihood.nc",

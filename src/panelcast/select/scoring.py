@@ -39,6 +39,7 @@ class PairedElpd:
     dse: float
     z: float | None
     n: int
+    note: str | None = None
 
 
 def paired_elpd(cell_nc: Path, reference_nc: Path) -> PairedElpd:
@@ -47,6 +48,11 @@ def paired_elpd(cell_nc: Path, reference_nc: Path) -> PairedElpd:
     diff = sum(d_i), signed cell-minus-reference (positive = beats the
     reference); dse = sqrt(n * var(d_i, ddof=1)) — the paired SE, smaller (and
     the honest significance number) than each side's marginal SE (#63).
+
+    Degenerate pairs get an explicit verdict instead of NaN/None ambiguity:
+    identical snapshots (the reference against itself) are z=0 with diff 0;
+    a single observation or zero variance with a nonzero diff leaves z None
+    with a note saying why.
     """
     elpd_cell = pointwise_elpd(cell_nc)
     elpd_ref = pointwise_elpd(reference_nc)
@@ -57,8 +63,24 @@ def paired_elpd(cell_nc: Path, reference_nc: Path) -> PairedElpd:
         )
     d = elpd_cell - elpd_ref
     diff = float(np.sum(d))
-    dse = float(np.sqrt(d.size * np.var(d, ddof=1)))
-    return PairedElpd(diff=diff, dse=dse, z=(diff / dse) if dse else None, n=int(d.size))
+    n = int(d.size)
+    if n < 2:
+        return PairedElpd(
+            diff=diff, dse=float("nan"), z=None, n=n,
+            note="paired elpd degenerate: single observation, dse undefined",
+        )
+    dse = float(np.sqrt(n * np.var(d, ddof=1)))
+    if dse == 0.0:
+        if diff == 0.0:
+            return PairedElpd(
+                diff=0.0, dse=0.0, z=0.0, n=n,
+                note="paired diff identically zero (arm matches the reference)",
+            )
+        return PairedElpd(
+            diff=diff, dse=0.0, z=None, n=n,
+            note="paired elpd degenerate: zero variance with nonzero diff",
+        )
+    return PairedElpd(diff=diff, dse=dse, z=diff / dse, n=n)
 
 
 @dataclass
@@ -207,6 +229,8 @@ def score_arm(
     else:
         pair = paired_elpd(Path(log_likelihood_path), Path(reference_nc))
         score.elpd_diff, score.elpd_dse, score.elpd_z = pair.diff, pair.dse, pair.z
+        if pair.note:
+            score.notes.append(pair.note)
     return score
 
 
@@ -288,11 +312,19 @@ def _verdict(ranked: list[ArmScore], reference_label: str) -> str:
         for s in ranked
         if s.converged is False
     ]
-    unscored = [s.arm for s in ranked if s.elpd_z is None]
-    if unscored:
+    # z None means either "never paired" (no snapshot: diff is None too) or
+    # "paired but degenerate" — the caveats must not conflate the two.
+    unscored = [s for s in ranked if s.elpd_z is None]
+    missing = [s.arm for s in unscored if s.elpd_diff is None]
+    if missing:
         caveats.append(
-            "No pointwise log-likelihood snapshot for " + ", ".join(unscored) + "; "
+            "No pointwise log-likelihood snapshot for " + ", ".join(missing) + "; "
             "unranked rather than scored with a different estimator."
+        )
+    degenerate = [s.arm for s in unscored if s.elpd_diff is not None]
+    if degenerate:
+        caveats.append(
+            "Paired elpd degenerate (z undefined) for " + ", ".join(degenerate) + "."
         )
     return " ".join(["**Verdict:**", head, *caveats])
 

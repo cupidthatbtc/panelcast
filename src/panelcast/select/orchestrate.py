@@ -10,6 +10,8 @@ manual PR.
 from __future__ import annotations
 
 import json
+import math
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,7 +20,7 @@ import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor, load_descriptor
 from panelcast.select.rules import DecisionRules, promotable, screenable
-from panelcast.select.runner import SweepConfig, ofat_arms
+from panelcast.select.runner import STAGE2_MAX_WINNERS, SweepConfig, ofat_arms
 from panelcast.select.space import KNOBS, enumerate_space
 from panelcast.select.tiers import EffortTier
 
@@ -88,17 +90,23 @@ def build_plan(
     }
     n_stage1 = 1 + len(ofat_arms(descriptor))
 
-    # Priority-ordered stage sizing: stage 1 is exact; stage 2 depends on the
-    # winners (report a conservative upper bound), stage 3 and confirmation are
-    # fixed by the tier.
+    # Priority-ordered stage sizing: stage 1 is exact; stage 2 is bounded by
+    # the runner's winner cap, stage 3 and confirmation are fixed by the tier.
+    notes: list[str] = []
     stage2_upper = 0
     if tier.include_stage2:
-        stage2_upper = 6  # winner composition + a handful of pairwise probes
+        stage2_upper = 1 + math.comb(STAGE2_MAX_WINNERS, 2)
+        notes.append(
+            f"stage 2 composes at most the top {STAGE2_MAX_WINNERS} stage-1 winners "
+            f"(≤{stage2_upper} composed/pairwise arms)"
+        )
+    # run_confirmation applies the tier's publication_confirm overrides to
+    # EVERY confirmation fit, so all 2×seeds fits are priced at that scale —
+    # there is no separate publication pass.
     confirm_fits = (2 * n_confirmation_seeds) if tier.confirm else 0
-    pub_fits = 2 if (tier.confirm and tier.publication_confirm) else 0
-    min_fits = n_stage1 + confirm_fits + pub_fits
+    min_fits = n_stage1 + confirm_fits
     stage3 = tier.stage3_fits if 3 in tier.stages else 0
-    max_fits_planned = n_stage1 + stage2_upper + stage3 + confirm_fits + pub_fits
+    max_fits_planned = n_stage1 + stage2_upper + stage3 + confirm_fits
     if cfg.max_fits is not None:
         max_fits_planned = min(max_fits_planned, cfg.max_fits)
         # A cap below the baseline truncates the sweep mid-stage-1; the floor
@@ -108,10 +116,11 @@ def build_plan(
     predicted_hours: float | None = None
     predicted_peak: float | None = None
     cost_source = "no prepared data — run splits+features first for a GPU cost estimate"
-    notes: list[str] = []
     if dims is not None:
+        n_confirm_priced = min(confirm_fits, max_fits_planned)
         predicted_hours, predicted_peak, cost_source = _predict_cost(
-            dims, tier, max_fits_planned, calibration_store_path
+            dims, tier, max_fits_planned - n_confirm_priced, n_confirm_priced,
+            calibration_store_path,
         )
     if cfg.budget_hours is not None:
         notes.append(f"budget cap: {cfg.budget_hours:g} GPU-h (stages truncate in priority order)")
@@ -133,9 +142,12 @@ def build_plan(
 def _predict_cost(
     dims: dict[str, int],
     tier: EffortTier,
-    n_fits: int,
+    n_screen_fits: int,
+    n_confirm_fits: int,
     store_path: Path | None,
 ) -> tuple[float, float, str]:
+    """Screening fits priced at tier scale; confirmation fits at the tier's
+    publication_confirm scale when set (run_confirmation applies it to all)."""
     from panelcast.gpu_memory.calibration_store import estimate_with_calibration
     from panelcast.gpu_memory.runtime_predictor import predict_fit_seconds
 
@@ -143,15 +155,18 @@ def _predict_cost(
         tier.num_chains, tier.num_samples, tier.num_warmup, dims["n_observations"],
         transform="offset_logit", store_path=store_path,
     )
-    total_seconds = diag.seconds * n_fits
-    if tier.publication_confirm:
-        pub = predict_fit_seconds(
-            tier.publication_confirm.get("num_chains", tier.num_chains),
-            tier.publication_confirm.get("num_samples", 5000),
-            tier.publication_confirm.get("num_warmup", 5000),
-            dims["n_observations"], transform="offset_logit", store_path=store_path,
-        )
-        total_seconds += pub.seconds * 2
+    total_seconds = diag.seconds * n_screen_fits
+    if n_confirm_fits:
+        if tier.publication_confirm:
+            pub = predict_fit_seconds(
+                tier.publication_confirm.get("num_chains", tier.num_chains),
+                tier.publication_confirm.get("num_samples", 5000),
+                tier.publication_confirm.get("num_warmup", 5000),
+                dims["n_observations"], transform="offset_logit", store_path=store_path,
+            )
+            total_seconds += pub.seconds * n_confirm_fits
+        else:
+            total_seconds += diag.seconds * n_confirm_fits
     estimate, mem_source = estimate_with_calibration(
         store_path,
         n_observations=dims["n_observations"],
@@ -255,6 +270,25 @@ def run_select(
     )
     report_md += "\n" + _render_verdicts(verdicts, rules)
 
+    # Arms that consumed budget (or never ran) but produced no score: the
+    # ranking must not read as coverage of the whole space when it isn't.
+    not_evaluated = sorted(
+        (r for r in ledger.records.values() if r.status != "completed"),
+        key=lambda r: (r.status, r.arm_id),
+    )
+    if not_evaluated:
+        report_md += "\n" + _render_not_evaluated(not_evaluated)
+    report_json["not_evaluated"] = [
+        {
+            "arm": r.arm_id,
+            "knobs": r.knobs,
+            "stage": r.stage,
+            "status": r.status,
+            "error": (r.error or "")[-300:] or None,
+        }
+        for r in not_evaluated
+    ]
+
     # The confirmation candidate is the highest-z arm that clears the promotion
     # bar at SCREENING scale (z + coverage) — convergence is NOT required here,
     # because reduced-sample fits rarely converge and nothing would ever reach
@@ -291,6 +325,8 @@ def run_select(
     return {
         "report_dir": str(report_dir),
         "n_arms_scored": len(scores),
+        "n_arms_not_evaluated": len(not_evaluated),
+        "not_evaluated": dict(Counter(r.status for r in not_evaluated)),
         "promotable": [v.arm for v in verdicts if v.promote],
         "winner_arm": winner.arm if (winner and recommend) else None,
         "confirmed": confirmed,
@@ -305,6 +341,23 @@ def _snapshot_scorer(run_dir: Path, reference_run: Path | None) -> dict:
     ref_nc = (reference_run / "evaluation" / "log_likelihood.nc") if reference_run else None
     score = score_arm(run_dir, arm="_probe", reference_nc=ref_nc)
     return {"z": score.elpd_z, "elpd_diff": score.elpd_diff}
+
+
+def _render_not_evaluated(records) -> str:
+    lines = [
+        "## Not evaluated",
+        "",
+        "These arms produced no score; the ranking above covers completed arms only.",
+        "",
+        "| arm | stage | status | knobs | error (tail) |",
+        "| --- | --- | --- | --- | --- |",
+    ]
+    for r in records:
+        err_lines = (r.error or "").strip().splitlines()
+        tail = err_lines[-1][-200:].replace("|", "\\|") if err_lines else "-"
+        knobs = json.dumps(r.knobs, sort_keys=True, default=str).replace("|", "\\|")
+        lines.append(f"| {r.arm_id} | {r.stage} | {r.status} | {knobs} | {tail} |")
+    return "\n".join(lines) + "\n"
 
 
 def _render_verdicts(verdicts, rules: DecisionRules) -> str:

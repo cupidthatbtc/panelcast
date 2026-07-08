@@ -129,6 +129,35 @@ class TestPairedElpd:
         with pytest.raises(ValueError, match="obs dimensions differ"):
             paired_elpd(nc_a, nc_b)
 
+    def test_self_pairing_is_zero_not_none(self, tmp_path):
+        # The reference paired against its own snapshot: diff identically 0,
+        # dse 0 — an explicit z=0 baseline row, not "unscored".
+        arr = np.random.default_rng(3).normal(-2.0, 0.5, size=(2, 10, 6))
+        nc = _write_loglik(tmp_path / "same.nc", arr)
+        pair = paired_elpd(nc, nc)
+        assert pair.diff == 0.0
+        assert pair.dse == 0.0
+        assert pair.z == 0.0
+        assert "identically zero" in pair.note
+
+    def test_single_observation_pair_is_none_with_note(self, tmp_path):
+        # n=1: var(d, ddof=1) is NaN; z must be None, not NaN (NaN sorts
+        # nondeterministically in rank_arms).
+        nc_a = _write_loglik(tmp_path / "a.nc", np.full((2, 10, 1), -1.0))
+        nc_b = _write_loglik(tmp_path / "b.nc", np.full((2, 10, 1), -2.0))
+        pair = paired_elpd(nc_a, nc_b)
+        assert pair.n == 1
+        assert pair.z is None
+        assert "single observation" in pair.note
+
+    def test_zero_variance_nonzero_diff_is_none_with_note(self, tmp_path):
+        nc_a = _write_loglik(tmp_path / "a.nc", np.full((2, 10, 6), -1.0))
+        nc_b = _write_loglik(tmp_path / "b.nc", np.full((2, 10, 6), -2.0))
+        pair = paired_elpd(nc_a, nc_b)
+        assert pair.z is None
+        assert pair.diff == pytest.approx(6.0)
+        assert "zero variance" in pair.note
+
 
 class TestScoreArm:
     def test_full_run_dir(self, tmp_path):
@@ -207,6 +236,13 @@ class TestScoreArm:
         assert score.wall_clock_seconds == 12.5
         assert score.expected_gb is None
 
+    def test_degenerate_pair_note_propagates(self, tmp_path):
+        run_dir = _make_run_dir(tmp_path, np.full((2, 10, 6), -1.0))
+        ref_nc = _write_loglik(tmp_path / "ref.nc", np.full((2, 10, 6), -1.0))
+        score = score_arm(run_dir, arm="cell", reference_nc=ref_nc)
+        assert score.elpd_z == 0.0
+        assert any("identically zero" in n for n in score.notes)
+
 
 class TestRankArms:
     def test_ordering_and_none_sinking(self):
@@ -282,3 +318,16 @@ class TestRenderReport:
     def test_no_scored_arms_verdict(self):
         md, _ = render_report([ArmScore(arm="only")], "ref")
         assert "nothing is scored against ref" in md
+
+    def test_degenerate_and_missing_caveats_are_distinct(self):
+        # An arm that WAS paired but has no defined z (dse 0) must not be
+        # reported as "no snapshot" — that caveat is for unpaired arms only.
+        scores = [
+            ArmScore(arm="winner", elpd_diff=5.0, elpd_dse=1.0, elpd_z=5.0, converged=True),
+            ArmScore(arm="no_snapshot"),
+            ArmScore(arm="degen", elpd_diff=0.0, elpd_dse=0.0),
+        ]
+        md, _ = render_report(scores, "ref")
+        verdict = md.split("**Verdict:**")[1]
+        assert "No pointwise log-likelihood snapshot for no_snapshot;" in verdict
+        assert "Paired elpd degenerate (z undefined) for degen." in verdict

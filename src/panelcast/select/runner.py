@@ -21,8 +21,9 @@ import random as _random
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -43,6 +44,10 @@ log = structlog.get_logger()
 # of a real exit code, so resume can tell a budget-kill (terminal — never retry)
 # apart from an ordinary crash. Deliberately out of the range of real signals.
 ARM_TIMEOUT_RETURNCODE = -1000
+
+# Stage 2 composes the stage-1 winner set (1 + C(n, 2) arms), so the winner set
+# is capped to keep the fit count within the consented plan's stage-2 ceiling.
+STAGE2_MAX_WINNERS = 3
 
 _FEATURE_STAGES = ["splits", "features", "train", "evaluate"]
 _MODEL_STAGES = ["train", "evaluate"]
@@ -239,6 +244,28 @@ def stage2_arms(
     return arms
 
 
+def stage2_winners(
+    records: Iterable[ArmRecord],
+    winner_z: float,
+    cap: int = STAGE2_MAX_WINNERS,
+) -> list[dict[str, Any]]:
+    """Stage-1 winners for stage 2: top-``cap`` by z, tie-broken by arm id.
+
+    A None z (unscored — missing/failed reference snapshot) is never a winner.
+    The cap keeps the composed+pairwise stage-2 count within the plan's
+    ``1 + C(cap, 2)`` ceiling.
+    """
+    scored: list[tuple[float, str, dict[str, Any]]] = []
+    for r in records:
+        if r.stage != 1 or not r.knobs or r.status != "completed":
+            continue
+        z = (r.score or {}).get("z")
+        if z is not None and z >= winner_z:
+            scored.append((float(z), r.arm_id, r.knobs))
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    return [knobs for _, _, knobs in scored[:cap]]
+
+
 def stage3_arms(
     descriptor: DatasetDescriptor,
     n_arms: int,
@@ -364,6 +391,80 @@ def launch_arm(
     return proc.returncode, tail
 
 
+def _attribution_error(
+    run_dir: Path | None,
+    merged: dict[str, Any],
+    launched_at: datetime,
+    claimed_runs: set[str],
+) -> str | None:
+    """Why the resolved run cannot be this arm's own output (None = attribution holds).
+
+    ``outputs/latest.json`` is a mutable pointer shared with any concurrent
+    ``panelcast run``, and a failed pointer write silently leaves the previous
+    run resolved. Before scoring, check the run's manifest: it must be created
+    after this arm launched, record this arm's knob values (when it records
+    them), and not already belong to another arm of this sweep.
+    """
+    if run_dir is None:
+        return None
+    if str(run_dir) in claimed_runs:
+        return f"attribution failed: {run_dir} already belongs to another arm of this sweep"
+    try:
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return f"attribution failed: no readable manifest at {run_dir}"
+    try:
+        created = datetime.fromisoformat(str(manifest.get("created_at")))
+    except (TypeError, ValueError):
+        return f"attribution failed: unreadable created_at in {run_dir}/manifest.json"
+    if created.tzinfo is not None:
+        created = created.astimezone().replace(tzinfo=None)
+    if created < launched_at - timedelta(seconds=1):
+        return (
+            f"attribution failed: run {run_dir} started at {created.isoformat()}, "
+            "before this arm launched (stale or foreign latest pointer)"
+        )
+    flags = manifest.get("flags")
+    if isinstance(flags, dict):
+        mismatched = sorted(k for k, v in merged.items() if k in flags and flags[k] != v)
+        if mismatched:
+            return "attribution failed: run config disagrees with the arm on " + ", ".join(
+                mismatched
+            )
+    return None
+
+
+def _resolve_attributed_run(
+    merged: dict[str, Any],
+    launched_at: datetime,
+    claimed_runs: set[str],
+) -> tuple[Path | None, str | None]:
+    """Resolve the just-finished run, verify it belongs to this arm, claim it.
+
+    The run_dir is dereferenced (Path.resolve) so the record survives the
+    mutable ``latest`` link re-pointing at later runs.
+    """
+    from panelcast.paths import resolve_latest
+
+    run_dir = resolve_latest()
+    if run_dir is not None:
+        run_dir = Path(run_dir).resolve()
+    problem = _attribution_error(run_dir, merged, launched_at, claimed_runs)
+    if problem is None and run_dir is not None:
+        claimed_runs.add(str(run_dir))
+    return run_dir, problem
+
+
+def _record_launch_failure(record: ArmRecord, code: int, tail: str) -> None:
+    if code == ARM_TIMEOUT_RETURNCODE:
+        record.status = "timeout"
+        log.warning("arm_timeout", arm_id=record.arm_id, returncode=code)
+    else:
+        record.status = "failed"
+        log.warning("arm_failed", arm_id=record.arm_id, returncode=code)
+    record.error = tail[-1500:]
+
+
 def run_sweep(
     cfg: SweepConfig,
     descriptor: DatasetDescriptor,
@@ -378,8 +479,6 @@ def run_sweep(
     real pipeline subprocess and (when the scoring module is present) the
     paired-ELPD scorer against the reference arm's snapshot.
     """
-    from panelcast.paths import resolve_latest
-
     launch = launch or launch_arm
     panelcast_bin = cfg.panelcast_bin or _default_panelcast_bin()
     ledger = SweepLedger(cfg.sweep_dir / "ledger.json")
@@ -405,6 +504,7 @@ def run_sweep(
 
     reference_run: Path | None = None
     cache_signature: str | None = None
+    claimed_runs = {str(r.run_dir) for r in ledger.records.values() if r.run_dir}
 
     def _budget_exhausted() -> str | None:
         if cfg.max_fits is not None and ledger.fits_done() >= cfg.max_fits:
@@ -433,23 +533,25 @@ def run_sweep(
         _write_arm_config(cfg, merged, stages, config_path)
         log.info("arm_start", arm_id=aid, stage=stage, knobs=arm, stages=stages)
         started = time.monotonic()
+        launched_at = datetime.now()
         code, tail = launch(config_path, panelcast_bin, cfg.arm_timeout_seconds)
         record.wall_clock_seconds = time.monotonic() - started
         if code != 0:
-            if code == ARM_TIMEOUT_RETURNCODE:
-                record.status = "timeout"
-                log.warning("arm_timeout", arm_id=aid, returncode=code)
-            else:
-                record.status = "failed"
-                log.warning("arm_failed", arm_id=aid, returncode=code)
-            record.error = tail[-1500:]
+            _record_launch_failure(record, code, tail)
             # The killed/failed run may have half-rebuilt the flat caches; force
             # the next arm to rebuild rather than trust an unknown state.
             cache_signature = None
             ledger.upsert(record)
             return
+        run_dir, problem = _resolve_attributed_run(merged, launched_at, claimed_runs)
+        if problem:
+            record.status = "failed"
+            record.error = problem
+            log.warning("arm_attribution_failed", arm_id=aid, error=problem)
+            cache_signature = None
+            ledger.upsert(record)
+            return
         cache_signature = signature
-        run_dir = resolve_latest()
         record.run_dir = str(run_dir) if run_dir else None
         if not arm and run_dir is not None:
             reference_run = run_dir
@@ -469,14 +571,7 @@ def run_sweep(
         _execute(stage, arm, note)
 
     if cfg.include_stage2:
-        winners = [
-            r.knobs
-            for r in ledger.records.values()
-            if r.stage == 1
-            and r.knobs
-            and r.status == "completed"
-            and (r.score or {}).get("z", float("-inf")) >= cfg.winner_z
-        ]
+        winners = stage2_winners(ledger.records.values(), cfg.winner_z)
         seen = set(ledger.records)
         for arm, note in stage2_arms(winners, descriptor, available_columns, seen):
             reason = _budget_exhausted()

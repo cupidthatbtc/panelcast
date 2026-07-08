@@ -79,12 +79,17 @@ class TestWriteArmConfig:
 
 
 def _fake_env(tmp_path, monkeypatch):
+    from datetime import datetime
+
     counter = {"n": 0}
 
     def launch(config_path, panelcast_bin, timeout_seconds=None):
         counter["n"] += 1
         run_dir = tmp_path / "outputs" / f"run_{counter['n']:03d}"
         run_dir.mkdir(parents=True)
+        (run_dir / "manifest.json").write_text(
+            json.dumps({"created_at": datetime.now().isoformat()}), encoding="utf-8"
+        )
         (tmp_path / "outputs" / "latest.json").write_text(
             json.dumps({"run_dir": run_dir.name}), encoding="utf-8"
         )
@@ -283,7 +288,7 @@ class TestConfirmationConfig:
 
         counter = {"n": 0}
 
-        def launch(config_path, panelcast_bin):
+        def launch(config_path, panelcast_bin, timeout_seconds=None):
             counter["n"] += 1
             run_dir = tmp_path / "outputs" / f"r{counter['n']}"
             ev = run_dir / "evaluation"
