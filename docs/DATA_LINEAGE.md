@@ -86,8 +86,8 @@
 │  │ • Save NetCDF + model manifest                          │           │
 │  │ Input:  data/features/train_features.parquet            │           │
 │  │         data/splits/.../train.parquet                   │           │
-│  │ Output: models/user_score_model/                        │           │
-│  │         models/training_summary.json                    │           │
+│  │ Output: outputs/<run>/models/*.nc                       │           │
+│  │         outputs/<run>/models/training_summary.json      │           │
 │  └─────────────────────────────────┬───────────────────────┘           │
 │                                    │                                    │
 │                                    ▼                                    │
@@ -96,10 +96,10 @@
 │  │ Module: pipelines/evaluate.py                           │           │
 │  │ • Model diagnostics and calibration metrics             │           │
 │  │ • Posterior predictive checks                           │           │
-│  │ Input:  models/user_score_model/                        │           │
+│  │ Input:  outputs/<run>/models/*.nc                       │           │
 │  │         data/features/test_features.parquet             │           │
-│  │ Output: outputs/evaluation/metrics.json                 │           │
-│  │         outputs/evaluation/diagnostics.json             │           │
+│  │ Output: outputs/<run>/evaluation/metrics.json           │           │
+│  │         outputs/<run>/evaluation/diagnostics.json       │           │
 │  └─────────────────────────────────┬───────────────────────┘           │
 │                                    │                                    │
 │                                    ▼                                    │
@@ -109,14 +109,14 @@
 │  │ • Generate publication-quality figures                   │           │
 │  │ • Generate LaTeX/CSV tables                             │           │
 │  │ • Trace plots, forest plots, posterior summaries        │           │
-│  │ Input:  outputs/evaluation/*.json                       │           │
-│  │ Output: reports/figures/                                │           │
-│  │         reports/tables/                                 │           │
+│  │ Input:  outputs/<run>/evaluation/*.json                 │           │
+│  │ Output: outputs/<run>/reports/figures/                  │           │
+│  │         outputs/<run>/reports/tables/                   │           │
 │  └─────────────────────────────────────────────────────────┘           │
 │                                                                         │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
 │  │ FINAL: outputs/{run_id}/manifest.json                              │ │
-│  │        outputs/latest -> symlink to most recent successful run     │ │
+│  │        outputs/latest.json -> the latest successful run            │ │
 │  └────────────────────────────────────────────────────────────────────┘ │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -694,8 +694,8 @@ The `evaluation/calibration.py` module assesses prediction interval calibration:
 
 | Output File | Description |
 |------------|-------------|
-| `outputs/evaluation/metrics.json` | Regression performance metrics |
-| `outputs/evaluation/diagnostics.json` | Convergence diagnostic summary |
+| `outputs/{run_id}/evaluation/metrics.json` | Regression performance metrics |
+| `outputs/{run_id}/evaluation/diagnostics.json` | Convergence diagnostic summary |
 
 ---
 
@@ -734,8 +734,8 @@ The publication pipeline dynamically detects whether the model used sigma-ref re
 
 | Output Directory | Contents |
 |-----------------|----------|
-| `reports/figures/` | PNG/SVG publication figures |
-| `reports/tables/` | LaTeX/CSV tables |
+| `outputs/{run_id}/reports/figures/` | PNG/SVG publication figures |
+| `outputs/{run_id}/reports/tables/` | LaTeX/CSV tables |
 
 ---
 
@@ -1339,16 +1339,19 @@ outputs/
 ├── {run_id}/                       # Timestamped run directory
 │   ├── manifest.json               # RunManifest (Pydantic model)
 │   ├── pipeline.log.json           # Structured JSON logs
-│   └── ... (stage outputs)
-├── latest -> {most_recent_run_id}  # Symlink to latest successful run
+│   ├── models/
+│   │   ├── user_score_{timestamp}.nc  # ArviZ InferenceData (NetCDF)
+│   │   ├── manifest.json              # ModelsManifest (current + history)
+│   │   └── training_summary.json      # Full training summary
+│   ├── evaluation/                 # Metrics, diagnostics, calibration
+│   ├── predictions/                # Next-event prediction CSVs
+│   └── reports/
+│       ├── figures/                # Publication figures
+│       └── tables/                 # LaTeX/CSV tables
+├── latest.json                     # Pointer to latest successful run
 └── failed/
     └── {failed_run_id}/            # Failed runs moved here
         └── manifest.json           # With error field set
-
-models/
-├── user_score_{timestamp}.nc       # ArviZ InferenceData (NetCDF)
-├── manifest.json                   # ModelsManifest (current + history)
-└── training_summary.json           # Full training summary
 
 data/
 ├── raw/
@@ -1377,10 +1380,6 @@ data/
 │   └── manifest.json
 └── audit/
     └── (exclusion audit logs)
-
-reports/
-├── figures/                        # Publication figures
-└── tables/                         # LaTeX/CSV tables
 ```
 
 ---

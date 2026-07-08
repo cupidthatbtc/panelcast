@@ -8,8 +8,8 @@ the same, with that domain's descriptor and dataset path.
 > **Fastest path — no data required.** After installing (Steps 1–3 below), run
 > `panelcast demo`. It runs the whole pipeline end-to-end on the bundled
 > synthetic aerospace example (`examples/aerospace/`) at tiny scale and writes a
-> model card under `reports/` — a one-command way to see every stage execute
-> before wiring up the AOTY dataset. Then `panelcast compare --baselines
+> model card under `outputs/<run_id>/reports/` — a one-command way to see every
+> stage execute before wiring up the AOTY dataset. Then `panelcast compare --baselines
 > --dataset examples/aerospace/descriptor.yaml` prints the baseline benchmark
 > table for that run.
 
@@ -45,10 +45,14 @@ After installation, restart your terminal or run `source ~/.bashrc` (Linux/macOS
 ## Step 3: Install Dependencies
 
 ```bash
-pixi install
+pixi install                  # resolve the locked environment
+pixi run pip install -e .    # install the panelcast package + CLI into it
 ```
 
-This creates a `.pixi` environment with all required packages including JAX, NumPyro, and pandas.
+`pixi install` creates a `.pixi` environment with all required packages
+including JAX, NumPyro, and pandas; the editable install adds the `panelcast`
+package and CLI to that environment. Run subsequent `panelcast ...` commands
+inside the environment (`pixi shell`, or prefix them with `pixi run`).
 
 ## Step 4: Prepare Your Dataset
 
@@ -150,14 +154,17 @@ panelcast run --num-chains 8 --num-samples 2000 --target-accept 0.95 --strict
 
 ## What Happens Next
 
-After a successful run, outputs are saved to:
+After a successful run, outputs are saved to a timestamped run directory,
+with `outputs/latest.json` pointing at the most recent successful run:
 
 | Directory | Contents |
 |-----------|----------|
-| `outputs/` | Run manifests and runtime artifacts (`outputs/<run_id>/manifest.json`) |
-| `outputs/evaluation/` | Evaluation metrics, diagnostics, predictions, calibration payloads |
-| `reports/` | Publication artifacts (figures, tables, model cards) |
-| `data/processed/` | Cleaned datasets |
+| `outputs/<run_id>/` | Run manifest and logs (`manifest.json`, `pipeline.log.json`) |
+| `outputs/<run_id>/models/` | Fitted models (NetCDF), model manifest, training summary |
+| `outputs/<run_id>/evaluation/` | Evaluation metrics, diagnostics, predictions, calibration payloads |
+| `outputs/<run_id>/predictions/` | Next-event prediction CSVs |
+| `outputs/<run_id>/reports/` | Publication artifacts (figures, tables, model card) |
+| `data/processed/` | Cleaned datasets (shared cross-run cache) |
 | `data/features/` | Feature matrices and feature manifest |
 | `data/splits/` | Train/validation/test split manifests |
 
@@ -179,6 +186,7 @@ See [CLI.md](CLI.md) for the complete command reference.
 | Preflight shows insufficient memory | Use `--num-chains 1` or reduce `--num-samples` |
 | MCMC divergences | Try `--num-warmup 2000` or `--target-accept 0.95` |
 | `pixi: command not found` | Restart terminal after pixi installation |
+| `panelcast: command not found` | Run `pixi run pip install -e .` (Step 3), then invoke inside `pixi shell` or via `pixi run panelcast ...` |
 
 For detailed troubleshooting:
 - GPU issues: [GPU_SETUP.md](GPU_SETUP.md)

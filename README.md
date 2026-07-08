@@ -63,9 +63,9 @@ Gaussian random walk; AR(1) event-to-event dependence; heteroscedastic
 observation noise scaled by observation count; non-centered parameterization
 (`LocScaleReparam`) plus a sigma-ref reparameterization to break the
 multiplicative funnel; Student-t likelihood with a soft-clip to the target
-bounds. The default Student-t is one of eight selectable observation families
+bounds. The default Student-t is one of nine selectable observation families
 (`--likelihood-family`: also `normal`, `skew_studentt`, `skew_normal`,
-`split_normal`, `beta`, `mixture`, `beta_binomial`), with an optional
+`split_normal`, `beta`, `mixture`, `beta_binomial`, `beta_ceiling`), with an optional
 integer-aware dequantization toggle. Optional per-entity overdispersion with a
 lognormal variance prior is available behind a gate. Built on
 [NumPyro](https://num.pyro.ai/) / JAX.
@@ -155,7 +155,7 @@ panelcast demo
 columns, switches the score bounds to [0, 10], drops the music-specific feature
 packs, and adds the domain's own numeric covariates — and runs data → splits →
 features → train → evaluate → predict → report, finishing with a generated
-model card under `reports/`. The model code is untouched.
+model card under `outputs/<run_id>/reports/`. The model code is untouched.
 
 The committed CSV is regenerated from the shared synthetic generator with
 `python scripts/generate_aero_example.py`. To benchmark the model against simple
