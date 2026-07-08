@@ -187,6 +187,7 @@ See [CLI.md](CLI.md) for the complete command reference.
 | MCMC divergences | Try `--num-warmup 2000` or `--target-accept 0.95` |
 | `pixi: command not found` | Restart terminal after pixi installation |
 | `panelcast: command not found` | Run `pixi run pip install -e .` (Step 3), then invoke inside `pixi shell` or via `pixi run panelcast ...` |
+| Environment or reproducibility issues (lockfile drift, missing accelerator, stale data stamps, dataset not resolving) | Run `panelcast doctor` — a one-screen, read-only preflight that reports every check `PASS`/`WARN`/`FAIL` with a fix hint (exit 1 on any FAIL) |
 
 For detailed troubleshooting:
 - GPU issues: [GPU_SETUP.md](GPU_SETUP.md)

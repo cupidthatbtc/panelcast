@@ -20,9 +20,11 @@ Data (shared cross-run cache)
 
 Runs
 - outputs/<run_id>/manifest.json
+- outputs/<run_id>/resolved_config.yaml (the fully resolved PipelineConfig for this run; the provenance source `runs reproduce` re-executes from)
 - outputs/<run_id>/dataset_hash.txt
 - outputs/<run_id>/pipeline.log.json
 - outputs/latest.json (pointer to the latest successful run)
+- outputs/failed/<run_id>/failure.json (failed runs only: stage, exception, hint, resume command, and recent events — surfaced by `runs why`)
 
 Models
 - outputs/<run_id>/models/user_score_*.nc (ArviZ InferenceData, NetCDF)
@@ -36,6 +38,7 @@ Evaluation
 - outputs/<run_id>/evaluation/within_entity_temporal/calibration.json
 - outputs/<run_id>/evaluation/entity_disjoint/predictions.json
 - outputs/<run_id>/evaluation/entity_disjoint/calibration.json
+- outputs/<run_id>/evaluation/<split>/ranked_slate.csv (per-row ranked slate: entity, y_true, pred_mean, predicted/expected/realized rank, and one p_top{K} column per usable K)
 
 predictions.json carries parallel per-row arrays. Alongside the legacy keys
 (y_true, y_pred_mean, y_pred_lower, y_pred_upper, residuals) it is identified:
@@ -56,5 +59,17 @@ Reports
 - outputs/<run_id>/reports/artifact_status.json
 - outputs/<run_id>/reports/tables/*.csv
 - outputs/<run_id>/reports/figures/*.png
+- outputs/<run_id>/reports/index.html (self-contained HTML run dashboard; the
+  report stage writes it best-effort and `panelcast report` regenerates it)
 - outputs/<run_id>/reports/MODEL_CARD.md (run-generated; the repo-root
   MODEL_CARD.md is the curated card)
+
+Backtest (`panelcast backtest`)
+- outputs/backtest/<id>/ledger.json (per-origin checkpoint; identity by origin index enables resume)
+- outputs/backtest/<id>/backtest_metrics.json (aggregate: mean/SE/min/max per metric plus per-origin populations)
+- outputs/backtest/<id>/backtest_report.md (rendered aggregate table)
+
+With `conformal_calibration` enabled (default off), `metrics.json` gains a
+`calibration.conformal` block and the next-event CSVs gain `conformal_q05` /
+`conformal_q95` columns; with it off, these artifacts are byte-identical to
+before.
