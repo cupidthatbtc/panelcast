@@ -147,7 +147,8 @@ These features are **enabled by default**. Use these flags to disable them:
 
 | Option | Default | Range | Description |
 |--------|---------|-------|-------------|
-| `--chain-method` | `sequential` | | `sequential`, `vectorized`, or `parallel` (multi-GPU) |
+| `--chain-method` | `sequential` | | `sequential`, `vectorized`, `parallel` (multi-GPU), or `auto` (memory-informed: vectorized when all chains fit the JAX pool budget, else sequential) |
+| `--checkpoint-every` | single-shot | ≥1 | Checkpoint the fit every N post-warmup draws so an interrupted run resumes from the last block (default: a single-shot fit) |
 | `--max-tree-depth` | `10` | 5–15 | Maximum NUTS tree depth |
 | `--likelihood-df` | `4.0` | ≥1.0 | Student-t degrees of freedom; ≥100 ≈ Normal |
 
@@ -157,6 +158,7 @@ These features are **enabled by default**. Use these flags to disable them:
 |--------|---------|-------|-------------|
 | `--val-albums` | `0` | ≥0 | Albums per artist held out for validation (0 = none) |
 | `--min-train-albums` | `2` | ≥1 | Minimum training albums per artist |
+| `--origin-offset` | `0` | ≥0 | Rolling-origin offset k: drop each entity's last k events as future and hold out the (last-k)-th; `0` = the standard split. `panelcast backtest` sweeps this |
 | `--secondary-split` / `--no-secondary-split` | on | | Artist-disjoint secondary evaluation split |
 | `--calibration-intervals` | `0.80,0.95` | | Comma-separated interval levels for calibration checks |
 | `--coverage-tolerance` | `0.03` | ≥0.0 | Allowed absolute coverage error |
@@ -374,11 +376,39 @@ panelcast diagnose [OPTIONS]
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--eval-dir` | | latest run's `evaluation/` | Directory with `diagnostics.json` / `metrics.json` (default: the latest run's `outputs/<run_id>/evaluation/`) |
-| `--output` | `-o` | `reports/diagnostics` | Output directory for the report |
+| `--output` | `-o` | `reports/diagnostics` | Output directory for the report (run-scoped when `--errors` is set) |
+| `--errors` | | `false` | Also decompose per-row errors from the identified predictions payload: full per-row CSV, entity / group / review-count-decile rollup CSVs, and a worst-25 Markdown table per split. Read-only, so it works on any past run whose payload is identified (pre-0.10.0 payloads get a clear re-run message) |
 
 ```bash
 panelcast diagnose
 panelcast diagnose --eval-dir outputs/2026-06-23_192630/evaluation
+panelcast diagnose --errors
+```
+
+---
+
+### `report` — Self-Contained HTML Run Dashboard
+
+Compose a completed run's manifest, metrics, diagnostics, readiness verdicts,
+figures, and coefficient table into a single portable `reports/index.html` that
+renders offline (Plotly.js inlined, PNGs base64). Read-only over existing
+artifacts, so it works on any past run; the report stage of a normal run also
+writes this file best-effort, and this command regenerates it on demand.
+
+```bash
+panelcast report [OPTIONS]
+```
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--run` | | latest run | Run directory to report on |
+| `--output` | `-o` | `<run>/reports/index.html` | Output HTML path |
+| `--interactive` / `--no-interactive` | | on | Interactive Plotly figures (self-contained, ~3–4 MB) vs embedded PNGs from `reports/figures` (smaller, quick shares) |
+
+```bash
+panelcast report
+panelcast report --run outputs/2026-07-08_120000_000000_abcd
+panelcast report --no-interactive -o run_summary.html
 ```
 
 ---
@@ -403,6 +433,7 @@ panelcast select [OPTIONS]
 | `--max-fits` | tier-defined | Hard cap on diagnostic fits (overrides the tier) |
 | `--budget-hours` | | GPU-hour budget; stages truncate in priority order |
 | `--arm-timeout` | `1800` | Per-arm wall-clock timeout in seconds, or `auto` to size each arm's timeout from its predicted runtime (max of an 1800s floor and 3x the transform-aware prediction); a fit exceeding it is killed and marked failed |
+| `--warmup-transfer` | `false` | The reference arm exports its adapted warmup state (mass matrix); screening arms whose model signature matches exactly re-import it and run at reduced warmup. Confirmation fits always run cold |
 | `--sweep-id` | `sweep` | Sweep directory name under `outputs/select/` (enables resume) |
 | `--config` | `configs/select.yaml` | YAML with the rules and effort tiers |
 | `--dry-run` | `false` | Print the enumerated space, staged plan, and predicted cost only |
@@ -410,6 +441,71 @@ panelcast select [OPTIONS]
 ```bash
 panelcast select --dry-run
 panelcast select --dataset examples/aerospace/descriptor.yaml --effort quick
+```
+
+---
+
+### `backtest` — Rolling-Origin Backtest
+
+Run the full leakage-safe stage chain (splits → features → train → evaluate)
+once per rolling origin and report every headline metric as mean ± SE across
+origins (plus min/max), so a headline number is a distribution rather than a
+point. Origin *k* holds out each entity's (last-*k*)-th event and drops
+everything after it; origin 0 is exactly the standard primary split. Each origin
+runs as its own run directory with fresh data stamps, so every leakage control
+holds unchanged and each origin's split content hash is recorded. Deeper origins
+shrink the eligible entity set, so the aggregate table reports `n_test` and
+`n_entities` per origin. A JSON ledger under `outputs/backtest/<id>/` makes a
+killed backtest resumable — rerun the same command and completed origins are
+skipped. Exits `1` while incomplete origins remain.
+
+```bash
+panelcast backtest [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--origins` | `3` | Number of rolling origins K (≥1); origin k holds out each entity's (last-k)-th event |
+| `--backtest-id` | `default` | Ledger/report directory name under the output root; reuse the same id to resume |
+| `--dataset` | built-in AOTY | Dataset descriptor (bare name or YAML path) |
+| `--num-chains` | pipeline default | Chains per origin fit |
+| `--num-samples` | pipeline default | Draws per origin fit |
+| `--num-warmup` | pipeline default | Warmup per origin fit |
+| `--origin-timeout` | none | Per-origin wall-clock timeout in seconds; an origin that exceeds it is killed and marked `timeout` |
+| `--output-root` | `outputs/backtest` | Root directory for backtest ledgers/reports |
+
+Writes `backtest_metrics.json`, `backtest_report.md`, and the resumable
+`ledger.json` under `outputs/backtest/<id>/`.
+
+```bash
+panelcast backtest --origins 3
+panelcast backtest --origins 5 --num-chains 2 --num-samples 500
+panelcast backtest --backtest-id nightly   # rerun the same id to resume
+```
+
+---
+
+### `doctor` — Environment & Reproducibility Preflight
+
+Read-only environment and reproducibility check in one screen: lockfile, package
+versions + exactness fingerprint, accelerator, compile cache, git state, dataset
+resolution, data-root stamps, calibration-store status, and free disk — each
+line `PASS` / `WARN` / `FAIL` with a fix hint on anything that isn't a pass.
+Exits `1` if any check FAILs, so it drops into CI as a gate.
+
+```bash
+panelcast doctor [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--dataset` | current default | Dataset descriptor to check (bare name or YAML path) |
+| `--json` | `false` | Machine-readable output for CI (one object per check); pipeable |
+
+```bash
+panelcast doctor
+panelcast doctor --dataset examples/aerospace/descriptor.yaml
+panelcast doctor --json | jq '.[] | select(.status == "FAIL")'
 ```
 
 ---
@@ -451,6 +547,113 @@ panelcast runs history [OPTIONS]
 |--------|---------|-------------|
 | `--output-dir` | `outputs` | Directory holding the pipeline run directories |
 | `--json` | `false` | Emit machine-readable JSON (groups with `feature_stamp` + `runs`) |
+
+---
+
+### `runs verify` — Check a Run Against Its Manifest
+
+Re-hash a recorded run's entire provenance chain and exit `1` on any mismatch,
+in order: every recorded output hash (`OK` / `MODIFIED` / `MISSING`), every
+recorded raw-input hash, the shared data-root stamps, and the `pixi.lock` hash.
+Data-root stamps protect the shared roots *during* a run; `runs verify` protects
+the whole run directory *after* it, indefinitely. Pre-0.9.0 manifests carried no
+output hashes and are reported as such.
+
+```bash
+panelcast runs verify [RUN_ID] [OPTIONS]
+```
+
+| Argument / Option | Default | Description |
+|-------------------|---------|-------------|
+| `RUN_ID` | `latest` | Run id under `outputs/` or `outputs/failed/` (or `latest`) |
+| `--output-base` | `outputs` | Run directory root |
+
+```bash
+panelcast runs verify                               # verify the latest run
+panelcast runs verify 2026-07-08_120000_000000_abcd
+```
+
+---
+
+### `runs show` — Full Provenance of One Run
+
+Render one run's complete provenance in a single screen: command, seed, dataset
+(with descriptor hash), git commit/branch/dirty state, environment (python/jax/
+numpyro, accelerator, exactness fingerprint, lockfile hash), stage durations,
+recorded/hashed output counts, and the headline metrics + coverage when the run
+completed evaluate.
+
+```bash
+panelcast runs show [RUN_ID] [OPTIONS]
+```
+
+| Argument / Option | Default | Description |
+|-------------------|---------|-------------|
+| `RUN_ID` | `latest` | Run id under `outputs/` or `outputs/failed/` (or `latest`) |
+| `--output-base` | `outputs` | Run directory root |
+
+---
+
+### `runs diff` — Compare Two Runs
+
+Compare two runs with defaults-aware semantics: an output-affecting config delta
+(only flags that actually differ, resolved against the defaults), generic numeric
+metric deltas (B − A) flattened from `metrics.json`, and a run-facts table (seed,
+fingerprint, jax/numpyro, accelerator, lockfile, version). Not-like-for-like
+diffs are called out first — a differing dataset descriptor hash or git commit
+invalidates the metric comparison.
+
+```bash
+panelcast runs diff RUN_A RUN_B [OPTIONS]
+```
+
+| Argument / Option | Default | Description |
+|-------------------|---------|-------------|
+| `RUN_A` | (required) | Left run id (or `latest`) |
+| `RUN_B` | (required) | Right run id (or `latest`) |
+| `--output-base` | `outputs` | Run directory root |
+
+---
+
+### `runs reproduce` — Re-execute a Recorded Run
+
+Re-execute a recorded run from its run directory alone, then compare. The config
+is rebuilt from the run's `resolved_config.yaml` (falling back to the manifest
+flags for pre-0.9.0 runs — weaker provenance). Two guards run before any compute:
+the dataset descriptor must still hash-match the recorded one, and the recorded
+raw inputs must be unchanged on disk, or it aborts (exit `1`). The environment
+fingerprint frames the expectation up front — bit-exact outputs within a matching
+fingerprint, statistical reproduction otherwise — and the post-run comparison
+follows suit (exact output-hash match vs headline-metric deltas). A reproduction
+always runs fresh: never resumes, never skips.
+
+```bash
+panelcast runs reproduce RUN_ID [OPTIONS]
+```
+
+| Argument / Option | Default | Description |
+|-------------------|---------|-------------|
+| `RUN_ID` | (required) | Run id under `outputs/` (or `latest`) |
+| `--output-base` | `outputs` | Run directory root for both the old and new runs |
+
+---
+
+### `runs why` — Explain a Failed Run
+
+Explain a failed run from its `failure.json`: the stage that failed, the
+exception type and message, an actionable hint, the exact resume command, the
+traceback tail, and the last ~10 structured log events. With no argument it picks
+the most recent run under `outputs/failed/`. Pre-0.9.0 failures with no
+`failure.json` fall back to the manifest's error field plus a resume command.
+
+```bash
+panelcast runs why [RUN_ID] [OPTIONS]
+```
+
+| Argument / Option | Default | Description |
+|-------------------|---------|-------------|
+| `RUN_ID` | most recent failed | Failed run id (default: the newest run under `outputs/failed/`) |
+| `--output-base` | `outputs` | Run directory root |
 
 ---
 

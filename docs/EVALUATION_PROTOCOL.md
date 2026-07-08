@@ -8,6 +8,21 @@ Metrics
 - RMSE and MAE
 - Calibration curves and coverage of credible intervals (80% and 95%)
 - CRPS (proper scoring rule for probabilistic regression)
+- Ranking metrics on the held-out slate (`ranking` block in `metrics.json`,
+  `ranked_slate.csv` per split): Spearman/Kendall rank correlation, expected vs
+  realized rank, and P(top-K) for K in {5, 10, 25}, where each P(top-K) carries
+  its own audited reliability curve (binned predicted-vs-realized frequency).
+  Read as descriptive on a single slate (top-K is high-variance) until the
+  rolling-origin backtest supplies multiple slates.
+- Sliced calibration (`calibration.by_slice` in `metrics.json`): empirical
+  coverage per subgroup — genre group, review-count decile, target tercile,
+  training-history bin — each with Wilson 95% CIs and a min-n floor (default 20
+  rows) below which a slice is skipped as noise. Informational, not gating: it
+  surfaces offsetting miscalibration the global coverage gate can hide, and the
+  payload states the expected false-flag count so lone flags are not over-read.
+- Per-row error decomposition (`panelcast diagnose --errors`): entity / group /
+  review-count-decile rollups and a worst-25 table from the identified
+  predictions payload — read-only, no refit.
 
 Cross-validation
 - Primary evaluation: within-entity temporal holdout (last event per entity)
