@@ -84,8 +84,11 @@ chance to auto-fix formatting and imports.
 
 The Python runtime reads its version from the installed package metadata
 (`panelcast.__version__` → `importlib.metadata`), whose source of truth is
-`pyproject.toml`. Bump `version` there, then hand-sync the static metadata that
-no code can read: `pixi.toml`, `CITATION.cff`, and the `MODEL_CARD.md` header.
+`pyproject.toml`. Run `pixi run bump X.Y.Z` to rewrite it together with the
+static copies no code can read — `pixi.toml`, `CITATION.cff` (version +
+date-released), and the `MODEL_CARD.md` header. The CHANGELOG entry stays
+manual, as does `requirements.lock` when `pixi.lock` changed;
+`tests/unit/test_release_metadata.py` fails the build if anything drifts.
 
 ## Reporting issues
 

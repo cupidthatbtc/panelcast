@@ -16,6 +16,8 @@ test-smoke = "pytest tests/ -m smoke"
 # Full tier: slow MCMC + e2e + domain portability (the nightly job)
 test-full = "pytest tests/ -m 'slow or e2e'"
 lint = "ruff check src/"
+# Rewrites every hand-synced version pin: pixi run bump 0.10.0
+bump = "python scripts/bump_version.py"
 # Type-check only the tightened boundary modules (per-module mypy overrides
 # in pyproject.toml re-enable a few codes there).
 typecheck = "mypy src/panelcast/config/gates.py src/panelcast/data/manifests.py src/panelcast/models/bayes/predict.py src/panelcast/pipelines/orchestrator.py"
