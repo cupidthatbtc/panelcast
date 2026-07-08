@@ -125,7 +125,7 @@ def _validate_run_options(
     """Validate the free-form run options, returning the normalized chain method
     and parsed calibration levels. Raises typer.Exit(1) with a message on any
     invalid value (Typer can't express these constraints declaratively)."""
-    valid_chain_methods = ("sequential", "vectorized", "parallel")
+    valid_chain_methods = ("sequential", "vectorized", "parallel", "auto")
     chain_method_normalized = chain_method.lower()
     if chain_method_normalized not in valid_chain_methods:
         typer.echo(
@@ -565,7 +565,10 @@ def run(
         str,
         typer.Option(
             "--chain-method",
-            help="Chain method: 'sequential', 'vectorized', or 'parallel' (multi-GPU)",
+            help=(
+                "Chain method: 'sequential', 'vectorized', 'parallel' (multi-GPU), or "
+                "'auto' (vectorized when the memory estimator says all chains fit in VRAM)"
+            ),
         ),
     ] = "sequential",
     checkpoint_every: Annotated[

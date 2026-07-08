@@ -18,7 +18,7 @@ from typing import Any
 
 import structlog
 
-VALID_CHAIN_METHODS = ("sequential", "vectorized", "parallel")
+VALID_CHAIN_METHODS = ("sequential", "vectorized", "parallel", "auto")
 
 
 def _passthrough(value: Any) -> Any:

@@ -130,3 +130,46 @@ class TestModelAwareAffine:
         )
         assert "local history (offset_logit)" in pred.source
         assert pred.hours == pytest.approx(5788.0 / 3600.0, abs=0.05)
+
+
+class TestChainMethodKeying:
+    """Vectorized wall-clocks must not corrupt sequential rates (#176)."""
+
+    def _tagged(self, seconds: float, chain_method: str | None):
+        record = _record(seconds)
+        if chain_method is not None:
+            record["context"]["chain_method"] = chain_method
+        return record
+
+    def test_vectorized_records_excluded_from_sequential(self, tmp_path):
+        path = _store(
+            tmp_path,
+            [self._tagged(1000.0, "vectorized")] * 3 + [self._tagged(4000.0, "sequential")] * 3,
+        )
+        pred = predict_fit_seconds(4, 1000, 1000, 5000, transform="offset_logit", store_path=path)
+        assert pred.seconds == pytest.approx(4000.0)
+
+    def test_untagged_records_count_as_sequential(self, tmp_path):
+        path = _store(tmp_path, [self._tagged(4000.0, None)] * 3)
+        pred = predict_fit_seconds(4, 1000, 1000, 5000, transform="offset_logit", store_path=path)
+        assert "local history" in pred.source
+        assert pred.seconds == pytest.approx(4000.0)
+
+    def test_vectorized_prediction_uses_vectorized_history(self, tmp_path):
+        path = _store(
+            tmp_path,
+            [self._tagged(1000.0, "vectorized")] * 3 + [self._tagged(4000.0, None)] * 3,
+        )
+        pred = predict_fit_seconds(
+            4, 1000, 1000, 5000, transform="offset_logit", store_path=path,
+            chain_method="vectorized",
+        )
+        assert pred.seconds == pytest.approx(1000.0)
+
+    def test_vectorized_cold_start_falls_back_to_anchor(self, tmp_path):
+        path = _store(tmp_path, [self._tagged(4000.0, "sequential")] * 3)
+        pred = predict_fit_seconds(
+            4, 1000, 1000, 5000, transform="offset_logit", store_path=path,
+            chain_method="vectorized",
+        )
+        assert "cold-start" in pred.source

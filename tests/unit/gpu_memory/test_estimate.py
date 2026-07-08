@@ -445,3 +445,33 @@ class TestGatedVectorSites:
             num_warmup=100,
         )
         assert result.num_chains == 7
+
+
+class TestVectorizedChainMethod:
+    """Vectorized chains hold every chain's live state simultaneously (#176)."""
+
+    def _estimate(self, chain_method: str, num_chains: int = 4):
+        from panelcast.gpu_memory.estimate import estimate_memory_gb
+
+        return estimate_memory_gb(
+            n_observations=40000,
+            n_features=32,
+            n_artists=900,
+            max_seq=30,
+            num_chains=num_chains,
+            num_samples=1000,
+            num_warmup=1000,
+            chain_method=chain_method,
+        )
+
+    def test_vectorized_scales_live_state_not_collection(self):
+        seq = self._estimate("sequential")
+        vec = self._estimate("vectorized")
+        assert vec.base_model_gb > seq.base_model_gb
+        assert vec.per_chain_gb == seq.per_chain_gb
+        assert vec.total_gb > seq.total_gb
+
+    def test_single_chain_vectorized_matches_sequential(self):
+        seq = self._estimate("sequential", num_chains=1)
+        vec = self._estimate("vectorized", num_chains=1)
+        assert vec.total_gb == seq.total_gb

@@ -133,6 +133,7 @@ def estimate_memory_gb(
     n_groups: int = 0,
     collection_overhead_factor: float = COLLECTION_OVERHEAD_FACTOR,
     fixed_overhead_gb: float = FIXED_OVERHEAD_GB,
+    chain_method: str = "sequential",
 ) -> MemoryEstimate:
     """Estimate GPU memory for MCMC run.
 
@@ -173,6 +174,12 @@ def estimate_memory_gb(
         entity_group_pooling: Group-pooling gate; adds an n_groups-sized
             latent (never excluded; negligible, included for completeness).
         n_groups: Group count for the entity_group_pooling term.
+        chain_method: "vectorized" runs all chains as one batched program, so
+            the live leapfrog state (params + grads/momentum) is per-chain
+            simultaneous — that term scales with num_chains. The collected-draw
+            factor is deliberately KEPT at the sequential-measured value until a
+            vectorized ladder is measured (never-under invariant: the factor
+            covers the end-of-run concat copy either way).
 
     Returns:
         MemoryEstimate with breakdown of memory components.
@@ -213,10 +220,11 @@ def estimate_memory_gb(
     )
 
     # Base model memory: parameters + gradients/momentum/state (~3x params)
-    # + feature matrix X + fixed JIT/runtime overhead.
+    # + feature matrix X + fixed JIT/runtime overhead. Vectorized chains hold
+    # every chain's live state simultaneously.
+    live_chains = num_chains if chain_method == "vectorized" else 1
     base_bytes = (
-        n_params * bytes_per_float
-        + n_params * bytes_per_float * 3
+        n_params * bytes_per_float * 4 * live_chains
         + n_observations * n_features * bytes_per_float
     )
     base_gb = base_bytes / gib + fixed_overhead_gb
