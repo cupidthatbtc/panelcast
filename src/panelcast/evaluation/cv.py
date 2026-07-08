@@ -213,6 +213,8 @@ def compute_loo(
         variable in the log_likelihood group.
     pointwise : bool, default True
         If True, compute pointwise LOO values (needed for diagnostics).
+        When False, az.loo returns no Pareto-k values, so the diagnostic
+        fields come back empty (n_high_pareto_k=0, no indices).
 
     Returns
     -------
@@ -253,10 +255,13 @@ def compute_loo(
     # Compute LOO
     loo_data = az.loo(idata, var_name=var_name, pointwise=pointwise)
 
-    # Extract Pareto-k values and identify problematic observations
-    pareto_k = loo_data.pareto_k.values
-    high_k_mask = pareto_k > 0.7
-    high_pareto_k_indices = np.where(high_k_mask)[0]
+    # Pareto-k values only exist on the pointwise result; without them the
+    # diagnostics are empty rather than an AttributeError.
+    pareto_k = getattr(loo_data, "pareto_k", None) if pointwise else None
+    if pareto_k is not None:
+        high_pareto_k_indices = np.where(np.asarray(pareto_k) > 0.7)[0]
+    else:
+        high_pareto_k_indices = np.array([], dtype=int)
     n_high_pareto_k = len(high_pareto_k_indices)
 
     # Extract warning if present
