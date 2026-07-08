@@ -161,8 +161,8 @@ with `outputs/latest.json` pointing at the most recent successful run:
 |-----------|----------|
 | `outputs/<run_id>/` | Run manifest and logs (`manifest.json`, `pipeline.log.json`) |
 | `outputs/<run_id>/models/` | Fitted models (NetCDF), model manifest, training summary |
-| `outputs/<run_id>/evaluation/` | Evaluation metrics, diagnostics, predictions, calibration payloads |
-| `outputs/<run_id>/predictions/` | Next-event prediction CSVs |
+| `outputs/<run_id>/evaluation/` | Held-out evaluation payloads (`metrics.json`, `diagnostics.json`, `predictions.json`, calibration) |
+| `outputs/<run_id>/predictions/` | Next-event prediction CSVs (forward forecasts, distinct from the held-out evaluation payloads above) |
 | `outputs/<run_id>/reports/` | Publication artifacts (figures, tables, model card) |
 | `data/processed/` | Cleaned datasets (shared cross-run cache) |
 | `data/features/` | Feature matrices and feature manifest |

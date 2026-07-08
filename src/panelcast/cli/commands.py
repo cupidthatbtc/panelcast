@@ -270,8 +270,14 @@ def compare(
         "--dataset",
         help="Dataset descriptor (bare name or YAML path; omit for AOTY defaults).",
     ),
-    output_dir: str = typer.Option(
-        "reports/baselines", "--output", "-o", help="Directory for the comparison artifacts."
+    output_dir: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help=(
+            "Directory for the comparison artifacts. Default: the latest run's "
+            "reports/baselines dir (flat reports/baselines when no run exists)."
+        ),
     ),
     num_samples: int = typer.Option(
         1000, "--num-samples", min=2, help="Predictive samples per baseline for interval scoring."
@@ -318,7 +324,7 @@ def compare(
             dataset=dataset,
             n_samples=num_samples,
             seed=seed,
-            output_dir=Path(output_dir),
+            output_dir=Path(output_dir) if output_dir is not None else None,
             include_bayes=include_bayes,
             metrics_path=Path(metrics) if metrics is not None else None,
         )

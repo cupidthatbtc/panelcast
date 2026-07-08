@@ -12,8 +12,8 @@
 
 This page states, in the open, **where the hierarchical Bayesian model actually
 sits against simple baselines** — because that placement is the honest argument for
-what the model is *for*. (`reports/baselines/` is gitignored, so the generated
-table is otherwise invisible in the repo.)
+what the model is *for*. (The generated table lands under the gitignored
+`outputs/<run_id>/reports/baselines/`, so it is otherwise invisible in the repo.)
 
 ## Within-entity temporal holdout — predict an entity's next event (N = 653)
 
@@ -123,11 +123,12 @@ gradient, not the single number.
 
 ```bash
 panelcast run --stages splits,features   # if the split/feature artifacts aren't present
-panelcast compare --baselines            # writes reports/baselines/ (gitignored)
+panelcast compare --baselines            # writes <latest run>/reports/baselines/ (gitignored;
+                                         # flat reports/baselines/ when no run exists)
 ```
 
-`reports/` is gitignored (large, regenerable), so this page is the curated,
-version-controlled copy. The committed snapshot of the model's own evaluation lives
+Both `outputs/` and flat `reports/` are gitignored (large, regenerable), so this
+page is the curated, version-controlled copy. The committed snapshot of the model's own evaluation lives
 at `.audit/baseline_metrics.json`, regenerated from the current default model
 (`user_score_20260703_121349.nc`, the 2026-07-03 re-baseline under the 0.6.0
 defaults: `offset_logit`, `gbm_offset`, genre pooling auto-on).

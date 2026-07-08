@@ -347,7 +347,7 @@ panelcast compare --baselines [OPTIONS]
 |--------|-------|---------|-------------|
 | `--baselines` | | `false` | Run the baseline benchmark (required to do anything) |
 | `--dataset` | | built-in AOTY | Dataset descriptor (bare name or YAML path) |
-| `--output` | `-o` | `reports/baselines` | Output directory |
+| `--output` | `-o` | latest run's `reports/baselines` | Output directory (default: the latest run's `outputs/<run_id>/reports/baselines`; flat `reports/baselines` when no run exists) |
 | `--num-samples` | | `1000` | Predictive samples per baseline for interval scoring |
 | `--seed` | | `0` | Random seed for predictive sampling |
 | `--bayes` / `--no-bayes` | | on | Append the current model's metrics from the `--metrics` file |
