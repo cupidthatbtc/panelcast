@@ -57,6 +57,7 @@ panelcast run [OPTIONS]
 | `--skip-existing` | | `false` | Skip stages with unchanged inputs |
 | `--stages` | `-s` | all | Comma-separated stages (e.g., `data,splits,train`) |
 | `--resume` | | | Resume failed run by run-id (e.g., `2026-01-19_143052`) |
+| `--tag` | | | Free-form label recorded in the run manifest (shown by `runs history`) |
 
 #### Preflight Memory Check Options
 
@@ -426,6 +427,30 @@ panelcast runs list [OPTIONS]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--output-dir` | `outputs` | Directory holding the pipeline run directories |
+
+---
+
+### `runs history` — Cross-Run Metrics History
+
+Show one row per successful run that completed evaluate: version, `--tag`
+label, sampler settings (`chains x samples`), headline metrics (MAE, RMSE,
+R², CRPS, coverage@80/95, WIS, elpd-per-obs), and wall-clock. Rows are
+grouped by the feature stamp the metrics were computed against — a stamp
+change renders as an explicit epoch break, and drift is only ever flagged
+within an epoch. Within an epoch a metric cell is flagged `*` when a
+coverage level moves more than the coverage tolerance (default 0.03) vs the
+epoch's best-MAE run, or when MAE / elpd-per-obs regress more than 2% vs
+the epoch best. Corrupt manifests and dry runs are skipped; runs from older
+versions render `?` for the missing version.
+
+```bash
+panelcast runs history [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--output-dir` | `outputs` | Directory holding the pipeline run directories |
+| `--json` | `false` | Emit machine-readable JSON (groups with `feature_stamp` + `runs`) |
 
 ---
 

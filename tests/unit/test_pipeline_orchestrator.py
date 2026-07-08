@@ -1719,3 +1719,61 @@ class TestHandleFailureExistingFailedDir:
         assert moved.exists()
         assert (moved / "new.txt").exists()  # the fresh run replaced the stale failed dir
         assert not (moved / "old.txt").exists()
+
+
+class TestRunTagAndVersionProvenance:
+    """--tag and the package version round-trip through the run manifest."""
+
+    def _setup(self, tmp_path, monkeypatch, **config_kwargs):
+        from panelcast.pipelines.manifest import EnvironmentInfo
+        from panelcast.utils.git_state import GitState
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.capture_git_state",
+            lambda: GitState(commit="abc", branch="test", dirty=False, untracked_count=0),
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.capture_environment",
+            lambda: EnvironmentInfo(
+                python_version="3.11.0",
+                jax_version="0.4.0",
+                numpyro_version=None,
+                arviz_version=None,
+                platform="Test",
+                pixi_lock_hash=None,
+            ),
+        )
+        orch = PipelineOrchestrator(PipelineConfig(**config_kwargs), output_base=tmp_path)
+        orch._setup_run()
+        return orch
+
+    def test_tag_and_version_saved_and_loaded(self, tmp_path, monkeypatch):
+        from panelcast import __version__
+        from panelcast.pipelines.manifest import load_run_manifest
+
+        orch = self._setup(tmp_path, monkeypatch, tag="exp-1")
+        loaded = load_run_manifest(orch.run_dir / "manifest.json")
+        assert loaded.tag == "exp-1"
+        assert loaded.version == __version__
+        assert "--tag exp-1" in loaded.command
+
+    def test_tag_defaults_to_none_and_stays_out_of_command(self, tmp_path, monkeypatch):
+        from panelcast.pipelines.manifest import load_run_manifest
+
+        orch = self._setup(tmp_path, monkeypatch)
+        loaded = load_run_manifest(orch.run_dir / "manifest.json")
+        assert loaded.tag is None
+        assert "--tag" not in loaded.command
+
+    def test_legacy_manifest_without_version_loads(self, tmp_path, monkeypatch):
+        from panelcast.pipelines.manifest import load_run_manifest
+
+        orch = self._setup(tmp_path, monkeypatch)
+        manifest_path = orch.run_dir / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        del payload["version"]
+        del payload["tag"]
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        loaded = load_run_manifest(manifest_path)
+        assert loaded.version is None
+        assert loaded.tag is None
