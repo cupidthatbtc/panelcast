@@ -35,7 +35,8 @@ Reproducibility notes
 Expected outputs
 - `data/processed/*`
 - `data/features/*`
-- `outputs/<run_id>/*` (run manifests)
-- `outputs/evaluation/*`
-- `reports/tables/*`
-- `reports/figures/*`
+- `outputs/<run_id>/*` (run manifest, models, evaluation, predictions, reports)
+- `outputs/<run_id>/evaluation/*`
+- `outputs/<run_id>/reports/tables/*`
+- `outputs/<run_id>/reports/figures/*`
+- `outputs/latest.json` (pointer to the latest successful run)
