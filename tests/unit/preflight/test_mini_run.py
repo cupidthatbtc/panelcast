@@ -1428,3 +1428,76 @@ class TestSubprocessNewFlagErrors:
         assert rc == 1
         assert output["success"] is False
         assert "--chain-method must be" in output["error"]
+
+
+class TestExcludeCollectionPrefixGuard:
+    """Foreign-prefix exclusions fail loudly instead of silently matching
+    nothing (NumPyro ignores unknown ~z. extra fields)."""
+
+    def test_foreign_prefix_exclusion_raises(self, minimal_model_args):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(minimal_model_args, f)
+            temp_path = Path(f.name)
+        try:
+            with pytest.raises(ValueError, match="do not match model prefix 'perf'"):
+                run_and_measure(temp_path, prefix="perf", exclude_collection=("user_rw_raw",))
+        finally:
+            temp_path.unlink()
+
+    @mock.patch("panelcast.gpu_memory.measure.get_jax_memory_stats")
+    @mock.patch("numpyro.infer.MCMC")
+    @mock.patch("numpyro.infer.NUTS")
+    @mock.patch("panelcast.models.bayes.model.make_score_model")
+    def test_matching_prefix_exclusion_accepted(
+        self, mock_make_model, mock_nuts, mock_mcmc_class, mock_get_stats, minimal_model_args
+    ):
+        mock_make_model.return_value = "model"
+        mock_nuts.return_value = "nuts_kernel"
+        mock_mcmc = mock.Mock()
+        mock_mcmc_class.return_value = mock_mcmc
+        mock_stats = mock.Mock()
+        mock_stats.peak_bytes_in_use = 1024
+        mock_stats.peak_gb = 0.0
+        mock_get_stats.return_value = mock_stats
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(minimal_model_args, f)
+            temp_path = Path(f.name)
+        try:
+            result = run_and_measure(temp_path, prefix="perf", exclude_collection=("perf_rw_raw",))
+            assert result["success"] is True
+            assert mock_mcmc.run.call_args[1]["extra_fields"] == ("~z.perf_rw_raw",)
+        finally:
+            temp_path.unlink()
+
+
+class TestLikelihoodDfConsumed:
+    """likelihood_df in the args JSON reaches the model (it used to be
+    silently dropped by the key whitelist)."""
+
+    @mock.patch("panelcast.gpu_memory.measure.get_jax_memory_stats")
+    @mock.patch("numpyro.infer.MCMC")
+    @mock.patch("numpyro.infer.NUTS")
+    @mock.patch("panelcast.models.bayes.model.make_score_model")
+    def test_likelihood_df_forwarded_to_model(
+        self, mock_make_model, mock_nuts, mock_mcmc_class, mock_get_stats, minimal_model_args
+    ):
+        mock_make_model.return_value = "model"
+        mock_nuts.return_value = "nuts_kernel"
+        mock_mcmc = mock.Mock()
+        mock_mcmc_class.return_value = mock_mcmc
+        mock_stats = mock.Mock()
+        mock_stats.peak_bytes_in_use = 1024
+        mock_stats.peak_gb = 0.0
+        mock_get_stats.return_value = mock_stats
+
+        args = {**minimal_model_args, "likelihood_df": 7.5}
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(args, f)
+            temp_path = Path(f.name)
+        try:
+            result = run_and_measure(temp_path)
+            assert result["success"] is True
+            assert mock_mcmc.run.call_args[1]["likelihood_df"] == 7.5
+        finally:
+            temp_path.unlink()

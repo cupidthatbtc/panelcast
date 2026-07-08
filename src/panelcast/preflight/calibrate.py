@@ -124,6 +124,10 @@ def run_calibration(
     model_signature: dict[str, Any] | None = None,
     exclude_collection: tuple[str, ...] = (),
     num_chains: int = 1,
+    model_prefix: str = "user",
+    target_transform: str = "identity",
+    chain_method: str = "sequential",
+    entity_group_pooling: bool = False,
 ) -> CalibrationResult:
     """Run two-point calibration for memory extrapolation.
 
@@ -149,6 +153,14 @@ def run_calibration(
             calibration measures the structure it projects for).
         num_chains: Chain count of the production run being projected
             (calibration mini-runs use the same count).
+        model_prefix: Posterior-site prefix of the production model (the
+            descriptor's model_prefix); the mini-runs build the same model.
+        target_transform: Target transform of the production run; the
+            mini-runs train on the same scale.
+        chain_method: NumPyro chain_method of the production run
+            ("sequential" or "vectorized").
+        entity_group_pooling: Whether the production run pools entities by
+            group (model_args must carry group_idx_by_artist / n_groups).
 
     Returns:
         CalibrationResult with fixed_overhead_gb, per_sample_gb, and
@@ -173,9 +185,16 @@ def run_calibration(
         model_signature = derive_model_signature(model_args)
         if exclude_collection:
             model_signature["exclude_from_collection"] = sorted(exclude_collection)
-    # The chain count changes what the calibration measures; key the cache
-    # on it regardless of where the signature came from.
-    model_signature = {**model_signature, "num_chains": num_chains}
+    # These change what the calibration measures; key the cache on them
+    # regardless of where the signature came from.
+    model_signature = {
+        **model_signature,
+        "num_chains": num_chains,
+        "model_prefix": model_prefix,
+        "target_transform": target_transform,
+        "chain_method": chain_method,
+        "entity_group_pooling": entity_group_pooling,
+    }
 
     start_time = time.perf_counter()
 
@@ -192,7 +211,11 @@ def run_calibration(
                 num_warmup=10,
                 num_samples=num_samples,
                 num_chains=num_chains,
+                prefix=model_prefix,
                 exclude_collection=exclude_collection,
+                target_transform=target_transform,
+                chain_method=chain_method,
+                entity_group_pooling=entity_group_pooling,
             )
 
             if not result.get("success", False):

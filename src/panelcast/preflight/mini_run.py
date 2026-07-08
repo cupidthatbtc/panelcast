@@ -19,6 +19,7 @@ The model_args.json file should contain:
     - n_reviews: Optional list of floats (per-observation review counts)
     - n_exponent: Optional float (heteroscedastic exponent)
     - learn_n_exponent: Optional bool (whether to sample exponent)
+    - likelihood_df: Optional float (Student-t degrees of freedom)
     - target_bounds: Optional [low, high] score bounds (default [0, 100]);
       consumed by --target-transform offset_logit
     - group_idx_by_artist / n_groups: Optional per-entity group indices and
@@ -138,13 +139,15 @@ def run_and_measure(
         "max_seq": args_json["max_seq"],
     }
 
-    # Optional heteroscedastic parameters
+    # Optional heteroscedastic / likelihood parameters
     if "n_reviews" in args_json:
         model_args["n_reviews"] = jnp.array(args_json["n_reviews"], dtype=jnp.float32)
     if "n_exponent" in args_json:
         model_args["n_exponent"] = args_json["n_exponent"]
     if "learn_n_exponent" in args_json:
         model_args["learn_n_exponent"] = args_json["learn_n_exponent"]
+    if "likelihood_df" in args_json:
+        model_args["likelihood_df"] = float(args_json["likelihood_df"])
 
     if entity_group_pooling:
         missing_group = [k for k in ("group_idx_by_artist", "n_groups") if k not in args_json]
@@ -174,6 +177,16 @@ def run_and_measure(
             target_transform, entity_group_pooling=entity_group_pooling
         )
         model_args["target_bounds"] = target_bounds
+
+    # All model sites are "{prefix}_..."; an exclusion naming another prefix
+    # would silently match nothing in NumPyro, so the calibration would
+    # measure WITH the dominant collection term while production excludes it.
+    foreign_sites = [s for s in exclude_collection if not s.startswith(f"{prefix}_")]
+    if foreign_sites:
+        raise ValueError(
+            f"exclude_collection sites {foreign_sites} do not match model "
+            f"prefix '{prefix}'; the exclusion would be a silent no-op"
+        )
 
     # Create NUTS kernel for the requested score-model prefix ("user" default
     # is consistent with CLI default behavior, most common use case)

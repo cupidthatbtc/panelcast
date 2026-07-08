@@ -495,6 +495,10 @@ def run_extrapolated_preflight_check(
     model_signature: dict | None = None,
     exclude_collection: tuple[str, ...] = (),
     num_chains: int = 1,
+    model_prefix: str = "user",
+    target_transform: str = "identity",
+    chain_method: str = "sequential",
+    entity_group_pooling: bool = False,
 ) -> ExtrapolationResult:
     """Run preflight check with calibration and extrapolation to target samples.
 
@@ -538,6 +542,15 @@ def run_extrapolated_preflight_check(
         num_chains: Chain count of the production run. Calibration runs at
             this count — sequential chains accumulate collected draws, so a
             1-chain calibration under-projects multi-chain runs.
+        model_prefix: Posterior-site prefix of the production model; the
+            calibration mini-runs build the same model (and the exclusion
+            site names must carry this prefix).
+        target_transform: Target transform of the production run, mirrored
+            in the calibration mini-runs.
+        chain_method: NumPyro chain_method of the production run
+            ("sequential" or "vectorized").
+        entity_group_pooling: Whether the production run pools entities by
+            group (model_args must carry group_idx_by_artist / n_groups).
 
     Returns:
         ExtrapolationResult with status based on projected memory vs available.
@@ -611,10 +624,17 @@ def run_extrapolated_preflight_check(
         model_signature = derive_model_signature(model_args)
         if exclude_collection:
             model_signature["exclude_from_collection"] = sorted(exclude_collection)
-    # The chain count changes what the calibration measures; key the cache
-    # on it regardless of where the signature came from (must match the
-    # signature run_calibration stores under).
-    model_signature = {**model_signature, "num_chains": num_chains}
+    # These change what the calibration measures; key the cache on them
+    # regardless of where the signature came from (must match the signature
+    # run_calibration stores under).
+    model_signature = {
+        **model_signature,
+        "num_chains": num_chains,
+        "model_prefix": model_prefix,
+        "target_transform": target_transform,
+        "chain_method": chain_method,
+        "entity_group_pooling": entity_group_pooling,
+    }
     config_hash = compute_config_hash(
         derived_obs,
         derived_artists,
@@ -641,6 +661,10 @@ def run_extrapolated_preflight_check(
                 model_signature=model_signature,
                 exclude_collection=exclude_collection,
                 num_chains=num_chains,
+                model_prefix=model_prefix,
+                target_transform=target_transform,
+                chain_method=chain_method,
+                entity_group_pooling=entity_group_pooling,
             )
         except CalibrationError as e:
             return ExtrapolationResult(

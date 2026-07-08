@@ -170,6 +170,21 @@ def _validate_run_options(
     return chain_method_normalized, calibration_levels
 
 
+def _resolve_preflight_group_pooling(config, descriptor, features_path, splits_path) -> bool:
+    """Resolve the tri-state pooling gate the way the training stage does, so
+    the preflight mirrors the production model structure."""
+    import pyarrow.parquet as pq
+
+    from panelcast.pipelines.train_bayes import resolve_entity_group_pooling
+
+    train_columns = set(pq.read_schema(splits_path).names) | set(
+        pq.read_schema(features_path).names
+    )
+    return resolve_entity_group_pooling(
+        getattr(config, "entity_group_pooling", None), descriptor, train_columns
+    )
+
+
 def _run_full_preflight(
     config, *, recalibrate: bool, preflight_only: bool, force_run: bool
 ) -> None:
@@ -212,12 +227,17 @@ def _run_full_preflight(
 
     preflight_descriptor = load_descriptor(config.dataset)
 
+    effective_group_pooling = _resolve_preflight_group_pooling(
+        config, preflight_descriptor, features_path, splits_path
+    )
+
     # Load data and build model_args using shared function
     model_args, _, _ = load_training_data(
         features_path=features_path,
         splits_path=splits_path,
         min_albums_filter=config.min_albums_filter,
         descriptor=preflight_descriptor,
+        entity_group_pooling=effective_group_pooling,
     )
 
     # Remove artist_album_counts (not needed for preflight)
@@ -228,15 +248,16 @@ def _run_full_preflight(
     model_args["album_seq"] = np.clip(album_seq, 1, config.max_albums)
     model_args["max_seq"] = config.max_albums
 
-    # Add heteroscedastic params (use effective-config values)
+    # Add heteroscedastic/likelihood params (use effective-config values;
+    # the mini-run consumes all three) and the domain's score bounds for the
+    # mini-run's forward transform.
     model_args["n_exponent"] = config.n_exponent
     model_args["learn_n_exponent"] = config.learn_n_exponent
     model_args["likelihood_df"] = config.likelihood_df
+    model_args["target_bounds"] = tuple(preflight_descriptor.target_bounds)
 
     # Use shared dimension derivation for consistent validation
-    n_observations, n_artists_dim, n_features, _ = _derive_dimensions_from_model_args(
-        model_args
-    )
+    n_observations, n_artists_dim, n_features, _ = _derive_dimensions_from_model_args(model_args)
 
     # Target is POST-WARMUP samples per chain: warmup draws are never
     # stored (measured: identical peaks at warmup 50 vs 250), and the
@@ -250,6 +271,9 @@ def _run_full_preflight(
         if not recalibrate
         else "[bold blue]Running fresh calibration...[/bold blue]"
     )
+    # Config-file-only gates (no CLI flags); read like train_bayes reads ctx.
+    eiv_gate = bool(getattr(config, "errors_in_variables", False))
+    entity_obs_gate = bool(getattr(config, "heteroscedastic_entity_obs", False))
     # Structural gates for the calibration cache key: a calibration must
     # never serve projections for a structurally different model.
     model_signature = {
@@ -262,6 +286,9 @@ def _run_full_preflight(
         "likelihood_family": config.likelihood_family,
         "discretize_observation": config.discretize_observation,
         "exclude_rw_raw_from_collection": config.exclude_rw_raw_from_collection,
+        "errors_in_variables": eiv_gate,
+        "heteroscedastic_entity_obs": entity_obs_gate,
+        "entity_group_pooling": effective_group_pooling,
     }
     # Mirror the production fit's memory gate in the calibration runs:
     # with the rw_raw exclusion on, the dominant memory term disappears
@@ -270,6 +297,29 @@ def _run_full_preflight(
         (f"{preflight_descriptor.model_prefix}_rw_raw",)
         if config.exclude_rw_raw_from_collection
         else ()
+    )
+    # The mini-run model cannot express these gates, so the calibration
+    # measures a smaller model and the projection understates the gated
+    # memory terms (EIV adds an n_obs-sized latent per collected draw).
+    unmirrored_gates = [
+        flag
+        for flag, on in (
+            ("errors_in_variables", eiv_gate),
+            ("heteroscedastic_entity_obs", entity_obs_gate),
+        )
+        if on
+    ]
+    if unmirrored_gates:
+        console.print(
+            "[bold yellow]Warning:[/bold yellow] --preflight-full cannot mirror "
+            f"{', '.join(unmirrored_gates)} in the calibration mini-run; the "
+            "projection understates the gated memory terms. Prefer --preflight "
+            "(which models these gates) or keep extra headroom."
+        )
+    # NumPyro degrades 'parallel' to sequential on a single device, which is
+    # the case the mini-run measures.
+    preflight_chain_method = (
+        config.chain_method if config.chain_method in ("sequential", "vectorized") else "sequential"
     )
 
     with console.status(progress_msg):
@@ -288,6 +338,10 @@ def _run_full_preflight(
             model_signature=model_signature,
             exclude_collection=preflight_exclude_collection,
             num_chains=config.num_chains,
+            model_prefix=preflight_descriptor.model_prefix,
+            target_transform=config.target_transform,
+            chain_method=preflight_chain_method,
+            entity_group_pooling=effective_group_pooling,
         )
 
     render_extrapolation_result(full_result, verbose=config.verbose)
@@ -326,9 +380,7 @@ def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> No
     # Mirror the orchestrator's resolution so the preflight reads the same
     # threshold a default run would use.
     effective_min_ratings = (
-        config.min_ratings
-        if config.min_ratings is not None
-        else quick_descriptor.primary_min_obs
+        config.min_ratings if config.min_ratings is not None else quick_descriptor.primary_min_obs
     )
 
     # Extract actual data dimensions (graceful fallback to defaults)
@@ -338,6 +390,8 @@ def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> No
         descriptor=quick_descriptor,
     )
 
+    # entity_group_pooling is not modeled here: n_groups is unknown before
+    # the data stages run, and the term is a few floats per group.
     result = run_preflight_check(
         n_observations=dimensions.n_observations,
         n_features=QUICK_PREFLIGHT_FEATURES,  # Features built from columns, not counted
@@ -347,6 +401,8 @@ def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> No
         num_samples=config.num_samples,
         num_warmup=config.num_warmup,
         exclude_rw_raw_from_collection=config.exclude_rw_raw_from_collection,
+        errors_in_variables=bool(getattr(config, "errors_in_variables", False)),
+        heteroscedastic_entity_obs=bool(getattr(config, "heteroscedastic_entity_obs", False)),
     )
 
     render_preflight_result(result, verbose=config.verbose, dimensions=dimensions)

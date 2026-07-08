@@ -1064,11 +1064,17 @@ class TestPreflightFull:
         }
         monkeypatch.setattr(
             "panelcast.pipelines.train_bayes.load_training_data",
-            lambda features_path, splits_path, min_albums_filter, descriptor=None: (
+            lambda **kwargs: (
                 dict(fake_model_args),
                 MagicMock(),
                 MagicMock(),
             ),
+        )
+
+        # Gate resolution reads parquet schemas; the dummy files are not parquet
+        monkeypatch.setattr(
+            "panelcast.cli.run._resolve_preflight_group_pooling",
+            lambda config, descriptor, features_path, splits_path: False,
         )
 
         # Mock _derive_dimensions_from_model_args
@@ -1140,6 +1146,30 @@ class TestPreflightFull:
 
         result = runner.invoke(app, ["run", "--preflight-full", "--preflight-only"])
         assert result.exit_code == 0
+
+    def test_preflight_full_warns_on_unmirrored_gates(self, monkeypatch, tmp_path):
+        """Gates the mini-run cannot express produce a loud warning."""
+        monkeypatch.chdir(tmp_path)
+
+        features_path = tmp_path / "data" / "features"
+        features_path.mkdir(parents=True)
+        (features_path / "train_features.parquet").write_text("dummy")
+        splits_path = tmp_path / "data" / "splits" / "within_entity_temporal"
+        splits_path.mkdir(parents=True)
+        (splits_path / "train.parquet").write_text("dummy")
+
+        self._setup_preflight_full_mocks(monkeypatch, status="pass", exit_code=0)
+        config_yaml = tmp_path / "eiv.yaml"
+        config_yaml.write_text("errors_in_variables: true\n")
+
+        result = runner.invoke(
+            app,
+            ["run", "--preflight-full", "--preflight-only", "--config", str(config_yaml)],
+        )
+        assert result.exit_code == 0
+        output = strip_ansi(result.output)
+        assert "Warning" in output
+        assert "errors_in_variables" in output
 
     def test_preflight_full_fail_aborts_without_force(self, monkeypatch, tmp_path):
         """--preflight-full fail aborts without --force-run."""
