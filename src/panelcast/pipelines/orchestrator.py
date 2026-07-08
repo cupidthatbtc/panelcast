@@ -31,6 +31,7 @@ from rich.progress import (
     SpinnerColumn,
     TextColumn,
     TimeElapsedColumn,
+    TimeRemainingColumn,
 )
 
 from panelcast import __version__ as panelcast_version
@@ -985,6 +986,12 @@ class PipelineOrchestrator:
             log.debug("skip_existing_ignores_dry_run_manifest", run_id=previous_manifest.run_id)
             previous_manifest = None
 
+        # Progress weighting reads durations before the flag-change reset below:
+        # a config change invalidates skip detection, not how long stages take.
+        previous_durations: dict[str, float] = (
+            dict(previous_manifest.stage_durations or {}) if previous_manifest else {}
+        )
+
         if previous_manifest is not None:
             changed_flags = self._skip_flag_differences(previous_manifest)
             if changed_flags:
@@ -996,16 +1003,19 @@ class PipelineOrchestrator:
                 )
                 previous_manifest = None
 
-        # Set up progress display
+        # Set up progress display; stages advance by predicted duration, not by
+        # count, so a 6-hour train doesn't move the bar like a 4-second stage.
+        weights = self._stage_weights(stages, previous_durations)
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TimeElapsedColumn(),
+            TimeRemainingColumn(),
             disable=not is_interactive(),
         ) as progress:
-            task_id = progress.add_task("Pipeline", total=len(stages))
+            task_id = progress.add_task("Pipeline", total=sum(weights.values()))
 
             for stage in stages:
                 progress.update(task_id, description=f"[cyan]{stage.name}")
@@ -1016,7 +1026,7 @@ class PipelineOrchestrator:
                         "stage_already_completed",
                         stage=stage.name,
                     )
-                    progress.advance(task_id)
+                    progress.advance(task_id, weights[stage.name])
                     continue
 
                 # Check if stage should be skipped
@@ -1030,12 +1040,59 @@ class PipelineOrchestrator:
                         if self.manifest:
                             self.manifest.stages_skipped.append(stage.name)
                             save_run_manifest(self.manifest, self.run_dir)
-                        progress.advance(task_id)
+                        progress.advance(task_id, weights[stage.name])
                         continue
 
                 # Execute stage
                 self._execute_stage(stage)
-                progress.advance(task_id)
+                progress.advance(task_id, weights[stage.name])
+
+    _FALLBACK_STAGE_SECONDS = 30.0
+
+    def _stage_weights(
+        self, stages: list[PipelineStage], previous_durations: dict[str, float]
+    ) -> dict[str, float]:
+        """Predicted seconds per stage for progress weighting (presentation only).
+
+        Train comes from the runtime predictor when prepared features exist
+        (config-aware: it prices the sampler settings this run will use), other
+        stages from the previous manifest's durations. With no history at all,
+        degrade to equal weights — a bar with made-up proportions is worse than
+        a stage-counted one.
+        """
+        train_predicted = self._predicted_train_seconds() if "train" in (
+            s.name for s in stages
+        ) else None
+        if not previous_durations and train_predicted is None:
+            return {s.name: 1.0 for s in stages}
+        weights: dict[str, float] = {}
+        for s in stages:
+            w: float | None = previous_durations.get(s.name)
+            if s.name == "train" and train_predicted is not None:
+                w = train_predicted
+            weights[s.name] = float(w) if w and w > 0 else self._FALLBACK_STAGE_SECONDS
+        return weights
+
+    def _predicted_train_seconds(self) -> float | None:
+        """Runtime-predictor train weight; None without prepared features to size from."""
+        features = Path("data/features/train_features.parquet")
+        if not features.exists():
+            return None
+        try:
+            import pandas as pd
+
+            from panelcast.gpu_memory.runtime_predictor import predict_fit_seconds
+
+            n_obs = int(len(pd.read_parquet(features, columns=[])))
+            return predict_fit_seconds(
+                self.config.num_chains,
+                self.config.num_samples,
+                self.config.num_warmup,
+                n_obs,
+                transform=self.config.target_transform,
+            ).seconds
+        except Exception:
+            return None
 
     # Run-scoped product roots: the stages that write each root and the stages
     # that read it. A root stays in the current run dir when one of its writers

@@ -1777,3 +1777,42 @@ class TestRunTagAndVersionProvenance:
         loaded = load_run_manifest(manifest_path)
         assert loaded.version is None
         assert loaded.tag is None
+
+
+class TestStageWeights:
+    """Duration-weighted progress (presentation only, #161)."""
+
+    def _orch(self, tmp_path, monkeypatch):
+        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+
+        monkeypatch.chdir(tmp_path)  # keep the flat features cache out of reach
+        return PipelineOrchestrator(PipelineConfig(), output_base=tmp_path / "outputs")
+
+    def _stages(self, *names):
+        from types import SimpleNamespace
+
+        return [SimpleNamespace(name=n) for n in names]
+
+    def test_no_history_degrades_to_equal_weights(self, tmp_path, monkeypatch):
+        orch = self._orch(tmp_path, monkeypatch)
+        weights = orch._stage_weights(self._stages("data", "train"), {})
+        assert weights == {"data": 1.0, "train": 1.0}
+
+    def test_previous_durations_weight_stages(self, tmp_path, monkeypatch):
+        orch = self._orch(tmp_path, monkeypatch)
+        weights = orch._stage_weights(
+            self._stages("data", "train", "evaluate"), {"data": 4.0, "train": 7200.0}
+        )
+        assert weights["data"] == 4.0
+        assert weights["train"] == 7200.0
+        assert weights["evaluate"] == orch._FALLBACK_STAGE_SECONDS
+
+    def test_predictor_overrides_previous_train_duration(self, tmp_path, monkeypatch):
+        orch = self._orch(tmp_path, monkeypatch)
+        monkeypatch.setattr(orch, "_predicted_train_seconds", lambda: 3600.0)
+        weights = orch._stage_weights(self._stages("data", "train"), {"train": 60.0})
+        assert weights["train"] == 3600.0
+
+    def test_predicted_train_seconds_none_without_features(self, tmp_path, monkeypatch):
+        orch = self._orch(tmp_path, monkeypatch)
+        assert orch._predicted_train_seconds() is None

@@ -770,6 +770,30 @@ def _build_heteroscedastic_summary(
     }
 
 
+def _predict_train_seconds(model_args: dict, mcmc_config: MCMCConfig, transform: str):
+    """RuntimePrediction for this fit, or None — the echo must never block a fit."""
+    try:
+        from panelcast.gpu_memory.runtime_predictor import predict_fit_seconds
+
+        return predict_fit_seconds(
+            mcmc_config.num_chains,
+            mcmc_config.num_samples,
+            mcmc_config.num_warmup,
+            len(model_args["y"]),
+            transform=transform,
+        )
+    except Exception:
+        return None
+
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 90:
+        return f"{seconds:.0f}s"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f}m"
+    return f"{seconds / 3600:.1f}h"
+
+
 def _build_resource_usage(
     model_args: dict,
     mcmc_config: MCMCConfig,
@@ -1067,6 +1091,19 @@ def train_models(
 
     # Fit model
     log.info("fitting_model", model=f"{prefix}_score")
+    prediction = _predict_train_seconds(
+        model_args, mcmc_config, str(getattr(ctx, "target_transform", "identity"))
+    )
+    if prediction is not None:
+        from datetime import datetime, timedelta
+
+        eta = (datetime.now() + timedelta(seconds=prediction.seconds)).strftime("%H:%M")
+        log.info(
+            "train_runtime_prediction",
+            predicted=_format_duration(prediction.seconds),
+            eta=eta,
+            source=prediction.source,
+        )
     exclude_rw_raw_from_collection = getattr(ctx, "exclude_rw_raw_from_collection", False)
     entity_obs_on = bool(getattr(ctx, "heteroscedastic_entity_obs", False))
     # rw_raw is the always-excluded large tensor. When the entity gate is on,
@@ -1130,6 +1167,9 @@ def train_models(
             "dataset": str(getattr(ctx, "dataset", None) or "aoty"),
         },
     )
+    if prediction is not None:
+        # Predicted next to actual, so per-run prediction error is auditable.
+        resource_usage["predicted_seconds"] = round(prediction.seconds, 1)
     log.info("resource_usage", **resource_usage)
 
     # Check convergence using CLI-provided thresholds
