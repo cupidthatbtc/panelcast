@@ -16,6 +16,7 @@ def within_entity_temporal_split(
     val_albums: int = 1,
     min_train_albums: int = 1,
     event_col: str | None = "Album",
+    origin_offset: int = 0,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Split data holding out the last N events per entity for test/validation.
@@ -30,13 +31,18 @@ def within_entity_temporal_split(
         test_albums: Number of most recent events per entity for test set
         val_albums: Number of second-most-recent events per entity for validation
         min_train_albums: Minimum events required in training set per entity
+        origin_offset: Rolling-origin backtest offset k: drop each entity's
+            last k events entirely (they are the future relative to this
+            origin) and hold out the (last-k)-th event as test. 0 reproduces
+            the standard split exactly.
 
     Returns:
         Tuple of (train_df, val_df, test_df)
 
     Note:
-        Entities with fewer than (test_albums + val_albums + min_train_albums)
-        events are excluded from all splits.
+        Entities with fewer than (test_albums + val_albums + min_train_albums
+        + origin_offset) events are excluded from all splits — deeper origins
+        shrink the eligible entity set.
 
     Example:
         >>> import pandas as pd
@@ -76,15 +82,19 @@ def within_entity_temporal_split(
             .drop(columns="_row_order")
         )
 
+    if origin_offset < 0:
+        raise ValueError(f"origin_offset must be >= 0, got {origin_offset}")
+
     # Count events per entity
     album_counts = df_sorted.groupby(entity_col).size()
-    min_required = test_albums + val_albums + min_train_albums
+    min_required = test_albums + val_albums + min_train_albums + origin_offset
     valid_artists = album_counts[album_counts >= min_required].index
     df_valid = df_sorted[df_sorted[entity_col].isin(valid_artists)].copy()
     # Exclude entities with fewer dated events than the holdout tail needs:
     # groupby().tail() would otherwise pull NaT rows into val/test, putting
-    # events of unknown chronology in the held-out sets.
-    n_holdout = test_albums + val_albums
+    # events of unknown chronology in the held-out sets. The dropped future
+    # events at deeper origins must be dated too, for the same reason.
+    n_holdout = test_albums + val_albums + origin_offset
     dated_counts = df_valid.groupby(entity_col)[date_col].transform("count")
     insufficient = dated_counts < max(n_holdout, 1)
     if insufficient.any():
@@ -96,6 +106,18 @@ def within_entity_temporal_split(
             rationale="held-out val/test events must have known chronology",
         )
         df_valid = df_valid[~insufficient].copy()
+
+    # Rolling origin: everything after the k-th-from-last event is the
+    # future relative to this origin and must not exist anywhere.
+    if origin_offset > 0:
+        future_df = df_valid.groupby(entity_col).tail(origin_offset)
+        df_valid = df_valid.drop(future_df.index)
+        structlog.get_logger().info(
+            "temporal_split_origin_offset",
+            origin_offset=origin_offset,
+            n_future_rows_dropped=len(future_df),
+            n_entities=df_valid[entity_col].nunique(),
+        )
 
     # Extract last N per entity for test
     test_df = df_valid.groupby(entity_col).tail(test_albums)

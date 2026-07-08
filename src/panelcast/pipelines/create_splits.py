@@ -40,6 +40,8 @@ class SplitConfig:
     test_albums: int = 1
     val_albums: int = 0
     min_train_albums: int = 1
+    # Rolling-origin backtest offset (0 = the standard split)
+    origin_offset: int = 0
 
     # Artist-disjoint parameters
     disjoint_test_size: float = 0.15
@@ -161,6 +163,7 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
         val_albums=config.val_albums,
         min_train_albums=config.min_train_albums,
         event_col=config.event_col,
+        origin_offset=config.origin_offset,
     )
 
     # Validate temporal ordering
@@ -196,6 +199,7 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
             "test_albums": config.test_albums,
             "val_albums": config.val_albums,
             "min_train_albums": config.min_train_albums,
+            "origin_offset": config.origin_offset,
         },
         source_dataset={
             "path": str(config.source_path),
