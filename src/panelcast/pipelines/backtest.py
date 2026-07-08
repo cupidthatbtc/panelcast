@@ -38,7 +38,7 @@ _AGGREGATED_METRICS = (
     ("coverage_0.80", ("calibration", "coverages", "0.80", "empirical")),
     ("coverage_0.95", ("calibration", "coverages", "0.95", "empirical")),
     ("wis", ("calibration", "wis")),
-    ("elpd_per_obs", ("info_criteria", "elpd_per_obs")),
+    ("elpd_per_obs", ("info_criteria", "heldout_elpd", "elpd_per_obs")),
 )
 
 

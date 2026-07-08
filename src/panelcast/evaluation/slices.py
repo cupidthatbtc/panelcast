@@ -159,7 +159,10 @@ def calibration_by_slice(
         "note": (
             "Wilson 95% CIs; coverage events share one posterior so CIs are "
             "slightly anti-conservative. Under perfect calibration ~5% of "
-            "slice-level tests flag by chance — read clusters, not lone flags."
+            "slice-level tests flag by chance — read clusters, not lone flags. "
+            "target_tercile slices condition on the outcome itself and deviate "
+            "from nominal even under perfect calibration (extreme terciles "
+            "under-cover) — diagnostic only, unlike the covariate slices."
         ),
         "slices": [
             {
