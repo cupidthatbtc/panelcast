@@ -4,6 +4,72 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] — 2026-07-08
+
+Honest evaluation. The headline numbers become distributions with error
+bars, every error becomes attributable to a named entity and slice, and the
+interval claims gain finite-sample backing.
+
+### Added
+
+- **Entity-identified predictions + error decomposition** (#180):
+  predictions.json carries entity/event/review-count/history identities and
+  per-row predictive sd, PIT, and coverage flags, aligned through the sort
+  and invalid-row drop by a regression-pinned invariant. `panelcast diagnose
+  --errors` decomposes any identified run into a worst-first per-row CSV,
+  entity/group/review-decile rollups with squared-error shares, and a
+  worst-25 table — read-only over existing artifacts.
+- **Sliced calibration audit** (#181): empirical coverage per genre group,
+  review-count decile, target tercile, and history bin, each with a Wilson
+  95% CI; slices whose nominal level falls outside the CI are flagged, with
+  the expected false-flag count stated. One stratification code path; a
+  small-multiples coverage figure and a flagged-slices model-card table.
+- **Ranking metrics** (#182): Spearman/Kendall, precision@K against the
+  realized top-K, and per-row rank distributions from the posterior draws —
+  P(top-K) and expected rank — with the P(top-K) probabilities audited by a
+  reliability curve. Every run writes ranked_slate.csv; publication gains a
+  predicted-vs-realized rank scatter.
+- **Rolling-origin backtest** (#179): `panelcast backtest --origins K` runs
+  the full leakage-safe stage chain per origin (origin 0 is exactly the
+  standard split) and reports every headline metric as mean ± SE across
+  origins, with per-origin populations stated. A JSON ledger resumes an
+  interrupted backtest at the next unfinished origin.
+- **Conformal calibration wrapper** (#156): split-conformal (CQR) interval
+  widening and PIT quantile recalibration on the Bayesian predictive,
+  calibrated on the validation split with train-only history. Default-off;
+  with the flag on, metrics.json reports both layers next to the raw numbers
+  and `predict_next` emits conformal_q05/q95. Exchangeability caveat stated.
+- **`panelcast report`** (#159): one self-contained HTML dashboard per run —
+  manifest header, verdict strip, per-split metrics, stage durations,
+  interactive figures (or embedded PNGs with `--no-interactive`), and the
+  coefficient table. Publication emits it best-effort; works on any past run.
+- **`pixi run bump`**: one command rewrites every hand-synced version pin
+  (pyproject, pixi.toml, CITATION.cff, MODEL_CARD.md) — the 0.8.0 red-main
+  incident can't recur from a forgotten pin.
+
+### Changed
+
+- Every PR is now reviewed automatically (Claude code-review workflow with a
+  visible tracking comment; Opus 4.8).
+- CLI.md, ARTIFACTS.md, and the evaluation protocol now document the full 0.9
+  runs tooling and the 0.10 evaluation surfaces (from the release audit).
+
+### Fixed
+
+- **`select --warmup-transfer` was a silent no-op**: the orchestrator never
+  forwarded the warm-start paths into the stage context, so the reference arm
+  never exported and every arm ran cold — found by the #138 GPU validation
+  (which also confirmed an 8.9x wall-clock speedup for `chain_method=auto`
+  vectorized fits after the #197 fix).
+- Backtest aggregation read `elpd_per_obs` at the wrong nesting and reported
+  it as null for every origin; all aggregation paths are now pinned against
+  the real metrics.json shape.
+- `--resume` silently reverted `val_albums`, `origin_offset`, and
+  `conformal_calibration` to CLI defaults (missing from RESUME_CONFIG_KEYS).
+- `panelcast doctor --json` leaked a debug log line onto stdout ahead of the
+  JSON, breaking pipes; `runs why` on a successful run now says so instead of
+  guessing at incompleteness.
+
 ## [0.9.0] — 2026-07-08
 
 Trustworthy runs. The manifest system's provenance capture becomes an
