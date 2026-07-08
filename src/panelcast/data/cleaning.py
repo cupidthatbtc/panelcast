@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 
+import numpy as np
 import pandas as pd
 import structlog
 
@@ -40,6 +41,14 @@ OPTIONAL_CANONICAL_COLUMNS = (
     "Label",
     "Descriptors",
     "Album_URL",
+)
+
+# Optional columns the cleaned schema types as float64. Fabricated absent
+# columns must be float64 NaN, not object pd.NA, which pandera cannot coerce.
+OPTIONAL_NUMERIC_CANONICAL_COLUMNS = (
+    "Critic_Score",
+    "Critic_Reviews",
+    "Avg_Track_Score",
 )
 
 # AOTY collaboration-size bins: label -> (min_count, max_count); None = open.
@@ -77,13 +86,18 @@ def rename_columns(
 def ensure_optional_columns(
     df: pd.DataFrame,
     optional_columns: Sequence[str] | None = None,
+    numeric_columns: Sequence[str] | None = None,
 ) -> pd.DataFrame:
     """Ensure optional canonical columns exist for downstream compatibility."""
     df = df.copy()
     columns = OPTIONAL_CANONICAL_COLUMNS if optional_columns is None else optional_columns
+    numeric = OPTIONAL_NUMERIC_CANONICAL_COLUMNS if numeric_columns is None else numeric_columns
     for col in columns:
         if col not in df.columns:
-            df[col] = pd.NA
+            if col in numeric:
+                df[col] = pd.Series(np.nan, dtype="float64", index=df.index)
+            else:
+                df[col] = pd.NA
     return df
 
 
@@ -301,6 +315,16 @@ def clean_albums(
     df = ensure_optional_columns(
         df,
         tuple(descriptor.raw_column_map.get(col, col) for col in descriptor.optional_raw_columns),
+        # Secondary target/n_obs are float64 in the cleaned schema whatever
+        # the descriptor calls them; the constant covers the AOTY extras.
+        numeric_columns=tuple(
+            set(OPTIONAL_NUMERIC_CANONICAL_COLUMNS)
+            | {
+                c
+                for c in (descriptor.secondary_target_col, descriptor.secondary_n_obs_col)
+                if c is not None
+            }
+        ),
     )
     df = parse_release_dates(
         df,

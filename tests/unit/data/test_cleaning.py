@@ -97,6 +97,21 @@ class TestEnsureOptionalColumns:
         assert "Critic_Score" not in df.columns
         assert "Critic_Score" in result.columns
 
+    def test_fabricated_numeric_columns_are_float64(self):
+        # Object-dtype pd.NA cannot be coerced by the cleaned schema's float64
+        # columns; fabricated numeric optionals must be float64 NaN.
+        df = pd.DataFrame({"Artist": ["A"]})
+        result = ensure_optional_columns(df)
+        for col in ("Critic_Score", "Critic_Reviews", "Avg_Track_Score"):
+            assert result[col].dtype == "float64"
+            assert result[col].isna().all()
+
+    def test_fabricated_text_columns_stay_object(self):
+        df = pd.DataFrame({"Artist": ["A"]})
+        result = ensure_optional_columns(df)
+        for col in ("Label", "Descriptors", "Album_URL"):
+            assert result[col].dtype == "object"
+
 
 # =============================================================================
 # parse_release_dates tests
@@ -430,6 +445,34 @@ class TestCleanAlbums:
         raw = _make_raw_df()
         cleaned = clean_albums(raw, config=CleaningConfig(strict_validation=False))
         assert len(cleaned) == 1
+
+    def test_strict_validation_passes_without_critic_columns(self):
+        # A contract-valid frame legitimately omitting the optional critic
+        # columns must survive post-cleaning validation, including strict mode.
+        raw = _make_raw_df()
+        assert "Critic Score" not in raw.columns
+        assert "Critic Reviews" not in raw.columns
+        cleaned = clean_albums(raw, config=CleaningConfig(strict_validation=True))
+        assert cleaned["Critic_Score"].dtype == "float64"
+        assert cleaned["Critic_Reviews"].dtype == "float64"
+
+    def test_strict_validation_passes_with_tier3_row(self):
+        # Tier-3 rows (no parseable date, no year) keep NaN Year by design and
+        # must not fail post-cleaning validation.
+        raw = pd.concat(
+            [
+                _make_raw_df(),
+                _make_raw_df(
+                    Album=["Album 2"],
+                    Year=[None],
+                    **{"Release Date": ["not-a-date"]},
+                ),
+            ],
+            ignore_index=True,
+        )
+        cleaned = clean_albums(raw, config=CleaningConfig(strict_validation=True))
+        assert cleaned["date_risk"].tolist() == ["low", "high"]
+        assert cleaned["Year"].isna().tolist() == [False, True]
 
 
 # =============================================================================

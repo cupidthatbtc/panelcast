@@ -72,7 +72,9 @@ LEGACY_CLEANED_SCHEMA = pa.DataFrameSchema(
     {
         "Artist": pa.Column(str, nullable=False),
         "Album": pa.Column(str, nullable=False),
-        "Year": pa.Column(float, pa.Check.in_range(1900, 2030), nullable=False),
+        # Deliberate deviation from the pre-builder literal (nullable=False):
+        # tier-3 rows keep NaN Year by design, so the cleaned schema accepts it.
+        "Year": pa.Column(float, pa.Check.in_range(1900, 2030), nullable=True),
         "User_Score": pa.Column(float, pa.Check.in_range(0, 100), nullable=False),
         "User_Ratings": pa.Column(float, pa.Check.ge(0), nullable=False),
         "Num_Tracks": pa.Column(float, pa.Check.ge(0), nullable=True),
@@ -230,6 +232,17 @@ class TestBehavioralEquivalence:
         legacy = _outcome(LEGACY_CLEANED_SCHEMA, frame)
         built = _outcome(build_cleaned_schema(DEFAULT_DESCRIPTOR), frame)
         assert built == legacy
+
+
+class TestCleanedYearNullable:
+    """Tier-3 rows (unparseable date, no year) legitimately carry a NaN year;
+    the cleaned schema must accept them instead of aborting strict runs."""
+
+    def test_null_year_row_passes_cleaned_validation(self):
+        frame = pd.concat([_valid_cleaned_frame(), _valid_cleaned_frame()], ignore_index=True)
+        frame.loc[1, "Album"] = "Album 2"
+        frame.loc[1, "Year"] = None
+        validate_cleaned_dataframe(frame, lazy=True)
 
 
 # ---------------------------------------------------------------------------

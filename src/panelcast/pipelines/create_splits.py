@@ -79,6 +79,13 @@ def save_split_parquet(df: pd.DataFrame, path: Path) -> None:
     df.to_parquet(path, compression="snappy", index=False)
 
 
+def _hash_split(df: pd.DataFrame) -> str:
+    """Hash a split as persisted: parquet is written with index=False, so the
+    filtered non-contiguous index must not enter the digest or reloaded
+    parquets could never match the manifest."""
+    return hash_dataframe(df.reset_index(drop=True))
+
+
 def create_splits(config: SplitConfig | None = None) -> SplitResult:
     """
     Create train/validation/test splits from cleaned dataset.
@@ -115,6 +122,31 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
         hash=source_hash[:16],
     )
 
+    # Duplicate (entity, event) keys can straddle the temporal boundary: one
+    # copy of the latest event lands in test while its twin stays in train,
+    # and no split validator can see it. Real AOTY data contains legitimate
+    # title collisions (re-recordings, same-titled albums), so warn loudly
+    # and record the count instead of dropping rows.
+    n_duplicate_key_rows = 0
+    if config.event_col in source_df.columns:
+        dup_mask = source_df.duplicated(subset=[config.entity_col, config.event_col], keep=False)
+        n_duplicate_key_rows = int(dup_mask.sum())
+    if n_duplicate_key_rows:
+        examples = (
+            source_df.loc[dup_mask, [config.entity_col, config.event_col]]
+            .drop_duplicates()
+            .head(5)
+            .astype(str)
+            .values.tolist()
+        )
+        log.warning(
+            "duplicate_entity_event_keys",
+            n_rows=n_duplicate_key_rows,
+            examples=examples,
+            risk="duplicate keys may straddle the temporal split boundary (leakage)",
+            action="rows kept; verify duplicates are distinct events, not repeats",
+        )
+
     results = {"temporal": {}, "disjoint": {}}
 
     # ===== WITHIN-ENTITY TEMPORAL SPLIT =====
@@ -148,9 +180,9 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
     save_split_parquet(test_t, temporal_paths["test"])
 
     # Compute hashes
-    train_t_hash = hash_dataframe(train_t)
-    val_t_hash = hash_dataframe(val_t)
-    test_t_hash = hash_dataframe(test_t)
+    train_t_hash = _hash_split(train_t)
+    val_t_hash = _hash_split(val_t)
+    test_t_hash = _hash_split(test_t)
 
     # Combined content hash
     combined_t = hashlib.sha256((train_t_hash + val_t_hash + test_t_hash).encode()).hexdigest()
@@ -238,9 +270,9 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
     save_split_parquet(test_d, disjoint_paths["test"])
 
     # Compute hashes
-    train_d_hash = hash_dataframe(train_d)
-    val_d_hash = hash_dataframe(val_d)
-    test_d_hash = hash_dataframe(test_d)
+    train_d_hash = _hash_split(train_d)
+    val_d_hash = _hash_split(val_d)
+    test_d_hash = _hash_split(test_d)
     combined_d = hashlib.sha256((train_d_hash + val_d_hash + test_d_hash).encode()).hexdigest()
 
     # Create manifest
@@ -311,6 +343,7 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
             "rows": len(source_df),
             "artists": source_df[config.entity_col].nunique(),
             "sha256": source_hash,
+            "duplicate_key_rows": n_duplicate_key_rows,
         },
         "within_entity_temporal": {
             "train_rows": results["temporal"]["train"],

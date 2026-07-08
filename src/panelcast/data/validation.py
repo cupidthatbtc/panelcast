@@ -162,7 +162,9 @@ def build_cleaned_schema(descriptor: DatasetDescriptor) -> pa.DataFrameSchema:
     columns: dict[str, pa.Column] = {
         descriptor.entity_col: pa.Column(str, nullable=False),
         descriptor.event_col: pa.Column(str, nullable=False),
-        descriptor.year_col: pa.Column(float, pa.Check.in_range(*YEAR_RANGE), nullable=False),
+        # Nullable: tier-3 rows (no parseable date, no year) legitimately keep
+        # a NaN year; parse_release_dates marks them date_risk='high'.
+        descriptor.year_col: pa.Column(float, pa.Check.in_range(*YEAR_RANGE), nullable=True),
         descriptor.target_col: pa.Column(float, pa.Check.in_range(low, high), nullable=False),
         descriptor.n_obs_col: pa.Column(float, pa.Check.ge(0), nullable=False),
     }

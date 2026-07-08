@@ -1034,6 +1034,102 @@ class TestSplitResultFields:
         assert len(json_str) > 0
 
 
+@pytest.fixture
+def unmocked_source_df():
+    """Source frame suitable for running create_splits without mocks."""
+    rows = []
+    for artist_id in range(12):
+        for album_idx in range(5):
+            rows.append(
+                {
+                    "Artist": f"Artist_{artist_id}",
+                    "Album": f"Album_{artist_id}_{album_idx}",
+                    "Release_Date_Parsed": pd.Timestamp("2018-01-01")
+                    + pd.DateOffset(months=album_idx * 6),
+                    "User_Score": 60.0 + album_idx * 3,
+                    "User_Ratings": 30 + album_idx * 10,
+                }
+            )
+    df = pd.DataFrame(rows)
+    df["original_row_id"] = range(len(df))
+    return df
+
+
+class TestManifestHashesMatchPersistedParquets:
+    """Manifest sha256 values must match a hash of the reloaded parquet files."""
+
+    def test_reloaded_split_hashes_match_manifest(self, tmp_path, unmocked_source_df):
+        from panelcast.data.manifests import load_manifest
+        from panelcast.utils.hashing import hash_dataframe
+
+        config = SplitConfig(
+            source_path=tmp_path / "source.parquet",
+            output_dir=tmp_path / "splits",
+        )
+        unmocked_source_df.to_parquet(config.source_path, index=False)
+
+        result = create_splits(config)
+
+        for manifest_path, split_paths in (
+            (result.temporal_manifest_path, result.temporal_splits),
+            (result.disjoint_manifest_path, result.disjoint_splits),
+        ):
+            manifest = load_manifest(manifest_path)
+            for split_name, parquet_path in split_paths.items():
+                reloaded = pd.read_parquet(parquet_path)
+                assert hash_dataframe(reloaded) == manifest.splits[split_name].sha256, (
+                    f"{manifest.split_type}/{split_name} hash does not match "
+                    "the persisted parquet"
+                )
+
+
+class TestDuplicateKeyDetection:
+    """Duplicate (entity, event) keys are surfaced loudly, not dropped."""
+
+    def test_warns_on_duplicate_keys_and_keeps_rows(self, tmp_path, unmocked_source_df):
+        import structlog
+
+        # Duplicate Artist_0's latest album: one copy lands in test while its
+        # twin (same key, same score) stays on the train side of the boundary.
+        df = pd.concat(
+            [unmocked_source_df, unmocked_source_df.iloc[[4]]], ignore_index=True
+        )
+        df["original_row_id"] = range(len(df))
+
+        config = SplitConfig(
+            source_path=tmp_path / "source.parquet",
+            output_dir=tmp_path / "splits",
+        )
+        df.to_parquet(config.source_path, index=False)
+
+        with structlog.testing.capture_logs() as logs:
+            result = create_splits(config)
+
+        dup_events = [e for e in logs if e["event"] == "duplicate_entity_event_keys"]
+        assert len(dup_events) == 1
+        assert dup_events[0]["n_rows"] == 2
+        assert ["Artist_0", "Album_0_4"] in dup_events[0]["examples"]
+
+        # Rows are kept, and the count is recorded in the pipeline summary.
+        assert result.summary["source"]["rows"] == len(df)
+        assert result.summary["source"]["duplicate_key_rows"] == 2
+
+    def test_no_warning_without_duplicates(self, tmp_path, unmocked_source_df):
+        import structlog
+
+        config = SplitConfig(
+            source_path=tmp_path / "source.parquet",
+            output_dir=tmp_path / "splits",
+        )
+        unmocked_source_df.to_parquet(config.source_path, index=False)
+
+        with structlog.testing.capture_logs() as logs:
+            result = create_splits(config)
+
+        assert not [e for e in logs if e["event"] == "duplicate_entity_event_keys"]
+        assert result.summary["source"]["duplicate_key_rows"] == 0
+
+
 class TestSaveSplitParquetDtypes:
     def test_mixed_dtypes_roundtrip(self, tmp_path):
         """Save DataFrame with mixed dtypes: int, float, str, datetime."""
