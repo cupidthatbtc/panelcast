@@ -5,7 +5,10 @@ to reproduce a pipeline run: command, flags, git state, environment (including
 pixi.lock hash), input hashes, and stage execution metadata.
 """
 
+import hashlib
 import importlib
+import json
+import os
 import platform
 import secrets
 import sys
@@ -32,6 +35,16 @@ class EnvironmentInfo(BaseModel):
         arviz_version: ArviZ version if installed, None otherwise
         platform: Platform description (e.g., "Windows 11")
         pixi_lock_hash: SHA256 hash of pixi.lock file, None if not found
+        jaxlib_version: jaxlib version — bit-exactness of draws depends on it
+        accelerator: default JAX device platform ("cpu"/"gpu"), None if probing failed
+        device_kind: e.g. "NVIDIA GeForce RTX 5090 Laptop GPU"
+        machine: platform.machine() (e.g., "x86_64")
+        jax_platforms_env: the JAX_PLATFORMS override in effect, if any
+        fingerprint: canonical hash of exactly the fields that bound
+            bit-exactness — draws reproduce bit-exactly within a fingerprint,
+            statistically across fingerprints. Excludes pixi_lock_hash
+            (lockfile churn in non-numerical deps doesn't change the
+            exactness domain) and the OS release.
     """
 
     python_version: str
@@ -40,6 +53,13 @@ class EnvironmentInfo(BaseModel):
     arviz_version: str | None
     platform: str
     pixi_lock_hash: str | None
+    # Defaulted so pre-0.9.0 manifests load unchanged.
+    jaxlib_version: str | None = None
+    accelerator: str | None = None
+    device_kind: str | None = None
+    machine: str | None = None
+    jax_platforms_env: str | None = None
+    fingerprint: str | None = None
 
 
 def _get_version(module_name: str) -> str | None:
@@ -58,11 +78,55 @@ def _get_version(module_name: str) -> str | None:
         return None
 
 
+def _accelerator_info() -> tuple[str | None, str | None]:
+    """(platform, device_kind) of the default JAX device; never raises.
+
+    ``jax.devices()`` initializes the backend — inside the pipeline JAX is
+    already imported so this adds no startup cost, and a broken accelerator
+    must never fail manifest capture.
+    """
+    try:
+        import jax
+
+        device = jax.devices()[0]
+        return device.platform, device.device_kind
+    except Exception:
+        return None, None
+
+
+def compute_fingerprint(
+    python_version: str,
+    jax_version: str,
+    jaxlib_version: str | None,
+    numpyro_version: str | None,
+    accelerator: str | None,
+    device_kind: str | None,
+    machine: str | None,
+) -> str:
+    """Canonical hash of exactly the fields that bound bit-exactness of draws.
+
+    The payload is versioned so a future field addition doesn't silently
+    unmatch all recorded history.
+    """
+    payload = {
+        "v": 1,
+        "python": python_version,
+        "jax": jax_version,
+        "jaxlib": jaxlib_version,
+        "numpyro": numpyro_version,
+        "accelerator": accelerator,
+        "device_kind": device_kind,
+        "machine": machine,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()[:16]
+
+
 def capture_environment() -> EnvironmentInfo:
     """Capture current software environment.
 
     Gathers Python version, key package versions (JAX, NumPyro, ArviZ),
-    platform information, and pixi.lock hash for reproducibility tracking.
+    platform information, the accelerator identity, pixi.lock hash, and the
+    bit-exactness fingerprint for reproducibility tracking.
 
     Returns:
         EnvironmentInfo with current environment details.
@@ -70,19 +134,40 @@ def capture_environment() -> EnvironmentInfo:
     Example:
         >>> env = capture_environment()
         >>> env.python_version  # e.g., "3.11.5"
-        >>> env.pixi_lock_hash  # SHA256 hash or None
+        >>> env.fingerprint  # e.g., "1f7c0a..." — the exactness domain
     """
     # Get pixi.lock hash from environment verification
     env_status = verify_environment()
     pixi_lock_hash = env_status.pixi_lock_hash
 
+    python_version = sys.version.split()[0]
+    jax_version = _get_version("jax") or "not installed"
+    jaxlib_version = _get_version("jaxlib")
+    numpyro_version = _get_version("numpyro")
+    accelerator, device_kind = _accelerator_info()
+    machine = platform.machine()
+
     return EnvironmentInfo(
-        python_version=sys.version.split()[0],
-        jax_version=_get_version("jax") or "not installed",
-        numpyro_version=_get_version("numpyro"),
+        python_version=python_version,
+        jax_version=jax_version,
+        numpyro_version=numpyro_version,
         arviz_version=_get_version("arviz"),
         platform=f"{platform.system()} {platform.release()}",
         pixi_lock_hash=pixi_lock_hash,
+        jaxlib_version=jaxlib_version,
+        accelerator=accelerator,
+        device_kind=device_kind,
+        machine=machine,
+        jax_platforms_env=os.environ.get("JAX_PLATFORMS"),
+        fingerprint=compute_fingerprint(
+            python_version,
+            jax_version,
+            jaxlib_version,
+            numpyro_version,
+            accelerator,
+            device_kind,
+            machine,
+        ),
     )
 
 

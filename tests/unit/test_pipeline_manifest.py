@@ -583,3 +583,68 @@ class TestGenerateRunIdEdgeCases:
 
         run_id = generate_run_id()
         assert run_id.startswith(str(datetime.now().year))
+
+
+class TestEnvironmentFingerprint:
+    """Bit-exactness fingerprint (#168): versioned, accelerator-aware, guarded."""
+
+    def test_capture_populates_fingerprint_and_identity_fields(self):
+        from panelcast.pipelines.manifest import capture_environment
+
+        env = capture_environment()
+        assert env.fingerprint and len(env.fingerprint) == 16
+        assert env.machine
+        assert env.jaxlib_version  # installed in the test env
+
+    def test_fingerprint_is_deterministic(self):
+        from panelcast.pipelines.manifest import capture_environment
+
+        assert capture_environment().fingerprint == capture_environment().fingerprint
+
+    def test_fingerprint_excludes_lockfile(self):
+        from panelcast.pipelines.manifest import compute_fingerprint
+
+        a = compute_fingerprint("3.14", "0.8.2", "0.8.2", "0.19", "cpu", "cpu", "x86_64")
+        # Same numerical stack, different lockfile — same exactness domain (no
+        # lockfile input exists at all); a version change breaks the domain.
+        b = compute_fingerprint("3.14", "0.8.2", "0.8.2", "0.19", "cpu", "cpu", "x86_64")
+        c = compute_fingerprint("3.14", "0.8.3", "0.8.2", "0.19", "cpu", "cpu", "x86_64")
+        assert a == b
+        assert a != c
+
+    def test_device_change_breaks_the_domain(self):
+        from panelcast.pipelines.manifest import compute_fingerprint
+
+        gpu = compute_fingerprint(
+            "3.12", "0.8.2", "0.8.2", "0.19", "gpu", "NVIDIA GeForce RTX 5090", "x86_64"
+        )
+        cpu = compute_fingerprint("3.12", "0.8.2", "0.8.2", "0.19", "cpu", "cpu", "x86_64")
+        assert gpu != cpu
+
+    def test_broken_accelerator_never_fails_capture(self, monkeypatch):
+        import jax
+
+        from panelcast.pipelines.manifest import capture_environment
+
+        def boom():
+            raise RuntimeError("driver gone")
+
+        monkeypatch.setattr(jax, "devices", boom)
+        env = capture_environment()
+        assert env.accelerator is None
+        assert env.device_kind is None
+        assert env.fingerprint  # still computed over the None fields
+
+    def test_old_manifest_without_new_fields_loads(self):
+        from panelcast.pipelines.manifest import EnvironmentInfo
+
+        env = EnvironmentInfo(
+            python_version="3.11.5",
+            jax_version="0.4.26",
+            numpyro_version="0.14.0",
+            arviz_version=None,
+            platform="Linux 6.6",
+            pixi_lock_hash=None,
+        )
+        assert env.fingerprint is None
+        assert env.jaxlib_version is None
