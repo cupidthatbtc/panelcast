@@ -242,6 +242,8 @@ class PipelineConfig:
     min_train_albums: int = 2
     # Rolling-origin backtest offset (0 = the standard split)
     origin_offset: int = 0
+    # Conformal calibration wrapper on the predictive (#156; needs val_albums >= 1)
+    conformal_calibration: bool = False
     # Evaluation configuration
     calibration_intervals: tuple[float, ...] = (0.80, 0.95)
     coverage_tolerance: float = 0.03
@@ -649,6 +651,7 @@ class PipelineOrchestrator:
                 "exclude_rw_raw_from_collection": self.config.exclude_rw_raw_from_collection,
                 "val_albums": self.config.val_albums,
                 "origin_offset": self.config.origin_offset,
+                "conformal_calibration": self.config.conformal_calibration,
                 "min_train_albums": self.config.min_train_albums,
                 # Evaluation
                 "calibration_intervals": list(self.config.calibration_intervals),
@@ -1266,6 +1269,7 @@ class PipelineOrchestrator:
             exclude_rw_raw_from_collection=self.config.exclude_rw_raw_from_collection,
             val_albums=self.config.val_albums,
             origin_offset=self.config.origin_offset,
+            conformal_calibration=self.config.conformal_calibration,
             min_train_albums=self.config.min_train_albums,
             calibration_intervals=self.config.calibration_intervals,
             coverage_tolerance=self.config.coverage_tolerance,

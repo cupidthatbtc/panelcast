@@ -1124,6 +1124,64 @@ def _run_training_prior_predictive(
         return None
 
 
+def _conformal_block(
+    *,
+    summary: dict,
+    prefix: str,
+    ctx: StageContext,
+    posterior_samples: dict[str, Any],
+    val_df: pd.DataFrame | None,
+    train_df: pd.DataFrame,
+    features_dir: Path,
+    transform,
+    y_test: np.ndarray,
+    test_samples: np.ndarray,
+    intervals: tuple[float, ...],
+) -> dict:
+    """Conformal wrapper block for metrics.json (#156).
+
+    One extra predictive pass on the validation split — prepared with
+    train-only history (val_df=None below), so test rows never inform the
+    calibration — then pure array math in evaluation/conformal.py.
+    """
+    from panelcast.evaluation.conformal import conformalize
+
+    if val_df is None or val_df.empty:
+        raise ValueError(
+            "conformal_calibration needs a validation split; rerun with val_albums >= 1."
+        )
+    val_features_path = features_dir / "validation_features.parquet"
+    if not val_features_path.exists():
+        raise FileNotFoundError(
+            f"conformal_calibration needs {val_features_path}; rerun the features stage."
+        )
+    val_features = pd.read_parquet(val_features_path)
+    val_model_args, val_y, _ = _prepare_test_model_args(
+        val_df,
+        val_features,
+        summary,
+        train_df=train_df,
+        val_df=None,
+        strict=False,
+    )
+    val_samples = _run_known_artist_predictive(
+        posterior_samples,
+        val_model_args,
+        seed_offset=ctx.seed + 2000,
+        prefix=prefix,
+        batch_size=int(getattr(ctx, "predictive_batch_size", 500)),
+    )
+    if transform.name != "identity":
+        val_samples = np.asarray(transform.inverse(val_samples))
+    block = conformalize(val_y, val_samples, y_test, test_samples, intervals)
+    log.info(
+        "conformal_calibration_done",
+        n_calibration=block["n_calibration"],
+        levels=list(block["levels"]),
+    )
+    return block
+
+
 def _evaluate_primary_split(
     *,
     summary: dict,
@@ -1261,6 +1319,31 @@ def _evaluate_primary_split(
         lag1_acf=residual_acf["lag1_acf"],
         n_pairs=residual_acf["n_pairs"],
     )
+
+    # Conformal calibration wrapper (#156): finite-sample interval guarantees
+    # calibrated on the validation split (train-only history; leakage-safe).
+    # Informational — never fail the stage over it.
+    if getattr(ctx, "conformal_calibration", False):
+        try:
+            primary_metrics["calibration"]["conformal"] = _conformal_block(
+                summary=summary,
+                prefix=prefix,
+                ctx=ctx,
+                posterior_samples=posterior_samples,
+                val_df=primary_val_df,
+                train_df=primary_train_df,
+                features_dir=primary_features_dir,
+                transform=transform,
+                y_test=primary_y_true,
+                test_samples=primary_y_samples,
+                intervals=intervals,
+            )
+        except Exception as e:
+            log.warning(
+                "conformal_calibration_failed",
+                error_type=type(e).__name__,
+                error=str(e)[:500],
+            )
 
     # Ranking metrics (#182): the ordinal read on the held-out slate.
     # Informational — never fail the stage over it.

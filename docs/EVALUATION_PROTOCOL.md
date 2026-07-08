@@ -28,6 +28,21 @@ Rolling-origin backtest (`panelcast backtest --origins K`)
 - The JSON ledger under `outputs/backtest/<id>/` makes an interrupted backtest
   resume at the next unfinished origin; rerun the same command to resume.
 
+Conformal calibration wrapper (`conformal_calibration: true`, default off)
+- Calibrated on the validation split with train-only history (needs
+  `val_albums >= 1`); test rows never inform the calibration.
+- Two layers reported in `metrics.json` under `calibration.conformal`, next
+  to the raw Bayesian numbers: split-conformal (CQR) interval widening with
+  its finite-sample adjustment per nominal level, and quantile recalibration
+  (PIT remapping) of the whole predictive CDF.
+- The guarantee is marginal coverage >= the nominal level **under
+  exchangeability**. Within-entity temporal validation/test eras drift, so
+  read the guarantee as approximate; weighted conformal is a possible
+  follow-up.
+- With the flag on, `predict_next` emits `conformal_q05`/`conformal_q95`
+  (recalibrated quantiles) alongside the posterior quantile columns; with it
+  off, outputs are byte-identical to before.
+
 History cap (`max_albums`)
 - `--max-albums` (default 50 for AOTY) caps the length of the time-varying
   trajectory per entity. It is a max-EVENTS cap, not a row filter: an entity's

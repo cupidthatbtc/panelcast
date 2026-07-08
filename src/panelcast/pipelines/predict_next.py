@@ -232,6 +232,7 @@ def _predict_known_entities(
     strict: bool = False,
     batch_size: int = 500,
     artist_batch_size: int = 50,
+    conformal_levels: tuple[float, float] | None = None,
 ) -> pd.DataFrame:
     """Generate next-event predictions for all known entities under 3 scenarios.
 
@@ -425,22 +426,28 @@ def _predict_known_entities(
                 # Compute summary stats per artist
                 for i, artist in enumerate(built.valid_artists):
                     samples = np.clip(y_pred[:, i], target_bounds[0], target_bounds[1])
-                    results.append(
-                        {
-                            "entity": artist,
-                            "scenario": scenario,
-                            "pred_mean": float(np.mean(samples)),
-                            "pred_std": float(np.std(samples)),
-                            "pred_q05": float(np.percentile(samples, 5)),
-                            "pred_q25": float(np.percentile(samples, 25)),
-                            "pred_q50": float(np.percentile(samples, 50)),
-                            "pred_q75": float(np.percentile(samples, 75)),
-                            "pred_q95": float(np.percentile(samples, 95)),
-                            "last_score": built.last_scores[i],
-                            "n_training_events": built.n_training_events[i],
-                            "horizon_clamped": built.horizon_clamped_flags[i],
-                        }
-                    )
+                    row = {
+                        "entity": artist,
+                        "scenario": scenario,
+                        "pred_mean": float(np.mean(samples)),
+                        "pred_std": float(np.std(samples)),
+                        "pred_q05": float(np.percentile(samples, 5)),
+                        "pred_q25": float(np.percentile(samples, 25)),
+                        "pred_q50": float(np.percentile(samples, 50)),
+                        "pred_q75": float(np.percentile(samples, 75)),
+                        "pred_q95": float(np.percentile(samples, 95)),
+                        "last_score": built.last_scores[i],
+                        "n_training_events": built.n_training_events[i],
+                        "horizon_clamped": built.horizon_clamped_flags[i],
+                    }
+                    if conformal_levels is not None:
+                        row["conformal_q05"] = float(
+                            np.quantile(samples, conformal_levels[0])
+                        )
+                        row["conformal_q95"] = float(
+                            np.quantile(samples, conformal_levels[1])
+                        )
+                    results.append(row)
 
             if batch_end % 200 == 0 or batch_end == n_artists_total:
                 log.info(
@@ -456,6 +463,7 @@ def _predict_new_entities(
     posterior_samples: dict[str, jnp.ndarray],
     summary: dict,
     seed: int = 42,
+    conformal_levels: tuple[float, float] | None = None,
 ) -> pd.DataFrame:
     """Generate predictions for hypothetical new entities under 2 scenarios.
 
@@ -533,20 +541,48 @@ def _predict_new_entities(
             pred = predict_new_entity(**kwargs)
 
             y_samples = np.asarray(pred["y"])
-            results.append(
-                {
-                    "scenario": scenario_name,
-                    "pred_mean": float(np.mean(y_samples)),
-                    "pred_std": float(np.std(y_samples)),
-                    "pred_q05": float(np.percentile(y_samples, 5)),
-                    "pred_q25": float(np.percentile(y_samples, 25)),
-                    "pred_q50": float(np.percentile(y_samples, 50)),
-                    "pred_q75": float(np.percentile(y_samples, 75)),
-                    "pred_q95": float(np.percentile(y_samples, 95)),
-                }
-            )
+            row = {
+                "scenario": scenario_name,
+                "pred_mean": float(np.mean(y_samples)),
+                "pred_std": float(np.std(y_samples)),
+                "pred_q05": float(np.percentile(y_samples, 5)),
+                "pred_q25": float(np.percentile(y_samples, 25)),
+                "pred_q50": float(np.percentile(y_samples, 50)),
+                "pred_q75": float(np.percentile(y_samples, 75)),
+                "pred_q95": float(np.percentile(y_samples, 95)),
+            }
+            if conformal_levels is not None:
+                row["conformal_q05"] = float(np.quantile(y_samples, conformal_levels[0]))
+                row["conformal_q95"] = float(np.quantile(y_samples, conformal_levels[1]))
+            results.append(row)
 
     return pd.DataFrame(results)
+
+
+def _load_conformal_levels(
+    evaluation_dir: Path, lo: float = 0.05, hi: float = 0.95
+) -> tuple[float, float] | None:
+    """Recalibrated (lo, hi) quantile levels from the evaluate stage's conformal block.
+
+    The evaluate stage persists the calibration PIT quantile grid in
+    metrics.json (#156); interpolating it remaps any nominal level without
+    touching the samples. None (with a warning) when the block is absent —
+    the flag is on but evaluate ran without it or without a validation split.
+    """
+    metrics_path = evaluation_dir / "metrics.json"
+    try:
+        metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+        grid = metrics["calibration"]["conformal"]["pit_quantile_grid"]
+        levels = np.asarray(grid["levels"], dtype=float)
+        values = np.asarray(grid["values"], dtype=float)
+    except (OSError, ValueError, KeyError, TypeError):
+        log.warning(
+            "conformal_levels_unavailable",
+            path=str(metrics_path),
+            hint="run evaluate with conformal_calibration and val_albums >= 1 first",
+        )
+        return None
+    return float(np.interp(lo, levels, values)), float(np.interp(hi, levels, values))
 
 
 def predict_next_events(ctx: StageContext) -> dict:
@@ -652,6 +688,10 @@ def predict_next_events(ctx: StageContext) -> dict:
     # Compute artist mean features
     artist_mean_features = train_df.groupby(entity_col)[feature_cols].mean()
 
+    conformal_levels = None
+    if getattr(ctx, "conformal_calibration", False):
+        conformal_levels = _load_conformal_levels(Path(paths.evaluation))
+
     # Generate known entity predictions
     log.info("predicting_known_artists", n_artists=len(summary["artist_to_idx"]))
     known_df = _predict_known_entities(
@@ -663,12 +703,15 @@ def predict_next_events(ctx: StageContext) -> dict:
         strict=ctx.strict,
         batch_size=int(getattr(ctx, "predictive_batch_size", 500)),
         artist_batch_size=int(getattr(ctx, "predict_artist_batch_size", 50)),
+        conformal_levels=conformal_levels,
     )
     log.info("known_predictions_complete", n_rows=len(known_df))
 
     # Generate new entity predictions
     log.info("predicting_new_artists")
-    new_df = _predict_new_entities(posterior_samples, summary, seed=seed)
+    new_df = _predict_new_entities(
+        posterior_samples, summary, seed=seed, conformal_levels=conformal_levels
+    )
     log.info("new_predictions_complete", n_rows=len(new_df))
 
     # Save outputs
