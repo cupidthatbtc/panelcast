@@ -125,6 +125,8 @@ class ModelCardData:
     # plus the expected false-flag count so a lone flag is not over-read.
     flagged_slices: list[dict] = field(default_factory=list)
     expected_false_flags: float | None = None
+    # Ranking metrics (#182): one-line ordinal summary of the held-out slate.
+    ranking_summary: str = ""
 
     # Limitations and ethics
     limitations: list[str] = field(default_factory=list)
@@ -325,6 +327,9 @@ def _generate_markdown(data: ModelCardData) -> str:
     lines.append("### Predictive Performance")
     lines.append("")
     lines.append(data.predictive_summary)
+    if data.ranking_summary:
+        lines.append("")
+        lines.append(f"**Ranking:** {data.ranking_summary}")
     if data.loo_elpd is not None:
         lines.append("")
         lines.append(f"- **Held-out ELPD (test lppd):** {data.loo_elpd:.1f}")

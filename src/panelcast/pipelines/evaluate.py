@@ -39,6 +39,7 @@ from panelcast.evaluation.calibration import (
 )
 from panelcast.evaluation.metrics import compute_crps, compute_point_metrics
 from panelcast.evaluation.ppc import compute_ppc_statistics
+from panelcast.evaluation.ranking import compute_ranking_metrics
 from panelcast.evaluation.slices import calibration_by_slice, stratified_history_metrics
 from panelcast.models.bayes.diagnostics import (
     check_convergence,
@@ -1261,16 +1262,35 @@ def _evaluate_primary_split(
         n_pairs=residual_acf["n_pairs"],
     )
 
+    # Ranking metrics (#182): the ordinal read on the held-out slate.
+    # Informational — never fail the stage over it.
+    ranking_metrics: dict | None = None
+    ranked_slate: pd.DataFrame | None = None
+    try:
+        ranking_metrics, ranked_slate = compute_ranking_metrics(
+            primary_y_true,
+            primary_y_samples,
+            primary_row_ids["entity"].to_numpy(),
+        )
+    except Exception as e:
+        log.warning(
+            "ranking_metrics_failed",
+            error_type=type(e).__name__,
+            error=str(e)[:500],
+        )
+
     primary_split_result = {
         **primary_metrics,
         "n_test": int(len(primary_y_true)),
         "info_criteria": primary_info_criteria,
         "residual_autocorrelation": residual_acf,
         "stratified_by_history": stratified_by_history,
+        "ranking": ranking_metrics,
     }
     primary_split_artifact = {
         "predictions": primary_predictions,
         "calibration": primary_calibration,
+        "ranked_slate": ranked_slate,
     }
     return primary_split_result, primary_split_artifact
 
@@ -1501,6 +1521,9 @@ def evaluate_models(ctx: StageContext) -> dict:
         split_dir.mkdir(parents=True, exist_ok=True)
         _write_json(split_dir / "predictions.json", artifacts["predictions"])
         _write_json(split_dir / "calibration.json", artifacts["calibration"])
+        ranked_slate = artifacts.get("ranked_slate")
+        if ranked_slate is not None:
+            ranked_slate.to_csv(split_dir / "ranked_slate.csv", index=False)
 
     # Backward compatibility with existing dashboards/reporting paths.
     if PRIMARY_SPLIT in split_artifacts:
