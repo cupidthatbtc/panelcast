@@ -40,6 +40,7 @@ from panelcast.cli import commands as _commands  # noqa: E402, F401
 from panelcast.cli import runs_cmd as _runs_cmd  # noqa: E402, F401
 from panelcast.cli import doctor_cmd as _doctor_cmd  # noqa: E402, F401
 from panelcast.cli import select_cmd as _select_cmd  # noqa: E402, F401
+from panelcast.cli import backtest_cmd as _backtest_cmd  # noqa: E402, F401
 # isort: on
 
 __version__ = _main.__version__

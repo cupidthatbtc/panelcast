@@ -240,6 +240,8 @@ class PipelineConfig:
     # default (2) so `stage splits` / `demo` build the same split population.
     val_albums: int = 0
     min_train_albums: int = 2
+    # Rolling-origin backtest offset (0 = the standard split)
+    origin_offset: int = 0
     # Evaluation configuration
     calibration_intervals: tuple[float, ...] = (0.80, 0.95)
     coverage_tolerance: float = 0.03
@@ -646,6 +648,7 @@ class PipelineOrchestrator:
                 "gbm_offset": self.config.gbm_offset,
                 "exclude_rw_raw_from_collection": self.config.exclude_rw_raw_from_collection,
                 "val_albums": self.config.val_albums,
+                "origin_offset": self.config.origin_offset,
                 "min_train_albums": self.config.min_train_albums,
                 # Evaluation
                 "calibration_intervals": list(self.config.calibration_intervals),
@@ -958,6 +961,8 @@ class PipelineOrchestrator:
             parts.append("--gbm-offset" if self.config.gbm_offset else "--no-gbm-offset")
         if self.config.val_albums != defaults.val_albums:
             parts.append(f"--val-albums {self.config.val_albums}")
+        if self.config.origin_offset != defaults.origin_offset:
+            parts.append(f"--origin-offset {self.config.origin_offset}")
         if self.config.calibration_intervals != defaults.calibration_intervals:
             interval_str = ",".join(f"{p:.4g}" for p in self.config.calibration_intervals)
             parts.append(f"--calibration-intervals {interval_str}")
@@ -1260,6 +1265,7 @@ class PipelineOrchestrator:
             gbm_offset=self.config.gbm_offset,
             exclude_rw_raw_from_collection=self.config.exclude_rw_raw_from_collection,
             val_albums=self.config.val_albums,
+            origin_offset=self.config.origin_offset,
             min_train_albums=self.config.min_train_albums,
             calibration_intervals=self.config.calibration_intervals,
             coverage_tolerance=self.config.coverage_tolerance,

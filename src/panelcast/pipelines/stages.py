@@ -141,6 +141,7 @@ class StageContext:
     exclude_rw_raw_from_collection: bool = False
     # Split configuration
     val_albums: int = 0
+    origin_offset: int = 0
     min_train_albums: int = 1
     # Evaluation configuration
     calibration_intervals: tuple[float, ...] = (0.80, 0.95)
@@ -374,6 +375,7 @@ def _run_splits_stage(ctx: StageContext):
         random_state=ctx.seed,
         min_ratings=ctx.min_ratings,
         val_albums=getattr(ctx, "val_albums", 0),
+        origin_offset=getattr(ctx, "origin_offset", 0),
         min_train_albums=getattr(ctx, "min_train_albums", 1),
         entity_col=ctx.descriptor.entity_col,
         date_col=ctx.descriptor.parsed_date_col,

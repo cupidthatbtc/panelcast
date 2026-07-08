@@ -729,6 +729,17 @@ def run(
             ),
         ),
     ] = 2,
+    origin_offset: Annotated[
+        int,
+        typer.Option(
+            min=0,
+            help=(
+                "Rolling-origin backtest offset k: drop each artist's last k "
+                "albums as future and hold out the (last-k)-th (default 0 = "
+                "the standard split)."
+            ),
+        ),
+    ] = 0,
     calibration_intervals: str = typer.Option(
         "0.80,0.95",
         "--calibration-intervals",
@@ -900,6 +911,7 @@ def run(
         likelihood_family=likelihood_family,
         discretize_observation=discretize_observation,
         val_albums=val_albums,
+        origin_offset=origin_offset,
         min_train_albums=min_train_albums,
         calibration_intervals=calibration_levels,
         coverage_tolerance=coverage_tolerance,
