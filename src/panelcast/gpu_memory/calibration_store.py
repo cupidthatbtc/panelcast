@@ -10,6 +10,8 @@ earns tighter numbers.
 from __future__ import annotations
 
 import json
+import logging
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,8 +20,11 @@ from typing import Any
 from panelcast.gpu_memory.estimate import (
     COLLECTION_OVERHEAD_FACTOR,
     FIXED_OVERHEAD_GB,
+    _count_params,
     estimate_memory_gb,
 )
+
+logger = logging.getLogger(__name__)
 
 _STORE_VERSION = 1
 _MAX_RECORDS = 200
@@ -61,15 +66,48 @@ def append_record(
         "context": context or {},
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    records = load_records(path)
+    records = _read_records_for_append(path)
+    if records is None:
+        logger.warning(
+            "GPU calibration store %s unreadable; skipping append to avoid "
+            "rewriting the store from an empty read",
+            path,
+        )
+        return
     records.append(record)
     payload = {"version": _STORE_VERSION, "records": records[-_MAX_RECORDS:]}
-    tmp = path.with_suffix(".tmp")
+    # Per-process tmp name: concurrent appenders must not share one tmp file.
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
     tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     tmp.replace(path)
 
 
+def _read_records_for_append(path: Path) -> list[dict[str, Any]] | None:
+    """Records for the append's read-modify-write; None = present but unreadable.
+
+    A transient read failure (Windows sharing violation during another
+    process's os.replace, AV hold) must not be collapsed to an empty list —
+    the rewrite would silently destroy the accumulated history. Missing store
+    is fine (fresh start); corrupt JSON is real corruption (writes are
+    atomic), so rewriting heals it.
+    """
+    for delay in (0.05, 0.1, 0.2):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return []
+        except ValueError:
+            return []
+        except OSError:
+            time.sleep(delay)
+            continue
+        records = payload.get("records", [])
+        return records if isinstance(records, list) else []
+    return None
+
+
 def load_records(path: Path | None = None) -> list[dict[str, Any]]:
+    """Read-only load; any failure falls back to no history (shipped constants)."""
     path = path or default_store_path()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -84,7 +122,10 @@ def _linear_terms(inputs: dict[str, Any]) -> tuple[float, float] | None:
 
     The estimator is linear in the two constants:
     total = (1 + jbp) * (raw_base + FIXED + FACTOR * unit), so the local refit
-    is a straight least-squares on these terms.
+    is a straight least-squares on these terms. Structural gate flags are
+    folded into the terms themselves (via the shared _count_params), so
+    records fit under different gates stay comparable; records that predate
+    the flags being recorded are read as gate-off.
     """
     try:
         n_obs = int(inputs["n_observations"])
@@ -93,13 +134,22 @@ def _linear_terms(inputs: dict[str, Any]) -> tuple[float, float] | None:
         max_seq = int(inputs["max_seq"])
         num_chains = int(inputs["num_chains"])
         num_samples = int(inputs["num_samples"])
-        exclude = bool(inputs.get("exclude_rw_raw_from_collection", False))
+        n_params, collected = _count_params(
+            n_observations=n_obs,
+            n_features=n_features,
+            n_artists=n_artists,
+            max_seq=max_seq,
+            exclude_rw_raw_from_collection=bool(
+                inputs.get("exclude_rw_raw_from_collection", False)
+            ),
+            errors_in_variables=bool(inputs.get("errors_in_variables", False)),
+            heteroscedastic_entity_obs=bool(inputs.get("heteroscedastic_entity_obs", False)),
+            entity_group_pooling=bool(inputs.get("entity_group_pooling", False)),
+            n_groups=int(inputs.get("n_groups", 0) or 0),
+        )
     except (KeyError, TypeError, ValueError):
         return None
     gib = 1024**3
-    rw_raw = n_artists * max(0, max_seq - 1)
-    n_params = n_artists + rw_raw + n_features + 10
-    collected = n_params - rw_raw if exclude else n_params
     raw_base = (n_params * 4 * 4 + n_obs * n_features * 4) / gib
     unit = collected * num_samples * 4 * num_chains / gib
     return raw_base, unit
