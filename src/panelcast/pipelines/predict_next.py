@@ -575,6 +575,7 @@ def _load_conformal_levels(
         grid = metrics["calibration"]["conformal"]["pit_quantile_grid"]
         levels = np.asarray(grid["levels"], dtype=float)
         values = np.asarray(grid["values"], dtype=float)
+        return float(np.interp(lo, levels, values)), float(np.interp(hi, levels, values))
     except (OSError, ValueError, KeyError, TypeError):
         log.warning(
             "conformal_levels_unavailable",
@@ -582,7 +583,6 @@ def _load_conformal_levels(
             hint="run evaluate with conformal_calibration and val_albums >= 1 first",
         )
         return None
-    return float(np.interp(lo, levels, values)), float(np.interp(hi, levels, values))
 
 
 def predict_next_events(ctx: StageContext) -> dict:

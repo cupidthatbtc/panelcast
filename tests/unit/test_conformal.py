@@ -13,7 +13,9 @@ from panelcast.evaluation.conformal import (
 )
 
 
-def _cal_set(n=300, n_draws=400, pred_scale=5.0, true_scale=5.0, seed=0):
+def _cal_set(
+    n=300, n_draws=400, pred_scale=5.0, true_scale=5.0, seed=0
+) -> tuple[np.ndarray, np.ndarray]:
     rng = np.random.default_rng(seed)
     y = rng.normal(70, true_scale, size=n)
     samples = rng.normal(70, pred_scale, size=(n_draws, n))

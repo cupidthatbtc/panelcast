@@ -92,10 +92,14 @@ def conformalize(
     pit_cal = compute_pit_per_row(y_cal, cal_samples)
 
     levels_block: dict[str, dict] = {}
+    n_cal = len(pit_cal)
     for prob in probs:
         adjustment = conformal_adjustment(y_cal, cal_samples, prob)
         lo, hi = conformalized_bounds(test_samples, prob, adjustment)
         covered = (y_test >= lo) & (y_test <= hi)
+        # ceil((n+1)p) > n means the score quantile clamps at the max and the
+        # finite-sample guarantee cannot be met at this level with this n.
+        attainable = math.ceil((n_cal + 1) * prob) <= n_cal
 
         a = (1.0 - prob) / 2.0
         lo_lvl, hi_lvl = recalibrated_levels(pit_cal, [a, 1.0 - a])
@@ -106,6 +110,7 @@ def conformalize(
         levels_block[f"{prob:.2f}"] = {
             "nominal": float(prob),
             "cqr_adjustment": adjustment,
+            "cqr_guarantee_attainable": attainable,
             "cqr_coverage": float(covered.mean()),
             "cqr_mean_width": float(np.mean(hi - lo)),
             "recalibrated_levels": [float(lo_lvl), float(hi_lvl)],

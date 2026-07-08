@@ -726,10 +726,15 @@ class PipelineOrchestrator:
         "min_ratings",
         "min_albums_filter",
         "min_train_albums",
+        # Split geometry: a resume that reverts these regenerates different
+        # splits than the run it claims to continue.
+        "val_albums",
+        "origin_offset",
         "calibration_intervals",
         "coverage_tolerance",
         "prediction_interval",
         "evaluate_secondary_split",
+        "conformal_calibration",
         "enforce_lockfile",
         "dataset",
     )
