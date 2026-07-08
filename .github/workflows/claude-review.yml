@@ -32,6 +32,8 @@ jobs:
           plugins: "code-review@claude-code-plugins"
           prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
           claude_args: "--model claude-opus-4-8"
-          # Post the review report as a PR comment even when there are no
-          # findings — otherwise a clean review leaves only the green check.
+          # display_report only surfaces the report on the Actions job
+          # summary; track_progress is what posts a visible PR comment
+          # (progress + final report), so a clean review still responds.
           display_report: "true"
+          track_progress: "true"
