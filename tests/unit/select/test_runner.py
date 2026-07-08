@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
@@ -12,6 +13,7 @@ import pytest
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.select.runner import (
     ARM_TIMEOUT_RETURNCODE,
+    STAGE2_MAX_WINNERS,
     ArmRecord,
     SweepConfig,
     SweepLedger,
@@ -23,6 +25,7 @@ from panelcast.select.runner import (
     reorder_arms,
     run_sweep,
     stage2_arms,
+    stage2_winners,
     stage3_arms,
 )
 from panelcast.select.space import default_arm
@@ -195,6 +198,12 @@ class TestLedger:
         assert ledger.hours_spent() == 1.0
 
 
+def _write_manifest(run_dir: Path, created_at: str | None = None, **extra) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    payload = {"created_at": created_at or datetime.now().isoformat(), **extra}
+    (run_dir / "manifest.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
 def _fake_env(tmp_path, monkeypatch):
     """Fake launcher + latest-run plumbing; returns (cfg, launches list)."""
     launches: list[Path] = []
@@ -204,7 +213,7 @@ def _fake_env(tmp_path, monkeypatch):
         launches.append(Path(config_path))
         (tmp_path / "outputs").mkdir(exist_ok=True)
         current = next(run_dirs)
-        (tmp_path / "outputs" / current).mkdir()
+        _write_manifest(tmp_path / "outputs" / current)
         (tmp_path / "outputs" / "latest.json").write_text(
             json.dumps({"run_dir": current}), encoding="utf-8"
         )
@@ -401,3 +410,148 @@ class TestArmTimeout:
         assert relaunched.records[timeout_id].status == "timeout"
         # The failed arm is retryable: resume re-ran it and it completed this time.
         assert relaunched.records[failed_id].status == "completed"
+
+
+class TestStage2Winners:
+    def _record(self, knobs, z, status="completed", stage=1) -> ArmRecord:
+        score = None if z == "absent" else {"z": z}
+        return ArmRecord(arm_id(knobs), knobs, stage, status=status, score=score)
+
+    def test_none_z_is_never_a_winner(self):
+        records = [
+            self._record({"latent_process": "ar1"}, None),
+            self._record({"gbm_offset": False}, "absent"),
+        ]
+        assert stage2_winners(records, winner_z=2.0) == []
+
+    def test_five_winners_capped_to_top_three_by_z(self):
+        knobs = [
+            {"latent_process": "ar1"},
+            {"gbm_offset": False},
+            {"ar_center": "none"},
+            {"learn_n_exponent": True},
+            {"errors_in_variables": True},
+        ]
+        records = [self._record(k, z) for k, z in zip(knobs, (3.0, 7.0, 5.0, 4.0, 6.0))]
+        winners = stage2_winners(records, winner_z=2.0)
+        assert len(winners) == STAGE2_MAX_WINNERS == 3
+        assert winners == [knobs[1], knobs[4], knobs[2]]  # z 7, 6, 5
+        # The composed+pairwise bound the plan promises: 1 + C(3, 2).
+        assert len(stage2_arms(winners, AOTY)) <= 1 + 3
+
+    def test_tie_breaks_on_arm_id(self):
+        a, b = {"latent_process": "ar1"}, {"gbm_offset": False}
+        records = [self._record(a, 5.0), self._record(b, 5.0)]
+        winners = stage2_winners(records, winner_z=2.0, cap=1)
+        expected_first = min((arm_id(a), a), (arm_id(b), b))[1]
+        assert winners == [expected_first]
+
+    def test_sweep_survives_none_z_scores(self, tmp_path, monkeypatch):
+        # The production scorer returns {"z": None} whenever the reference
+        # snapshot is missing; the stage-2 gate must not TypeError on it.
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = True
+        ledger = run_sweep(cfg, AOTY, launch=launch, scorer=lambda r, ref: {"z": None})
+        assert all(r.status == "completed" for r in ledger.records.values())
+        assert not any(r.stage == 2 for r in ledger.records.values())
+
+    def test_sweep_stage2_count_stays_within_plan_bound(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = True
+        counter = {"n": 0}
+
+        def scorer(run_dir, reference):
+            counter["n"] += 1
+            return {"z": float(counter["n"])}  # every arm clears the bar
+
+        ledger = run_sweep(cfg, AOTY, launch=launch, scorer=scorer)
+        n_stage2 = sum(1 for r in ledger.records.values() if r.stage == 2)
+        assert 0 < n_stage2 <= 1 + 3
+
+
+class TestAttribution:
+    def test_run_dir_is_dereferenced(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.max_fits = 1
+
+        import panelcast.paths as paths_mod
+
+        real = tmp_path / "outputs" / "run_000"
+
+        def launch_indirect(config_path, panelcast_bin, timeout_seconds=None):
+            _write_manifest(real)
+            return 0, "ok"
+
+        monkeypatch.setattr(
+            paths_mod,
+            "resolve_latest",
+            lambda output_base=Path("outputs"): tmp_path / "outputs" / ".." / "outputs" / "run_000",
+        )
+        ledger = run_sweep(cfg, AOTY, launch=launch_indirect)
+        (record,) = ledger.records.values()
+        assert record.run_dir == str(real.resolve())
+
+    def test_stale_run_is_not_scored(self, tmp_path, monkeypatch):
+        # latest.json still points at a run created BEFORE this arm launched
+        # (failed pointer write / foreign run): the arm must fail, not score it.
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.max_fits = 1
+        stale = tmp_path / "outputs" / "stale_run"
+        _write_manifest(stale, created_at=(datetime.now() - timedelta(hours=2)).isoformat())
+        (tmp_path / "outputs" / "latest.json").write_text(
+            json.dumps({"run_dir": "stale_run"}), encoding="utf-8"
+        )
+
+        def launch_no_pointer(config_path, panelcast_bin, timeout_seconds=None):
+            return 0, "ok"  # succeeds but never re-points latest.json
+
+        ledger = run_sweep(cfg, AOTY, launch=launch_no_pointer)
+        (record,) = ledger.records.values()
+        assert record.status == "failed"
+        assert "attribution failed" in record.error
+        assert record.run_dir is None
+
+    def test_config_mismatch_is_not_scored(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.max_fits = 2
+
+        def launch_foreign(config_path, panelcast_bin, timeout_seconds=None):
+            code, tail = launch(config_path, panelcast_bin, timeout_seconds)
+            run_dir = tmp_path / "outputs" / json.loads(
+                (tmp_path / "outputs" / "latest.json").read_text()
+            )["run_dir"]
+            # A foreign run's manifest records different knob values.
+            _write_manifest(run_dir, flags={"likelihood_family": "not-a-real-family"})
+            return code, tail
+
+        ledger = run_sweep(cfg, AOTY, launch=launch_foreign)
+        assert all(r.status == "failed" for r in ledger.records.values())
+        assert all("disagrees with the arm" in r.error for r in ledger.records.values())
+
+    def test_two_arms_resolving_to_same_run_fail_the_second(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.max_fits = 2
+        state = {"n": 0}
+
+        def launch_once(config_path, panelcast_bin, timeout_seconds=None):
+            state["n"] += 1
+            if state["n"] == 1:
+                return launch(config_path, panelcast_bin, timeout_seconds)
+            # Second arm: pointer write fails silently, latest still points at
+            # arm 1's run — but a fresh manifest timestamp alone must not pass.
+            run_dir = tmp_path / "outputs" / json.loads(
+                (tmp_path / "outputs" / "latest.json").read_text()
+            )["run_dir"]
+            _write_manifest(run_dir)
+            return 0, "ok"
+
+        ledger = run_sweep(cfg, AOTY, launch=launch_once)
+        statuses = [r.status for r in ledger.records.values()]
+        assert statuses.count("completed") == 1
+        assert statuses.count("failed") == 1
+        failed = next(r for r in ledger.records.values() if r.status == "failed")
+        assert "already belongs to another arm" in failed.error

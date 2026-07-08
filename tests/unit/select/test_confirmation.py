@@ -40,7 +40,7 @@ def _fake_env(tmp_path, monkeypatch, winner_ll_for_seed=None, winner_passed_for_
     winner_ll_for_seed = winner_ll_for_seed or (lambda seed: _WINNER_GOOD_LL)
     winner_passed_for_seed = winner_passed_for_seed or (lambda seed: True)
 
-    def launch(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
+    def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
         name = Path(config_path).stem  # confirm_<label>_seed<seed>
         label = "winner" if "winner" in name else "reference"
         seed = int(name.split("seed")[-1])
@@ -112,10 +112,10 @@ class TestRunConfirmation:
     def test_fit_failure_recorded_not_raised(self, tmp_path, monkeypatch):
         cfg, launch = _fake_env(tmp_path, monkeypatch)
 
-        def flaky(config_path: Path, panelcast_bin: str) -> tuple[int, str]:
+        def flaky(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
             if "seed43" in Path(config_path).stem:
                 return 1, "boom"
-            return launch(config_path, panelcast_bin)
+            return launch(config_path, panelcast_bin, timeout_seconds)
 
         result = run_confirmation(
             {"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=flaky
@@ -141,6 +141,70 @@ class TestRunConfirmation:
         assert config["num_samples"] == 5000
         assert config["seed"] == 42
         assert config["stages"] == ["splits", "features", "train", "evaluate"]
+
+
+class TestConfirmationTimeout:
+    def _captured_timeouts(self, tmp_path, monkeypatch, cfg, sampler_overrides):
+        base_cfg, launch = _fake_env(tmp_path, monkeypatch)
+        timeouts: list = []
+
+        def capturing(config_path, panelcast_bin, timeout_seconds=None):
+            timeouts.append(timeout_seconds)
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        run_confirmation(
+            {"latent_process": "ar1"}, cfg, seeds=(42,),
+            sampler_overrides=sampler_overrides, launch=capturing,
+        )
+        return timeouts
+
+    def test_timeout_scaled_by_publication_sampler_ratio(self, tmp_path, monkeypatch):
+        cfg = SweepConfig(
+            sweep_id="c", output_root=tmp_path / "select", panelcast_bin="pc",
+            num_samples=1000, num_warmup=1000, arm_timeout_seconds=1800.0,
+        )
+        timeouts = self._captured_timeouts(
+            tmp_path, monkeypatch, cfg,
+            {"num_chains": 4, "num_samples": 5000, "num_warmup": 5000},
+        )
+        # (5000+5000)/(1000+1000) = 5x the screening timeout, on every fit.
+        assert timeouts == [9000.0, 9000.0]
+
+    def test_screening_timeout_is_the_floor_without_overrides(self, tmp_path, monkeypatch):
+        cfg = SweepConfig(
+            sweep_id="c", output_root=tmp_path / "select", panelcast_bin="pc",
+            num_samples=1000, num_warmup=1000, arm_timeout_seconds=1800.0,
+        )
+        timeouts = self._captured_timeouts(tmp_path, monkeypatch, cfg, None)
+        assert timeouts == [1800.0, 1800.0]
+
+    def test_no_timeout_when_arm_timeout_unset(self, tmp_path, monkeypatch):
+        cfg = SweepConfig(
+            sweep_id="c", output_root=tmp_path / "select", panelcast_bin="pc",
+            num_samples=1000, num_warmup=1000,
+        )
+        timeouts = self._captured_timeouts(
+            tmp_path, monkeypatch, cfg, {"num_samples": 5000, "num_warmup": 5000}
+        )
+        assert timeouts == [None, None]
+
+
+class TestSelfPairGuard:
+    def test_winner_resolving_to_reference_run_is_an_error(self, tmp_path, monkeypatch):
+        # A failed latest-pointer write after the winner fit leaves the pointer
+        # on the reference run: pairing it against itself would fake a z=0 seed.
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+
+        def sticky_pointer(config_path, panelcast_bin, timeout_seconds=None):
+            if "winner" in Path(config_path).stem:
+                return 0, "ok"  # succeeds but never re-points latest.json
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        result = run_confirmation(
+            {"latent_process": "ar1"}, cfg, seeds=(42,), launch=sticky_pointer
+        )
+        assert not result.confirmed
+        assert "self-pair" in result.seeds[0].error
 
 
 class TestConfirmationResult:

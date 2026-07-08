@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import arviz as az
@@ -122,6 +123,83 @@ class TestResolveDims:
         assert dims["n_artists"] == 10  # n_obs // 5
 
 
+PUB_OVERRIDES = {"num_chains": 4, "num_samples": 5000, "num_warmup": 5000}
+STANDARD_PUB = EffortTier(
+    "standard", (1, 2), 4, 1000, 1000, confirm=True, publication_confirm=PUB_OVERRIDES
+)
+
+
+class TestPlanMatchesExecution:
+    def test_stage2_bound_matches_runner_cap(self, tmp_path):
+        # 1 composed + C(3, 2) pairwise for the capped winner set — not the old
+        # hand-waved 6 that stage2_arms could silently exceed.
+        plan = build_plan(AOTY, NOCONFIRM, _cfg(tmp_path), dataset_label="aoty")
+        assert plan.max_fits_planned == plan.n_stage1_arms + 4
+        assert any("stage 2" in n for n in plan.notes)
+        assert "stage 2" in render_plan(plan)
+
+    def test_no_phantom_publication_fits(self, tmp_path):
+        # run_confirmation runs ALL 2xN confirmation fits at publication scale;
+        # there is no separate 2-fit publication pass to price.
+        plan = build_plan(
+            AOTY, STANDARD_PUB, _cfg(tmp_path), dataset_label="aoty", n_confirmation_seeds=3
+        )
+        assert plan.min_fits == plan.n_stage1_arms + 6
+        assert plan.max_fits_planned == plan.n_stage1_arms + 4 + 6
+
+    def test_cost_prices_confirmation_at_publication_scale(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+
+        import panelcast.gpu_memory.calibration_store as cs
+        import panelcast.gpu_memory.runtime_predictor as rp
+
+        def fake_predict(num_chains, num_samples, num_warmup, n_obs, transform, store_path):
+            seconds = 1000.0 if num_samples == 5000 else 100.0
+            return SimpleNamespace(seconds=seconds, source="fake")
+
+        monkeypatch.setattr(rp, "predict_fit_seconds", fake_predict)
+        monkeypatch.setattr(
+            cs,
+            "estimate_with_calibration",
+            lambda *a, **k: (SimpleNamespace(total_gb=8.0), "fake-mem"),
+        )
+        dims = {"n_observations": 5000, "n_features": 40, "n_artists": 900, "max_seq": 30}
+        plan = build_plan(
+            AOTY, STANDARD_PUB, _cfg(tmp_path), dataset_label="aoty",
+            n_confirmation_seeds=3, dims=dims,
+        )
+        n_screen = plan.n_stage1_arms + 4
+        expected_hours = (n_screen * 100.0 + 6 * 1000.0) / 3600.0
+        assert plan.predicted_gpu_hours == expected_hours
+
+    def test_confirmation_launch_count_matches_plan(self, tmp_path, monkeypatch):
+        import yaml
+
+        import panelcast.paths as paths_mod
+        from panelcast.select.confirmation import run_confirmation
+
+        monkeypatch.setattr(paths_mod, "resolve_latest", lambda output_base=Path("outputs"): None)
+        launched: list[Path] = []
+
+        def launch(config_path, panelcast_bin, timeout_seconds=None):
+            launched.append(Path(config_path))
+            return 0, "ok"
+
+        cfg = _cfg(tmp_path)
+        plan = build_plan(
+            AOTY, STANDARD_PUB, cfg, dataset_label="aoty", n_confirmation_seeds=3
+        )
+        run_confirmation(
+            {"latent_process": "ar1"}, cfg, seeds=(42, 43, 44),
+            sampler_overrides=STANDARD_PUB.publication_confirm, launch=launch,
+        )
+        planned_confirm = plan.max_fits_planned - (plan.n_stage1_arms + 4)
+        assert len(launched) == planned_confirm == 6
+        for path in launched:
+            payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+            assert payload["num_samples"] == 5000  # every fit at publication scale
+
+
 class TestThoroughCost:
     def test_publication_fit_included(self, tmp_path):
         thorough = EffortTier(
@@ -173,7 +251,14 @@ def _write_scored_run(run_dir: Path, ll: np.ndarray, *, converged: bool = True) 
         encoding="utf-8",
     )
     (run_dir / "manifest.json").write_text(
-        json.dumps({"stage_durations": {"train": 120.0}, "resources": {}}), encoding="utf-8"
+        json.dumps(
+            {
+                "created_at": datetime.now().isoformat(),
+                "stage_durations": {"train": 120.0},
+                "resources": {},
+            }
+        ),
+        encoding="utf-8",
     )
 
 
@@ -428,3 +513,64 @@ class TestConfirmationWiring:
         assert result["confirmed"] is False
         assert result["winner_arm"] is None
         assert result["promotable"]  # it cleared the rules, just not confirmation
+
+
+class TestReferenceBaselineRow:
+    def test_reference_scores_zero_not_missing_snapshot(self, tmp_path, monkeypatch):
+        # The reference paired against its own snapshot is the z=0 baseline row,
+        # not a "no snapshot" caveat sinking below every scored arm.
+        launch = _fake_env(tmp_path, monkeypatch)
+        cfg = _cfg(tmp_path, max_fits=3)
+        cfg.include_stage2 = False
+        result = run_select(
+            None, NOCONFIRM, DecisionRules(), cfg, launch=launch,
+            audit_root=tmp_path / ".audit",
+        )
+        report = (Path(result["report_dir"]) / "report.md").read_text(encoding="utf-8")
+        assert "No pointwise log-likelihood snapshot" not in report
+        payload = json.loads((Path(result["report_dir"]) / "report.json").read_text())
+        reference = next(a for a in payload["arms"] if a["knobs"] == {})
+        assert reference["elpd_z"] == 0.0
+        assert reference["elpd_diff"] == 0.0
+        # z=0 ranks with the scored arms, below the genuine winners.
+        assert payload["arms"][-1]["knobs"] == {}
+
+
+class TestNotEvaluatedSection:
+    def test_failed_arms_surface_in_report_and_summary(self, tmp_path, monkeypatch):
+        launch = _fake_env(tmp_path, monkeypatch)
+        calls = {"n": 0}
+
+        def flaky(config_path, panelcast_bin, timeout_seconds=None):
+            calls["n"] += 1
+            if calls["n"] == 3:
+                return 1, "cuda OOM: out of memory"
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        cfg = _cfg(tmp_path, max_fits=4)
+        cfg.include_stage2 = False
+        result = run_select(
+            None, NOCONFIRM, DecisionRules(), cfg, launch=flaky,
+            audit_root=tmp_path / ".audit",
+        )
+        assert result["n_arms_not_evaluated"] == 1
+        assert result["not_evaluated"] == {"failed": 1}
+        report = (Path(result["report_dir"]) / "report.md").read_text(encoding="utf-8")
+        assert "## Not evaluated" in report
+        assert "cuda OOM" in report
+        payload = json.loads((Path(result["report_dir"]) / "report.json").read_text())
+        assert len(payload["not_evaluated"]) == 1
+        assert payload["not_evaluated"][0]["status"] == "failed"
+        assert payload["not_evaluated"][0]["knobs"]
+
+    def test_clean_sweep_has_no_section_but_zero_counts(self, tmp_path, monkeypatch):
+        launch = _fake_env(tmp_path, monkeypatch)
+        cfg = _cfg(tmp_path, max_fits=2)
+        cfg.include_stage2 = False
+        result = run_select(
+            None, NOCONFIRM, DecisionRules(), cfg, launch=launch,
+            audit_root=tmp_path / ".audit",
+        )
+        assert result["n_arms_not_evaluated"] == 0
+        report = (Path(result["report_dir"]) / "report.md").read_text(encoding="utf-8")
+        assert "## Not evaluated" not in report
