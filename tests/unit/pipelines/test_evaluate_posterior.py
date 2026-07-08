@@ -341,9 +341,11 @@ def test_evaluate_models_returns_split_metrics(tmp_path, mock_summary):
         passed=True,
         rhat_max=1.0,
         ess_bulk_min=1000,
+        ess_tail_min=900,
         divergences=0,
         rhat_threshold=1.01,
         ess_threshold=400,
+        failing_params=[],
     )
 
     ctx = SimpleNamespace(
@@ -422,9 +424,11 @@ def test_evaluate_models_strict_fails_when_secondary_artifacts_missing(tmp_path,
         passed=True,
         rhat_max=1.0,
         ess_bulk_min=1000,
+        ess_tail_min=900,
         divergences=0,
         rhat_threshold=1.01,
         ess_threshold=400,
+        failing_params=[],
     )
 
     ctx = SimpleNamespace(
@@ -441,6 +445,8 @@ def test_evaluate_models_strict_fails_when_secondary_artifacts_missing(tmp_path,
         patch("panelcast.pipelines.evaluate.load_model", return_value=fake_idata),
         patch("panelcast.pipelines.evaluate.check_convergence", return_value=diagnostics),
         patch("panelcast.pipelines.evaluate.get_divergence_info"),
+        # Keep the (now strict-fatal) prior-predictive gate out of scope here.
+        patch("panelcast.pipelines.evaluate._run_training_prior_predictive", return_value=None),
         patch(
             "panelcast.pipelines.evaluate._extract_posterior_samples",
             return_value={"user_sigma_obs": np.ones((5,))},
@@ -470,9 +476,11 @@ def test_evaluate_models_strict_fails_on_bad_calibration(mock_summary):
         passed=True,
         rhat_max=1.0,
         ess_bulk_min=1000,
+        ess_tail_min=900,
         divergences=0,
         rhat_threshold=1.01,
         ess_threshold=400,
+        failing_params=[],
     )
     ctx = SimpleNamespace(
         seed=42,
@@ -504,6 +512,8 @@ def test_evaluate_models_strict_fails_on_bad_calibration(mock_summary):
         patch("panelcast.pipelines.evaluate.load_model", return_value=fake_idata),
         patch("panelcast.pipelines.evaluate.check_convergence", return_value=diagnostics),
         patch("panelcast.pipelines.evaluate.get_divergence_info"),
+        # Keep the (now strict-fatal) prior-predictive gate out of scope here.
+        patch("panelcast.pipelines.evaluate._run_training_prior_predictive", return_value=None),
         patch("panelcast.pipelines.evaluate.pd.read_parquet", return_value=pd.DataFrame()),
         patch("builtins.open", mock_open(read_data=json.dumps(mock_summary))),
         patch(

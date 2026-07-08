@@ -489,9 +489,11 @@ class TestEvaluateModelsPriorPredictive:
             passed=True,
             rhat_max=1.0,
             ess_bulk_min=1000,
+            ess_tail_min=900,
             divergences=0,
             rhat_threshold=1.01,
             ess_threshold=400,
+            failing_params=[],
         )
         rng = np.random.default_rng(7)
         return {
@@ -546,9 +548,11 @@ class TestEvaluateModelsPriorPredictive:
                     passed=True,
                     rhat_max=1.0,
                     ess_bulk_min=1000,
+                    ess_tail_min=900,
                     divergences=0,
                     rhat_threshold=1.01,
                     ess_threshold=400,
+                    failing_params=[],
                 ),
             ),
             patch("panelcast.pipelines.evaluate.get_divergence_info"),
@@ -582,6 +586,13 @@ class TestEvaluateModelsPriorPredictive:
         assert pp_data["reasonable"] is True
         assert pp_data["n_samples"] == 500
         assert isinstance(pp_data["sampled_indices"], list)
+
+        # Tail ESS and failing params flow through to diagnostics.json — the
+        # publication layer must not have to fabricate them from bulk ESS.
+        diag_path = tmp_path / "outputs" / "evaluation" / "diagnostics.json"
+        diag_data = json.loads(diag_path.read_text())
+        assert diag_data["ess_tail_min"] == 900.0
+        assert diag_data["failing_params"] == []
 
     def test_prior_predictive_strict_raises_on_failed_checks(self, tmp_path, summary):
         # Line 962: strict=True + checks_passed=False → ValueError
@@ -618,9 +629,11 @@ class TestEvaluateModelsPriorPredictive:
                     passed=True,
                     rhat_max=1.0,
                     ess_bulk_min=1000,
+                    ess_tail_min=900,
                     divergences=0,
                     rhat_threshold=1.01,
                     ess_threshold=400,
+                    failing_params=[],
                 ),
             ),
             patch("panelcast.pipelines.evaluate.get_divergence_info"),
@@ -662,9 +675,11 @@ class TestEvaluateModelsPriorPredictive:
                     passed=True,
                     rhat_max=1.0,
                     ess_bulk_min=1000,
+                    ess_tail_min=900,
                     divergences=0,
                     rhat_threshold=1.01,
                     ess_threshold=400,
+                    failing_params=[],
                 ),
             ),
             patch("panelcast.pipelines.evaluate.get_divergence_info"),
@@ -691,6 +706,84 @@ class TestEvaluateModelsPriorPredictive:
         pp_path = tmp_path / "outputs" / "evaluation" / "prior_predictive.json"
         assert not pp_path.exists()
         assert "metrics" in result
+
+    def test_prior_predictive_pooled_summary_drives_real_model(self, tmp_path, summary):
+        """A pooled training summary must reach the REAL run_prior_predictive with
+        group_idx_by_artist/n_groups attached. Regression: the pooling args were
+        never added to train_model_args, so every entity_group_pooling run raised
+        inside the model and the gate silently skipped (mocked tests hid it)."""
+        from panelcast.pipelines.evaluate import (
+            _run_training_prior_predictive,
+            _summary_dataset,
+        )
+
+        s = dict(summary)
+        s["priors"] = {**summary["priors"], "entity_group_pooling": True}
+        s["group_idx_by_artist"] = [0, 1]
+        s["n_groups"] = 2
+        _setup_primary_split(tmp_path, s)
+        # strict so any failure inside the helper surfaces instead of -> None
+        ctx = _make_standard_ctx(strict=True)
+
+        with patch("panelcast.pipelines.evaluate.Path", side_effect=lambda p: tmp_path / p):
+            result = _run_training_prior_predictive(s, _summary_dataset(s), "user", ctx)
+
+        assert result is not None
+        assert result.n_samples == 500
+
+    def test_prior_predictive_pooled_summary_missing_group_args_raises_strict(
+        self, tmp_path, summary
+    ):
+        """Pooling on but summary lacks group args → named error, fatal under strict."""
+        from panelcast.pipelines.evaluate import (
+            _run_training_prior_predictive,
+            _summary_dataset,
+        )
+
+        s = dict(summary)
+        s["priors"] = {**summary["priors"], "entity_group_pooling": True}
+        _setup_primary_split(tmp_path, s)
+        ctx = _make_standard_ctx(strict=True)
+
+        with patch("panelcast.pipelines.evaluate.Path", side_effect=lambda p: tmp_path / p):
+            with pytest.raises(ValueError, match="group_idx_by_artist/n_groups"):
+                _run_training_prior_predictive(s, _summary_dataset(s), "user", ctx)
+
+    def test_prior_predictive_strict_reraises_helper_failure(self, tmp_path, summary):
+        """Under strict a crash inside the helper (here: train/summary artist
+        mismatch) must propagate, not downgrade to a warning + None."""
+        from panelcast.pipelines.evaluate import (
+            _run_training_prior_predictive,
+            _summary_dataset,
+        )
+
+        s = dict(summary)
+        s["artist_to_idx"] = {"Artist_A": 0}  # Artist_B in train.parquet is unknown
+        s["n_artists"] = 1
+        _setup_primary_split(tmp_path, s)
+        ctx = _make_standard_ctx(strict=True)
+
+        with patch("panelcast.pipelines.evaluate.Path", side_effect=lambda p: tmp_path / p):
+            with pytest.raises(ValueError, match="Unknown artists"):
+                _run_training_prior_predictive(s, _summary_dataset(s), "user", ctx)
+
+    def test_prior_predictive_nonstrict_downgrades_failure_to_none(self, tmp_path, summary):
+        """Non-strict keeps the legacy behavior: warn and return None."""
+        from panelcast.pipelines.evaluate import (
+            _run_training_prior_predictive,
+            _summary_dataset,
+        )
+
+        s = dict(summary)
+        s["artist_to_idx"] = {"Artist_A": 0}
+        s["n_artists"] = 1
+        _setup_primary_split(tmp_path, s)
+        ctx = _make_standard_ctx(strict=False)
+
+        with patch("panelcast.pipelines.evaluate.Path", side_effect=lambda p: tmp_path / p):
+            result = _run_training_prior_predictive(s, _summary_dataset(s), "user", ctx)
+
+        assert result is None
 
 
 class TestEvaluateModelsTransformPaths:
@@ -737,9 +830,11 @@ class TestEvaluateModelsTransformPaths:
                     passed=True,
                     rhat_max=1.0,
                     ess_bulk_min=1000,
+                    ess_tail_min=900,
                     divergences=0,
                     rhat_threshold=1.01,
                     ess_threshold=400,
+                    failing_params=[],
                 ),
             ),
             patch("panelcast.pipelines.evaluate.get_divergence_info"),
@@ -1525,9 +1620,11 @@ class TestEvaluateModelsExtended:
             passed=True,
             rhat_max=1.0,
             ess_bulk_min=1000,
+            ess_tail_min=900,
             divergences=0,
             rhat_threshold=1.01,
             ess_threshold=400,
+            failing_params=[],
         )
         rng = np.random.default_rng(0)
 
@@ -1569,9 +1666,11 @@ class TestEvaluateModelsExtended:
                     passed=True,
                     rhat_max=1.0,
                     ess_bulk_min=1000,
+                    ess_tail_min=900,
                     divergences=0,
                     rhat_threshold=1.01,
                     ess_threshold=400,
+                    failing_params=[],
                 ),
             ),
             patch("panelcast.pipelines.evaluate.get_divergence_info"),
@@ -1617,12 +1716,19 @@ class TestEvaluateModelsExtended:
                     passed=True,
                     rhat_max=1.0,
                     ess_bulk_min=1000,
+                    ess_tail_min=900,
                     divergences=0,
                     rhat_threshold=1.01,
                     ess_threshold=400,
+                    failing_params=[],
                 ),
             ),
             p("panelcast.pipelines.evaluate.get_divergence_info"),
+            # Keep the (now strict-fatal) prior-predictive gate out of scope.
+            p(
+                "panelcast.pipelines.evaluate._run_training_prior_predictive",
+                return_value=None,
+            ),
             p(
                 "panelcast.pipelines.evaluate._extract_posterior_samples",
                 return_value={"user_sigma_obs": np.ones((5,))},
@@ -1664,9 +1770,11 @@ class TestEvaluateModelsExtended:
                     passed=True,
                     rhat_max=1.0,
                     ess_bulk_min=1000,
+                    ess_tail_min=900,
                     divergences=0,
                     rhat_threshold=1.01,
                     ess_threshold=400,
+                    failing_params=[],
                 ),
             ),
             p("panelcast.pipelines.evaluate.get_divergence_info"),
@@ -1721,9 +1829,11 @@ class TestEvaluateModelsExtended:
                     passed=True,
                     rhat_max=1.0,
                     ess_bulk_min=1000,
+                    ess_tail_min=900,
                     divergences=0,
                     rhat_threshold=1.01,
                     ess_threshold=400,
+                    failing_params=[],
                 ),
             ),
             p("panelcast.pipelines.evaluate.get_divergence_info"),
@@ -1795,9 +1905,11 @@ class TestEvaluateModelsExtended:
                     passed=True,
                     rhat_max=1.0,
                     ess_bulk_min=1000,
+                    ess_tail_min=900,
                     divergences=0,
                     rhat_threshold=1.01,
                     ess_threshold=400,
+                    failing_params=[],
                 ),
             ),
             p("panelcast.pipelines.evaluate.get_divergence_info"),
@@ -1882,9 +1994,11 @@ class TestEvaluateModelsExtended:
                     passed=True,
                     rhat_max=1.0,
                     ess_bulk_min=1000,
+                    ess_tail_min=900,
                     divergences=0,
                     rhat_threshold=1.01,
                     ess_threshold=400,
+                    failing_params=[],
                 ),
             ),
             p("panelcast.pipelines.evaluate.get_divergence_info"),
