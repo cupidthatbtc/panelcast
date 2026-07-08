@@ -46,11 +46,18 @@ class SeedResult:
 
 @dataclass
 class ConfirmationResult:
-    """Per-seed paired verdicts plus the holds-on-every-seed conclusion."""
+    """Per-seed paired verdicts plus the holds-on-every-seed conclusion.
+
+    ``sampler``/``version``/``seeds_planned`` echo the protocol so a resumed
+    confirmation can prove the stored ledger belongs to the same call.
+    """
 
     winner_knobs: dict[str, Any]
     seeds: list[SeedResult] = field(default_factory=list)
     promote_z: float = 2.0
+    sampler: dict[str, Any] | None = None
+    version: str | None = None
+    seeds_planned: list[int] = field(default_factory=list)
 
     @property
     def confirmed(self) -> bool:
@@ -75,8 +82,68 @@ class ConfirmationResult:
             "winner_knobs": self.winner_knobs,
             "promote_z": self.promote_z,
             "confirmed": self.confirmed,
+            "sampler": self.sampler,
+            "version": self.version,
+            "seeds_planned": self.seeds_planned,
             "seeds": [asdict(s) for s in self.seeds],
         }
+
+
+def _sampler_echo(cfg: SweepConfig, sampler_overrides: dict[str, int] | None) -> dict[str, Any]:
+    return {
+        "num_chains": cfg.num_chains,
+        "num_samples": cfg.num_samples,
+        "num_warmup": cfg.num_warmup,
+        "overrides": dict(sampler_overrides or {}),
+    }
+
+
+def _reusable_prior_seeds(out_path: Path, identity: dict[str, Any]) -> dict[int, SeedResult]:
+    """Prior seeds whose snapshots survive, IF the stored protocol matches this call.
+
+    Any identity mismatch (knobs, z bar, sampler scale, seeds tuple, version)
+    archives the old ledger and starts fresh — evidence is never mixed across
+    protocols. Old-format files without the echo fields mismatch by construction.
+    """
+    if not out_path.exists():
+        return {}
+    try:
+        payload = json.loads(out_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    if {k: payload.get(k) for k in identity} != identity:
+        archived = out_path.with_name(f"confirmation_{time.strftime('%Y%m%dT%H%M%S')}.json")
+        out_path.replace(archived)
+        log.warning("confirmation_protocol_changed", archived=str(archived))
+        return {}
+    reusable: dict[int, SeedResult] = {}
+    for entry in payload.get("seeds", []):
+        ref, win = entry.get("reference_run"), entry.get("winner_run")
+        if not ref or not win or entry.get("error"):
+            continue
+        if not (
+            (Path(ref) / "evaluation" / "log_likelihood.nc").exists()
+            and (Path(win) / "evaluation" / "log_likelihood.nc").exists()
+        ):
+            continue
+        reusable[int(entry["seed"])] = SeedResult(
+            seed=int(entry["seed"]), reference_run=ref, winner_run=win
+        )
+    return reusable
+
+
+def _score_cached_seed(cached: SeedResult) -> SeedResult | None:
+    """Re-pair a prior seed from its persisted snapshots; None → refit it."""
+    win, ref = Path(cached.winner_run), Path(cached.reference_run)
+    try:
+        pair = paired_elpd(
+            win / "evaluation" / "log_likelihood.nc", ref / "evaluation" / "log_likelihood.nc"
+        )
+    except Exception:  # corrupt snapshot: refit rather than crash the resume
+        return None
+    cached.winner_converged = _run_converged(win)
+    cached.elpd = {"diff": pair.diff, "dse": pair.dse, "z": pair.z, "n": pair.n}
+    return cached
 
 
 def _run_converged(run_dir: Path | None) -> bool:
@@ -166,8 +233,11 @@ def run_confirmation(
     ``sampler_overrides`` applies to EVERY confirmation fit (both sides of
     every seed), so tiers with ``publication_confirm`` run the whole
     confirmation at publication scale. Results checkpoint to
-    ``<sweep_dir>/confirmation.json`` after every seed.
+    ``<sweep_dir>/confirmation.json`` after every seed, and a re-entry reuses
+    any prior seed whose run dirs still carry their log-likelihood snapshots
+    (re-pairing is cheap; only missing seeds refit).
     """
+    from panelcast import __version__
     from panelcast.paths import resolve_latest
 
     launch = launch or launch_arm
@@ -175,7 +245,21 @@ def run_confirmation(
     out_path = cfg.sweep_dir / "confirmation.json"
     cfg.sweep_dir.mkdir(parents=True, exist_ok=True)
     base = default_arm()
-    result = ConfirmationResult(winner_knobs=winner_knobs, promote_z=promote_z)
+    result = ConfirmationResult(
+        winner_knobs=winner_knobs,
+        promote_z=promote_z,
+        sampler=_sampler_echo(cfg, sampler_overrides),
+        version=__version__,
+        seeds_planned=list(seeds),
+    )
+    identity = {
+        "winner_knobs": winner_knobs,
+        "promote_z": promote_z,
+        "sampler": result.sampler,
+        "version": result.version,
+        "seeds_planned": result.seeds_planned,
+    }
+    prior = _reusable_prior_seeds(out_path, identity)
     timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
     def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:
@@ -198,6 +282,12 @@ def run_confirmation(
         return run_dir.resolve() if run_dir is not None else None
 
     for seed in seeds:
+        cached = _score_cached_seed(prior[seed]) if seed in prior else None
+        if cached is not None:
+            log.info("confirmation_seed_reused", seed=seed, winner_run=cached.winner_run)
+            result.seeds.append(cached)
+            out_path.write_text(json.dumps(result.to_dict(), indent=2), encoding="utf-8")
+            continue
         seed_result = SeedResult(seed=seed)
         try:
             ref_run = _one_fit(dict(base), seed, "reference")
