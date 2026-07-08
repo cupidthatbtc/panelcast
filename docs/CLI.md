@@ -127,7 +127,7 @@ These features are **enabled by default**. Use these flags to disable them:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--likelihood-df` | `4.0` | Student-t degrees of freedom (`≥100` behaves as Normal) |
-| `--likelihood-family` | `studentt` | Observation likelihood: `studentt`, `normal`, `skew_studentt`, `skew_normal`, `split_normal`, `beta`, `mixture`, or `beta_binomial`. See [`LIKELIHOOD_CANDIDATES.md`](LIKELIHOOD_CANDIDATES.md) |
+| `--likelihood-family` | `studentt` | Observation likelihood: `studentt`, `normal`, `skew_studentt`, `skew_normal`, `split_normal`, `beta`, `mixture`, `beta_binomial`, or `beta_ceiling`. See [`LIKELIHOOD_CANDIDATES.md`](LIKELIHOOD_CANDIDATES.md) |
 | `--discretize-observation` | `false` | Interval-censor the observation to integers (honest PPC for integer scores). Location-scale families only (`studentt`, `normal`, `skew_normal`, `split_normal`, `mixture`); rejected for `skew_studentt`, `beta`, `beta_binomial` (`beta_binomial` is already discrete) |
 
 #### Domain & Model Options
@@ -137,7 +137,7 @@ These features are **enabled by default**. Use these flags to disable them:
 | `--config` / `-c` | | YAML config file(s) with `PipelineConfig` keys; repeatable, later files win. Explicit CLI options always win over YAML. |
 | `--dataset` | built-in AOTY | Dataset descriptor: bare name (resolves to `configs/datasets/{name}.yaml`) or YAML path |
 | `--debut-prev-score-source` | `train_mean` | Debut `prev_score` fill: `train_mean` or `dataset_stats` (legacy; mild leakage) |
-| `--target-transform` | `identity` | Score-scale transform: `identity` (soft-clip) or `offset_logit` (logit scale) |
+| `--target-transform` | `offset_logit` | Score-scale transform: `offset_logit` (default since 0.5.0; the model runs on the Smithson-Verkuilen logit scale, bounds hold by construction) or `identity` (soft-clip; the former default, still selectable) |
 | `--ar-center` | `global` | AR(1) centering: `global`, `none` (legacy), or `artist_running` (sensitivity only) |
 | `--latent-process` | `rw` | Artist-effect process: `rw` (random walk) or `ar1` (stationary). Experimental |
 | `--exclude-rw-raw-from-collection` | `false` | Don't store `rw_raw` draws on device (~96% peak-GPU cut); required for the 4-chain publication run on 24 GB GPUs |
@@ -316,7 +316,7 @@ panelcast export-figures --run outputs/2026-01-19_143052
 Run the whole pipeline on the bundled synthetic aerospace example
 (`examples/aerospace/`) at tiny scale — a one-command way to see every stage
 execute with no external data. Finishes with a generated model card under
-`reports/`.
+`outputs/<run_id>/reports/`.
 
 ```bash
 panelcast demo [OPTIONS]
@@ -349,7 +349,9 @@ panelcast compare --baselines [OPTIONS]
 | `--dataset` | | built-in AOTY | Dataset descriptor (bare name or YAML path) |
 | `--output` | `-o` | `reports/baselines` | Output directory |
 | `--num-samples` | | `1000` | Predictive samples per baseline for interval scoring |
-| `--bayes` / `--no-bayes` | | on | Append the current model's metrics from `outputs/evaluation/metrics.json` |
+| `--seed` | | `0` | Random seed for predictive sampling |
+| `--bayes` / `--no-bayes` | | on | Append the current model's metrics from the `--metrics` file |
+| `--metrics` | | latest run's `evaluation/metrics.json` | Evaluation metrics.json supplying the model's row (with `--bayes`) |
 
 ```bash
 panelcast compare --baselines
@@ -370,8 +372,60 @@ panelcast diagnose [OPTIONS]
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--eval-dir` | | `outputs/evaluation` | Directory with `diagnostics.json` / `metrics.json` |
+| `--eval-dir` | | latest run's `evaluation/` | Directory with `diagnostics.json` / `metrics.json` (default: the latest run's `outputs/<run_id>/evaluation/`) |
 | `--output` | `-o` | `reports/diagnostics` | Output directory for the report |
+
+```bash
+panelcast diagnose
+panelcast diagnose --eval-dir outputs/2026-06-23_192630/evaluation
+```
+
+---
+
+### `select` — Model-Selection Sweep
+
+Run the portable model-selection protocol: enumerate the candidate space
+(transform / likelihood / gates) from the code's own registries, print a
+pre-run plan with predicted cost, then drive the staged sweep, score every
+arm against pre-registered rules, and write one ranked report under
+`outputs/select/<sweep-id>/`. `select` recommends; a default flip stays a
+manual PR.
+
+```bash
+panelcast select [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--dataset` | built-in AOTY | Dataset descriptor (bare name or YAML path) |
+| `--effort` | `standard` | Effort tier: `quick` (screen), `standard`, `thorough` (+random +publication) |
+| `--max-fits` | tier-defined | Hard cap on diagnostic fits (overrides the tier) |
+| `--budget-hours` | | GPU-hour budget; stages truncate in priority order |
+| `--arm-timeout` | `1800` | Per-arm wall-clock timeout in seconds; a fit exceeding it is killed and marked failed |
+| `--sweep-id` | `sweep` | Sweep directory name under `outputs/select/` (enables resume) |
+| `--config` | `configs/select.yaml` | YAML with the rules and effort tiers |
+| `--dry-run` | `false` | Print the enumerated space, staged plan, and predicted cost only |
+
+```bash
+panelcast select --dry-run
+panelcast select --dataset examples/aerospace/descriptor.yaml --effort quick
+```
+
+---
+
+### `runs list` — List Pipeline Runs
+
+List run directories under `outputs/` with their manifest summary: creation
+time, success status, completed-stage count, and a `*` marking the run the
+latest pointer refers to.
+
+```bash
+panelcast runs list [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--output-dir` | `outputs` | Directory holding the pipeline run directories |
 
 ---
 
@@ -415,6 +469,7 @@ AOTY_DATASET_PATH="path/to/your/dataset.csv"
 | `4` | Stage Error | General stage execution error |
 | `5` | Environment Error | Environment verification failure (e.g., missing `pixi.lock`) |
 | `6` | GPU Memory Error | GPU memory check failure |
+| `7` | Stale Artifact Error | Shared data artifacts (`data/processed`, `data/splits`, `data/features`) were regenerated by another run mid-flight |
 
 **Note:** When using `--preflight-only`, exit code 2 indicates CANNOT_CHECK status (unable to check GPU memory). See [Preflight-Specific Exit Codes](#preflight-specific-exit-codes) below for the full mapping.
 
