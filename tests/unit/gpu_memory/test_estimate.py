@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from panelcast.gpu_memory.estimate import MemoryEstimate, estimate_memory_gb
+from panelcast.gpu_memory.estimate import (
+    COLLECTION_OVERHEAD_FACTOR,
+    ENTITY_OBS_KEEP_MAX,
+    MemoryEstimate,
+    estimate_memory_gb,
+)
 
 STANDARD_PARAMS: dict[str, int] = {
     "n_observations": 1000,
@@ -231,6 +236,87 @@ class TestEstimateMemoryGbEdgeCases:
             num_warmup=100,
         )
         assert result.total_gb > 0.0
+
+
+def _collection_term_gb(n_sites: int, num_samples: int) -> float:
+    """Per-chain collected size (GB) of n_sites extra scalars per draw."""
+    return n_sites * num_samples * 4 * COLLECTION_OVERHEAD_FACTOR / 1024**3
+
+
+class TestGatedVectorSites:
+    """Gate flags add the gated latent sites to the formula (never-under)."""
+
+    def test_eiv_on_exceeds_off_by_n_obs_collection_term(self):
+        off = estimate_memory_gb(**STANDARD_PARAMS)
+        on = estimate_memory_gb(**STANDARD_PARAMS, errors_in_variables=True)
+        assert on.total_gb > off.total_gb
+        expected = _collection_term_gb(
+            STANDARD_PARAMS["n_observations"], STANDARD_PARAMS["num_samples"]
+        )
+        assert on.per_chain_gb - off.per_chain_gb == pytest.approx(expected)
+
+    def test_eiv_latent_rides_the_rw_raw_exclusion(self):
+        """With the exclusion on, prev_latent_raw leaves collection but is
+        still a parameter (train_bayes wiring)."""
+        excl_only = estimate_memory_gb(**STANDARD_PARAMS, exclude_rw_raw_from_collection=True)
+        both = estimate_memory_gb(
+            **STANDARD_PARAMS,
+            exclude_rw_raw_from_collection=True,
+            errors_in_variables=True,
+        )
+        assert both.per_chain_gb == pytest.approx(excl_only.per_chain_gb)
+        assert both.base_model_gb > excl_only.base_model_gb
+
+    def test_entity_obs_collected_below_cap_even_with_exclusion(self):
+        """entity_obs_raw stays in collection below the keep cap."""
+        off = estimate_memory_gb(**STANDARD_PARAMS, exclude_rw_raw_from_collection=True)
+        on = estimate_memory_gb(
+            **STANDARD_PARAMS,
+            exclude_rw_raw_from_collection=True,
+            heteroscedastic_entity_obs=True,
+        )
+        expected = _collection_term_gb(STANDARD_PARAMS["n_artists"], STANDARD_PARAMS["num_samples"])
+        assert on.per_chain_gb - off.per_chain_gb == pytest.approx(expected)
+
+    def test_entity_obs_dropped_above_cap_only_with_exclusion(self):
+        """Above the cap, entity_obs_raw is dropped from collection only when
+        the rw_raw exclusion is also on (train_bayes wiring)."""
+        big = {**STANDARD_PARAMS, "n_artists": ENTITY_OBS_KEEP_MAX + 1}
+        excl_off = estimate_memory_gb(**big, exclude_rw_raw_from_collection=True)
+        excl_on = estimate_memory_gb(
+            **big, exclude_rw_raw_from_collection=True, heteroscedastic_entity_obs=True
+        )
+        assert excl_on.per_chain_gb == pytest.approx(excl_off.per_chain_gb)
+        assert excl_on.base_model_gb > excl_off.base_model_gb
+
+        no_excl_off = estimate_memory_gb(**big)
+        no_excl_on = estimate_memory_gb(**big, heteroscedastic_entity_obs=True)
+        expected = _collection_term_gb(big["n_artists"], big["num_samples"])
+        assert no_excl_on.per_chain_gb - no_excl_off.per_chain_gb == pytest.approx(expected)
+
+    def test_entity_obs_kept_at_exact_cap(self):
+        """At exactly ENTITY_OBS_KEEP_MAX the site stays in collection — the
+        drop condition is strictly greater-than (train_bayes wiring)."""
+        at_cap = {**STANDARD_PARAMS, "n_artists": ENTITY_OBS_KEEP_MAX}
+        off = estimate_memory_gb(**at_cap, exclude_rw_raw_from_collection=True)
+        on = estimate_memory_gb(
+            **at_cap, exclude_rw_raw_from_collection=True, heteroscedastic_entity_obs=True
+        )
+        expected = _collection_term_gb(at_cap["n_artists"], at_cap["num_samples"])
+        assert on.per_chain_gb - off.per_chain_gb == pytest.approx(expected)
+
+    def test_group_pooling_adds_n_groups_term(self):
+        off = estimate_memory_gb(**STANDARD_PARAMS)
+        on = estimate_memory_gb(**STANDARD_PARAMS, entity_group_pooling=True, n_groups=7)
+        expected = _collection_term_gb(7, STANDARD_PARAMS["num_samples"])
+        assert on.per_chain_gb - off.per_chain_gb == pytest.approx(expected)
+        zero = estimate_memory_gb(**STANDARD_PARAMS, entity_group_pooling=True, n_groups=0)
+        assert zero.total_gb == pytest.approx(off.total_gb)
+
+    def test_entity_obs_keep_max_matches_train_bayes(self):
+        from panelcast.pipelines.train_bayes import _ENTITY_OBS_KEEP_MAX
+
+        assert ENTITY_OBS_KEEP_MAX == _ENTITY_OBS_KEEP_MAX
 
     def test_max_seq_zero(self):
         """max_seq=0 should handle gracefully."""

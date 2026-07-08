@@ -9,6 +9,7 @@ import pytest
 
 from panelcast.gpu_memory.calibration_store import (
     _MIN_LOCAL_ENVELOPE,
+    _linear_terms,
     append_record,
     estimate_with_calibration,
     load_records,
@@ -70,6 +71,17 @@ class TestStore:
         assert load_records(path) == []
         append_record(_inputs(), 8.3, 7.4, 3000.0, path=path)
         assert len(load_records(path)) == 1
+
+    def test_non_object_json_store_treated_as_corrupt(self, tmp_path):
+        """Valid JSON that isn't an object ([], null, string) must not raise
+        out of append_record — telemetry never breaks a fit."""
+        for content in ('[{"records": []}]', "null", '"records"'):
+            path = tmp_path / "cal.json"
+            path.write_text(content, encoding="utf-8")
+            assert load_records(path) == []
+            append_record(_inputs(), 8.3, 7.4, 3000.0, path=path)
+            assert len(load_records(path)) == 1
+            path.unlink()
 
     def test_cap_keeps_most_recent(self, tmp_path):
         path = tmp_path / "cal.json"
@@ -140,3 +152,104 @@ class TestResolve:
         estimate, source = estimate_with_calibration(tmp_path / "missing.json", **_inputs())
         assert estimate.total_gb > 0
         assert "shipped" in source
+
+
+class TestAppendRobustness:
+    """A transient read failure must not clobber the accumulated store."""
+
+    def _patch_read_text(self, monkeypatch, target, fail_times):
+        from pathlib import Path
+
+        real_read_text = Path.read_text
+        calls = {"n": 0}
+
+        def flaky_read_text(self, *args, **kwargs):
+            if self == target:
+                calls["n"] += 1
+                if calls["n"] <= fail_times:
+                    raise PermissionError("sharing violation")
+            return real_read_text(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", flaky_read_text)
+        return calls
+
+    def test_missing_store_created_with_one_record(self, tmp_path):
+        path = tmp_path / "cal.json"
+        append_record(_inputs(), 8.3, 7.4, 3000.0, path=path)
+        assert len(load_records(path)) == 1
+
+    def test_unreadable_store_skips_append(self, tmp_path, monkeypatch):
+        import panelcast.gpu_memory.calibration_store as store_mod
+
+        path = tmp_path / "cal.json"
+        append_record(_inputs(), 8.3, 7.4, 3000.0, path=path)
+        before = path.read_bytes()
+
+        monkeypatch.setattr(store_mod.time, "sleep", lambda _s: None)
+        self._patch_read_text(monkeypatch, path, fail_times=99)
+        append_record(_inputs(num_samples=999), 1.0, 1.0, 1.0, path=path)
+
+        monkeypatch.undo()
+        assert path.read_bytes() == before  # store intact, nothing rewritten
+        assert len(load_records(path)) == 1
+
+    def test_transient_failure_retries_then_appends(self, tmp_path, monkeypatch):
+        import panelcast.gpu_memory.calibration_store as store_mod
+
+        path = tmp_path / "cal.json"
+        append_record(_inputs(), 8.3, 7.4, 3000.0, path=path)
+
+        monkeypatch.setattr(store_mod.time, "sleep", lambda _s: None)
+        self._patch_read_text(monkeypatch, path, fail_times=2)
+        append_record(_inputs(num_samples=999), 1.0, 1.0, 1.0, path=path)
+
+        monkeypatch.undo()
+        records = load_records(path)
+        assert len(records) == 2
+        assert records[-1]["estimate_inputs"]["num_samples"] == 999
+
+
+class TestLinearTermsGateFlags:
+    """_linear_terms folds structural gate flags into the fit terms."""
+
+    def test_eiv_flag_grows_collection_unit(self):
+        base_inputs = _inputs()
+        eiv_inputs = {**base_inputs, "errors_in_variables": True}
+        base_terms = _linear_terms(base_inputs)
+        eiv_terms = _linear_terms(eiv_inputs)
+        assert eiv_terms[1] > base_terms[1]  # n_obs latent collected per draw
+        assert eiv_terms[0] > base_terms[0]  # and a parameter either way
+
+    def test_eiv_with_exclusion_leaves_unit_unchanged(self):
+        excl = {**_inputs(), "exclude_rw_raw_from_collection": True}
+        both = {**excl, "errors_in_variables": True}
+        assert _linear_terms(both)[1] == pytest.approx(_linear_terms(excl)[1])
+        assert _linear_terms(both)[0] > _linear_terms(excl)[0]
+
+    def test_refit_recovers_constants_from_gated_records(self):
+        """Records fit under EIV refit cleanly: the gate is in the terms, so
+        the recovered constants match the planted ones (a formula that
+        ignored the flag would bias the factor by the missing n_obs term)."""
+        planted_factor, planted_fixed = 2.2, 0.18
+        records = []
+        for i in range(8):
+            inputs = {**_inputs(num_samples=100 + 150 * i), "errors_in_variables": True}
+            est = estimate_memory_gb(
+                collection_overhead_factor=planted_factor,
+                fixed_overhead_gb=planted_fixed,
+                **inputs,
+            )
+            records.append(
+                {
+                    "estimate_inputs": inputs,
+                    "expected_gb": est.total_gb,
+                    "actual_peak_gb": est.total_gb,
+                    "wall_clock_seconds": 600.0,
+                    "context": {},
+                }
+            )
+        cal = refit_constants(records)
+        assert cal is not None
+        assert cal.collection_overhead_factor == pytest.approx(
+            planted_factor * _MIN_LOCAL_ENVELOPE, rel=1e-2
+        )

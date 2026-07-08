@@ -38,6 +38,44 @@ COLLECTION_OVERHEAD_FACTOR = 3.4
 # Fixed JIT / CUDA-context floor (~0.06 GiB measured: cal_10, cal_50, 2x50).
 FIXED_OVERHEAD_GB = 0.06
 
+# Mirrors train_bayes._ENTITY_OBS_KEEP_MAX (not imported: train_bayes imports
+# this module). Above this entity cardinality the gate-on entity_obs_raw site
+# is dropped from in-sampler collection when the rw_raw exclusion is also on.
+ENTITY_OBS_KEEP_MAX = 20000
+
+
+def _count_params(
+    n_observations: int,
+    n_features: int,
+    n_artists: int,
+    max_seq: int,
+    exclude_rw_raw_from_collection: bool = False,
+    errors_in_variables: bool = False,
+    heteroscedastic_entity_obs: bool = False,
+    entity_group_pooling: bool = False,
+    n_groups: int = 0,
+) -> tuple[int, int]:
+    """(n_params, collected_params) mirroring train_bayes's site shapes.
+
+    The exclusion wiring mirrors train_bayes: the rw_raw exclusion gate also
+    carries the EIV latent ({prefix}_prev_latent_raw, n_obs) out of
+    collection, and drops entity_obs_raw (n_artists) only above the keep cap.
+    group_offset_z (n_groups) is never excluded.
+    """
+    rw_raw_params = n_artists * max(0, max_seq - 1)
+    eiv_params = n_observations if errors_in_variables else 0
+    entity_obs_params = n_artists if heteroscedastic_entity_obs else 0
+    group_params = max(0, n_groups) if entity_group_pooling else 0
+    n_params = n_artists + rw_raw_params + n_features + 10
+    n_params += eiv_params + entity_obs_params + group_params
+
+    excluded_params = 0
+    if exclude_rw_raw_from_collection:
+        excluded_params += rw_raw_params + eiv_params
+        if n_artists > ENTITY_OBS_KEEP_MAX:
+            excluded_params += entity_obs_params
+    return n_params, n_params - excluded_params
+
 
 @dataclass(frozen=True)
 class MemoryEstimate:
@@ -89,6 +127,10 @@ def estimate_memory_gb(
     num_warmup: int,
     jit_buffer_percent: float = 0.10,
     exclude_rw_raw_from_collection: bool = False,
+    errors_in_variables: bool = False,
+    heteroscedastic_entity_obs: bool = False,
+    entity_group_pooling: bool = False,
+    n_groups: int = 0,
     collection_overhead_factor: float = COLLECTION_OVERHEAD_FACTOR,
     fixed_overhead_gb: float = FIXED_OVERHEAD_GB,
 ) -> MemoryEstimate:
@@ -122,6 +164,15 @@ def estimate_memory_gb(
             tensor from in-sampler collection (--exclude-rw-raw-from-
             collection). Removes the dominant n_artists*(max_seq-1) term
             from collected-draw size (~96% cut at production settings).
+        errors_in_variables: EIV gate; adds an n_obs-sized latent
+            ({prefix}_prev_latent_raw), excluded from collection only when
+            the rw_raw exclusion is also on (train_bayes wiring).
+        heteroscedastic_entity_obs: Entity-overdispersion gate; adds an
+            n_artists-sized latent, kept in collection unless the rw_raw
+            exclusion is on AND n_artists exceeds ENTITY_OBS_KEEP_MAX.
+        entity_group_pooling: Group-pooling gate; adds an n_groups-sized
+            latent (never excluded; negligible, included for completeness).
+        n_groups: Group count for the entity_group_pooling term.
 
     Returns:
         MemoryEstimate with breakdown of memory components.
@@ -145,13 +196,21 @@ def estimate_memory_gb(
     # - init_artist_effect: n_artists
     # - rw_raw: n_artists * (max_seq - 1)
     # - beta: n_features
+    # - gated vector sites (EIV / entity-obs / group pooling)
     # - hyperpriors: ~10 scalars (sigma_obs, sigma_artist, etc.)
-    rw_raw_params = n_artists * max(0, max_seq - 1)
-    n_params = n_artists + rw_raw_params + n_features + 10
-
-    # Sites actually collected per draw (the in-sampler exclusion removes
-    # rw_raw from storage; gradients/momentum still cover all parameters).
-    collected_params = n_params - rw_raw_params if exclude_rw_raw_from_collection else n_params
+    # Sites actually collected per draw follow train_bayes's exclusion wiring
+    # (gradients/momentum still cover all parameters).
+    n_params, collected_params = _count_params(
+        n_observations=n_observations,
+        n_features=n_features,
+        n_artists=n_artists,
+        max_seq=max_seq,
+        exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
+        errors_in_variables=errors_in_variables,
+        heteroscedastic_entity_obs=heteroscedastic_entity_obs,
+        entity_group_pooling=entity_group_pooling,
+        n_groups=n_groups,
+    )
 
     # Base model memory: parameters + gradients/momentum/state (~3x params)
     # + feature matrix X + fixed JIT/runtime overhead.

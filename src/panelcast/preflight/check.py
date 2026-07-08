@@ -26,6 +26,10 @@ def run_preflight_check(
     headroom_target: float = 0.20,
     jit_buffer_percent: float = 0.10,
     exclude_rw_raw_from_collection: bool = False,
+    errors_in_variables: bool = False,
+    heteroscedastic_entity_obs: bool = False,
+    entity_group_pooling: bool = False,
+    n_groups: int = 0,
 ) -> PreflightResult:
     """Run preflight memory check.
 
@@ -45,6 +49,12 @@ def run_preflight_check(
         jit_buffer_percent: Allocator-slack buffer as fraction (default 0.10).
         exclude_rw_raw_from_collection: Whether the run excludes rw_raw from
             in-sampler collection (changes the dominant memory term).
+        errors_in_variables: EIV gate (adds an n_obs-sized latent term).
+        heteroscedastic_entity_obs: Entity-overdispersion gate (adds an
+            n_artists-sized latent term).
+        entity_group_pooling: Group-pooling gate (adds an n_groups-sized
+            latent term).
+        n_groups: Group count for the entity_group_pooling term.
 
     Returns:
         PreflightResult with status, estimate, and suggestions.
@@ -57,6 +67,14 @@ def run_preflight_check(
         >>> if result.status == PreflightStatus.FAIL:
         ...     raise SystemExit(result.exit_code)
     """
+    gate_flags = {
+        "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
+        "errors_in_variables": errors_in_variables,
+        "heteroscedastic_entity_obs": heteroscedastic_entity_obs,
+        "entity_group_pooling": entity_group_pooling,
+        "n_groups": n_groups,
+    }
+
     # Step 1: Get memory estimate
     estimate = estimate_memory_gb(
         n_observations=n_observations,
@@ -67,7 +85,7 @@ def run_preflight_check(
         num_samples=num_samples,
         num_warmup=num_warmup,
         jit_buffer_percent=jit_buffer_percent,
-        exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
+        **gate_flags,
     )
 
     # Step 2: Try to query GPU memory
@@ -115,7 +133,7 @@ def run_preflight_check(
         n_artists=n_artists,
         max_seq=max_seq,
         jit_buffer_percent=jit_buffer_percent,
-        exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
+        **gate_flags,
     )
 
     # Step 6: Generate message
@@ -149,6 +167,10 @@ def _generate_suggestions(
     max_seq: int,
     jit_buffer_percent: float,
     exclude_rw_raw_from_collection: bool = False,
+    errors_in_variables: bool = False,
+    heteroscedastic_entity_obs: bool = False,
+    entity_group_pooling: bool = False,
+    n_groups: int = 0,
 ) -> tuple[str, ...]:
     """Generate configuration adjustment suggestions for FAIL/WARNING."""
     if status == PreflightStatus.PASS:
@@ -156,7 +178,9 @@ def _generate_suggestions(
 
     suggestions: list[str] = []
 
-    # Suggest reducing chains first (most effective)
+    # Suggest reducing chains first (most effective). The halved-chains
+    # estimate must use the run's own gate flags — without the exclusion flag
+    # it prices a structurally different (~25x bigger) model.
     if num_chains > 1:
         reduced_chains = max(1, num_chains // 2)
         new_estimate = estimate_memory_gb(
@@ -168,6 +192,11 @@ def _generate_suggestions(
             num_samples=num_samples,
             num_warmup=num_warmup,
             jit_buffer_percent=jit_buffer_percent,
+            exclude_rw_raw_from_collection=exclude_rw_raw_from_collection,
+            errors_in_variables=errors_in_variables,
+            heteroscedastic_entity_obs=heteroscedastic_entity_obs,
+            entity_group_pooling=entity_group_pooling,
+            n_groups=n_groups,
         )
         suggestions.append(
             f"Try --num-chains {reduced_chains} (estimated: {new_estimate.total_gb:.1f} GB)"

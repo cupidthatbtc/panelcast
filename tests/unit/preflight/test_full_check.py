@@ -1364,3 +1364,89 @@ class TestGenerateExtrapolationSuggestionsEdgeCases:
         """FAIL shows how much memory is over."""
         result = _generate_extrapolation_suggestions(PreflightStatus.FAIL, 15.0, 10.0)
         assert any("5.0 GB" in s for s in result)
+
+
+class TestExtrapolationStructureForwarding:
+    """run_extrapolated_preflight_check threads the production structure into
+    the calibration and keys the cache on it."""
+
+    SAMPLE_MODEL_ARGS: ClassVar[dict[str, Any]] = {
+        "artist_idx": [0, 1, 0],
+        "album_seq": [1, 1, 2],
+        "prev_score": [0.0, 0.0, 75.0],
+        "X": [[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]],
+        "y": [70.0, 80.0, 75.0],
+        "n_artists": 2,
+        "max_seq": 2,
+    }
+
+    def _calibration(self):
+        from panelcast.preflight.calibrate import CalibrationResult
+
+        return CalibrationResult(
+            fixed_overhead_gb=2.0,
+            per_sample_gb=0.001,
+            calibration_points=((10, 2.01), (50, 2.05)),
+            config_hash="abc123",
+            calibration_time=5.0,
+        )
+
+    @mock.patch("panelcast.preflight.full_check.query_gpu_memory")
+    @mock.patch("panelcast.preflight.cache.load_calibration_cache")
+    @mock.patch("panelcast.preflight.cache.save_calibration_cache")
+    @mock.patch("panelcast.preflight.calibrate.run_calibration")
+    def test_structure_forwarded_to_run_calibration(
+        self, mock_run_cal, _mock_save, mock_load, mock_query
+    ):
+        mock_query.return_value = GpuMemoryInfo("Test GPU", 16 * 1024**3, 4 * 1024**3, 12 * 1024**3)
+        mock_load.return_value = None
+        mock_run_cal.return_value = self._calibration()
+
+        run_extrapolated_preflight_check(
+            self.SAMPLE_MODEL_ARGS,
+            target_samples=2000,
+            n_observations=3,
+            n_artists=2,
+            n_features=2,
+            max_seq=2,
+            exclude_collection=("perf_rw_raw",),
+            num_chains=2,
+            model_prefix="perf",
+            target_transform="offset_logit",
+            chain_method="vectorized",
+            entity_group_pooling=True,
+        )
+
+        kwargs = mock_run_cal.call_args[1]
+        assert kwargs["model_prefix"] == "perf"
+        assert kwargs["target_transform"] == "offset_logit"
+        assert kwargs["chain_method"] == "vectorized"
+        assert kwargs["entity_group_pooling"] is True
+        assert kwargs["exclude_collection"] == ("perf_rw_raw",)
+
+    @mock.patch("panelcast.preflight.full_check.query_gpu_memory")
+    @mock.patch("panelcast.preflight.cache.load_calibration_cache")
+    @mock.patch("panelcast.preflight.cache.save_calibration_cache")
+    @mock.patch("panelcast.preflight.calibrate.run_calibration")
+    def test_cache_key_differs_by_model_prefix(
+        self, mock_run_cal, _mock_save, mock_load, mock_query
+    ):
+        """A calibration measured under one prefix must not serve another."""
+        mock_query.return_value = GpuMemoryInfo("Test GPU", 16 * 1024**3, 4 * 1024**3, 12 * 1024**3)
+        mock_load.return_value = None
+        mock_run_cal.return_value = self._calibration()
+
+        for prefix in ("user", "perf"):
+            run_extrapolated_preflight_check(
+                self.SAMPLE_MODEL_ARGS,
+                target_samples=2000,
+                n_observations=3,
+                n_artists=2,
+                n_features=2,
+                max_seq=2,
+                model_prefix=prefix,
+            )
+
+        hashes = [call[0][0] for call in mock_load.call_args_list]
+        assert len(hashes) == 2
+        assert hashes[0] != hashes[1]

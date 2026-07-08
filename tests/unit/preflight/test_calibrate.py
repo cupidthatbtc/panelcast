@@ -1091,3 +1091,76 @@ class TestCalculateCalibrationAdditional:
         fixed, per_sample = calculate_calibration((10, 0.1), (50, 0.5))
         assert fixed == pytest.approx(0.0)
         assert per_sample == pytest.approx(0.01)
+
+
+class TestRunCalibrationStructureForwarding:
+    """run_calibration mirrors the production model structure (prefix,
+    transform, chain method, pooling) in the mini-runs and the cache key."""
+
+    _SUBPROCESS_RESULTS = (
+        {"success": True, "peak_memory_bytes": int(2.0 * 1024**3), "runtime_seconds": 5.0},
+        {"success": True, "peak_memory_bytes": int(3.0 * 1024**3), "runtime_seconds": 8.0},
+    )
+
+    @mock.patch("panelcast.preflight.cache.compute_config_hash")
+    @mock.patch("panelcast.preflight.full_check._derive_dimensions_from_model_args")
+    @mock.patch("panelcast.preflight.full_check._run_mini_mcmc_subprocess")
+    @mock.patch("panelcast.preflight.full_check.serialize_model_args")
+    def test_structure_forwarded_to_mini_run(
+        self, mock_serialize, mock_subprocess, mock_derive, mock_hash, tmp_path
+    ):
+        temp_file = tmp_path / "args.json"
+        temp_file.write_text("{}")
+        mock_serialize.return_value = temp_file
+        mock_subprocess.side_effect = list(self._SUBPROCESS_RESULTS)
+        mock_derive.return_value = (50, 5, 3, 2)
+        mock_hash.return_value = "hash1234________"
+
+        model_args = {"y": np.ones(50), "X": np.ones((50, 3)), "n_artists": 5, "max_seq": 2}
+        run_calibration(
+            model_args,
+            exclude_collection=("perf_rw_raw",),
+            num_chains=2,
+            model_prefix="perf",
+            target_transform="offset_logit",
+            chain_method="vectorized",
+            entity_group_pooling=True,
+        )
+
+        assert mock_subprocess.call_count == 2
+        for call in mock_subprocess.call_args_list:
+            kwargs = call[1]
+            assert kwargs["prefix"] == "perf"
+            assert kwargs["target_transform"] == "offset_logit"
+            assert kwargs["chain_method"] == "vectorized"
+            assert kwargs["entity_group_pooling"] is True
+            assert kwargs["exclude_collection"] == ("perf_rw_raw",)
+
+    @mock.patch("panelcast.preflight.cache.compute_config_hash")
+    @mock.patch("panelcast.preflight.full_check._derive_dimensions_from_model_args")
+    @mock.patch("panelcast.preflight.full_check._run_mini_mcmc_subprocess")
+    @mock.patch("panelcast.preflight.full_check.serialize_model_args")
+    def test_structure_keyed_into_cache_signature(
+        self, mock_serialize, mock_subprocess, mock_derive, mock_hash, tmp_path
+    ):
+        temp_file = tmp_path / "args.json"
+        temp_file.write_text("{}")
+        mock_serialize.return_value = temp_file
+        mock_subprocess.side_effect = list(self._SUBPROCESS_RESULTS)
+        mock_derive.return_value = (50, 5, 3, 2)
+        mock_hash.return_value = "hash1234________"
+
+        model_args = {"y": np.ones(50), "X": np.ones((50, 3)), "n_artists": 5, "max_seq": 2}
+        run_calibration(
+            model_args,
+            model_prefix="perf",
+            target_transform="offset_logit",
+            chain_method="vectorized",
+            entity_group_pooling=True,
+        )
+
+        signature = mock_hash.call_args[1]["model_signature"]
+        assert signature["model_prefix"] == "perf"
+        assert signature["target_transform"] == "offset_logit"
+        assert signature["chain_method"] == "vectorized"
+        assert signature["entity_group_pooling"] is True
