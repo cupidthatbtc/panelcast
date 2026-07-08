@@ -299,3 +299,93 @@ class TestRender:
         )
         md = render_confirmation(result)
         assert "NOT CONFIRMED" in md
+
+
+class TestConfirmationResume:
+    """Re-entry reuses prior seeds from persisted snapshots (#165)."""
+
+    def _counting(self, launch):
+        calls = {"n": 0}
+
+        def counting(config_path, panelcast_bin, timeout_seconds=None):
+            calls["n"] += 1
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        return calls, counting
+
+    def test_rerun_refits_nothing(self, tmp_path, monkeypatch):
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        calls, counting = self._counting(launch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=counting)
+        assert calls["n"] == 4
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=counting)
+        assert calls["n"] == 4  # both seeds re-paired from snapshots
+        assert result.confirmed
+        assert all(s.elpd["z"] > 2.0 for s in result.seeds)
+
+    def test_interrupt_resumes_at_missing_seed(self, tmp_path, monkeypatch):
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        # Same protocol, one more seed: 42 reused, only 43 fits (2 launches).
+        calls, counting = self._counting(launch)
+        result = run_confirmation(
+            {"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=counting
+        )
+        # seeds tuple is part of the identity: (42,) != (42, 43) archives and refits all
+        assert calls["n"] == 4
+        assert result.confirmed
+        assert any(p.name.startswith("confirmation_") and p.name != "confirmation.json"
+                   for p in cfg.sweep_dir.iterdir())
+
+    def test_protocol_change_archives_and_refits(self, tmp_path, monkeypatch):
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        calls, counting = self._counting(launch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), promote_z=3.0,
+                         launch=counting)
+        assert calls["n"] == 4  # z bar changed: no reuse
+        archived = [p for p in cfg.sweep_dir.iterdir()
+                    if p.name.startswith("confirmation_") and p.suffix == ".json"]
+        assert archived
+
+    def test_missing_snapshot_refits_that_seed(self, tmp_path, monkeypatch):
+        import shutil
+
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=launch)
+        victim = Path(next(s for s in result.seeds if s.seed == 43).winner_run)
+        shutil.rmtree(victim)
+        calls, counting = self._counting(launch)
+        result = run_confirmation(
+            {"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=counting
+        )
+        assert calls["n"] == 2  # seed 42 reused; seed 43 refit both sides
+        assert result.confirmed
+
+    def test_failed_seed_is_not_reused(self, tmp_path, monkeypatch):
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+
+        def flaky(config_path, panelcast_bin, timeout_seconds=None):
+            if "seed43" in Path(config_path).stem:
+                return 1, "boom"
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=flaky)
+        calls, counting = self._counting(launch)
+        result = run_confirmation(
+            {"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=counting
+        )
+        assert calls["n"] == 2  # only the failed seed refits
+        assert result.confirmed
+
+    def test_reused_seed_rechecks_convergence(self, tmp_path, monkeypatch):
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        win = Path(result.seeds[0].winner_run)
+        (win / "evaluation" / "diagnostics.json").write_text(
+            json.dumps({"passed": False}), encoding="utf-8"
+        )
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        assert result.seeds[0].winner_converged is False
+        assert not result.confirmed
