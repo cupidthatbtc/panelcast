@@ -3,8 +3,10 @@
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
+import pytest
 
 from panelcast.visualization.charts import (
+    _hdi_label_from_columns,
     create_forest_plot,
     create_posterior_plot,
     create_predictions_plot,
@@ -134,6 +136,25 @@ class TestCreatePosteriorPlot:
         fig = create_posterior_plot(samples, "mu")
         assert fig.layout.yaxis.title.text == "Count"
 
+    def test_hdi_bounds_match_arviz_for_skewed_samples(self):
+        # For skewed posteriors ETI != HDI; the annotated bounds must be the
+        # true HDI, consistent with the matplotlib publication figures.
+        import arviz as az
+
+        rng = np.random.default_rng(42)
+        samples = rng.lognormal(mean=0.0, sigma=0.75, size=4000)
+        expected = az.hdi(samples, hdi_prob=0.94)
+        eti = np.percentile(samples, [3.0, 97.0])
+        assert abs(expected[0] - eti[0]) > 0.01  # skew separates the two
+
+        fig = create_posterior_plot(samples, "sigma", hdi_prob=0.94)
+        # add_vline order: hdi lower, hdi upper, mean
+        assert fig.layout.shapes[0].x0 == pytest.approx(expected[0])
+        assert fig.layout.shapes[1].x0 == pytest.approx(expected[1])
+        annotation_texts = [a.text for a in fig.layout.annotations]
+        assert any("HDI 94% lower" in t for t in annotation_texts)
+        assert any("HDI 94% upper" in t for t in annotation_texts)
+
 
 class TestCreatePredictionsPlot:
     """Tests for create_predictions_plot."""
@@ -170,11 +191,12 @@ class TestCreatePredictionsPlot:
         fig = create_predictions_plot(y_true, y_pred, y_pred - 3, y_pred + 3, ci_label="90% CI")
         assert fig.data[0].name == "90% CI"
 
-    def test_default_ci_label(self):
+    def test_default_ci_label_is_generic(self):
+        # No level information -> generic "CI", not a made-up percentage
         y_true = np.array([70, 75])
         y_pred = np.array([72, 74])
         fig = create_predictions_plot(y_true, y_pred, y_pred - 3, y_pred + 3)
-        assert fig.data[0].name == "94% CI"
+        assert fig.data[0].name == "CI"
 
     def test_accepts_list_input(self):
         fig = create_predictions_plot([70, 75], [72, 74], [67, 69], [77, 79])
@@ -291,6 +313,51 @@ class TestCreateForestPlot:
         )
         fig = create_forest_plot(df, template="aoty_dark")
         assert fig.layout.template.layout.paper_bgcolor == "#1E1E1E"
+
+    def test_hover_label_matches_default_columns(self):
+        # Default hdi_3%/hdi_97% columns are a 94% HDI, not 95%
+        df = pd.DataFrame(
+            {
+                "param": ["a"],
+                "mean": [1.0],
+                "hdi_3%": [0.5],
+                "hdi_97%": [1.5],
+            }
+        )
+        fig = create_forest_plot(df)
+        assert "94% HDI" in fig.data[0].hovertemplate
+        assert "95% HDI" not in fig.data[0].hovertemplate
+
+    def test_hover_label_derived_from_columns(self):
+        df = pd.DataFrame(
+            {
+                "param": ["a"],
+                "mean": [1.0],
+                "hdi_2.5%": [0.5],
+                "hdi_97.5%": [1.5],
+            }
+        )
+        fig = create_forest_plot(df, lower_col="hdi_2.5%", upper_col="hdi_97.5%")
+        assert "95% HDI" in fig.data[0].hovertemplate
+
+    def test_hover_label_generic_when_level_unknown(self):
+        df = pd.DataFrame(
+            {
+                "param": ["a"],
+                "mean": [1.0],
+                "lower": [0.5],
+                "upper": [1.5],
+            }
+        )
+        fig = create_forest_plot(df, lower_col="lower", upper_col="upper")
+        assert "HDI: [" in fig.data[0].hovertemplate
+        assert "% HDI" not in fig.data[0].hovertemplate
+
+    def test_hdi_label_from_columns_helper(self):
+        assert _hdi_label_from_columns("hdi_3%", "hdi_97%") == "94% HDI"
+        assert _hdi_label_from_columns("hdi_2.5%", "hdi_97.5%") == "95% HDI"
+        assert _hdi_label_from_columns("ci_lower", "ci_upper") == "HDI"
+        assert _hdi_label_from_columns("hdi_97%", "hdi_3%") == "HDI"  # inverted
 
 
 class TestCreateReliabilityPlot:

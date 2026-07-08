@@ -58,6 +58,7 @@ class DashboardData:
         - y_pred_mean: array of predicted means
         - y_pred_lower: array of lower CI bounds
         - y_pred_upper: array of upper CI bounds
+        - interval_level: credible-interval level, e.g. 0.95 (optional)
     coefficients : pd.DataFrame | None
         Coefficient summary table with columns:
         - param: parameter name
@@ -75,7 +76,7 @@ class DashboardData:
     """
 
     idata: Any | None = None  # az.InferenceData
-    predictions: dict[str, np.ndarray] | None = None
+    predictions: dict[str, Any] | None = None
     coefficients: pd.DataFrame | None = None
     reliability: dict[str, np.ndarray] | None = None
     artist_data: pd.DataFrame | None = field(default=None)
@@ -128,9 +129,11 @@ def create_dashboard_figures(
                 if var_names:
                     var_name = var_names[0]
                     samples = posterior[var_name].values
-                    # Handle multi-dimensional samples
+                    # Multi-dimensional parameters: trace the first element
+                    # only, keeping (chain, draw) intact.
                     if samples.ndim > 2:
-                        samples = samples.reshape(samples.shape[0], -1)[:, 0:100]
+                        samples = samples.reshape(samples.shape[0], samples.shape[1], -1)[:, :, 0]
+                        var_name = f"{var_name}[0]"
                     elif samples.ndim == 1:
                         samples = samples.reshape(1, -1)
 
@@ -153,6 +156,7 @@ def create_dashboard_figures(
                 pred["y_pred_mean"],
                 pred["y_pred_lower"],
                 pred["y_pred_upper"],
+                ci_label=_ci_label(pred.get("interval_level")),
                 template=theme,
             )
             figures["predictions"] = fig.to_html(
@@ -213,10 +217,18 @@ def _find_column(df: pd.DataFrame, candidates: list[str]) -> str | None:
     return None
 
 
+def _ci_label(interval_level: float | None) -> str:
+    """Interval legend label; generic "CI" when the level is unknown."""
+    if interval_level is None:
+        return "CI"
+    return f"{float(interval_level) * 100:.0f}% CI"
+
+
 def create_artist_view(
     artist_name: str,
     artist_data: pd.DataFrame,
     theme: str = "aoty_light",
+    ci_label: str = "CI",
 ) -> str:
     """Generate artist-specific view showing prediction history.
 
@@ -237,6 +249,9 @@ def create_artist_view(
         - upper or y_pred_upper: upper bound (optional)
     theme : str, default "aoty_light"
         Plotly template name.
+    ci_label : str, default "CI"
+        Legend label for the prediction interval band. Pass the actual
+        level (e.g. "95% CI") when known.
 
     Returns
     -------
@@ -284,7 +299,7 @@ def create_artist_view(
                 fill="toself",
                 fillcolor="rgba(0, 114, 178, 0.2)",
                 line=dict(color="rgba(0, 114, 178, 0)"),
-                name="94% CI",
+                name=ci_label,
                 hoverinfo="skip",
             )
         )
@@ -524,6 +539,8 @@ def load_dashboard_data(run_dir: Path | None = None) -> DashboardData:  # noqa: 
                     "y_pred_lower": np.array(pred["y_pred_lower"]),
                     "y_pred_upper": np.array(pred["y_pred_upper"]),
                 }
+                if pred.get("interval_level") is not None:
+                    data.predictions["interval_level"] = float(pred["interval_level"])
                 logger.info("Loaded predictions from %s", pred_path)
     except Exception as e:
         logger.debug("Could not load predictions: %s", e)

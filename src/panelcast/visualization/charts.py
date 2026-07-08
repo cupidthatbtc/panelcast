@@ -18,6 +18,8 @@ Usage:
 
 from __future__ import annotations
 
+import re
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -170,13 +172,12 @@ def create_posterior_plot(
     >>> fig = create_posterior_plot(samples, "mu", hdi_prob=0.94)
     >>> fig.show()
     """
+    import arviz as az
+
     samples = np.asarray(samples).ravel()
 
-    # Calculate HDI bounds using percentiles
-    lower_q = (1 - hdi_prob) / 2
-    upper_q = 1 - lower_q
-    hdi_lower = np.percentile(samples, lower_q * 100)
-    hdi_upper = np.percentile(samples, upper_q * 100)
+    # True HDI (matches the matplotlib publication figures), not equal-tailed
+    hdi_lower, hdi_upper = az.hdi(samples, hdi_prob=hdi_prob)
     mean_val = np.mean(samples)
 
     fig = go.Figure()
@@ -232,7 +233,7 @@ def create_predictions_plot(
     y_pred_mean: np.ndarray,
     y_pred_lower: np.ndarray,
     y_pred_upper: np.ndarray,
-    ci_label: str = "94% CI",
+    ci_label: str = "CI",
     template: str = "aoty_light",
 ) -> go.Figure:
     """Create predicted vs actual scatter plot with uncertainty intervals.
@@ -250,8 +251,10 @@ def create_predictions_plot(
         Lower bound of credible interval, shape (n_obs,).
     y_pred_upper : np.ndarray
         Upper bound of credible interval, shape (n_obs,).
-    ci_label : str, default "94% CI"
-        Label for the credible interval in legend/hover.
+    ci_label : str, default "CI"
+        Label for the credible interval in legend/hover. Pass the actual
+        level (e.g. "95% CI") when known; the generic default avoids
+        claiming a level the data doesn't carry.
     template : str, default "aoty_light"
         Plotly template name.
 
@@ -334,6 +337,21 @@ def create_predictions_plot(
     return fig
 
 
+def _hdi_label_from_columns(lower_col: str, upper_col: str) -> str:
+    """Derive an interval label like "94% HDI" from bound column names.
+
+    Parses percentages out of names like "hdi_3%"/"hdi_97%" (-> "94% HDI").
+    Falls back to a generic "HDI" when the names carry no level.
+    """
+    lower_match = re.search(r"(\d+(?:\.\d+)?)", lower_col)
+    upper_match = re.search(r"(\d+(?:\.\d+)?)", upper_col)
+    if lower_match and upper_match:
+        width = float(upper_match.group(1)) - float(lower_match.group(1))
+        if 0 < width < 100:
+            return f"{width:g}% HDI"
+    return "HDI"
+
+
 def create_forest_plot(
     df: pd.DataFrame,
     estimate_col: str = "mean",
@@ -381,6 +399,8 @@ def create_forest_plot(
     error_minus = df[estimate_col] - df[lower_col]
     error_plus = df[upper_col] - df[estimate_col]
 
+    hdi_label = _hdi_label_from_columns(lower_col, upper_col)
+
     fig = go.Figure()
 
     fig.add_trace(
@@ -402,7 +422,7 @@ def create_forest_plot(
             hovertemplate=(
                 "<b>%{y}</b><br>"
                 "Estimate: %{x:.3f}<br>"
-                "95% HDI: [%{customdata[0]:.3f}, %{customdata[1]:.3f}]"
+                f"{hdi_label}: [%{{customdata[0]:.3f}}, %{{customdata[1]:.3f}}]"
                 "<extra></extra>"
             ),
             customdata=df[[lower_col, upper_col]].values,
