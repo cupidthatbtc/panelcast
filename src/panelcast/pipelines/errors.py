@@ -168,3 +168,27 @@ class StageSkipped(Exception):
         """
         self.message = message
         super().__init__(message)
+
+
+def failure_hint(error: Exception) -> str | None:
+    """One actionable next step, keyed on the typed pipeline exceptions.
+
+    Lives beside the exception types so hints stay next to what they explain.
+    """
+    if isinstance(error, ConvergenceError):
+        return (
+            "re-run without --strict, add --allow-divergences, or raise --target-accept; "
+            "evaluation/diagnostics.json has the rhat/ess detail"
+        )
+    if isinstance(error, EnvironmentError):
+        return "run `pixi install` to sync the lockfile, or pass --allow-unlocked-env"
+    if isinstance(error, GpuMemoryError):
+        return (
+            "run with --preflight-full for a measured memory ladder, free VRAM, or use "
+            "--exclude-rw-raw-from-collection to cut peak sharply"
+        )
+    if isinstance(error, StaleArtifactError):
+        return "another run rewrote the shared data roots; re-run the data stages or start fresh"
+    if isinstance(error, DataValidationError):
+        return "inspect the reported columns in the raw CSV; the cleaning report lists failing rows"
+    return None

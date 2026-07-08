@@ -1452,10 +1452,14 @@ class PipelineOrchestrator:
             if self.run_dir:
                 save_run_manifest(self.manifest, self.run_dir)
 
+        # failure.json is written BEFORE the move so it survives it.
+        self._write_failure_payload(error, stage)
+
         # Close logging handlers before moving directory (Windows file lock issue)
         self._close_log_handlers()
 
         # Move to failed directory
+        final_path = self.run_dir
         if self.run_dir and self.run_dir.exists():
             failed_dir = self.output_base / "failed"
             failed_dir.mkdir(parents=True, exist_ok=True)
@@ -1467,6 +1471,7 @@ class PipelineOrchestrator:
 
             try:
                 shutil.move(str(self.run_dir), str(failed_path))
+                final_path = failed_path
                 log.info("run_moved_to_failed", path=str(failed_path))
             except PermissionError as e:
                 # On Windows, file locks can persist; log but don't fail
@@ -1475,6 +1480,54 @@ class PipelineOrchestrator:
                     error=str(e),
                     run_dir=str(self.run_dir),
                 )
+
+        self._print_failure_epilogue(error, stage, final_path)
+
+    def _write_failure_payload(self, error: Exception, stage: str) -> None:
+        """Structured forensics for `runs why`; must never raise."""
+        if self.run_dir is None or not self.run_dir.exists():
+            return
+        import traceback
+
+        from panelcast.pipelines.errors import failure_hint
+        from panelcast.utils.logging import recent_events
+
+        try:
+            payload = {
+                "run_id": self.manifest.run_id if self.manifest else None,
+                "stage": stage,
+                "exception_type": type(error).__name__,
+                "message": str(error),
+                "traceback_tail": traceback.format_exception(error)[-8:],
+                "stages_completed": (
+                    list(self.manifest.stages_completed) if self.manifest else []
+                ),
+                "hint": failure_hint(error),
+                "resume_command": f"panelcast run --resume {self.run_dir.name}",
+                "recent_events": recent_events(),
+            }
+            (self.run_dir / "failure.json").write_text(
+                json.dumps(payload, indent=2, default=str), encoding="utf-8"
+            )
+        except Exception as e:  # forensics must never mask the real failure
+            log.debug("failure_payload_write_failed", error=str(e))
+
+    def _print_failure_epilogue(self, error: Exception, stage: str, final_path) -> None:
+        """The 10-second answer to 'what happened and what do I type next'."""
+        from rich.console import Console
+
+        from panelcast.pipelines.errors import failure_hint
+
+        console = Console(stderr=True)
+        run_name = final_path.name if final_path is not None else "unknown"
+        console.print(f"\n[red bold]{stage} failed:[/] {type(error).__name__}: {error}")
+        if final_path is not None:
+            console.print(f"run moved to: {final_path}")
+        console.print(f"resume with:  panelcast run --resume {run_name}")
+        hint = failure_hint(error)
+        if hint:
+            console.print(f"hint:         {hint}")
+        console.print(f"details:      panelcast runs why {run_name}")
 
     def _close_log_handlers(self) -> None:
         """Close file handlers to release locks (needed for Windows).
