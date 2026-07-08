@@ -131,7 +131,7 @@ class TestLoadTrainingData:
         sample_features_df.to_parquet(features_path)
         splits_df.to_parquet(splits_path)
 
-        model_args, feature_cols, train_df = load_training_data(features_path, splits_path)
+        model_args, feature_cols, train_df, _imputation = load_training_data(features_path, splits_path)
 
         # Feature values should be from features_df, not splits_df
         assert train_df["feature_1"].iloc[0] == 1.0, "feature_1 should come from features"
@@ -146,7 +146,7 @@ class TestLoadTrainingData:
         sample_features_df.to_parquet(features_path)
         sample_splits_df.to_parquet(splits_path)
 
-        _model_args, feature_cols, train_df = load_training_data(features_path, splits_path)
+        _model_args, feature_cols, train_df, _imputation = load_training_data(features_path, splits_path)
 
         assert "n_reviews" not in feature_cols
         assert "n_reviews" in train_df.columns
@@ -178,7 +178,7 @@ class TestLoadTrainingData:
         features_df.to_parquet(features_path)
         sample_splits_df.to_parquet(splits_path)
 
-        model_args, feature_cols, train_df = load_training_data(features_path, splits_path)
+        model_args, feature_cols, train_df, _imputation = load_training_data(features_path, splits_path)
 
         # NaN values should be filled with 0
         assert not train_df["feature_1"].isna().any(), "NaN values should be filled"
@@ -1001,8 +1001,8 @@ class TestApplyMaxAlbumsCapEdgeCases:
 class TestLoadTrainingDataEdgeCases:
     """Additional edge case tests for load_training_data."""
 
-    def test_successful_load_returns_three_elements(self, tmp_path):
-        """Successful load should return (model_args, feature_cols, train_df) triple."""
+    def test_successful_load_return_shape(self, tmp_path):
+        """Successful load returns (model_args, feature_cols, train_df, imputation)."""
         features_df = pd.DataFrame(
             {
                 "feature_1": [1.0, 2.0, 3.0],
@@ -1021,7 +1021,7 @@ class TestLoadTrainingDataEdgeCases:
         features_df.to_parquet(tmp_path / "features.parquet")
         splits_df.to_parquet(tmp_path / "splits.parquet")
 
-        model_args, feature_cols, train_df = load_training_data(
+        model_args, feature_cols, train_df, _imputation = load_training_data(
             tmp_path / "features.parquet", tmp_path / "splits.parquet", min_albums_filter=1
         )
         assert isinstance(model_args, dict)
@@ -1050,7 +1050,7 @@ class TestLoadTrainingDataEdgeCases:
         features_df.to_parquet(tmp_path / "features.parquet")
         splits_df.to_parquet(tmp_path / "splits.parquet")
 
-        model_args, feature_cols, train_df = load_training_data(
+        model_args, feature_cols, train_df, _imputation = load_training_data(
             tmp_path / "features.parquet", tmp_path / "splits.parquet", min_albums_filter=1
         )
         assert "feat_a" in feature_cols
@@ -1076,12 +1076,60 @@ class TestLoadTrainingDataEdgeCases:
         features_df.to_parquet(tmp_path / "features.parquet")
         splits_df.to_parquet(tmp_path / "splits.parquet")
 
-        model_args, _feat_cols, train_df = load_training_data(
+        model_args, _feat_cols, train_df, _imputation = load_training_data(
             tmp_path / "features.parquet", tmp_path / "splits.parquet", min_albums_filter=1
         )
         # train_df should be filtered to exclude the NaN n_reviews row
         assert len(train_df) == 3
         assert len(model_args["y"]) == 3
+
+
+class TestImputeMissingGate:
+    """The #158 gate: median + indicators on, exact legacy fillna(0) off."""
+
+    def _write(self, tmp_path):
+        features_df = pd.DataFrame(
+            {
+                "feature_1": [1.0, np.nan, 3.0, 5.0],  # median of observed = 3.0
+                "feature_2": [4.0, 5.0, 6.0, 7.0],
+                "n_reviews": [10, 20, 30, 40],
+            },
+            index=pd.RangeIndex(4),
+        )
+        splits_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "B", "B"],
+                "User_Score": [70.0, 75.0, 80.0, 85.0],
+            },
+            index=pd.RangeIndex(4),
+        )
+        features_df.to_parquet(tmp_path / "features.parquet")
+        splits_df.to_parquet(tmp_path / "splits.parquet")
+        return tmp_path / "features.parquet", tmp_path / "splits.parquet"
+
+    def test_gate_off_is_legacy_fillna_zero(self, tmp_path):
+        features_path, splits_path = self._write(tmp_path)
+        model_args, feature_cols, train_df, imputation = load_training_data(
+            features_path, splits_path, min_albums_filter=1
+        )
+        assert imputation is None
+        assert feature_cols == ["feature_1", "feature_2"]
+        assert train_df["feature_1"].tolist() == [1.0, 0.0, 3.0, 5.0]
+
+    def test_gate_on_imputes_median_and_appends_indicator(self, tmp_path):
+        features_path, splits_path = self._write(tmp_path)
+        model_args, feature_cols, train_df, imputation = load_training_data(
+            features_path, splits_path, min_albums_filter=1, impute_missing=True
+        )
+        assert feature_cols == ["feature_1", "feature_2", "feature_1__missing"]
+        assert train_df["feature_1"].tolist() == [1.0, 3.0, 3.0, 5.0]
+        assert train_df["feature_1__missing"].tolist() == [0.0, 1.0, 0.0, 0.0]
+        assert imputation == {
+            "medians": {"feature_1": 3.0, "feature_2": 5.5},
+            "indicator_cols": ["feature_1__missing"],
+        }
+        # The indicator is a real predictor: X carries the extra column.
+        assert model_args["X"].shape[1] == 3
 
 
 # --- from unit/pipelines/test_train_bayes_coverage.py ---
@@ -1901,7 +1949,7 @@ class TestTrainModelsFeatureStandardization:
             train_df = pd.DataFrame(
                 {"Artist": ["A", "A", "B", "B", "C", "C"]},
             )
-            return model_args, feature_cols, train_df
+            return model_args, feature_cols, train_df, None
 
         with (
             patch(
@@ -2441,7 +2489,7 @@ class TestTrainModelsLearnedSigmaObsParamterization:
             train_df = pd.DataFrame(
                 {"Artist": ["artist_0"] * 3 + ["artist_1"] * 3 + ["artist_2"] * 3},
             )
-            return model_args, feature_cols, train_df
+            return model_args, feature_cols, train_df, None
 
         with (
             patch("panelcast.pipelines.train_bayes.load_training_data", side_effect=_fake_load),
@@ -2714,7 +2762,7 @@ class TestLoadTrainingDataNew:
         splits_df.to_parquet(splits_path)
 
         # With min_albums_filter=5, both artists (A:3, B:2) are below threshold
-        model_args, feature_cols, train_df = load_training_data(
+        model_args, feature_cols, train_df, _imputation = load_training_data(
             features_path, splits_path, min_albums_filter=5
         )
         # All album_seq should be 1 since both artists are below threshold

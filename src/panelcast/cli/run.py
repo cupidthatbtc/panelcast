@@ -232,12 +232,13 @@ def _run_full_preflight(
     )
 
     # Load data and build model_args using shared function
-    model_args, _, _ = load_training_data(
+    model_args, _, _, _ = load_training_data(
         features_path=features_path,
         splits_path=splits_path,
         min_albums_filter=config.min_albums_filter,
         descriptor=preflight_descriptor,
         entity_group_pooling=effective_group_pooling,
+        impute_missing=config.impute_missing,
     )
 
     # Remove artist_album_counts (not needed for preflight)

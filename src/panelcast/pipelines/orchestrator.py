@@ -233,6 +233,10 @@ class PipelineConfig:
     # column. Explicit True/False always wins (True hard-fails on unsupported
     # domains). No CLI flag.
     entity_group_pooling: bool | None = None
+    # Missing-covariate treatment gate (#158): train-median imputation plus
+    # <col>__missing indicator columns instead of the legacy fillna(0).
+    # Feature-affecting; default off => byte-identical outputs. No CLI flag.
+    impute_missing: bool = False
     # Stacked-GBM offset feature block (#86): a gradient-boosted prediction of
     # the target from the other blocks' outputs enters X as one more covariate
     # (out-of-fold for train rows). Default on since 0.6.0 (promoted on the
@@ -664,6 +668,7 @@ class PipelineOrchestrator:
                 "errors_in_variables": self.config.errors_in_variables,
                 "propagate_rw_horizon": self.config.propagate_rw_horizon,
                 "entity_group_pooling": self.config.entity_group_pooling,
+                "impute_missing": self.config.impute_missing,
                 "gbm_offset": self.config.gbm_offset,
                 "exclude_rw_raw_from_collection": self.config.exclude_rw_raw_from_collection,
                 "val_albums": self.config.val_albums,
@@ -739,6 +744,7 @@ class PipelineOrchestrator:
         "errors_in_variables",
         "propagate_rw_horizon",
         "entity_group_pooling",
+        "impute_missing",
         "gbm_offset",
         "exclude_rw_raw_from_collection",
         "max_albums",
@@ -988,6 +994,8 @@ class PipelineOrchestrator:
                 if self.config.entity_group_pooling
                 else "--no-entity-group-pooling"
             )
+        if self.config.impute_missing:
+            parts.append("--impute-missing")
         if self.config.gbm_offset != defaults.gbm_offset:
             parts.append("--gbm-offset" if self.config.gbm_offset else "--no-gbm-offset")
         if self.config.val_albums != defaults.val_albums:
@@ -1295,6 +1303,7 @@ class PipelineOrchestrator:
             errors_in_variables=self.config.errors_in_variables,
             propagate_rw_horizon=self.config.propagate_rw_horizon,
             entity_group_pooling=self.config.entity_group_pooling,
+            impute_missing=self.config.impute_missing,
             gbm_offset=self.config.gbm_offset,
             exclude_rw_raw_from_collection=self.config.exclude_rw_raw_from_collection,
             warmup_export_path=self.config.warmup_export_path,

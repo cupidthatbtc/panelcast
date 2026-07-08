@@ -135,6 +135,8 @@ class StageContext:
     # present in the training split (the orchestrator always passes the
     # configured PipelineConfig value; train resolves it).
     entity_group_pooling: bool | None = None
+    # Missing-covariate treatment gate (#158): median + indicators vs fillna(0)
+    impute_missing: bool = False
     # Stacked-GBM offset feature block (#86). Stays False here so bare test
     # contexts keep the legacy roster; the orchestrator always passes the
     # config value (default on since 0.6.0), mirroring the 0.5.0
