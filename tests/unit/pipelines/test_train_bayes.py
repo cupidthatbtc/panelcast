@@ -1520,7 +1520,11 @@ class TestTrainModelsStrictConvergence:
             assert summary["divergences"] == 3
 
     def test_strict_diagnostics_failed_raises(self, tmp_path):
-        """Strict mode with diagnostics.passed=False should raise ConvergenceError."""
+        """Strict mode with diagnostics.passed=False should raise ConvergenceError.
+
+        The message must print the TOTAL ESS floor (ctx.ess_threshold), not the
+        pre-#142 per-chain figure multiplied by num_chains (400 * 4 = 1600).
+        """
         features_path, splits_path = _make_train_parquets(tmp_path)
         ctx = _make_ctx(strict=True, allow_divergences=True, num_chains=4, num_samples=1000)
 
@@ -1549,8 +1553,46 @@ class TestTrainModelsStrictConvergence:
                 side_effect=lambda p: tmp_path / p,
             ),
         ):
-            with pytest.raises(ConvergenceError, match="Convergence failed"):
+            with pytest.raises(
+                ConvergenceError, match=r"Convergence failed.*ess_min=100 \(thresh 400\)"
+            ):
                 train_models(ctx, features_path=features_path, splits_path=splits_path)
+
+    def test_summary_diagnostics_include_tail_ess_and_failing_params(self, tmp_path):
+        """The persisted diagnostics block carries ess_tail_min and failing_params."""
+        features_path, splits_path = _make_train_parquets(tmp_path)
+        ctx = _make_ctx(strict=False, allow_divergences=True)
+
+        fit_result = _make_fake_fit_result(divergences=0)
+        diagnostics = _make_fake_diagnostics(passed=False, rhat_max=1.05, ess_bulk_min=100)
+        diagnostics.failing_params = ["user_rho"]
+
+        model_dir = tmp_path / "models"
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        with (
+            patch("panelcast.pipelines.train_bayes.fit_model", return_value=fit_result),
+            patch(
+                "panelcast.pipelines.train_bayes.check_convergence",
+                return_value=diagnostics,
+            ),
+            patch(
+                "panelcast.pipelines.train_bayes.save_model",
+                return_value=(model_dir / "model.nc", MagicMock()),
+            ),
+            patch(
+                "panelcast.pipelines.train_bayes.hash_dataframe",
+                return_value="abc123",
+            ),
+            patch(
+                "panelcast.pipelines.train_bayes.Path",
+                side_effect=lambda p: tmp_path / p,
+            ),
+        ):
+            summary = train_models(ctx, features_path=features_path, splits_path=splits_path)
+
+        assert summary["diagnostics"]["ess_tail_min"] == 1800.0
+        assert summary["diagnostics"]["failing_params"] == ["user_rho"]
 
 
 class TestTrainModelsHighDivergenceWarning:

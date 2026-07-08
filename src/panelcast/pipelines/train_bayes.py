@@ -47,6 +47,20 @@ log = structlog.get_logger()
 # never create the site, so this is a no-op for every published number.
 _ENTITY_OBS_KEEP_MAX = 20000
 
+# Keys prepare_model_data emits for pipeline bookkeeping, not for the NumPyro
+# model signature. Anything forwarding model_args into mcmc.run must pop every
+# one of these — the model function has no **kwargs, so a leftover key is a
+# TypeError on the first fit.
+MODEL_ARGS_METADATA_KEYS = (
+    "artist_album_counts",
+    "artist_to_idx",
+    "group_to_idx",
+    "global_mean_score",
+    "global_std_score",
+    "effective_ceiling",
+    "ar_center_value",
+)
+
 
 def _validate_strict_sampling_config(
     *,
@@ -776,6 +790,21 @@ def _build_resource_usage(
         "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
     }
     expected_gb = estimate_memory_gb(**estimate_inputs).total_gb
+    # Model-structure gates change the fit's memory/runtime profile; record them
+    # so calibration records from structurally different fits don't collide.
+    # Added AFTER the estimate call — the estimator doesn't consume them.
+    priors = model_args.get("priors")
+    estimate_inputs["errors_in_variables"] = bool(
+        getattr(priors, "errors_in_variables", False)
+    )
+    estimate_inputs["heteroscedastic_entity_obs"] = bool(
+        getattr(priors, "heteroscedastic_entity_obs", False)
+    )
+    estimate_inputs["entity_group_pooling"] = bool(
+        getattr(priors, "entity_group_pooling", False)
+    )
+    if estimate_inputs["entity_group_pooling"]:
+        estimate_inputs["n_groups"] = int(model_args["n_groups"])
     peak = fit_result.peak_gpu_memory_bytes
     expected = round(expected_gb, 3)
     actual = round(peak / (1024**3), 3) if peak is not None else None
@@ -1134,11 +1163,11 @@ def train_models(
         )
 
     if ctx.strict and not diagnostics.passed:
-        ess_thresh = ctx.ess_threshold * ctx.num_chains
+        # The gate is a TOTAL ESS floor (summed across chains) — report it as-is.
         raise ConvergenceError(
             f"Convergence failed: rhat_max={diagnostics.rhat_max:.4f} "
             f"(thresh {ctx.rhat_threshold}), ess_min={diagnostics.ess_bulk_min:.0f} "
-            f"(thresh {ess_thresh})",
+            f"(thresh {ctx.ess_threshold})",
             stage="train",
         )
 
@@ -1211,8 +1240,10 @@ def train_models(
             "passed": diagnostics.passed,
             "rhat_max": float(diagnostics.rhat_max),
             "ess_bulk_min": float(diagnostics.ess_bulk_min),
+            "ess_tail_min": float(diagnostics.ess_tail_min),
             "rhat_threshold": float(diagnostics.rhat_threshold),
             "ess_threshold": int(diagnostics.ess_threshold),
+            "failing_params": [str(p) for p in diagnostics.failing_params],
         },
     }
 
