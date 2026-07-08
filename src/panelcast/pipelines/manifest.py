@@ -171,6 +171,30 @@ def capture_environment() -> EnvironmentInfo:
     )
 
 
+def flag_differences(
+    a_flags: dict[str, Any],
+    b_flags: dict[str, Any],
+    defaults: Any,
+    ignore: frozenset[str] = frozenset(),
+) -> list[tuple[str, Any, Any]]:
+    """(key, a_value, b_value) for output-affecting flags that differ, defaults-aware.
+
+    A key absent from either side falls back to the current default, so a
+    manifest written before a flag existed doesn't read as a change against
+    that flag's default (an older run on the default path is unchanged).
+    """
+    keys = sorted((set(a_flags) | set(b_flags)) - set(ignore))
+
+    def value(flags: dict, key: str):
+        return flags.get(key, getattr(defaults, key, None))
+
+    return [
+        (key, value(a_flags, key), value(b_flags, key))
+        for key in keys
+        if value(a_flags, key) != value(b_flags, key)
+    ]
+
+
 class GitStateModel(BaseModel):
     """Pydantic model wrapper for GitState dataclass.
 
