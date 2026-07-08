@@ -90,6 +90,53 @@ def _save_log_likelihood_idata(idata_ll: az.InferenceData, path: Path) -> None:
     idata_ll.to_netcdf(str(path))
 
 
+_SAVE_PREDICTIVE_ENV = "PANELCAST_SAVE_PREDICTIVE"
+_PREDICTIVE_SNAPSHOT_DRAWS = 500
+
+
+def _predictive_save_path(output_dir: Path | None = None) -> Path | None:
+    """Opt-in destination for the thinned score-scale predictive snapshot.
+
+    Off by default; set ``PANELCAST_SAVE_PREDICTIVE=1`` to persist
+    ``predictive.npz`` under the evaluation output dir so ``panelcast stack``
+    (#154) can score arm mixtures without refitting. Returns None when unset.
+    """
+    if os.environ.get(_SAVE_PREDICTIVE_ENV):
+        return (output_dir or Path(_EVAL_OUTPUT_DIR)) / "predictive.npz"
+    return None
+
+
+def _append_predictive_snapshot(
+    path: Path,
+    split_key: str,
+    y_samples: np.ndarray,
+    y_true: np.ndarray,
+    fresh: bool = False,
+) -> None:
+    """Merge one split's evenly-thinned float32 draws (+ y_true) into the npz.
+
+    Thinned to at most ``_PREDICTIVE_SNAPSHOT_DRAWS`` so the file stays a few
+    MB. npz cannot append, so existing splits are re-saved; ``fresh`` drops any
+    prior file first (the primary split writes first, so a re-run never mixes
+    splits from different evaluations).
+    """
+    y_samples = np.asarray(y_samples)
+    idx = np.linspace(
+        0, y_samples.shape[0] - 1, num=min(_PREDICTIVE_SNAPSHOT_DRAWS, y_samples.shape[0])
+    ).astype(int)
+    arrays: dict[str, np.ndarray] = {}
+    if path.exists():
+        if fresh:
+            path.unlink()
+        else:
+            with np.load(path) as existing:
+                arrays = {k: existing[k] for k in existing.files}
+    arrays[f"{split_key}_draws"] = y_samples[idx].astype(np.float32)
+    arrays[f"{split_key}_y_true"] = np.asarray(y_true, dtype=np.float32)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(path, **arrays)
+
+
 def _json_safe(value: Any) -> Any:
     """Convert payloads to strict-JSON-safe primitives."""
     if isinstance(value, dict):
@@ -1231,6 +1278,11 @@ def _evaluate_primary_split(
     transform = _transform_from_summary(summary)
     if transform.name != "identity":
         primary_y_samples = np.asarray(transform.inverse(primary_y_samples))
+    predictive_path = _predictive_save_path(Path(paths.evaluation))
+    if predictive_path is not None:
+        _append_predictive_snapshot(
+            predictive_path, "primary", primary_y_samples, primary_y_true, fresh=True
+        )
     primary_metrics, primary_predictions, primary_calibration = _evaluate_predictions(
         primary_y_true,
         primary_y_samples,
@@ -1541,6 +1593,11 @@ def evaluate_models(ctx: StageContext) -> dict:
                 seed=ctx.seed + 1000,
                 group_idx_new=group_idx_new,
             )
+            secondary_predictive_path = _predictive_save_path(Path(paths.evaluation))
+            if secondary_predictive_path is not None:
+                _append_predictive_snapshot(
+                    secondary_predictive_path, "secondary", secondary_y_samples, secondary_y_true
+                )
             secondary_metrics, secondary_predictions, secondary_calibration = _evaluate_predictions(
                 secondary_y_true,
                 secondary_y_samples,

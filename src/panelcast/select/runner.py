@@ -470,7 +470,7 @@ def launch_arm(
     """
     import os
 
-    env = {**os.environ, "PANELCAST_SAVE_LOG_LIKELIHOOD": "1"}
+    env = {**os.environ, "PANELCAST_SAVE_LOG_LIKELIHOOD": "1", "PANELCAST_SAVE_PREDICTIVE": "1"}
     try:
         proc = subprocess.run(
             [panelcast_bin, "run", "--config", str(config_path)],

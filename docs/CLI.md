@@ -445,6 +445,40 @@ panelcast select --dataset examples/aerospace/descriptor.yaml --effort quick
 
 ---
 
+### `stack` — Predictive Stacking Over a Sweep
+
+Fit predictive-stacking weights (Yao et al. 2018) plus pseudo-BMA+ weights
+over a completed sweep's arm ledger from the persisted per-point held-out
+log-likelihood snapshots, then score the weighted arm mixture against the
+champion single arm and the reference on CRPS, point metrics, coverage, and
+WIS. The mixture is a forecast product, not a posterior. Weights are fit on
+the primary split's snapshots, so the headline is only ever the secondary
+(entity-disjoint) split's predictive snapshots — never the split the weights
+were fit on. Arms without snapshots are excluded, not scored another way.
+Writes `stacking.md` + `stacking.json` next to the ledger.
+
+```bash
+panelcast stack SWEEP_DIR [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `SWEEP_DIR` | required | Sweep directory (`outputs/select/<sweep-id>`) containing `ledger.json` |
+| `--baselines` | | `baseline_comparison.json` rows for a baseline-floor section in the report |
+| `--seed` | `0` | Bayesian-bootstrap seed for the pseudo-BMA+ weights (stacking weights are deterministic) |
+| `--out-dir` | sweep dir | Report destination |
+
+```bash
+panelcast stack outputs/select/sweep
+```
+
+Predictive snapshots (`evaluation/predictive.npz`, ~500 thinned float32
+draws per split) are written per arm by the evaluate stage when
+`PANELCAST_SAVE_PREDICTIVE=1`; sweeps set it automatically. Older sweeps
+without snapshots still get the weights table, but no mixture scoreboard.
+
+---
+
 ### `backtest` — Rolling-Origin Backtest
 
 Run the full leakage-safe stage chain (splits → features → train → evaluate)
