@@ -3035,6 +3035,85 @@ class TestBuildReadinessNew:
         assert checks["secondary_split_evaluated"]["passed"] is False
 
 
+class TestReadinessConsistentWithRealGate:
+    """End-to-end: a diagnostics payload produced by the REAL check_convergence
+    (serialized the way evaluate.py writes diagnostics.json) must yield readiness
+    verdicts consistent with the gate's passed flag. Post-#142 both apply the
+    same TOTAL bulk-ESS floor, so ~600 total with threshold 400 passes both
+    (a per-chain misreading would demand 1600 and flip the verdict)."""
+
+    def test_real_check_convergence_payload_feeds_readiness(self):
+        az = pytest.importorskip("arviz")
+        from panelcast.models.bayes.diagnostics import check_convergence
+
+        rng = np.random.default_rng(42)
+        n_chains, n_draws = 4, 150
+        idata = az.from_dict(
+            posterior={"user_mu": rng.normal(size=(n_chains, n_draws))},
+            sample_stats={"diverging": np.zeros((n_chains, n_draws), dtype=bool)},
+        )
+
+        diags = check_convergence(idata, ess_threshold=400)
+        # iid draws: total bulk ESS ~ n_chains * n_draws = 600 — above the
+        # total floor but below the per-chain misreading (400 * 4 = 1600).
+        assert 400 < diags.ess_bulk_min < 1600
+        assert diags.passed is True
+
+        # Serialized exactly as evaluate.py writes diagnostics.json.
+        payload = {
+            "passed": diags.passed,
+            "rhat_max": float(diags.rhat_max),
+            "ess_bulk_min": float(diags.ess_bulk_min),
+            "divergences": int(diags.divergences),
+            "rhat_threshold": float(diags.rhat_threshold),
+            "ess_threshold": int(diags.ess_threshold),
+        }
+        readiness = _build_publication_readiness(
+            metrics={
+                "primary_split": "within_entity_temporal",
+                "splits": {
+                    "within_entity_temporal": {"calibration": {"within_tolerance": True}},
+                    SECONDARY_SPLIT: {"calibration": {"within_tolerance": True}},
+                },
+            },
+            diagnostics=payload,
+            training_summary={"mcmc_config": {"num_chains": n_chains}},
+            artifact_errors=[],
+            require_secondary_split=True,
+            prior_predictive_available=True,
+        )
+        checks = _check_map(readiness)
+        assert checks["ess_within_threshold"]["passed"] is (diags.ess_bulk_min >= 400)
+        assert checks["convergence_passed"]["passed"] is diags.passed
+        assert readiness["ready"] is diags.passed
+
+
+class TestRepoRootModelCardUntouched:
+    """#135 regression: publication must never write the curated repo-root
+    MODEL_CARD.md. Runs without the Path reroute patch, in a temp cwd, so a
+    reintroduced root write would actually hit the sentinel."""
+
+    def test_generate_artifacts_leaves_cwd_model_card_alone(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        sentinel = "# Curated repo-root model card - do not overwrite\n"
+        root_card = tmp_path / "MODEL_CARD.md"
+        root_card.write_text(sentinel, encoding="utf-8")
+
+        _write_json(tmp_path / "outputs/evaluation/metrics.json", _make_metrics())
+        _write_json(tmp_path / "outputs/evaluation/diagnostics.json", _make_diagnostics())
+        _write_json(tmp_path / "models/training_summary.json", _make_training_summary())
+
+        ctx = _setup_ctx(strict=False)
+        patches = _base_patches(tmp_path)
+        del patches["Path"]  # real cwd-relative paths; no tmp_path rerouting
+        artifacts = _run_with_patches(tmp_path, ctx, patches)
+
+        # The run-scoped card was written under reports/, not the repo root.
+        assert (tmp_path / "reports" / "MODEL_CARD.md").exists()
+        assert any(Path(d).name == "MODEL_CARD.md" for d in artifacts["docs"])
+        assert root_card.read_text(encoding="utf-8") == sentinel
+
+
 class TestRenderReadinessMarkdownNew:
     def test_pass_status(self):
         md = _render_publication_readiness_markdown(
