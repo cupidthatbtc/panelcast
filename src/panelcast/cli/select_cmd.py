@@ -16,6 +16,8 @@ import typer
 
 from panelcast.cli import app
 
+_DEFAULT_CONFIG = "configs/select.yaml"
+
 
 @app.command("select")
 def select(
@@ -48,7 +50,7 @@ def select(
         "sweep", "--sweep-id", help="Sweep directory name under outputs/select/ (enables --resume)."
     ),
     config_path: str = typer.Option(
-        "configs/select.yaml", "--config", help="YAML with the rules and effort tiers."
+        _DEFAULT_CONFIG, "--config", help="YAML with the rules and effort tiers."
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print the enumerated space, staged plan, and predicted cost only."
@@ -69,12 +71,16 @@ def select(
     from panelcast.select.tiers import resolve_tier, tier_to_sweep_config
 
     cfg_path = Path(config_path)
+    # A typo'd explicit --config must not silently run under shipped defaults;
+    # only the shipped default path may be absent (fresh domain repo).
+    if not cfg_path.exists() and config_path != _DEFAULT_CONFIG:
+        raise typer.BadParameter(f"config file not found: {config_path}", param_hint="--config")
     try:
         tier = resolve_tier(effort, cfg_path)
+        rules = DecisionRules.load(cfg_path)
     except ValueError as exc:
         typer.echo(f"Error: {exc}")
         raise typer.Exit(code=1) from exc
-    rules = DecisionRules.load(cfg_path)
     descriptor = load_descriptor(dataset)
     label = dataset or descriptor.name
 
@@ -96,12 +102,18 @@ def select(
         n_confirmation_seeds=len(rules.confirmation_seeds),
         dims=resolve_dims(_prepared_paths(descriptor)),
     )
+    plan.notes.append(
+        f"pre-registered rules in effect: promote_z={rules.promote_z:g}, "
+        f"coverage tolerance ±{rules.coverage_tolerance:g}, convergence "
+        f"{'required' if rules.require_convergence else 'not required'}, "
+        f"confirmation seeds {list(rules.confirmation_seeds)}"
+    )
     typer.echo(render_plan(plan))
 
     if dry_run:
         raise typer.Exit(code=0)
 
-    train_df, feature_cols = _load_prepared_frame()
+    train_df, feature_cols = _load_prepared_frame(descriptor)
     if train_df is None:
         typer.echo(
             "No prepared splits/features found. The sweep rebuilds them per arm, "
@@ -115,6 +127,7 @@ def select(
         cfg,
         train_df=train_df,
         feature_cols=feature_cols,
+        available_columns=frozenset(train_df.columns) if train_df is not None else None,
     )
     typer.echo(f"\nSweep complete. Report: {result['report_dir']}/report.md")
     if result["winner_arm"]:
@@ -151,8 +164,14 @@ def _prepared_paths(descriptor) -> dict | None:
     return hint
 
 
-def _load_prepared_frame() -> tuple[Any, list[str] | None]:
-    """(joined train frame, feature_cols) from prepared artifacts, or (None, None)."""
+def _load_prepared_frame(descriptor) -> tuple[Any, list[str] | None]:
+    """(joined train frame, feature_cols) from prepared artifacts, or (None, None).
+
+    The flat ``data/`` artifacts are shared across domains: a frame left behind
+    by another domain's run would crash (or silently mis-screen) the prior
+    screen, so a frame missing the descriptor's own columns is treated as not
+    prepared rather than passed through.
+    """
     if not (_SPLIT_PATH.exists() and _FEATURES_PATH.exists()):
         return None, None
     try:
@@ -163,6 +182,15 @@ def _load_prepared_frame() -> tuple[Any, list[str] | None]:
         split_df = pd.read_parquet(_SPLIT_PATH)
         features_df = pd.read_parquet(_FEATURES_PATH)
         joined = join_splits_with_features(split_df, features_df, name="select_train")
+        missing = [
+            c for c in (descriptor.entity_col, descriptor.target_col) if c not in joined.columns
+        ]
+        if missing:
+            typer.echo(
+                f"Prepared splits/features do not match dataset '{descriptor.name}' "
+                f"(missing column(s): {', '.join(missing)}); ignoring them."
+            )
+            return None, None
         feature_cols = [c for c in features_df.columns if c != "original_row_id"]
         joined[feature_cols] = joined[feature_cols].fillna(0)
         return joined, feature_cols

@@ -66,13 +66,22 @@ def load_tiers(path: Path | None = None) -> dict[str, EffortTier]:
 
     An entry present in the YAML overrides the shipped tier of that name field
     by field, so a domain can retune one knob without restating the block.
+    A present-but-malformed file raises rather than silently shipping defaults.
     """
-    path = path or DEFAULT_RULES_PATH
+    path = Path(path or DEFAULT_RULES_PATH)
     tiers = dict(_SHIPPED_TIERS)
     try:
-        payload = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    except (OSError, yaml.YAMLError):
+        text = path.read_text(encoding="utf-8")
+    except OSError:
         return tiers
+    try:
+        payload = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise ValueError(f"malformed select config {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ValueError(
+            f"malformed select config {path}: expected a mapping, got {type(payload).__name__}"
+        )
     block = payload.get("tiers") or {}
     for name, spec in block.items():
         base = tiers.get(name)

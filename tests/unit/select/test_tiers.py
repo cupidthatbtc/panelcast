@@ -53,6 +53,18 @@ class TestLoad:
         assert "exhaustive" in tiers
         assert tiers["exhaustive"].stage3_fits == 40
 
+    def test_malformed_yaml_raises_not_defaults(self, tmp_path):
+        path = tmp_path / "select.yaml"
+        path.write_text("tiers: {quick: {num_samples: 250", encoding="utf-8")
+        with pytest.raises(ValueError, match="malformed select config"):
+            load_tiers(path)
+
+    def test_non_mapping_yaml_raises(self, tmp_path):
+        path = tmp_path / "select.yaml"
+        path.write_text("just a string\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="expected a mapping"):
+            load_tiers(path)
+
 
 class TestResolve:
     def test_unknown_tier_raises(self, tmp_path):

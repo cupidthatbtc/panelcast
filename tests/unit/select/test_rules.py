@@ -70,6 +70,20 @@ class TestLoad:
         path.write_text("grid: {}\n", encoding="utf-8")
         assert DecisionRules.load(path).promote_z == 2.0
 
+    def test_malformed_yaml_raises_not_defaults(self, tmp_path):
+        # A present-but-broken file silently running under shipped defaults
+        # would void pre-registration; it must raise.
+        path = tmp_path / "select.yaml"
+        path.write_text("rules: {promote_z: 4.0", encoding="utf-8")
+        with pytest.raises(ValueError, match="malformed select config"):
+            DecisionRules.load(path)
+
+    def test_non_mapping_yaml_raises(self, tmp_path):
+        path = tmp_path / "select.yaml"
+        path.write_text("- just\n- a\n- list\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="expected a mapping"):
+            DecisionRules.load(path)
+
 
 class TestEvaluate:
     def test_clean_arm_promotes(self):

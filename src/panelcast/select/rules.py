@@ -31,12 +31,25 @@ class DecisionRules:
 
     @classmethod
     def load(cls, path: Path | None = None) -> DecisionRules:
-        """Rules from the YAML ``rules:`` block; shipped defaults when absent."""
-        path = path or DEFAULT_RULES_PATH
+        """Rules from the YAML ``rules:`` block; shipped defaults ONLY when absent.
+
+        A present-but-malformed file raises — silently falling back to shipped
+        defaults would void pre-registration without a word of warning.
+        """
+        path = Path(path or DEFAULT_RULES_PATH)
         try:
-            payload = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-        except (OSError, yaml.YAMLError):
+            text = path.read_text(encoding="utf-8")
+        except OSError:
             return cls()
+        try:
+            payload = yaml.safe_load(text) or {}
+        except yaml.YAMLError as exc:
+            raise ValueError(f"malformed select config {path}: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError(
+                f"malformed select config {path}: expected a mapping, "
+                f"got {type(payload).__name__}"
+            )
         block = payload.get("rules") or {}
         known = {
             "promote_z": float,
