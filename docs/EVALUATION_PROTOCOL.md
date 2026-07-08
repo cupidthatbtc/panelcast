@@ -16,6 +16,18 @@ Cross-validation
 - Secondary split sets `prev_score` to training global mean for every row (no held-out label usage)
 - Primary split fails fast if unknown entities appear in test data (no silent row dropping)
 
+Rolling-origin backtest (`panelcast backtest --origins K`)
+- Origin k holds out each entity's (last-k)-th event as test and drops the k
+  later events entirely; origin 0 is exactly the standard primary split.
+- Each origin runs the full splits->features->train->evaluate chain as its own
+  run directory with fresh data stamps, so every leakage control holds
+  unchanged; the origin's split content hash lands in the backtest ledger.
+- Metrics are reported as mean ± SE across origins (plus min/max). Deeper
+  origins shrink the eligible entity set — per-origin n_test and n_entities
+  are reported and cross-origin variation includes that population shift.
+- The JSON ledger under `outputs/backtest/<id>/` makes an interrupted backtest
+  resume at the next unfinished origin; rerun the same command to resume.
+
 History cap (`max_albums`)
 - `--max-albums` (default 50 for AOTY) caps the length of the time-varying
   trajectory per entity. It is a max-EVENTS cap, not a row filter: an entity's

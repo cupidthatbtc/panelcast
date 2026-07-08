@@ -136,6 +136,7 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     ),
     # Split configuration
     "val_albums": _spec("val_albums", "val_albums"),
+    "origin_offset": _spec("origin_offset", "origin_offset"),
     "min_train_albums": _spec("min_train_albums", "min_train_albums"),
     # Evaluation configuration
     "calibration_intervals": _spec(
