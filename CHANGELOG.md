@@ -4,6 +4,65 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] — 2026-07-08
+
+Inference performance and robustness (#138). Fits and sweeps now plan their
+cost, schedule inside their budget, and survive interruption — plus the
+full-repo audit hardening that ran alongside.
+
+### Added
+
+- **Adaptive per-arm select timeouts** (#148): `--arm-timeout auto` sizes each
+  arm's kill threshold from its own predicted runtime, so slow-but-legitimate
+  arms (offset_logit-retaining) can finish and become champions instead of
+  being structurally excluded by the fixed 1800s ceiling.
+- **Budget lookahead and cost-ordered scheduling** (#166): an arm whose
+  predicted cost exceeds the remaining `--budget-hours` is recorded as
+  `skipped_budget` (retryable under a bigger budget) instead of truncating the
+  stage, and predicted cost breaks ties within each diagnostic-priority group.
+- **Predicted train runtime and ETA** (#161): `panelcast run` logs the
+  predicted fit duration, ETA, and prediction source before sampling starts,
+  records `predicted_seconds` next to the actual in the manifest, and the
+  pipeline progress bar advances by predicted per-stage seconds with a
+  time-remaining column.
+- **Resumable multi-seed confirmation** (#165): `confirmation.json` is now a
+  protocol-echoing ledger; a re-entry reuses any prior seed whose snapshots
+  survive (re-pairing is cheap), refits only what is missing, and archives the
+  ledger on any protocol change.
+- **MCMC checkpoint and resume** (#177): `--checkpoint-every N` samples in
+  blocks through `post_warmup_state`, persisting draws + sampler state after
+  each block; an interrupted fit resumes from the last block. Blocked draws
+  are bit-identical to the single-shot chain (parity-tested); mismatched
+  checkpoints refuse loudly.
+- **Memory-informed auto chain_method** (#176): `--chain-method auto` runs
+  NumPyro's vectorized chains when the memory estimator says all chains fit in
+  free VRAM, sequential otherwise (always sequential on CPU). Opt-in only;
+  runtime telemetry is keyed by chain method. The measured vectorized memory
+  ladder and speedup bake-off remain on #138 before docs recommend it.
+- **Warm-started sweep arms** (#178): `panelcast select --warmup-transfer`
+  reuses the reference fit's adapted mass matrix for screening arms at reduced
+  warmup (exact latent-signature match only; confirmation always runs cold).
+  The subset z-stability bake-off remains on #138 before docs recommend it.
+- **Persistent JAX compilation cache** (#141): sweep arms, preflight
+  mini-runs, and confirmation fits reuse compiled XLA programs across
+  processes instead of recompiling in every subprocess.
+- **`panelcast runs history`** (#153): longitudinal table of headline metrics
+  across runs, grouped into feature-stamp epochs, with drift flags and
+  `--tag` for findable release fits.
+
+### Fixed
+
+- Audit-cycle hardening across the whole pipeline (#140–#152): fair baseline
+  conditioning (information sets equalized with the model's evaluation
+  protocol, ridge features standardized), the training prior-predictive gate
+  restored, publication diagnostics reported truthfully with exact fan-chart
+  quantiles, ESS gate reconciled to the documented total floor, stage-wise
+  runs and the run lifecycle repaired, calibration-store appends hardened and
+  gated vector sites modeled in the memory estimate, split/cleaning
+  data-integrity guards (undated events excluded from temporal holdout,
+  duplicate-key warnings, persisted-form hashing), degenerate paired-elpd
+  verdicts made explicit, and dashboard trace/interval rendering fixed.
+
 ## [0.7.2] — 2026-07-05
 
 A patch release: the report stage no longer writes into your working tree.
