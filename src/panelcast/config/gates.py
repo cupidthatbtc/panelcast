@@ -24,7 +24,7 @@ LikelihoodFamily = Literal[
     "studentt", "normal", "skew_studentt", "beta", "skew_normal", "split_normal",
     "mixture", "beta_binomial", "beta_ceiling",
 ]
-ChainMethod = Literal["sequential", "vectorized", "parallel"]
+ChainMethod = Literal["sequential", "vectorized", "parallel", "auto"]
 
 __all__ = [
     "TargetTransform",

@@ -1745,6 +1745,7 @@ class TestTrainModelsFeatureStandardization:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
+            checkpoint_dir=None,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -1815,6 +1816,7 @@ class TestTrainModelsFeatureStandardization:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
+            checkpoint_dir=None,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -1930,6 +1932,7 @@ class TestTrainModelsNRefComputation:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
+            checkpoint_dir=None,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -2018,6 +2021,7 @@ class TestTrainModelsNRefComputation:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
+            checkpoint_dir=None,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -2073,6 +2077,7 @@ class TestTrainModelsMCMCConfigPassthrough:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
+            checkpoint_dir=None,
         ):
             captured_config["config"] = config
             return _make_fake_fit_result()
@@ -2161,6 +2166,7 @@ class TestTrainModelsHeteroscedasticConfig:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
+            checkpoint_dir=None,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -2216,6 +2222,7 @@ class TestTrainModelsPriorsPassthrough:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
+            checkpoint_dir=None,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -2773,3 +2780,78 @@ class TestTrainRuntimePrediction:
         assert _format_duration(45) == "45s"
         assert _format_duration(1800) == "30m"
         assert _format_duration(10440) == "2.9h"
+
+
+class TestResolveChainMethod:
+    """'auto' resolves vectorized only when the estimator says all chains fit (#176)."""
+
+    _INPUTS = {
+        "n_observations": 1000,
+        "n_features": 10,
+        "n_artists": 50,
+        "max_seq": 10,
+        "num_chains": 4,
+        "num_samples": 1000,
+        "num_warmup": 1000,
+        "exclude_rw_raw_from_collection": False,
+    }
+
+    def _resolve(self, monkeypatch, backend="gpu", free_gb=32.0, estimate_gb=2.0):
+        import types
+
+        import jax
+
+        import panelcast.gpu_memory.estimate as est_mod
+        import panelcast.gpu_memory.query as query_mod
+        from panelcast.pipelines.train_bayes import _resolve_chain_method
+
+        monkeypatch.setattr(jax, "default_backend", lambda: backend)
+        monkeypatch.setattr(
+            est_mod,
+            "estimate_memory_gb",
+            lambda **kw: types.SimpleNamespace(total_gb=estimate_gb),
+        )
+        monkeypatch.setattr(
+            query_mod,
+            "query_gpu_memory",
+            lambda device_index=0: types.SimpleNamespace(free_gb=free_gb),
+        )
+        return _resolve_chain_method("auto", dict(self._INPUTS))
+
+    def test_explicit_value_passes_through(self):
+        from panelcast.pipelines.train_bayes import _resolve_chain_method
+
+        assert _resolve_chain_method("sequential", {}) == ("sequential", None)
+        assert _resolve_chain_method("vectorized", {}) == ("vectorized", None)
+
+    def test_cpu_backend_resolves_sequential(self, monkeypatch):
+        method, reason = self._resolve(monkeypatch, backend="cpu")
+        assert method == "sequential"
+        assert "cpu backend" in reason
+
+    def test_fits_resolves_vectorized(self, monkeypatch):
+        method, reason = self._resolve(monkeypatch, free_gb=32.0, estimate_gb=2.0)
+        assert method == "vectorized"
+        assert "fits" in reason
+
+    def test_too_big_resolves_sequential(self, monkeypatch):
+        method, reason = self._resolve(monkeypatch, free_gb=4.0, estimate_gb=20.0)
+        assert method == "sequential"
+        assert "would need" in reason
+
+    def test_estimate_failure_resolves_sequential(self, monkeypatch):
+        import jax
+
+        import panelcast.gpu_memory.query as query_mod
+
+        monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+
+        def boom(device_index=0):
+            raise RuntimeError("nvml down")
+
+        monkeypatch.setattr(query_mod, "query_gpu_memory", boom)
+        from panelcast.pipelines.train_bayes import _resolve_chain_method
+
+        method, reason = _resolve_chain_method("auto", dict(self._INPUTS))
+        assert method == "sequential"
+        assert "unavailable" in reason

@@ -83,6 +83,7 @@ def predict_fit_seconds(
     n_obs: int,
     transform: str | None = None,
     store_path: Path | None = None,
+    chain_method: str = "sequential",
 ) -> RuntimePrediction:
     """Predicted wall-clock for one fit, from local history when it exists.
 
@@ -91,13 +92,21 @@ def predict_fit_seconds(
     residual rate over same-transform records. A transform with no history falls
     back to its own cold-start anchor, never to a mixed all-records rate (fast
     identity fits would otherwise drag an offset_logit estimate low).
+
+    History is also keyed by chain_method (records without one predate the key
+    and are sequential): vectorized wall-clocks must not corrupt sequential
+    rates or vice versa. The cold anchors are sequential-measured, so a
+    vectorized cold start over-predicts — conservative for timeout sizing.
     """
     draws = _total_draws(num_chains, num_samples, num_warmup)
     unit = draws * max(n_obs, 1)
     records = [
         r
         for r in load_records(store_path)
-        if r.get("wall_clock_seconds") and _record_draws(r) and _record_n_obs(r)
+        if r.get("wall_clock_seconds")
+        and _record_draws(r)
+        and _record_n_obs(r)
+        and (r.get("context", {}).get("chain_method") or "sequential") == chain_method
     ]
     units = [float(_record_draws(r) * _record_n_obs(r)) for r in records]
     seconds = [float(r["wall_clock_seconds"]) for r in records]

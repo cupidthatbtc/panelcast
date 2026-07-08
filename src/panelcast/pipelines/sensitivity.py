@@ -1233,7 +1233,12 @@ def run_sensitivity_suite(ctx) -> dict:
         seed=getattr(ctx, "seed", 42),
         target_accept_prob=getattr(ctx, "target_accept", 0.9),
         max_tree_depth=getattr(ctx, "max_tree_depth", 10),
-        chain_method=getattr(ctx, "chain_method", "sequential"),
+        # Sensitivity refits are diagnostic-scale; 'auto' resolves in train only.
+        chain_method=(
+            "sequential"
+            if getattr(ctx, "chain_method", "sequential") == "auto"
+            else getattr(ctx, "chain_method", "sequential")
+        ),
     )
     model = make_score_model(prefix)
     obs_name = f"{prefix}_y"

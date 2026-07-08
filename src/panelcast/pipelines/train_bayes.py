@@ -770,6 +770,41 @@ def _build_heteroscedastic_summary(
     }
 
 
+_AUTO_VRAM_HEADROOM = 0.8
+
+
+def _resolve_chain_method(requested: str, estimate_inputs: dict) -> tuple[str, str | None]:
+    """Resolve 'auto': vectorized when the estimator says all chains fit in VRAM.
+
+    Never flips silently — 'auto' is the opt-in; explicit values pass through
+    untouched, and the CPU backend always resolves sequential (vectorized
+    chains draw a different rng fan-out, so published sequential configs stay
+    byte-identical unless the user asked for auto).
+    """
+    if requested != "auto":
+        return requested, None
+    import jax
+
+    if jax.default_backend() != "gpu":
+        return "sequential", "auto: cpu backend"
+    try:
+        from panelcast.gpu_memory.estimate import estimate_memory_gb
+        from panelcast.gpu_memory.query import query_gpu_memory
+
+        estimate = estimate_memory_gb(**estimate_inputs, chain_method="vectorized")
+        free_gb = query_gpu_memory().free_gb
+    except Exception as exc:
+        return "sequential", f"auto: estimate unavailable ({exc})"
+    if estimate.total_gb <= free_gb * _AUTO_VRAM_HEADROOM:
+        return "vectorized", (
+            f"auto: vectorized fits ({estimate.total_gb:.2f} GB <= "
+            f"{_AUTO_VRAM_HEADROOM:.0%} of {free_gb:.2f} GB free)"
+        )
+    return "sequential", (
+        f"auto: vectorized would need {estimate.total_gb:.2f} GB vs {free_gb:.2f} GB free"
+    )
+
+
 def _predict_train_seconds(model_args: dict, mcmc_config: MCMCConfig, transform: str):
     """RuntimePrediction for this fit, or None — the echo must never block a fit."""
     try:
@@ -1050,6 +1085,28 @@ def train_models(
         log.info("heteroscedastic_mode", mode="homoscedastic")
 
     # Configure MCMC from CLI args
+    requested_chain_method = str(getattr(ctx, "chain_method", "sequential"))
+    resolved_chain_method, chain_method_reason = _resolve_chain_method(
+        requested_chain_method,
+        {
+            "n_observations": len(model_args["y"]),
+            "n_features": int(model_args["X"].shape[1]),
+            "n_artists": int(model_args["n_artists"]),
+            "max_seq": int(model_args["max_seq"]),
+            "num_chains": ctx.num_chains,
+            "num_samples": ctx.num_samples,
+            "num_warmup": ctx.num_warmup,
+            "exclude_rw_raw_from_collection": bool(
+                getattr(ctx, "exclude_rw_raw_from_collection", False)
+            ),
+        },
+    )
+    if chain_method_reason:
+        log.info(
+            "chain_method_resolved",
+            chain_method=resolved_chain_method,
+            reason=chain_method_reason,
+        )
     mcmc_config = MCMCConfig(
         num_warmup=ctx.num_warmup,
         num_samples=ctx.num_samples,
@@ -1057,7 +1114,7 @@ def train_models(
         seed=ctx.seed,
         target_accept_prob=ctx.target_accept,
         max_tree_depth=ctx.max_tree_depth,
-        chain_method=ctx.chain_method,
+        chain_method=resolved_chain_method,
         checkpoint_every_draws=getattr(ctx, "checkpoint_every_draws", None),
     )
 
@@ -1171,6 +1228,8 @@ def train_models(
         context={
             "transform": str(getattr(ctx, "target_transform", "identity")),
             "dataset": str(getattr(ctx, "dataset", None) or "aoty"),
+            # Vectorized wall-clocks must not corrupt sequential rate history.
+            "chain_method": mcmc_config.chain_method,
         },
     )
     if prediction is not None:
@@ -1246,6 +1305,9 @@ def train_models(
         "model_type": f"{prefix}_score",
         "model_path": str(model_path),
         "mcmc_config": mcmc_config.to_dict(),
+        # The resolved method lives in mcmc_config; keep the request auditable.
+        "chain_method_requested": requested_chain_method,
+        "chain_method_resolution": chain_method_reason,
         "convergence_thresholds": {
             "rhat_threshold": ctx.rhat_threshold,
             "ess_threshold": ctx.ess_threshold,
