@@ -23,13 +23,15 @@ class SourceDataset(TypedDict):
 class SplitParameters(TypedDict, total=False):
     """Split parameters. The keys present depend on the split type.
 
-    within-entity temporal: ``test_albums`` / ``val_albums`` / ``min_train_albums``.
+    within-entity temporal: ``test_albums`` / ``val_albums`` / ``min_train_albums``
+    / ``origin_offset``.
     entity-disjoint: ``test_size`` / ``val_size`` / ``random_state``.
     """
 
     test_albums: int
     val_albums: int
     min_train_albums: int
+    origin_offset: int
     test_size: float
     val_size: float
     random_state: int
