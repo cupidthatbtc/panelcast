@@ -111,19 +111,21 @@ class TestGenerateRunId:
     """Tests for run ID generation."""
 
     def test_format(self):
-        """Run ID has correct format: YYYY-MM-DD_HHMMSS."""
+        """Run ID has format YYYY-MM-DD_HHMMSS_ffffff_xxxx."""
         run_id = generate_run_id()
-        # Format: "2026-01-19_143052"
-        assert len(run_id) == 17
+        # Format: "2026-01-19_143052_123456_a3f9"
+        assert len(run_id) == 29
         assert run_id[4] == "-"
         assert run_id[7] == "-"
         assert run_id[10] == "_"
+        assert run_id[17] == "_"
+        assert run_id[24] == "_"
 
     def test_parseable(self):
         """Run ID can be parsed back to datetime components."""
         run_id = generate_run_id()
         # Should parse without error
-        date_part, time_part = run_id.split("_")
+        date_part, time_part, micro_part, suffix = run_id.split("_")
         year, month, day = date_part.split("-")
         assert 2020 <= int(year) <= 2100
         assert 1 <= int(month) <= 12
@@ -135,6 +137,9 @@ class TestGenerateRunId:
         assert 0 <= hour <= 23
         assert 0 <= minute <= 59
         assert 0 <= second <= 59
+        assert 0 <= int(micro_part) <= 999_999
+        assert len(suffix) == 4
+        int(suffix, 16)  # random suffix is hex
 
 
 class TestRunManifest:
@@ -563,13 +568,14 @@ class TestGetVersion:
 class TestGenerateRunIdEdgeCases:
     """Additional generate_run_id tests."""
 
-    def test_two_ids_same_second_are_equal(self):
-        """Two run IDs generated in the same second should be equal."""
+    def test_two_ids_same_second_differ(self):
+        """Two run IDs generated back to back must not collide (#audit: two
+        runs in the same second shared one run dir)."""
         id1 = generate_run_id()
         id2 = generate_run_id()
-        # They may or may not be equal (depends on timing), but should have same format
-        assert len(id1) == 17
-        assert len(id2) == 17
+        assert id1 != id2
+        assert len(id1) == 29
+        assert len(id2) == 29
 
     def test_starts_with_year(self):
         """Run ID starts with current year."""

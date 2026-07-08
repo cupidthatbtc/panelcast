@@ -246,7 +246,7 @@ class TestPackageExports:
         # generate_run_id should return string
         run_id = generate_run_id()
         assert isinstance(run_id, str)
-        assert len(run_id) == 17  # YYYY-MM-DD_HHMMSS
+        assert len(run_id) == 29  # YYYY-MM-DD_HHMMSS_ffffff_xxxx
 
 
 class TestCLIExitCodes:

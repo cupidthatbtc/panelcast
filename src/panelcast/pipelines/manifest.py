@@ -7,6 +7,7 @@ pixi.lock hash), input hashes, and stage execution metadata.
 
 import importlib
 import platform
+import secrets
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -124,7 +125,7 @@ class RunManifest(BaseModel):
     input file hashes, per-stage execution metadata, and outputs.
 
     Attributes:
-        run_id: Timestamp-based identifier (e.g., "2026-01-19_143052")
+        run_id: Timestamp-based identifier (e.g., "2026-01-19_143052_123456_a3f9")
         created_at: ISO 8601 timestamp when run started
         command: Full CLI invocation string
         flags: Parsed flag values (seed, skip_existing, etc.)
@@ -169,17 +170,23 @@ class RunManifest(BaseModel):
 
 
 def generate_run_id() -> str:
-    """Generate timestamp-based run identifier.
+    """Generate a sortable, collision-resistant run identifier.
+
+    The second-resolution timestamp alone let two runs started in the same
+    second silently share a run directory; microseconds plus a random suffix
+    keep ids unique while lexicographic order still follows creation time.
 
     Returns:
-        Run ID in format "YYYY-MM-DD_HHMMSS" (e.g., "2026-01-19_143052").
+        Run ID in format "YYYY-MM-DD_HHMMSS_ffffff_xxxx"
+        (e.g., "2026-01-19_143052_123456_a3f9").
 
     Example:
         >>> run_id = generate_run_id()
-        >>> len(run_id) == 17  # "YYYY-MM-DD_HHMMSS"
+        >>> len(run_id) == 29
         True
     """
-    return datetime.now().strftime("%Y-%m-%d_%H%M%S")
+    stamp = datetime.now().strftime("%Y-%m-%d_%H%M%S_%f")
+    return f"{stamp}_{secrets.token_hex(2)}"
 
 
 def save_run_manifest(manifest: RunManifest, run_dir: Path) -> Path:

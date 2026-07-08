@@ -873,11 +873,11 @@ class TestOrchestratorCommandStringAdvanced:
         """Command string includes non-default data filtering."""
         from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
 
-        config = PipelineConfig(min_ratings=20, min_albums_filter=5)
+        config = PipelineConfig(min_ratings=25, min_albums_filter=5)
         orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
         cmd = orchestrator._build_command_string()
 
-        assert "--min-ratings 20" in cmd
+        assert "--min-ratings 25" in cmd
         assert "--min-albums 5" in cmd
 
     def test_command_with_chain_method(self, tmp_path):
@@ -1532,6 +1532,70 @@ class TestRecordStageOutputsPath:
         orchestrator._record_stage_outputs(stage, run_result=run_result)
 
         assert "test:path_key" in orchestrator.manifest.outputs
+
+
+# ============================================================================
+# CLI: split-population parity across entry points
+# ============================================================================
+
+
+class TestSplitConfigParity:
+    """`stage splits`, `run --stages splits`, and `demo` must build the same
+    split population (min_train_albums used to diverge: CLI 2 vs dataclass 1)."""
+
+    def _captured_config(self, monkeypatch, args):
+        captured = {}
+
+        def fake_run_pipeline(config):
+            captured["config"] = config
+            return 0
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.run_pipeline", fake_run_pipeline
+        )
+        result = runner.invoke(app, args)
+        assert result.exit_code == 0, result.output
+        return captured["config"]
+
+    @staticmethod
+    def _split_config(pipeline_config, tmp_path):
+        """The SplitConfig the splits stage would run with under this config."""
+        from panelcast.pipelines.orchestrator import PipelineOrchestrator
+        from panelcast.pipelines.stages import _run_splits_stage
+
+        orchestrator = PipelineOrchestrator(pipeline_config, output_base=tmp_path)
+        ctx = orchestrator._create_stage_context()
+        captured = {}
+
+        def fake_create_splits(config):
+            captured["config"] = config
+            return {}
+
+        with patch("panelcast.pipelines.create_splits.create_splits", fake_create_splits):
+            _run_splits_stage(ctx)
+        return captured["config"]
+
+    def test_stage_splits_matches_run_stages_splits(self, monkeypatch, tmp_path):
+        stage_cfg = self._captured_config(monkeypatch, ["stage", "splits"])
+        run_cfg = self._captured_config(monkeypatch, ["run", "--stages", "splits"])
+        assert self._split_config(stage_cfg, tmp_path) == self._split_config(
+            run_cfg, tmp_path
+        )
+
+    def test_split_defaults_match_documented_default(self, monkeypatch, tmp_path):
+        run_cfg = self._captured_config(monkeypatch, ["run", "--stages", "splits"])
+        split = self._split_config(run_cfg, tmp_path)
+        assert split.min_train_albums == 2
+
+    def test_demo_config_matches_split_defaults(self, monkeypatch):
+        """demo builds PipelineConfig without min_train_albums; the dataclass
+        default must match the documented `run` default."""
+        from panelcast.pipelines.orchestrator import PipelineConfig
+
+        demo_cfg = self._captured_config(monkeypatch, ["demo"])
+        defaults = PipelineConfig()
+        assert demo_cfg.min_train_albums == defaults.min_train_albums == 2
+        assert demo_cfg.val_albums == defaults.val_albums
 
 
 # ============================================================================

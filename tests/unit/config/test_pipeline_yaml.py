@@ -126,13 +126,13 @@ class TestRepositoryConfigs:
         data = load_yaml_config(REPO_ROOT / "configs" / "base.yaml")
         kwargs = apply_yaml_overrides({}, data)
         config = PipelineConfig(**kwargs)
-        # Spot-check against PipelineConfig defaults (min_train_albums is the
-        # one place the CLI default (2) differs from the dataclass default).
+        # Spot-check against PipelineConfig defaults (min_train_albums used to
+        # diverge between the CLI (2) and the dataclass (1); both are 2 now).
         defaults = PipelineConfig()
         assert config.seed == defaults.seed
         assert config.num_samples == defaults.num_samples
         assert config.target_transform == defaults.target_transform
-        assert config.min_train_albums == 2
+        assert config.min_train_albums == defaults.min_train_albums == 2
 
     def test_dev_yaml_is_cheap_run(self):
         data = load_yaml_config(REPO_ROOT / "configs" / "dev.yaml")

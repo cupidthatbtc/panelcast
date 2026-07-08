@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from datetime import datetime
 from pathlib import Path
 from time import time
@@ -225,9 +226,10 @@ class PipelineConfig:
     # on device during sampling (~96% peak-GPU cut at production settings;
     # posterior parity for all other sites guarded by tests).
     exclude_rw_raw_from_collection: bool = False
-    # Split configuration
+    # Split configuration. min_train_albums matches the documented `run` CLI
+    # default (2) so `stage splits` / `demo` build the same split population.
     val_albums: int = 0
-    min_train_albums: int = 1
+    min_train_albums: int = 2
     # Evaluation configuration
     calibration_intervals: tuple[float, ...] = (0.80, 0.95)
     coverage_tolerance: float = 0.03
@@ -269,27 +271,7 @@ class PipelineConfig:
                 f"Invalid target_transform: '{self.target_transform}'. "
                 "Must be 'identity' or 'offset_logit'."
             )
-        from panelcast.models.bayes.likelihoods import REGISTRY
-
-        valid_families = tuple(REGISTRY)
-        if self.likelihood_family not in valid_families:
-            raise ValueError(
-                f"Invalid likelihood_family: '{self.likelihood_family}'. "
-                f"Must be one of: {', '.join(valid_families)}."
-            )
-        _spec = REGISTRY[self.likelihood_family]
-        if self.discretize_observation and not _spec.supports_discretization:
-            supported = [f for f, s in REGISTRY.items() if s.supports_discretization]
-            raise ValueError(
-                f"discretize_observation=True is not supported by likelihood_family "
-                f"'{self.likelihood_family}'. Supported: {', '.join(supported)}."
-            )
-        if self.discretize_observation and self.target_transform != "identity":
-            raise ValueError(
-                "discretize_observation=True requires target_transform='identity': "
-                "discretization interval-censors integers on the raw score scale, "
-                f"but target_transform='{self.target_transform}' moves y off that scale."
-            )
+        self._validate_likelihood()
         if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
             raise ValueError(
                 f"Invalid debut_prev_score_source: '{self.debut_prev_score_source}'. "
@@ -332,6 +314,52 @@ class PipelineConfig:
                 f"Got num_samples={self.num_samples}, ess_threshold={self.ess_threshold}."
             )
 
+    def _validate_likelihood(self) -> None:
+        """Validate the likelihood family and its structural constraints."""
+        from panelcast.models.bayes.likelihoods import REGISTRY
+
+        valid_families = tuple(REGISTRY)
+        if self.likelihood_family not in valid_families:
+            raise ValueError(
+                f"Invalid likelihood_family: '{self.likelihood_family}'. "
+                f"Must be one of: {', '.join(valid_families)}."
+            )
+        spec = REGISTRY[self.likelihood_family]
+        if self.discretize_observation and not spec.supports_discretization:
+            supported = [f for f, s in REGISTRY.items() if s.supports_discretization]
+            raise ValueError(
+                f"discretize_observation=True is not supported by likelihood_family "
+                f"'{self.likelihood_family}'. Supported: {', '.join(supported)}."
+            )
+        if self.discretize_observation and self.target_transform != "identity":
+            raise ValueError(
+                "discretize_observation=True requires target_transform='identity': "
+                "discretization interval-censors integers on the raw score scale, "
+                f"but target_transform='{self.target_transform}' moves y off that scale."
+            )
+        if spec.requires_identity_transform and self.target_transform != "identity":
+            raise ValueError(
+                f"likelihood_family='{self.likelihood_family}' requires "
+                f"target_transform='identity' (got '{self.target_transform}'): "
+                "the bounded likelihood assumes mu is on the score scale."
+            )
+        if not spec.uses_sigma:
+            inert = [
+                knob
+                for knob, enabled in (
+                    ("learn_n_exponent", self.learn_n_exponent),
+                    ("heteroscedastic_entity_obs", self.heteroscedastic_entity_obs),
+                    ("n_exponent", self.n_exponent != 0.0),
+                )
+                if enabled
+            ]
+            if inert:
+                raise ValueError(
+                    f"{', '.join(inert)} cannot be used with likelihood_family="
+                    f"'{self.likelihood_family}': the family draws its own precision "
+                    "and ignores sigma, so these options would be silently inert."
+                )
+
 
 class PipelineOrchestrator:
     """Orchestrates pipeline execution with progress tracking and error handling.
@@ -372,6 +400,7 @@ class PipelineOrchestrator:
         self.run_dir: Path | None = None
         self.manifest: RunManifest | None = None
         self._start_time: float = 0.0
+        self._resolved_paths: ArtifactPaths | None = None
         # Resolve the dataset descriptor once; every stage reads it from the
         # StageContext rather than re-deriving domain names from literals.
         self.descriptor = load_descriptor(config.dataset)
@@ -391,9 +420,18 @@ class PipelineOrchestrator:
             )
         # Resolve the observation threshold: an explicit CLI/YAML value wins;
         # otherwise fall back to the descriptor's primary_min_obs so retargeted
-        # domains don't need --min-ratings on the command line.
+        # domains don't need --min-ratings on the command line. The data stage
+        # only materializes parquets at the descriptor's thresholds, so any
+        # other value would die hours later at the splits stage.
         if config.min_ratings is None:
             config.min_ratings = self.descriptor.primary_min_obs
+        elif config.min_ratings not in self.descriptor.min_obs_thresholds:
+            raise ValueError(
+                f"min_ratings={config.min_ratings} has no materialized dataset for "
+                f"descriptor '{self.descriptor.name}': the data stage only writes "
+                f"thresholds {sorted(self.descriptor.min_obs_thresholds)}. Pick one "
+                "of those, or add the value to the descriptor's min_obs_thresholds."
+            )
 
     def run(self) -> int:
         """Execute the pipeline and return exit code.
@@ -457,6 +495,11 @@ class PipelineOrchestrator:
         except KeyError as e:
             log.error("invalid_stage", error=str(e))
             return 1
+        except PipelineError as e:
+            # Consumer-only invocations fail here when no prior run supplies
+            # their inputs; route through the normal failure path.
+            self._handle_failure(e, e.stage)
+            return e.exit_code
 
         if not stages:
             log.warning("no_stages_to_execute")
@@ -506,10 +549,24 @@ class PipelineOrchestrator:
             self._setup_resume()
             return
 
-        # Generate new run ID and directory
-        run_id = generate_run_id()
-        self.run_dir = self.output_base / run_id
-        self.run_dir.mkdir(parents=True, exist_ok=True)
+        # Generate new run ID and create its directory EXCLUSIVELY: a second
+        # run minting the same id must retry with a fresh one instead of
+        # silently sharing (and, on failure, rmtree'ing) this run's dir.
+        run_id = ""
+        for _ in range(10):
+            run_id = generate_run_id()
+            self.run_dir = self.output_base / run_id
+            try:
+                self.run_dir.mkdir(parents=True, exist_ok=False)
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise PipelineError(
+                f"Could not create a unique run directory under {self.output_base} "
+                f"after 10 attempts (last id: {run_id}).",
+                stage="setup",
+            )
 
         # Capture git state and environment
         git_state = capture_git_state()
@@ -914,6 +971,12 @@ class PipelineOrchestrator:
                 except Exception as e:
                     log.debug("could_not_load_previous_manifest", error=str(e), exc_info=True)
 
+        # Defensive: a latest pointer written by an older checkout may still
+        # target a dry run, whose recorded hashes cover nothing on disk.
+        if previous_manifest is not None and previous_manifest.flags.get("dry_run"):
+            log.debug("skip_existing_ignores_dry_run_manifest", run_id=previous_manifest.run_id)
+            previous_manifest = None
+
         if previous_manifest is not None:
             changed_flags = self._skip_flag_differences(previous_manifest)
             if changed_flags:
@@ -966,9 +1029,101 @@ class PipelineOrchestrator:
                 self._execute_stage(stage)
                 progress.advance(task_id)
 
+    # Run-scoped product roots: the stages that write each root and the stages
+    # that read it. A root stays in the current run dir when one of its writers
+    # is part of this invocation; otherwise consumers read it from the most
+    # recent successful run that produced it.
+    PRODUCT_WRITERS: dict[str, tuple[str, ...]] = {
+        "models": ("train",),
+        "evaluation": ("evaluate",),
+        "predictions": ("predict",),
+        "reports": ("report", "sensitivity"),
+    }
+    PRODUCT_READERS: dict[str, tuple[str, ...]] = {
+        "models": ("evaluate", "predict", "sensitivity"),
+        "evaluation": ("report",),
+        "predictions": ("report",),
+    }
+
     def _artifact_paths(self) -> ArtifactPaths:
-        """Run-scoped artifact roots; flat layout before a run dir exists."""
-        return ArtifactPaths.for_run(self.run_dir) if self.run_dir else ArtifactPaths.flat()
+        """Artifact roots for this invocation; flat layout before a run dir exists."""
+        if self.run_dir is None:
+            return ArtifactPaths.flat()
+        if self._resolved_paths is None:
+            self._resolved_paths = self._resolve_artifact_paths()
+        return self._resolved_paths
+
+    def _resolve_artifact_paths(self) -> ArtifactPaths:
+        """Run-scoped roots, with read roots redirected for consumer-only runs.
+
+        A ``--stages`` selection that excludes a product's writer would
+        otherwise look for that product in the just-created (empty) run dir.
+        Each such root that a selected stage reads resolves to the most recent
+        successful run that produced it; a producer present in the stage list
+        wins over latest-run resolution, so ``--stages evaluate,report`` reads
+        evaluate's fresh output. Writes always target the current run dir.
+        """
+        current = ArtifactPaths.for_run(self.run_dir)
+        if self.config.stages is None:
+            return current  # full run: every product is produced here
+        selected = set(self.config.stages)
+        overrides: dict[str, Path] = {}
+        for product, writers in self.PRODUCT_WRITERS.items():
+            if selected.intersection(writers):
+                continue
+            readers = selected.intersection(self.PRODUCT_READERS.get(product, ()))
+            if not readers:
+                continue
+            source = self._find_run_with_product(product, writers)
+            if source is None:
+                if self.config.dry_run:
+                    # A dry run only previews the plan; a missing source is
+                    # worth a warning, not a failure.
+                    log.warning(
+                        "artifact_root_unresolved",
+                        product=product,
+                        readers=sorted(readers),
+                    )
+                    continue
+                raise PipelineError(
+                    f"Stage(s) {sorted(readers)} read '{product}' artifacts, but this "
+                    f"invocation does not run {list(writers)} and no previous "
+                    f"successful run under {self.output_base} contains '{product}'. "
+                    f"Run `panelcast stage {writers[0]}` (or a full `panelcast run`) "
+                    "first.",
+                    stage="setup",
+                )
+            overrides[product] = source / product
+            log.info(
+                "artifact_root_from_previous_run",
+                product=product,
+                source_run=source.name,
+                readers=sorted(readers),
+            )
+        return dataclass_replace(current, **overrides) if overrides else current
+
+    def _find_run_with_product(self, product: str, writers: tuple[str, ...]) -> Path | None:
+        """Most recent successful non-dry run whose dir contains ``product``."""
+        try:
+            candidates = sorted(
+                (p for p in self.output_base.iterdir() if p.is_dir()), reverse=True
+            )
+        except OSError:
+            return None
+        for run_dir in candidates:
+            if run_dir == self.run_dir or run_dir.name in ("latest", "failed"):
+                continue
+            try:
+                manifest = load_run_manifest(run_dir / "manifest.json")
+            except Exception:
+                continue
+            if not manifest.success or manifest.flags.get("dry_run"):
+                continue
+            if not any(w in manifest.stages_completed for w in writers):
+                continue
+            if (run_dir / product).is_dir():
+                return run_dir
+        return None
 
     def _create_stage_context(self) -> StageContext:
         """Create StageContext for stage execution.
@@ -1105,12 +1260,10 @@ class PipelineOrchestrator:
             self.manifest.input_hashes.update(self._capture_stage_input_hashes(stage))
 
         if self.config.dry_run:
+            # Record nothing beyond the plan: completed stages, stage hashes,
+            # or outputs from a run that executed nothing would poison
+            # --skip-existing and latest-run resolution with stale state.
             log.info("stage_dry_run", stage=stage.name, would_run=stage.description)
-            if self.manifest:
-                self.manifest.stages_completed.append(stage.name)
-                self.manifest.stage_hashes[stage.name] = stage.compute_input_hash()
-                self._record_stage_outputs(stage, run_result=None)
-                save_run_manifest(self.manifest, self.run_dir)
             return
 
         if stage.name in CONSUMER_STAGES and self.manifest is not None:
@@ -1259,7 +1412,10 @@ class PipelineOrchestrator:
 
         # latest.json is the authoritative pointer; the link is opportunistic
         # convenience (symlink/junction creation can fail on Windows/NTFS).
-        if self.run_dir:
+        # Dry runs never take the pointer: their run dir holds no artifacts,
+        # so latest-run consumers (diagnose, compare, dashboards) would
+        # resolve to an empty run.
+        if self.run_dir and not self.config.dry_run:
             self._write_latest_pointer()
             self._create_latest_link()
 

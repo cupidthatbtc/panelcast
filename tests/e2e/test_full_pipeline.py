@@ -81,7 +81,7 @@ class TestFullPipeline:
 
         Tests that:
         - Dry run does not create output files
-        - Stages are recorded in manifest
+        - Stages are NOT recorded as completed (nothing executed)
         - Exit code is 0
         """
         config = PipelineConfig(
@@ -135,10 +135,14 @@ class TestFullPipeline:
         assert not run_fn_called["data"], "Data stage should not run in dry_run"
         assert not run_fn_called["splits"], "Splits stage should not run in dry_run"
 
-        # Verify stages recorded
+        # A dry run executes nothing, so it must not claim completed stages,
+        # record stage hashes (would poison --skip-existing), or take the
+        # latest pointer (would point consumers at an artifact-less dir).
         assert orchestrator.manifest is not None
-        assert "data" in orchestrator.manifest.stages_completed
-        assert "splits" in orchestrator.manifest.stages_completed
+        assert orchestrator.manifest.stages_completed == []
+        assert orchestrator.manifest.stage_hashes == {}
+        assert orchestrator.manifest.flags["dry_run"] is True
+        assert not (tmp_path / "outputs" / "latest.json").exists()
 
     def test_pipeline_skip_detection(
         self,

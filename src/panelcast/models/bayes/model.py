@@ -728,7 +728,21 @@ def make_score_model(score_type: str) -> Callable:
         # flag to determine if we should apply heteroscedastic scaling.
         # When learning, we always apply scaling (that's why we're learning it).
         # When fixed, we can check if n_exp != 0 to skip unnecessary computation.
-        heteroscedastic_requested = learn_n_exponent or n_exponent != 0
+        # Beta-family likelihoods draw their own precision (phi) and never read
+        # sigma, so the sigma-side gated sites (n_exponent, sigma_ref, entity
+        # overdispersion) would be pure prior draws with zero likelihood
+        # contribution — skip them for those families. sigma_obs itself stays
+        # sampled: publication tables and cold-start prediction read it. Lazy
+        # import for the same cycle reason as _sample_likelihood; sigma-using
+        # families keep the exact legacy draw sequence.
+        from panelcast.models.bayes.likelihoods import REGISTRY
+
+        _family_spec = REGISTRY.get(priors.likelihood_family)
+        family_uses_sigma = _family_spec is None or _family_spec.uses_sigma
+
+        heteroscedastic_requested = family_uses_sigma and (
+            learn_n_exponent or n_exponent != 0
+        )
         if heteroscedastic_requested and n_reviews is None:
             raise ValueError(
                 f"Heteroscedastic noise scaling requires n_reviews data. "
@@ -739,7 +753,7 @@ def make_score_model(score_type: str) -> Callable:
         use_heteroscedastic = heteroscedastic_requested  # n_reviews guaranteed non-None here
 
         # === Exponent for heteroscedastic noise (fixed or learned) ===
-        if learn_n_exponent:
+        if learn_n_exponent and family_uses_sigma:
             if n_exponent_prior == "logit-normal":
                 # Logit-normal: sample in unbounded space, transform via sigmoid
                 # This avoids funnel geometry that causes divergences with Beta prior
@@ -808,7 +822,7 @@ def make_score_model(score_type: str) -> Callable:
         # the gate-off RNG draw sequence (and every published number) is
         # unchanged. When homoscedastic, sigma_scaled is a scalar; jnp.exp of
         # the per-entity factor broadcasts it to per-observation shape.
-        if priors.heteroscedastic_entity_obs:
+        if priors.heteroscedastic_entity_obs and family_uses_sigma:
             sigma_scaled = jnp.broadcast_to(sigma_scaled, (len(artist_idx),))
             sigma_scaled = _apply_entity_overdispersion(
                 prefix, sigma_scaled, artist_idx, n_artists, priors

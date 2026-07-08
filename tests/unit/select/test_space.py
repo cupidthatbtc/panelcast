@@ -123,6 +123,24 @@ class TestArmConflicts:
         conflicts = arm_conflicts({"latent_process": "arma"}, AOTY)
         assert any("not a candidate value" in c for c in conflicts)
 
+    def test_sigma_knobs_conflict_with_sigma_ignoring_families(self):
+        """Arms pairing beta families with sigma-side knobs score identically
+        to the base arm while labeled as different models — pruned."""
+        for family in ("beta", "beta_ceiling", "beta_binomial"):
+            for knob in ("learn_n_exponent", "heteroscedastic_entity_obs"):
+                conflicts = arm_conflicts(
+                    {
+                        "likelihood_family": family,
+                        "target_transform": "identity",
+                        knob: True,
+                    },
+                    AOTY,
+                )
+                assert any("ignores sigma" in c for c in conflicts), (family, knob)
+        # sigma-using families keep those knobs as real arms.
+        assert arm_conflicts({"learn_n_exponent": True}, AOTY) == []
+        assert arm_conflicts({"heteroscedastic_entity_obs": True}, AOTY) == []
+
 
 class TestActivation:
     def test_n_exponent_prior_inert_without_learning(self):

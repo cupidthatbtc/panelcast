@@ -87,6 +87,13 @@ class TestRegistryContract:
         assert {f for f, s in REGISTRY.items() if s.requires_aggregation_count} == {
             "beta_binomial"
         }
+        # Beta families draw their own precision (phi) and never read sigma;
+        # config validation and the model's sigma-side skip key off this flag.
+        assert {f for f, s in REGISTRY.items() if not s.uses_sigma} == {
+            "beta",
+            "beta_ceiling",
+            "beta_binomial",
+        }
 
     @pytest.mark.parametrize(
         "family", sorted(f for f, s in REGISTRY.items() if s.requires_identity_transform)

@@ -728,7 +728,10 @@ class LikelihoodSpec:
     ``requires_identity_transform`` and ``requires_aggregation_count`` declare
     the structural constraints the family's ``sample_obs`` enforces at runtime,
     so the select candidate space (``panelcast.select.space``) can prune arms
-    without restating them.
+    without restating them. ``uses_sigma`` is False for families whose
+    ``sample_obs`` draws its own precision and never reads ``sigma_scaled``
+    (the Beta families); the model skips the sigma-side gated sites for them
+    and config validation rejects sigma-side knobs.
     """
 
     name: str
@@ -739,6 +742,7 @@ class LikelihoodSpec:
     cdf: Callable | None = None
     requires_identity_transform: bool = False
     requires_aggregation_count: bool = False
+    uses_sigma: bool = True
 
 
 REGISTRY: dict[str, LikelihoodSpec] = {
@@ -774,6 +778,7 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         predict_draws=_beta_predict_draws,
         cdf=None,
         requires_identity_transform=True,
+        uses_sigma=False,
     ),
     "skew_normal": LikelihoodSpec(
         name="skew_normal",
@@ -809,6 +814,7 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         cdf=None,
         requires_identity_transform=True,
         requires_aggregation_count=True,
+        uses_sigma=False,
     ),
     "beta_ceiling": LikelihoodSpec(
         name="beta_ceiling",
@@ -818,5 +824,6 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         predict_draws=_beta_ceiling_predict_draws,
         cdf=None,
         requires_identity_transform=True,
+        uses_sigma=False,
     ),
 }
