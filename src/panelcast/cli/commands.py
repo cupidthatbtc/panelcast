@@ -454,22 +454,48 @@ def runs_list(
             manifest = None
         if manifest is None:
             created_at, status, n_stages = "?", "corrupt", "?"
+            seed = git = dataset = "?"
+            mae = r2 = cov = "-"
         else:
             created_at = str(manifest.get("created_at") or "?")
             # Failed runs are moved to outputs/failed/, so a success=False
             # manifest still here is in-progress (or died before the move).
             status = "ok" if manifest.get("success") else "incomplete"
             n_stages = str(len(manifest.get("stages_completed") or []))
+            seed = str(manifest.get("seed", "?"))
+            g = manifest.get("git") or {}
+            git = f"{str(g.get('commit', ''))[:7]}{'*' if g.get('dirty') else ''}" or "?"
+            dataset = str((manifest.get("flags") or {}).get("dataset") or "aoty")
+            mae = r2 = cov = "-"
+            try:
+                payload = json.loads(
+                    (run_dir / "evaluation" / "metrics.json").read_text(encoding="utf-8")
+                )
+                m = _history_metrics(payload)
+                mae = f"{m['mae']:.2f}" if m["mae"] is not None else "-"
+                r2 = f"{m['r2']:.3f}" if m["r2"] is not None else "-"
+                cov95 = (m["coverage"] or {}).get("0.95")
+                cov = f"{cov95:.2f}" if cov95 is not None else "-"
+            except (OSError, ValueError):
+                pass
         marker = "*" if run_dir.name == latest_target else " "
-        rows.append((marker, run_dir.name, created_at, status, n_stages))
+        rows.append(
+            (marker, run_dir.name, created_at, status, n_stages, seed, dataset, git, mae, r2, cov)
+        )
 
     if not rows:
         typer.echo(f"No runs found under {base}.")
         raise typer.Exit(code=0)
 
-    typer.echo(f"  {'run_id':<24} {'created_at':<28} {'status':<10} stages")
-    for marker, run_id, created_at, status, n_stages in rows:
-        typer.echo(f"{marker} {run_id:<24} {created_at:<28} {status:<10} {n_stages}")
+    typer.echo(
+        f"  {'run_id':<24} {'created_at':<28} {'status':<10} {'stages':<6} "
+        f"{'seed':<6} {'dataset':<10} {'git':<9} {'mae':<7} {'r2':<7} cov95"
+    )
+    for marker, run_id, created_at, status, n_stages, seed, dataset, git, mae, r2, cov in rows:
+        typer.echo(
+            f"{marker} {run_id:<24} {created_at:<28} {status:<10} {n_stages:<6} "
+            f"{seed:<6} {dataset:<10} {git:<9} {mae:<7} {r2:<7} {cov}"
+        )
     if latest_target is not None:
         typer.echo(f"\n* = {base / 'latest'} -> {latest_target}")
 
