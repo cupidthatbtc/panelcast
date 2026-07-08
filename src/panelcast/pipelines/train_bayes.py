@@ -773,6 +773,27 @@ def _build_heteroscedastic_summary(
 _AUTO_VRAM_HEADROOM = 0.8
 
 
+def _vram_budget_gb() -> float:
+    """VRAM this process can still allocate, in GB.
+
+    NVML 'free' is meaningless here: by resolution time JAX has already
+    preallocated its pool (~75% of the device), which NVML reports as used —
+    it would always answer 'nothing free' and auto could never pick
+    vectorized. The pool's own limit minus current use is what a fit can
+    actually claim; NVML free is only the fallback when the backend exposes
+    no stats (then preallocation is likely off too).
+    """
+    import jax
+
+    gpus = [d for d in jax.devices() if d.platform == "gpu"]
+    stats = gpus[0].memory_stats() if gpus else None
+    if stats and stats.get("bytes_limit"):
+        return (stats["bytes_limit"] - stats.get("bytes_in_use", 0)) / 1024**3
+    from panelcast.gpu_memory.query import query_gpu_memory
+
+    return query_gpu_memory().free_gb
+
+
 def _resolve_chain_method(requested: str, estimate_inputs: dict) -> tuple[str, str | None]:
     """Resolve 'auto': vectorized when the estimator says all chains fit in VRAM.
 
@@ -789,19 +810,19 @@ def _resolve_chain_method(requested: str, estimate_inputs: dict) -> tuple[str, s
         return "sequential", "auto: cpu backend"
     try:
         from panelcast.gpu_memory.estimate import estimate_memory_gb
-        from panelcast.gpu_memory.query import query_gpu_memory
 
         estimate = estimate_memory_gb(**estimate_inputs, chain_method="vectorized")
-        free_gb = query_gpu_memory().free_gb
+        budget_gb = _vram_budget_gb()
     except Exception as exc:
         return "sequential", f"auto: estimate unavailable ({exc})"
-    if estimate.total_gb <= free_gb * _AUTO_VRAM_HEADROOM:
+    if estimate.total_gb <= budget_gb * _AUTO_VRAM_HEADROOM:
         return "vectorized", (
             f"auto: vectorized fits ({estimate.total_gb:.2f} GB <= "
-            f"{_AUTO_VRAM_HEADROOM:.0%} of {free_gb:.2f} GB free)"
+            f"{_AUTO_VRAM_HEADROOM:.0%} of {budget_gb:.2f} GB allocatable)"
         )
     return "sequential", (
-        f"auto: vectorized would need {estimate.total_gb:.2f} GB vs {free_gb:.2f} GB free"
+        f"auto: vectorized would need {estimate.total_gb:.2f} GB vs "
+        f"{budget_gb:.2f} GB allocatable"
     )
 
 
