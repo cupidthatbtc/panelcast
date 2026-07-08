@@ -104,7 +104,7 @@ class TestExportFiguresExecution:
         mock_fig = MagicMock()
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: mock_fig,
+            lambda *args, **kwargs: mock_fig,
         )
 
         export_results = {"predictions": [tmp_path / "pred.svg"]}
@@ -239,7 +239,7 @@ class TestExportFiguresExecution:
         mock_fig = MagicMock()
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: mock_fig,
+            lambda *args, **kwargs: mock_fig,
         )
 
         export_results = {"predictions": [tmp_path / "pred.svg"]}
@@ -304,7 +304,7 @@ class TestExportFiguresExecution:
         mock_fig = MagicMock()
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: mock_fig,
+            lambda *args, **kwargs: mock_fig,
         )
 
         def fake_export(**kwargs):
@@ -397,7 +397,7 @@ class TestExportFiguresExecution:
         mock_fig = MagicMock()
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: mock_fig,
+            lambda *args, **kwargs: mock_fig,
         )
         monkeypatch.setattr(
             "panelcast.visualization.export.export_all_figures",
