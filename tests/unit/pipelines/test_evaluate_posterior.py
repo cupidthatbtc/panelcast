@@ -104,7 +104,7 @@ def test_unknown_artists_raise_error(mock_summary):
 def test_feature_standardization(mock_test_data, mock_summary):
     """Features are standardized using training scaler."""
     test_df, test_features = mock_test_data
-    model_args, _ = _prepare_test_model_args(test_df, test_features, mock_summary)
+    model_args, _, _ = _prepare_test_model_args(test_df, test_features, mock_summary)
     assert abs(model_args["X"][0, 0] - 1.0) < 1e-5
 
 
@@ -117,7 +117,7 @@ def test_prev_score_sequential_from_training_history(mock_test_data, mock_summar
             "User_Score": [72.0, 85.0, 60.0],
         }
     )
-    model_args, _ = _prepare_test_model_args(
+    model_args, _, _ = _prepare_test_model_args(
         test_df, test_features, mock_summary, train_df=train_df
     )
     # First test album for Artist_A: prev_score = last training score (85.0)
@@ -143,7 +143,7 @@ def test_prev_score_uses_val_when_available(mock_test_data, mock_summary):
             "User_Score": [78.0, 55.0],
         }
     )
-    model_args, _ = _prepare_test_model_args(
+    model_args, _, _ = _prepare_test_model_args(
         test_df, test_features, mock_summary, train_df=train_df, val_df=val_df
     )
     # First test album for Artist_A: prev_score = val score (78.0), not train last (85.0)
@@ -186,7 +186,7 @@ def test_min_albums_filter_uses_training_history_counts(mock_summary):
         index=test_df.index,
     )
 
-    model_args, _ = _prepare_test_model_args(test_df, test_features, summary, train_df=train_df)
+    model_args, _, _ = _prepare_test_model_args(test_df, test_features, summary, train_df=train_df)
 
     np.testing.assert_array_equal(model_args["album_seq"], np.array([4, 1], dtype=np.int32))
 
@@ -251,7 +251,7 @@ def test_prepare_disjoint_inputs_uses_global_mean_prev_score(mock_summary):
         index=test_df.index,
     )
 
-    _X, prev_score, _n_reviews, y_true, _g = _prepare_disjoint_inputs(
+    _X, prev_score, _n_reviews, y_true, _g, _ids = _prepare_disjoint_inputs(
         test_df, test_features, mock_summary
     )
 
@@ -535,6 +535,7 @@ def test_evaluate_models_strict_fails_on_bad_calibration(mock_summary):
                     "priors": MagicMock(),
                 },
                 np.array([70.0, 71.0], dtype=np.float32),
+                pd.DataFrame(),
             ),
         ),
         patch(
@@ -671,7 +672,7 @@ class TestPrepareDisjointInputs:
             },
             index=test_df.index,
         )
-        X, prev_score, n_reviews, y_true, _g = _prepare_disjoint_inputs(
+        X, prev_score, n_reviews, y_true, _g, _ids = _prepare_disjoint_inputs(
             test_df, test_features, mock_summary
         )
         # X should be standardized: (1.0 - 1.0) / 0.5 = 0.0
@@ -696,7 +697,7 @@ class TestPrepareDisjointInputs:
             },
             index=test_df.index,
         )
-        _, _, n_reviews, _, _ = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
+        _, _, n_reviews, _, _, _ids = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
         np.testing.assert_array_equal(n_reviews, np.array([50, 100]))
 
 
@@ -748,7 +749,7 @@ class TestPrepareTestModelArgs:
             index=test_df.index,
         )
 
-        model_args, _ = _prepare_test_model_args(
+        model_args, _, _ = _prepare_test_model_args(
             test_df, test_features, summary, train_df=train_df, strict=False
         )
         # Album seq should be clipped to max_seq=3
