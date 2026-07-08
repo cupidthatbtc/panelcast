@@ -2742,3 +2742,34 @@ class TestApplyMaxAlbumsCapNew:
         )
         np.testing.assert_array_equal(result["album_seq"], [1, 1, 1])
         assert result["max_seq"] == 1
+
+
+class TestTrainRuntimePrediction:
+    """Pre-fit ETA echo (#161): honest source, never blocks a fit."""
+
+    def test_predicts_from_model_args(self):
+        import numpy as np
+
+        from panelcast.models.bayes.fit import MCMCConfig
+        from panelcast.pipelines.train_bayes import _predict_train_seconds
+
+        model_args = {"y": np.zeros(50)}
+        prediction = _predict_train_seconds(
+            model_args, MCMCConfig(num_warmup=10, num_samples=10, num_chains=1), "offset_logit"
+        )
+        assert prediction is not None
+        assert prediction.seconds > 0
+        assert prediction.source
+
+    def test_never_raises(self):
+        from panelcast.models.bayes.fit import MCMCConfig
+        from panelcast.pipelines.train_bayes import _predict_train_seconds
+
+        assert _predict_train_seconds({}, MCMCConfig(), "offset_logit") is None
+
+    def test_format_duration_bands(self):
+        from panelcast.pipelines.train_bayes import _format_duration
+
+        assert _format_duration(45) == "45s"
+        assert _format_duration(1800) == "30m"
+        assert _format_duration(10440) == "2.9h"
