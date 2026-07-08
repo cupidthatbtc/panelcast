@@ -1066,6 +1066,19 @@ def _run_training_prior_predictive(
             "ar_center": _ar_center_from_summary(summary),
         }
 
+        if getattr(train_model_args["priors"], "entity_group_pooling", False):
+            group_idx_by_artist = summary.get("group_idx_by_artist")
+            n_groups = summary.get("n_groups")
+            if group_idx_by_artist is None or n_groups is None:
+                raise ValueError(
+                    "entity_group_pooling is on but the training summary lacks "
+                    "group_idx_by_artist/n_groups — re-run the train stage."
+                )
+            train_model_args["group_idx_by_artist"] = np.asarray(
+                group_idx_by_artist, dtype=np.int32
+            )
+            train_model_args["n_groups"] = int(n_groups)
+
         if bool(getattr(train_model_args["priors"], "errors_in_variables", False)):
             global_std_pp = float(summary.get("global_std_score") or 0.0)
             if global_std_pp <= 0.0:
@@ -1102,6 +1115,10 @@ def _run_training_prior_predictive(
         )
         return prior_predictive_result
     except Exception as e:
+        # Under --strict a broken prior-predictive gate must fail the run, not
+        # silently downgrade to a skipped check.
+        if ctx.strict:
+            raise
         log.warning("prior_predictive_failed", error=str(e), exc_info=True)
         return None
 
@@ -1312,9 +1329,11 @@ def evaluate_models(ctx: StageContext) -> dict:
         "passed": diagnostics.passed,
         "rhat_max": float(diagnostics.rhat_max),
         "ess_bulk_min": float(diagnostics.ess_bulk_min),
+        "ess_tail_min": float(diagnostics.ess_tail_min),
         "divergences": int(diagnostics.divergences),
         "rhat_threshold": float(diagnostics.rhat_threshold),
         "ess_threshold": int(diagnostics.ess_threshold),
+        "failing_params": [str(p) for p in diagnostics.failing_params],
     }
 
     # Warn if loading old summary without sigma_rw_prior_type

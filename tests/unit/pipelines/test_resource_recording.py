@@ -54,6 +54,47 @@ class TestBuildResourceUsage:
         without_rw = _build_resource_usage(args, config, _fit_result(None), True)
         assert without_rw["expected_gb"] < with_rw["expected_gb"]
 
+    def test_calibration_record_carries_model_structure_gates(self, monkeypatch):
+        """estimate_inputs must key records by the model-structure gates so fits
+        with different structures don't collide in the calibration store."""
+        import panelcast.gpu_memory.calibration_store as store
+
+        captured = {}
+        monkeypatch.setattr(store, "append_record", lambda **kw: captured.update(kw))
+
+        config = MCMCConfig(num_warmup=10, num_samples=10, num_chains=2, seed=0)
+        args = _model_args()
+        args["priors"] = SimpleNamespace(
+            errors_in_variables=True,
+            heteroscedastic_entity_obs=False,
+            entity_group_pooling=True,
+        )
+        args["n_groups"] = 7
+        _build_resource_usage(args, config, _fit_result(peak_bytes=2 * 1024**3), False)
+
+        inputs = captured["estimate_inputs"]
+        assert inputs["errors_in_variables"] is True
+        assert inputs["heteroscedastic_entity_obs"] is False
+        assert inputs["entity_group_pooling"] is True
+        assert inputs["n_groups"] == 7
+
+    def test_calibration_record_gates_default_off_without_priors(self, monkeypatch):
+        import panelcast.gpu_memory.calibration_store as store
+
+        captured = {}
+        monkeypatch.setattr(store, "append_record", lambda **kw: captured.update(kw))
+
+        config = MCMCConfig(num_warmup=10, num_samples=10, num_chains=2, seed=0)
+        _build_resource_usage(
+            _model_args(), config, _fit_result(peak_bytes=2 * 1024**3), False
+        )
+
+        inputs = captured["estimate_inputs"]
+        assert inputs["errors_in_variables"] is False
+        assert inputs["heteroscedastic_entity_obs"] is False
+        assert inputs["entity_group_pooling"] is False
+        assert "n_groups" not in inputs
+
 
 class TestSummaryField:
     def test_resource_usage_round_trips(self):

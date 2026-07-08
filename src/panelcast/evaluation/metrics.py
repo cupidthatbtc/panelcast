@@ -170,8 +170,17 @@ def compute_crps(
 
     Notes
     -----
-    This function uses the properscoring library's crps_ensemble function,
-    which computes CRPS efficiently for ensemble predictions.
+    This is a vectorized FAIR (unbiased) ensemble CRPS estimator
+    (Ferro et al. 2008), computed per observation as
+
+        CRPS = mean_j |Y_j - y| - (1 / (2 n (n-1))) * sum_{j,k} |Y_j - Y_k|
+
+    where the spread term is the unbiased Gini mean difference of the n
+    ensemble members, evaluated via sorted order statistics. The n(n-1)
+    denominator makes the estimator unbiased for the CRPS of the underlying
+    predictive distribution regardless of ensemble size; the classical 1/n^2
+    form (e.g. properscoring's crps_ensemble) is biased upward by O(1/n).
+    The two agree as n grows.
 
     CRPS is measured in the same units as the target variable, making it
     directly interpretable. A CRPS of 5 points means the model's probabilistic

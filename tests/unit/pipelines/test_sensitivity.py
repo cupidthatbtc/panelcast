@@ -195,6 +195,44 @@ class TestRunPriorSensitivity:
             assert isinstance(r, SensitivityResult)
             assert r.loo is None  # LOO disabled
 
+    def test_log_likelihood_traced_under_variant_priors(
+        self, monkeypatch, simple_idata, passing_convergence, mock_loo
+    ):
+        """The log-lik trace must run under the SAME priors the variant was fit
+        with — bare model_args would silently score under get_default_priors()."""
+        fit_result = _make_fit_result(simple_idata)
+        monkeypatch.setattr(
+            "panelcast.pipelines.sensitivity.fit_model",
+            lambda *a, **kw: fit_result,
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.sensitivity.check_convergence",
+            lambda *a, **kw: passing_convergence,
+        )
+        captured_args = []
+        monkeypatch.setattr(
+            "panelcast.pipelines.sensitivity.compute_log_likelihood",
+            lambda model, mcmc, args, obs_name: captured_args.append(args) or MagicMock(),
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.sensitivity.add_log_likelihood_to_idata",
+            lambda *a, **kw: simple_idata,
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.sensitivity.compute_loo",
+            lambda *a, **kw: mock_loo,
+        )
+
+        variant = PriorConfig(mu_artist_scale=5.0)
+        run_prior_sensitivity(
+            model=lambda: None,
+            model_args={"y": np.zeros(5)},
+            configs={"diffuse_like": variant},
+            compute_loo_cv=True,
+        )
+        assert captured_args, "compute_log_likelihood never called"
+        assert captured_args[0]["priors"] is variant
+
     def test_loo_computed_when_enabled(
         self, monkeypatch, simple_idata, passing_convergence, mock_loo
     ):
@@ -448,6 +486,49 @@ class TestRunFeatureAblation:
         assert "no_group_a" in results
         assert "no_group_b" in results
         assert len(results) == 3
+
+    def test_priors_threaded_into_fits_and_log_likelihood(
+        self, monkeypatch, simple_idata, passing_convergence, mock_loo
+    ):
+        """priors= must reach the baseline fit, every ablated fit, AND each
+        log-likelihood trace — otherwise ELPD deltas conflate feature removal
+        with prior/pooling differences."""
+        fit_result = _make_fit_result(simple_idata)
+        fit_args, ll_args = [], []
+        monkeypatch.setattr(
+            "panelcast.pipelines.sensitivity.fit_model",
+            lambda model, args, config=None, progress_bar=True: fit_args.append(args)
+            or fit_result,
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.sensitivity.check_convergence",
+            lambda *a, **kw: passing_convergence,
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.sensitivity.compute_log_likelihood",
+            lambda model, mcmc, args, obs_name: ll_args.append(args) or MagicMock(),
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.sensitivity.add_log_likelihood_to_idata",
+            lambda *a, **kw: simple_idata,
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.sensitivity.compute_loo",
+            lambda *a, **kw: mock_loo,
+        )
+
+        located = PriorConfig(mu_artist_loc=3.14, entity_group_pooling=True)
+        run_feature_ablation(
+            model=lambda: None,
+            model_args={"X": np.ones((10, 5), dtype=np.float32), "y": np.zeros(10)},
+            feature_groups={"group_a": [0, 1]},
+            compute_loo_cv=True,
+            priors=located,
+        )
+        assert len(fit_args) == 2  # full baseline + no_group_a
+        assert all(args["priors"] is located for args in fit_args)
+        assert len(ll_args) == 2
+        assert all(args["priors"] is located for args in ll_args)
 
     def test_ablation_config_records_group_info(
         self, monkeypatch, simple_idata, passing_convergence

@@ -269,6 +269,25 @@ class TestComputeLoo:
 
         assert "log_likelihood" in str(exc_info.value)
 
+    def test_compute_loo_pointwise_false_returns_empty_diagnostics(
+        self, mock_idata_with_log_lik
+    ):
+        """pointwise=False must not crash (az.loo returns no pareto_k then);
+        the Pareto-k diagnostics come back empty."""
+        result = compute_loo(mock_idata_with_log_lik, pointwise=False)
+
+        assert isinstance(result, LOOResult)
+        assert isinstance(result.elpd_loo, float)
+        assert result.n_high_pareto_k == 0
+        assert len(result.high_pareto_k_indices) == 0
+
+    def test_compute_loo_pointwise_true_and_false_agree_on_elpd(
+        self, mock_idata_with_log_lik
+    ):
+        pw = compute_loo(mock_idata_with_log_lik, pointwise=True)
+        no_pw = compute_loo(mock_idata_with_log_lik, pointwise=False)
+        assert no_pw.elpd_loo == pytest.approx(pw.elpd_loo)
+
     def test_compute_loo_no_high_k_with_good_data(self):
         """All k < 0.7 -> n_high_pareto_k == 0 (with well-behaved data)."""
         # Create well-behaved log-likelihood data with small variation across samples

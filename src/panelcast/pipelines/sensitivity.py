@@ -282,8 +282,11 @@ def run_prior_sensitivity(
         loo_result = None
         if compute_loo_cv:
             try:
+                # The trace must run under the SAME priors the variant was
+                # fitted with — bare model_args would score densities under
+                # get_default_priors().
                 log_lik = compute_log_likelihood(
-                    model, fit_result.mcmc, model_args, obs_name=obs_name
+                    model, fit_result.mcmc, args_with_priors, obs_name=obs_name
                 )
                 idata_with_ll = add_log_likelihood_to_idata(fit_result.idata, log_lik)
                 loo_result = compute_loo(idata_with_ll)
@@ -439,6 +442,7 @@ def run_feature_ablation(
     coefficient_vars: list[str] | None = None,
     baseline: SensitivityResult | None = None,
     progress_bar: bool = True,
+    priors: PriorConfig | None = None,
 ) -> dict[str, SensitivityResult]:
     """Run feature ablation study (SENS-03).
 
@@ -467,6 +471,11 @@ def run_feature_ablation(
         Pre-fitted full-model baseline. When provided, the redundant
         baseline refit is skipped and this result is used as "full"
         (the suite passes the prior-sensitivity "default" fit here).
+    priors : PriorConfig | None, optional
+        Prior configuration threaded into every fit AND its log-likelihood
+        trace. Pass the same located config the baseline was fitted with;
+        otherwise ablated variants fall back to get_default_priors() and
+        ELPD deltas conflate feature removal with prior differences.
 
     Returns
     -------
@@ -496,6 +505,9 @@ def run_feature_ablation(
     """
     if mcmc_config is None:
         mcmc_config = MCMCConfig()
+
+    if priors is not None:
+        model_args = {**model_args, "priors": priors}
 
     # Get original feature matrix
     X_original = model_args["X"]
@@ -1166,6 +1178,7 @@ def run_sensitivity_suite(ctx) -> dict:
     from panelcast.models.bayes.model import make_score_model
     from panelcast.models.bayes.predict import extract_posterior_samples
     from panelcast.pipelines.train_bayes import (
+        MODEL_ARGS_METADATA_KEYS,
         _apply_max_albums_cap,
         load_training_data,
         locate_level_prior,
@@ -1195,10 +1208,11 @@ def run_sensitivity_suite(ctx) -> dict:
         entity_group_pooling=entity_group_pooling,
     )
     artist_album_counts = model_args.pop("artist_album_counts")
-    model_args.pop("artist_to_idx", None)
-    model_args.pop("global_mean_score", None)
-    model_args.pop("group_to_idx", None)
     ar_center_value = float(model_args.pop("ar_center_value", 0.0))
+    # Strip every bookkeeping key via the shared list so new metadata added to
+    # prepare_model_data can't leak into mcmc.run(**model_args) here.
+    for key in MODEL_ARGS_METADATA_KEYS:
+        model_args.pop(key, None)
     model_args = _apply_max_albums_cap(
         model_args, getattr(ctx, "max_albums", 50), artist_album_counts
     )
@@ -1228,17 +1242,17 @@ def run_sensitivity_suite(ctx) -> dict:
     payload: dict = {"axes": list(axes), "prefix": prefix}
     prior_results: dict[str, SensitivityResult] = {}
 
+    def _locate(config: PriorConfig) -> PriorConfig:
+        return locate_level_prior(
+            replace(config, entity_group_pooling=entity_group_pooling),
+            ar_center_value=ar_center_value,
+            target_transform=summary.get("target_transform", "identity"),
+            logit_offset=float(summary.get("logit_offset", 0.5)),
+            target_bounds=tuple(descriptor.target_bounds),
+        )
+
     if "priors" in axes:
-        located = {
-            name: locate_level_prior(
-                replace(config, entity_group_pooling=entity_group_pooling),
-                ar_center_value=ar_center_value,
-                target_transform=summary.get("target_transform", "identity"),
-                logit_offset=float(summary.get("logit_offset", 0.5)),
-                target_bounds=tuple(descriptor.target_bounds),
-            )
-            for name, config in PRIOR_CONFIGS.items()
-        }
+        located = {name: _locate(config) for name, config in PRIOR_CONFIGS.items()}
         prior_results = run_prior_sensitivity(
             model,
             model_args,
@@ -1259,6 +1273,8 @@ def run_sensitivity_suite(ctx) -> dict:
             obs_name=obs_name,
             baseline=prior_results.get("default"),
             progress_bar=progress_bar,
+            # Same located config the "full" baseline was fitted under.
+            priors=_locate(PRIOR_CONFIGS["default"]),
         )
         payload["ablation"] = aggregate_sensitivity_results(ablation_results).to_dict(
             orient="records"
