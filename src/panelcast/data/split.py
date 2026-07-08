@@ -81,9 +81,21 @@ def within_entity_temporal_split(
     min_required = test_albums + val_albums + min_train_albums
     valid_artists = album_counts[album_counts >= min_required].index
     df_valid = df_sorted[df_sorted[entity_col].isin(valid_artists)].copy()
-    # Exclude entities with no valid dates at all: temporal order is undefined.
-    has_known_dates = df_valid.groupby(entity_col)[date_col].transform(lambda s: s.notna().any())
-    df_valid = df_valid[has_known_dates].copy()
+    # Exclude entities with fewer dated events than the holdout tail needs:
+    # groupby().tail() would otherwise pull NaT rows into val/test, putting
+    # events of unknown chronology in the held-out sets.
+    n_holdout = test_albums + val_albums
+    dated_counts = df_valid.groupby(entity_col)[date_col].transform("count")
+    insufficient = dated_counts < max(n_holdout, 1)
+    if insufficient.any():
+        excluded_entities = df_valid.loc[insufficient, entity_col].unique()
+        structlog.get_logger().info(
+            "temporal_split_excluded_insufficient_dated_events",
+            n_entities=len(excluded_entities),
+            required_dated_events=n_holdout,
+            rationale="held-out val/test events must have known chronology",
+        )
+        df_valid = df_valid[~insufficient].copy()
 
     # Extract last N per entity for test
     test_df = df_valid.groupby(entity_col).tail(test_albums)
@@ -219,8 +231,19 @@ def validate_temporal_split(
         (training data after test data) is flagged as a violation.
 
     Raises:
-        ValueError: If temporal ordering is violated (train after test)
+        ValueError: If temporal ordering is violated (train after test), or if
+            any held-out (validation/test) row has a missing parsed date
     """
+    # Held-out rows must have known chronology; dropping NaT before the
+    # per-entity comparison below would hide unknown-date leakage.
+    for split_name, split_df in (("validation", val_df), ("test", test_df)):
+        n_missing = int(split_df[date_col].isna().sum())
+        if n_missing:
+            raise ValueError(
+                f"Temporal validation failed: {n_missing} {split_name} row(s) have "
+                f"missing parsed release dates (NaT); held-out events must be dated."
+            )
+
     # Get entities that appear in all splits (expected for temporal split)
     train_artists = set(train_df[entity_col])
     test_artists = set(test_df[entity_col])

@@ -169,6 +169,61 @@ class TestWithinArtistTemporalSplit:
         assert len(val) == 2
         assert len(train) == 2
 
+    def test_excludes_entity_when_holdout_would_contain_nat_val(self):
+        # 3 events pass the count filter, but only 1 is dated; tail() would
+        # otherwise pull a NaT event into validation.
+        df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "A"],
+                "Album": ["a0", "a1", "a2"],
+                "Release_Date_Parsed": pd.to_datetime([None, None, "2021-01-01"]),
+            }
+        )
+        train, val, test = within_entity_temporal_split(
+            df,
+            test_albums=1,
+            val_albums=1,
+            min_train_albums=1,
+        )
+        assert len(train) + len(val) + len(test) == 0
+
+    def test_excludes_entity_when_holdout_would_contain_nat_test(self):
+        df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "A"],
+                "Album": ["a0", "a1", "a2"],
+                "Release_Date_Parsed": pd.to_datetime([None, None, "2021-01-01"]),
+            }
+        )
+        train, val, test = within_entity_temporal_split(
+            df,
+            test_albums=2,
+            val_albums=0,
+            min_train_albums=1,
+        )
+        assert not test["Release_Date_Parsed"].isna().any()
+        assert len(train) + len(val) + len(test) == 0
+
+    def test_keeps_entity_with_enough_dated_events(self):
+        df = pd.DataFrame(
+            {
+                "Artist": ["A"] * 4,
+                "Album": ["a0", "a1", "a2", "a3"],
+                "Release_Date_Parsed": pd.to_datetime(
+                    [None, "2019-01-01", "2020-01-01", "2021-01-01"]
+                ),
+            }
+        )
+        train, val, test = within_entity_temporal_split(
+            df,
+            test_albums=1,
+            val_albums=1,
+            min_train_albums=1,
+        )
+        assert len(test) == 1 and len(val) == 1 and len(train) == 2
+        assert not val["Release_Date_Parsed"].isna().any()
+        assert not test["Release_Date_Parsed"].isna().any()
+
     def test_no_album_column_fallback(self):
         df = pd.DataFrame(
             {
@@ -295,6 +350,33 @@ class TestValidateTemporalSplit:
         )
         val = pd.DataFrame({"Artist": ["A"], "Release_Date_Parsed": pd.to_datetime(["2021-01-01"])})
         test = pd.DataFrame({"Artist": ["A"], "Release_Date_Parsed": [pd.NaT]})
+        with pytest.raises(ValueError, match="missing parsed release dates"):
+            validate_temporal_split(train, val, test)
+
+    def test_raises_when_val_dates_missing(self):
+        train = pd.DataFrame(
+            {"Artist": ["A"], "Release_Date_Parsed": pd.to_datetime(["2019-01-01"])}
+        )
+        val = pd.DataFrame({"Artist": ["A"], "Release_Date_Parsed": [pd.NaT]})
+        test = pd.DataFrame(
+            {"Artist": ["A"], "Release_Date_Parsed": pd.to_datetime(["2021-01-01"])}
+        )
+        with pytest.raises(ValueError, match="missing parsed release dates"):
+            validate_temporal_split(train, val, test)
+
+    def test_raises_when_test_has_partial_nat(self):
+        # A NaT test row alongside a dated one must still fail: dropna() used
+        # to hide this because the per-entity min was computed on known dates.
+        train = pd.DataFrame(
+            {"Artist": ["A"], "Release_Date_Parsed": pd.to_datetime(["2019-01-01"])}
+        )
+        val = pd.DataFrame({"Artist": ["A"], "Release_Date_Parsed": pd.to_datetime(["2020-01-01"])})
+        test = pd.DataFrame(
+            {
+                "Artist": ["A", "A"],
+                "Release_Date_Parsed": pd.to_datetime([None, "2021-01-01"]),
+            }
+        )
         with pytest.raises(ValueError, match="missing parsed release dates"):
             validate_temporal_split(train, val, test)
 
