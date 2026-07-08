@@ -2855,3 +2855,45 @@ class TestResolveChainMethod:
         method, reason = _resolve_chain_method("auto", dict(self._INPUTS))
         assert method == "sequential"
         assert "unavailable" in reason
+
+
+class TestVramBudget:
+    """Auto resolution must read the JAX pool budget, not post-preallocation NVML free."""
+
+    def test_pool_stats_win_over_nvml(self, monkeypatch):
+        import types
+
+        import jax
+
+        import panelcast.gpu_memory.query as query_mod
+        from panelcast.pipelines.train_bayes import _vram_budget_gb
+
+        gib = 1024**3
+        fake_gpu = types.SimpleNamespace(
+            platform="gpu",
+            memory_stats=lambda: {"bytes_limit": 20 * gib, "bytes_in_use": 2 * gib},
+        )
+        monkeypatch.setattr(jax, "devices", lambda: [fake_gpu])
+
+        def nvml_should_not_be_called(device_index=0):
+            raise AssertionError("NVML free must not be consulted when pool stats exist")
+
+        monkeypatch.setattr(query_mod, "query_gpu_memory", nvml_should_not_be_called)
+        assert _vram_budget_gb() == 18.0
+
+    def test_falls_back_to_nvml_without_stats(self, monkeypatch):
+        import types
+
+        import jax
+
+        import panelcast.gpu_memory.query as query_mod
+        from panelcast.pipelines.train_bayes import _vram_budget_gb
+
+        fake_gpu = types.SimpleNamespace(platform="gpu", memory_stats=lambda: None)
+        monkeypatch.setattr(jax, "devices", lambda: [fake_gpu])
+        monkeypatch.setattr(
+            query_mod,
+            "query_gpu_memory",
+            lambda device_index=0: types.SimpleNamespace(free_gb=7.5),
+        )
+        assert _vram_budget_gb() == 7.5
