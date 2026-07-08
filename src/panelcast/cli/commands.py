@@ -429,6 +429,55 @@ def diagnose(
         typer.echo(f"  wrote {path}")
 
 
+@app.command("report")
+def report(
+    run: str | None = typer.Option(
+        None,
+        "--run",
+        help="Run directory to report on (default: the latest run).",
+    ),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output HTML path (default: <run>/reports/index.html).",
+    ),
+    interactive: bool = typer.Option(
+        True,
+        "--interactive/--no-interactive",
+        help=(
+            "Interactive Plotly figures (self-contained, ~3-4 MB) vs embedded "
+            "PNGs from reports/figures (smaller, quick shares)."
+        ),
+    ),
+) -> None:
+    """One self-contained HTML dashboard for a completed run.
+
+    Composes the run's manifest, metrics, diagnostics, readiness verdicts,
+    figures, and coefficient table into a single portable page that renders
+    offline. Read-only over existing artifacts, so it works on any past run.
+
+    Examples:
+        panelcast report
+        panelcast report --run outputs/2026-07-08_120000_000000_abcd
+        panelcast report --no-interactive -o run_summary.html
+    """
+    from pathlib import Path
+
+    from panelcast.reporting.html_report import write_run_report
+
+    try:
+        path = write_run_report(
+            run_dir=Path(run) if run else None,
+            output_path=Path(output) if output else None,
+            interactive=interactive,
+        )
+    except FileNotFoundError as e:
+        typer.echo(f"Error: {e}")
+        raise typer.Exit(code=1) from e
+    typer.echo(f"  wrote {path}")
+
+
 @runs_app.command("list")
 def runs_list(
     output_dir: str = typer.Option(
