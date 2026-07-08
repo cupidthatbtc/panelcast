@@ -109,3 +109,46 @@ class TestWriteRunReport:
         out = tmp_path / "elsewhere" / "summary.html"
         path = write_run_report(run_dir, output_path=out, interactive=False)
         assert path == out and out.exists()
+
+
+class TestInteractiveFiguresPath:
+    def test_interactive_uses_dashboard_fragments(self, run_dir):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        data = SimpleNamespace(coefficients=object())
+        with (
+            patch(
+                "panelcast.visualization.dashboard.load_dashboard_data", return_value=data
+            ),
+            patch(
+                "panelcast.visualization.dashboard.create_dashboard_figures",
+                return_value={"trace": "<div id='plotly-trace'></div>"},
+            ),
+            patch(
+                "panelcast.visualization.dashboard.create_coefficients_table",
+                return_value="<table id='coef'></table>",
+            ),
+        ):
+            page = build_run_report(run_dir, interactive=True)
+        assert "plotly-trace" in page
+        assert "id='coef'" in page
+
+    def test_interactive_failure_falls_back_to_pngs(self, run_dir):
+        from unittest.mock import patch
+
+        with patch(
+            "panelcast.visualization.dashboard.load_dashboard_data",
+            side_effect=RuntimeError("no plotly here"),
+        ):
+            page = build_run_report(run_dir, interactive=True)
+        assert "data:image/png;base64," in page
+
+    def test_latest_run_resolution(self, run_dir, monkeypatch):
+        import panelcast.paths as paths
+
+        monkeypatch.setattr(paths, "resolve_latest", lambda *a, **k: run_dir)
+        page = build_run_report(None, interactive=False)
+        assert "2026-07-08_000000_000000_abcd" in page
+        out = write_run_report(None, interactive=False)
+        assert out == run_dir / "reports" / "index.html"
