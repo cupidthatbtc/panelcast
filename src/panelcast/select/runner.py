@@ -9,7 +9,9 @@ touches the repo mid-sweep. The repo belongs to the sweep for its duration.
 Stages: (1) one-factor-at-a-time from the shipped defaults; (2) compose
 stage-1 winners and probe their pairwise interactions; (3) an optional random
 sample of untried combinations. Cheap data diagnostics REORDER the search —
-they never prune. Stage order is the budget-truncation order.
+they never prune. Stage order is the budget-priority order; an arm whose
+predicted cost exceeds the remaining budget is recorded as ``skipped_budget``
+(retryable under a bigger budget) rather than truncating the stage.
 """
 
 from __future__ import annotations
@@ -101,7 +103,7 @@ class ArmRecord:
     arm_id: str
     knobs: dict[str, Any]
     stage: int
-    status: str = "pending"  # pending | completed | failed | timeout | excluded
+    status: str = "pending"  # pending | completed | failed | timeout | skipped_budget | excluded
     run_dir: str | None = None
     wall_clock_seconds: float | None = None
     error: str | None = None
@@ -207,19 +209,27 @@ def diagnose_data(train_df, descriptor: DatasetDescriptor) -> dict[str, bool]:
 def reorder_arms(
     arms: list[tuple[dict[str, Any], str | None]],
     diagnostics: dict[str, Any],
+    cost: Callable[[dict[str, Any]], float] | None = None,
 ) -> list[tuple[dict[str, Any], str | None]]:
-    """Diagnosed-relevant knobs float to the front; relative order otherwise kept."""
+    """Diagnosed-relevant knobs float to the front; predicted cost breaks ties.
+
+    Diagnostics dominate (they reorder, never prune); within each priority
+    group cheaper arms run first, so a budget-capped sweep completes as many
+    arms as the budget allows instead of dying on the first expensive one.
+    """
     prioritized: list[str] = []
     for signal, knob_names in _DIAGNOSTIC_PRIORITIES.items():
         if diagnostics.get(signal):
             prioritized.extend(knob_names)
 
-    def rank(pair: tuple[dict[str, Any], str | None]) -> int:
+    def rank(pair: tuple[dict[str, Any], str | None]) -> tuple[int, float]:
         arm = pair[0]
+        priority = len(prioritized)
         for i, name in enumerate(prioritized):
             if name in arm:
-                return i
-        return len(prioritized)
+                priority = i
+                break
+        return priority, cost(arm) if cost is not None else 0.0
 
     return sorted(arms, key=rank)
 
@@ -375,6 +385,25 @@ def _write_arm_config(
     path.write_text(yaml.safe_dump(payload, sort_keys=True), encoding="utf-8")
 
 
+def _predict_arm_seconds(
+    cfg: SweepConfig, merged: dict[str, Any], dims: dict[str, int] | None
+) -> Any:
+    """RuntimePrediction for one arm at the scale its subprocess will run, or None."""
+    if dims is None:
+        return None
+    from panelcast.gpu_memory.runtime_predictor import predict_fit_seconds
+    from panelcast.pipelines.orchestrator import PipelineConfig
+
+    defaults = PipelineConfig()
+    return predict_fit_seconds(
+        cfg.num_chains or defaults.num_chains,
+        cfg.num_samples or defaults.num_samples,
+        cfg.num_warmup or defaults.num_warmup,
+        int(dims.get("n_observations") or 0),
+        transform=merged.get("target_transform") or defaults.target_transform,
+    )
+
+
 def resolve_arm_timeout(
     cfg: SweepConfig, merged: dict[str, Any], dims: dict[str, int] | None = None
 ) -> tuple[float | None, Any]:
@@ -390,19 +419,9 @@ def resolve_arm_timeout(
         return None, None
     if cfg.arm_timeout_seconds != "auto":
         return float(cfg.arm_timeout_seconds), None
-    if dims is None:
+    prediction = _predict_arm_seconds(cfg, merged, dims)
+    if prediction is None:
         return cfg.arm_timeout_floor_seconds, None
-    from panelcast.gpu_memory.runtime_predictor import predict_fit_seconds
-    from panelcast.pipelines.orchestrator import PipelineConfig
-
-    defaults = PipelineConfig()
-    prediction = predict_fit_seconds(
-        cfg.num_chains or defaults.num_chains,
-        cfg.num_samples or defaults.num_samples,
-        cfg.num_warmup or defaults.num_warmup,
-        int(dims.get("n_observations") or 0),
-        transform=merged.get("target_transform") or defaults.target_transform,
-    )
     timeout = max(cfg.arm_timeout_floor_seconds, cfg.arm_timeout_multiplier * prediction.seconds)
     return timeout, prediction
 
@@ -515,6 +534,66 @@ def _apply_arm_timeout(
     return timeout_seconds
 
 
+def _cost_fn(
+    cfg: SweepConfig, base: dict[str, Any], dims: dict[str, int] | None
+) -> Callable[[dict[str, Any]], float] | None:
+    """Predicted-seconds tiebreak for ``reorder_arms``; None without data dims."""
+    if dims is None:
+        return None
+
+    def cost(arm: dict[str, Any]) -> float:
+        prediction = _predict_arm_seconds(cfg, {**base, **arm}, dims)
+        return prediction.seconds if prediction is not None else 0.0
+
+    return cost
+
+
+def _budget_skip_reason(cfg: SweepConfig, ledger: SweepLedger, prediction: Any) -> str | None:
+    """Why this arm cannot fit the remaining budget (None = launch it)."""
+    if cfg.budget_hours is None:
+        return None
+    remaining = cfg.budget_hours - ledger.hours_spent()
+    predicted_hours = prediction.seconds / 3600.0 if prediction is not None else None
+    if remaining > 0 and (predicted_hours is None or predicted_hours <= remaining):
+        return None
+    if remaining <= 0:
+        return f"budget exhausted: {ledger.hours_spent():.2f}h spent of {cfg.budget_hours:g}h"
+    return f"predicted {predicted_hours:.2f}h exceeds remaining budget {remaining:.2f}h"
+
+
+def _maybe_skip_for_budget(
+    cfg: SweepConfig,
+    ledger: SweepLedger,
+    dims: dict[str, int] | None,
+    stage: int,
+    arm: dict[str, Any],
+    aid: str,
+    note: str | None,
+) -> bool:
+    """Record a retryable ``skipped_budget`` when the arm can't fit the remaining budget.
+
+    Never clobbers a real failure record — a failed arm skipped for budget keeps
+    its error; either way both statuses are non-terminal on resume.
+    """
+    if cfg.budget_hours is None:
+        return False
+    prediction = _predict_arm_seconds(cfg, {**default_arm(), **arm}, dims)
+    reason = _budget_skip_reason(cfg, ledger, prediction)
+    if reason is None:
+        return False
+    log.warning("arm_skipped_budget", arm_id=aid, stage=stage, reason=reason)
+    existing = ledger.records.get(aid)
+    if existing is None or existing.status in ("pending", "skipped_budget"):
+        ledger.upsert(
+            ArmRecord(
+                arm_id=aid, knobs=arm, stage=stage, status="skipped_budget", note=note,
+                error=reason,
+                predicted_seconds=round(prediction.seconds, 1) if prediction is not None else None,
+            )
+        )
+    return True
+
+
 def _record_launch_failure(record: ArmRecord, code: int, tail: str) -> None:
     if code == ARM_TIMEOUT_RETURNCODE:
         record.status = "timeout"
@@ -559,7 +638,9 @@ def run_sweep(
             json.dumps(diagnostics, indent=2), encoding="utf-8"
         )
 
-    stage1 = reorder_arms(ofat_arms(descriptor, available_columns), diagnostics)
+    stage1 = reorder_arms(
+        ofat_arms(descriptor, available_columns), diagnostics, _cost_fn(cfg, base, dims)
+    )
     plan: list[tuple[int, dict[str, Any], str | None]] = []
     if cfg.reference_first:
         plan.append((1, {}, "reference (shipped defaults)"))
@@ -569,11 +650,9 @@ def run_sweep(
     cache_signature: str | None = None
     claimed_runs = {str(r.run_dir) for r in ledger.records.values() if r.run_dir}
 
-    def _budget_exhausted() -> str | None:
+    def _max_fits_reached() -> str | None:
         if cfg.max_fits is not None and ledger.fits_done() >= cfg.max_fits:
             return f"max_fits={cfg.max_fits} reached"
-        if cfg.budget_hours is not None and ledger.hours_spent() >= cfg.budget_hours:
-            return f"budget_hours={cfg.budget_hours} reached"
         return None
 
     def _execute(stage: int, arm: dict[str, Any], note: str | None) -> None:
@@ -589,6 +668,8 @@ def run_sweep(
             log.info("arm_skipped_resume", arm_id=aid, status=existing.status)
             return
         merged = {**base, **arm}
+        if _maybe_skip_for_budget(cfg, ledger, dims, stage, arm, aid, note):
+            return
         signature = feature_signature(merged)
         stages = _FEATURE_STAGES if signature != cache_signature else _MODEL_STAGES
         record = ArmRecord(arm_id=aid, knobs=arm, stage=stage, note=note)
@@ -628,7 +709,7 @@ def run_sweep(
         ledger.upsert(record)
 
     for stage, arm, note in plan:
-        reason = _budget_exhausted()
+        reason = _max_fits_reached()
         if reason:
             log.warning("sweep_truncated", stage=stage, reason=reason)
             return ledger
@@ -638,7 +719,7 @@ def run_sweep(
         winners = stage2_winners(ledger.records.values(), cfg.winner_z)
         seen = set(ledger.records)
         for arm, note in stage2_arms(winners, descriptor, available_columns, seen):
-            reason = _budget_exhausted()
+            reason = _max_fits_reached()
             if reason:
                 log.warning("sweep_truncated", stage=2, reason=reason)
                 return ledger
@@ -649,7 +730,7 @@ def run_sweep(
         for arm, note in stage3_arms(
             descriptor, cfg.stage3_fits, cfg.sweep_id, available_columns, seen
         ):
-            reason = _budget_exhausted()
+            reason = _max_fits_reached()
             if reason:
                 log.warning("sweep_truncated", stage=3, reason=reason)
                 return ledger

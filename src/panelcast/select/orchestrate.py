@@ -123,7 +123,10 @@ def build_plan(
             calibration_store_path,
         )
     if cfg.budget_hours is not None:
-        notes.append(f"budget cap: {cfg.budget_hours:g} GPU-h (stages truncate in priority order)")
+        notes.append(
+            f"budget cap: {cfg.budget_hours:g} GPU-h (arms beyond the remaining budget are "
+            "skipped, retryable on resume with a bigger budget)"
+        )
     if cfg.arm_timeout_seconds == "auto":
         notes.append(
             f"per-arm timeout: auto — max({cfg.arm_timeout_floor_seconds:g}s floor, "
