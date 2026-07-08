@@ -153,6 +153,76 @@ def render_markdown(report: DiagnoseReport) -> str:
     return "\n".join(lines)
 
 
+def _top_rows_markdown(rows, split: str, n: int = 25) -> str:
+    """Worst-|residual| rows as a hand-rendered pipe table (no tabulate dep)."""
+    top = rows.head(n)
+    cols = [c for c in top.columns if c != "sq_error_share"]
+    lines = [
+        f"# Worst {len(top)} predictions — {split}",
+        "",
+        "| " + " | ".join(cols) + " |",
+        "| " + " | ".join("---" for _ in cols) + " |",
+    ]
+    for _, row in top.iterrows():
+        cells = [
+            f"{v:.3f}" if isinstance(v, float) and math.isfinite(v) else str(v)
+            for v in (row[c] for c in cols)
+        ]
+        lines.append("| " + " | ".join(cells) + " |")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def run_error_decomposition(
+    eval_dir: Path | None = None,
+    output_dir: Path | None = None,
+) -> list[Path]:
+    """Decompose per-row errors for every split with an identified predictions.json.
+
+    Read-only over evaluate artifacts. Writes, per split, the full per-row
+    CSV, one CSV per rollup, and a worst-25 Markdown table. Payloads that
+    predate the identified schema raise ValueError with the re-run hint.
+    """
+    from panelcast.evaluation.decomposition import decompose_errors
+    from panelcast.paths import resolve_reports_dir
+    from panelcast.reporting.tables import export_table
+
+    if eval_dir is None:
+        eval_dir = resolve_evaluation_dir()
+    if output_dir is None:
+        output_dir = resolve_reports_dir() / "diagnostics"
+
+    payloads: dict[str, Path] = {
+        p.parent.name: p for p in sorted(eval_dir.glob("*/predictions.json"))
+    }
+    if not payloads:
+        flat = eval_dir / "predictions.json"
+        if flat.exists():
+            payloads["primary"] = flat
+    if not payloads:
+        raise FileNotFoundError(
+            f"No predictions.json under {eval_dir}. Run the evaluate stage first."
+        )
+
+    artifacts: list[Path] = []
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for split, path in payloads.items():
+        with open(path, encoding="utf-8") as f:
+            predictions = json.load(f)
+        decomp = decompose_errors(predictions)
+        artifacts += export_table(
+            decomp.rows, output_dir / f"error_decomposition_{split}", formats=("csv",)
+        )
+        for name, rollup in decomp.rollups.items():
+            artifacts += export_table(
+                rollup, output_dir / f"error_rollup_{name}_{split}", formats=("csv",)
+            )
+        md_path = output_dir / f"error_top25_{split}.md"
+        md_path.write_text(_top_rows_markdown(decomp.rows, split), encoding="utf-8")
+        artifacts.append(md_path)
+    return artifacts
+
+
 def run_diagnose(
     eval_dir: Path | None = None,
     output_dir: Path = Path("reports/diagnostics"),

@@ -101,7 +101,7 @@ class TestPrepareTestModelArgsTransformAxis:
         return _prepare_test_model_args(test_df, test_features, summary, train_df=train_df)
 
     def test_prev_score_on_model_scale(self, transform_name):
-        model_args, _ = self._prepare(transform_name)
+        model_args, _, _ = self._prepare(transform_name)
         # Artist A's only test row takes the last train score (75) as
         # prev_score, forward-transformed onto the training scale.
         t = get_transform(transform_name, (0.0, 100.0), offset=0.5)
@@ -109,9 +109,9 @@ class TestPrepareTestModelArgsTransformAxis:
         assert float(model_args["prev_score"][0]) == pytest.approx(expected, rel=1e-5)
 
     def test_y_true_stays_on_raw_scale(self, transform_name):
-        _, y_true = self._prepare(transform_name)
+        _, y_true, _ = self._prepare(transform_name)
         assert y_true[0] == pytest.approx(80.0)
 
     def test_priors_carry_transform(self, transform_name):
-        model_args, _ = self._prepare(transform_name)
+        model_args, _, _ = self._prepare(transform_name)
         assert model_args["priors"].target_transform == transform_name
