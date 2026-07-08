@@ -59,10 +59,10 @@ def _header_block(manifest: dict | None, run_dir: Path) -> str:
     fields = [
         ("run", manifest.get("run_id")),
         ("command", manifest.get("command")),
-        ("git", f"{git.get('commit', '?')[:12]}{dirty}"),
+        ("git", f"{(git.get('commit') or '?')[:12]}{dirty}"),
         ("seed", manifest.get("seed")),
         ("version", manifest.get("version")),
-        ("duration", f"{manifest.get('duration_seconds', 0):.0f}s"),
+        ("duration", f"{(manifest.get('duration_seconds') or 0):.0f}s"),
         ("tag", manifest.get("tag")),
     ]
     rows = " · ".join(
