@@ -302,6 +302,26 @@ class TestPreflightMessages:
 # --- from unit/preflight/test_check_expanded.py ---
 
 
+class TestRunPreflightCheckGateFlags:
+    """Gate flags passed to run_preflight_check reach the estimate."""
+
+    @mock.patch("panelcast.preflight.check.query_gpu_memory")
+    def test_gate_flags_reach_the_estimate(self, mock_query):
+        mock_query.return_value = GpuMemoryInfo(
+            device_name="Test GPU",
+            total_bytes=100 * 1024**3,
+            used_bytes=0,
+            free_bytes=100 * 1024**3,
+        )
+        off = run_preflight_check(**TEST_PARAMS)
+        on = run_preflight_check(
+            **TEST_PARAMS,
+            errors_in_variables=True,
+            heteroscedastic_entity_obs=True,
+        )
+        assert on.estimate.total_gb > off.estimate.total_gb
+
+
 class TestGenerateSuggestions:
     """Tests for _generate_suggestions function."""
 
@@ -380,6 +400,60 @@ class TestGenerateSuggestions:
             exclude_rw_raw_from_collection=True,
         )
         assert not [s for s in result if "--exclude-rw-raw-from-collection" in s]
+
+    def test_halved_chains_estimate_uses_exclusion_flag(self):
+        """The --num-chains suggestion must price the run's own model: with
+        the rw_raw exclusion on, recomputing without the flag quotes a ~25x
+        bigger collection term (regression: absurd suggested GB)."""
+        # Production scale so the wrong and right totals differ at .1f
+        params = {
+            "num_samples": 5000,
+            "num_warmup": 1000,
+            "n_observations": 20000,
+            "n_features": 32,
+            "n_artists": 7562,
+            "max_seq": 50,
+        }
+        result = _generate_suggestions(
+            status=PreflightStatus.FAIL,
+            num_chains=4,
+            jit_buffer_percent=0.10,
+            exclude_rw_raw_from_collection=True,
+            **params,
+        )
+        chain_suggestion = next(s for s in result if "--num-chains 2" in s)
+        halved = {**params, "num_chains": 2}
+        expected = estimate_memory_gb(
+            jit_buffer_percent=0.10, exclude_rw_raw_from_collection=True, **halved
+        )
+        wrong = estimate_memory_gb(jit_buffer_percent=0.10, **halved)
+        assert f"{wrong.total_gb:.1f}" != f"{expected.total_gb:.1f}"  # test is meaningful
+        assert f"{expected.total_gb:.1f} GB" in chain_suggestion
+        assert f"{wrong.total_gb:.1f} GB" not in chain_suggestion
+
+    def test_halved_chains_estimate_uses_gate_flags(self):
+        """New gate flags flow into the halved-chains estimate too."""
+        params = {
+            "num_samples": 5000,
+            "num_warmup": 1000,
+            "n_observations": 50000,
+            "n_features": 32,
+            "n_artists": 500,
+            "max_seq": 10,
+        }
+        result = _generate_suggestions(
+            status=PreflightStatus.FAIL,
+            num_chains=4,
+            jit_buffer_percent=0.10,
+            errors_in_variables=True,
+            **params,
+        )
+        chain_suggestion = next(s for s in result if "--num-chains 2" in s)
+        halved = {**params, "num_chains": 2}
+        expected = estimate_memory_gb(jit_buffer_percent=0.10, errors_in_variables=True, **halved)
+        wrong = estimate_memory_gb(jit_buffer_percent=0.10, **halved)
+        assert f"{wrong.total_gb:.1f}" != f"{expected.total_gb:.1f}"  # test is meaningful
+        assert f"{expected.total_gb:.1f} GB" in chain_suggestion
 
     def test_fail_suggests_full_preflight(self):
         result = _generate_suggestions(
