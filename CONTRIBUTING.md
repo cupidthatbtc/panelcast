@@ -25,7 +25,7 @@ selection skips both:
 # Fast unit/integration selection (matches CI's default gate)
 pixi run test-fast
 
-# With the coverage gate (fail_under = 80, configured in pyproject.toml)
+# With the coverage gate (fail_under = 95, configured in pyproject.toml)
 pixi run test-cov
 
 # Everything, including slow and end-to-end tests
@@ -63,8 +63,10 @@ chance to auto-fix formatting and imports.
 
 ## Conventions
 
-- **Commit messages** use a feature-area prefix: `feat(preflight):`,
-  `fix(gpu-memory):`, `test(cli):`, `docs(porting):`, etc. Keep them concise.
+- **Commit messages** are a short imperative subject line, optionally followed
+  by one short body paragraph — e.g. `make the likelihood parity guard
+  hardware-independent`. No conventional-commit prefixes (`feat:`, `fix(...)`,
+  etc.).
 - **Domain portability is a hard contract.** Dataset-specific names (columns,
   bounds, date formats) must flow through the `DatasetDescriptor`
   (`src/panelcast/config/descriptor.py`), never hard-coded. The guard test
