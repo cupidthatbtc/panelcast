@@ -1838,3 +1838,34 @@ class TestGbmOffsetColdStart:
             x_new = np.asarray(call.kwargs["X_new"])
             assert x_new.shape == (3,)
             assert (x_new == 0.0).all()
+
+
+class TestConformalColumns:
+    """conformal_q05/q95 emission when recalibrated levels are supplied (#156)."""
+
+    def _run(self, mock_posterior_samples, summary, conformal_levels):
+        mock_jax = _make_jax_mock()
+        rng = np.random.RandomState(77)
+        predict_return = {"y": rng.randn(200).astype(np.float32)}
+        with (
+            patch("panelcast.pipelines.predict_next.jax", mock_jax),
+            patch(
+                "panelcast.pipelines.predict_next.predict_new_entity",
+                return_value=predict_return,
+            ),
+        ):
+            return _predict_new_entities(
+                mock_posterior_samples, summary, conformal_levels=conformal_levels
+            )
+
+    def test_columns_present_with_levels(self, mock_posterior_samples, mock_summary):
+        result = self._run(mock_posterior_samples, mock_summary, (0.02, 0.98))
+        assert {"conformal_q05", "conformal_q95"} <= set(result.columns)
+        # Wider recalibrated levels must give a wider interval than the raw 5/95.
+        row = result.iloc[0]
+        assert row["conformal_q05"] <= row["pred_q05"]
+        assert row["conformal_q95"] >= row["pred_q95"]
+
+    def test_columns_absent_without_levels(self, mock_posterior_samples, mock_summary):
+        result = self._run(mock_posterior_samples, mock_summary, None)
+        assert "conformal_q05" not in result.columns

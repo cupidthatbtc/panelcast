@@ -146,6 +146,7 @@ class StageContext:
     # Split configuration
     val_albums: int = 0
     origin_offset: int = 0
+    conformal_calibration: bool = False
     min_train_albums: int = 1
     # Evaluation configuration
     calibration_intervals: tuple[float, ...] = (0.80, 0.95)
