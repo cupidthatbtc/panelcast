@@ -20,7 +20,7 @@ from panelcast.pipelines.compare_baselines import (
     ComparisonResult,
     _bayes_rows_from_metrics,
     _build_panel,
-    _entity_last_train_score,
+    _entity_last_score,
     _feature_cols,
     _json_safe,
     _render_markdown,
@@ -67,6 +67,7 @@ def _write_split_artifacts(
     test_df: pd.DataFrame,
     *,
     feature_cols: list[str] = FEATURE_COLS,
+    val_df: pd.DataFrame | None = None,
 ) -> None:
     """Persist train/test split + feature parquets for one split directory."""
     split_dir = root_splits / split_name
@@ -78,6 +79,8 @@ def _write_split_artifacts(
     feat_keep = [ROW_ID_COL, *feature_cols, "n_reviews"]
     train_df[split_keep].to_parquet(split_dir / "train.parquet")
     test_df[split_keep].to_parquet(split_dir / "test.parquet")
+    if val_df is not None:
+        val_df[split_keep].to_parquet(split_dir / "validation.parquet")
     train_df[feat_keep].to_parquet(feat_dir / "train_features.parquet")
     test_df[feat_keep].to_parquet(feat_dir / "test_features.parquet")
 
@@ -129,11 +132,11 @@ class TestFeatureCols:
         assert _feature_cols(df) == ["feat_a", "feat_b"]
 
 
-class TestEntityLastTrainScore:
+class TestEntityLastScore:
     def test_maps_entity_to_chronologically_last_score(self):
         df = _panel(n_entities=2, per=3)
         desc = make_aero_descriptor()
-        last = _entity_last_train_score(df, desc)
+        last = _entity_last_score(df, desc)
         # Last event per entity has the largest date.
         for ent, grp in df.groupby("Airframe"):
             expected = grp.sort_values("Flight_Date_Parsed")["Perf_Score"].iloc[-1]
@@ -143,7 +146,7 @@ class TestEntityLastTrainScore:
         df = _panel(n_entities=1, per=2)
         df.loc[df.index[-1], "Perf_Score"] = float("nan")
         desc = make_aero_descriptor()
-        last = _entity_last_train_score(df, desc)
+        last = _entity_last_score(df, desc)
         # The only remaining non-NaN score is the first event.
         assert last["AF0"] == pytest.approx(df["Perf_Score"].iloc[0])
 
@@ -271,6 +274,171 @@ class TestBuildPanelTestBranch:
         # NEW entity -> train_mean; AF0 -> its mapped prev score.
         assert panel.prev_score[0] == pytest.approx(7.5)
         assert panel.prev_score[1] == pytest.approx(6.5)
+
+
+def _event_row(
+    rid: int, entity: str, event: str, date: str, score: float, n_reviews: float = 20
+) -> dict:
+    return {
+        ROW_ID_COL: rid,
+        "Airframe": entity,
+        "Flight_ID": event,
+        "Flight_Date_Parsed": pd.Timestamp(date),
+        "Perf_Score": score,
+        "feat_a": 0.1 * rid,
+        "feat_b": -0.2 * rid,
+        "n_reviews": n_reviews,
+    }
+
+
+def _handmade_frames() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Two-entity panel: AF0 has a val event and two test events, AF1 neither."""
+    train = pd.DataFrame(
+        [
+            _event_row(0, "AF0", "AF0-F0", "2021-01-01", 5.0),
+            _event_row(1, "AF0", "AF0-F1", "2021-02-01", 6.0),
+            _event_row(2, "AF1", "AF1-F0", "2021-01-15", 4.0),
+            _event_row(3, "AF1", "AF1-F1", "2021-02-15", 4.5),
+        ]
+    )
+    val = pd.DataFrame([_event_row(20, "AF0", "AF0-FV", "2021-03-01", 8.0)])
+    test = pd.DataFrame(
+        [
+            _event_row(10, "AF0", "AF0-F2", "2021-04-01", 7.0),
+            _event_row(11, "AF0", "AF0-F3", "2021-05-01", 3.0),
+            _event_row(12, "AF1", "AF1-F2", "2021-04-15", 5.5),
+        ]
+    )
+    return train, val, test
+
+
+class TestSequentialPrevScore:
+    """Test-panel prev_score must mirror evaluate.py's sequential protocol."""
+
+    @staticmethod
+    def _load(tmp_path, split_type, train, test, val=None):
+        root_splits = tmp_path / "data" / "splits"
+        root_features = tmp_path / "data" / "features"
+        _write_split_artifacts(
+            root_splits, root_features, split_dir_name(split_type), train, test, val_df=val
+        )
+        desc = make_aero_descriptor()
+        return load_panel_pair(split_type, desc, root_splits, root_features)
+
+    def test_val_score_preferred_over_train(self, tmp_path):
+        train, val, test = _handmade_frames()
+        _, test_panel = self._load(
+            tmp_path, SplitType.WITHIN_ENTITY_TEMPORAL, train, test, val
+        )
+        # AF0's first test event conditions on its val score, not the last
+        # train score; AF1 has no val event and keeps its last train score.
+        assert test_panel.prev_score[0] == pytest.approx(8.0)
+        assert test_panel.prev_score[2] == pytest.approx(4.5)
+
+    def test_teacher_forces_preceding_test_labels(self, tmp_path):
+        train, val, test = _handmade_frames()
+        _, test_panel = self._load(
+            tmp_path, SplitType.WITHIN_ENTITY_TEMPORAL, train, test, val
+        )
+        # AF0's second test event conditions on the first test event's label.
+        assert test_panel.prev_score[1] == pytest.approx(7.0)
+
+    def test_without_validation_first_event_uses_last_train_score(self, tmp_path):
+        train, _, test = _handmade_frames()
+        _, test_panel = self._load(tmp_path, SplitType.WITHIN_ENTITY_TEMPORAL, train, test)
+        assert test_panel.prev_score[0] == pytest.approx(6.0)
+        assert test_panel.prev_score[1] == pytest.approx(7.0)
+        assert test_panel.prev_score[2] == pytest.approx(4.5)
+
+    def test_empty_validation_is_ignored(self, tmp_path):
+        train, val, test = _handmade_frames()
+        _, test_panel = self._load(
+            tmp_path, SplitType.WITHIN_ENTITY_TEMPORAL, train, test, val.iloc[0:0]
+        )
+        assert test_panel.prev_score[0] == pytest.approx(6.0)
+
+    def test_disjoint_split_keeps_cold_start_protocol(self, tmp_path):
+        # Entity-disjoint mirrors the model's cold-start evaluation: no val
+        # conditioning, no teacher forcing — every unseen-entity row gets the
+        # train mean.
+        train, _, _ = _handmade_frames()
+        test = pd.DataFrame(
+            [
+                _event_row(30, "AF9", "AF9-F0", "2021-04-01", 7.0),
+                _event_row(31, "AF9", "AF9-F1", "2021-05-01", 3.0),
+            ]
+        )
+        val = pd.DataFrame([_event_row(40, "AF9", "AF9-FV", "2021-03-01", 9.0)])
+        _, test_panel = self._load(tmp_path, SplitType.ENTITY_DISJOINT, train, test, val)
+        train_mean = train["Perf_Score"].mean()
+        assert test_panel.prev_score == pytest.approx([train_mean, train_mean])
+
+
+class TestNReviewsValidityFilter:
+    def test_invalid_test_rows_dropped(self, tmp_path):
+        train, _, test = _handmade_frames()
+        test.loc[0, "n_reviews"] = 0
+        test.loc[1, "n_reviews"] = float("nan")
+        root_splits = tmp_path / "data" / "splits"
+        root_features = tmp_path / "data" / "features"
+        _write_split_artifacts(
+            root_splits,
+            root_features,
+            split_dir_name(SplitType.WITHIN_ENTITY_TEMPORAL),
+            train,
+            test,
+        )
+        desc = make_aero_descriptor()
+        train_panel, test_panel = load_panel_pair(
+            SplitType.WITHIN_ENTITY_TEMPORAL, desc, root_splits, root_features
+        )
+        # Only the valid-n_reviews test row survives; train is untouched.
+        assert test_panel.y.shape[0] == 1
+        assert test_panel.y[0] == pytest.approx(5.5)
+        assert test_panel.entity[0] == "AF1"
+        assert train_panel.y.shape[0] == len(train)
+
+
+class TestNObsAlignmentCheck:
+    @staticmethod
+    def _run(tmp_path, monkeypatch, n_observations):
+        import structlog
+
+        _seed_both_splits(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(
+            "panelcast.pipelines.compare_baselines.load_descriptor",
+            lambda dataset=None: make_aero_descriptor(),
+        )
+        metrics_path = tmp_path / "metrics.json"
+        metrics_path.write_text(
+            json.dumps(
+                {
+                    "primary_split": "within_entity_temporal",
+                    "point_metrics": {"n_observations": n_observations, "mae": 1.0},
+                }
+            ),
+            encoding="utf-8",
+        )
+        with structlog.testing.capture_logs() as logs:
+            run_baseline_comparison(
+                dataset=None,
+                splits=(SplitType.WITHIN_ENTITY_TEMPORAL,),
+                n_samples=64,
+                output_dir=tmp_path / "reports" / "baselines",
+                include_bayes=True,
+                metrics_path=metrics_path,
+            )
+        return [e for e in logs if e["event"] == "baseline_n_obs_mismatch"]
+
+    def test_warns_when_bayes_n_obs_differs(self, tmp_path, monkeypatch):
+        warnings = self._run(tmp_path, monkeypatch, n_observations=999)
+        assert len(warnings) == 1
+        assert warnings[0]["bayes_n_obs"] == 999
+
+    def test_silent_when_n_obs_match(self, tmp_path, monkeypatch):
+        # _seed_both_splits holds out one test event per entity (4 entities).
+        assert self._run(tmp_path, monkeypatch, n_observations=4) == []
 
 
 # ---------------------------------------------------------------------------

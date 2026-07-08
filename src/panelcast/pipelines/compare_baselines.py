@@ -63,18 +63,18 @@ def _feature_cols(features_df: pd.DataFrame) -> list[str]:
     return [c for c in features_df.columns if c not in ("n_reviews", ROW_ID_COL)]
 
 
-def _entity_last_train_score(
-    train_df: pd.DataFrame, descriptor: DatasetDescriptor
+def _entity_last_score(
+    df: pd.DataFrame, descriptor: DatasetDescriptor
 ) -> dict[object, float]:
-    """Map each train entity to its chronologically-last training score."""
+    """Map each entity to its chronologically-last score in a split frame."""
     entity_col = descriptor.entity_col
     target_col = descriptor.target_col
     sort_cols = [entity_col]
-    if descriptor.parsed_date_col in train_df.columns:
+    if descriptor.parsed_date_col in df.columns:
         sort_cols.append(descriptor.parsed_date_col)
-    if descriptor.event_col in train_df.columns:
+    if descriptor.event_col in df.columns:
         sort_cols.append(descriptor.event_col)
-    ordered = train_df.sort_values(sort_cols, na_position="first")
+    ordered = df.sort_values(sort_cols, na_position="first")
     last = ordered.groupby(entity_col)[target_col].last()
     return {e: float(v) for e, v in last.items() if pd.notna(v)}
 
@@ -88,8 +88,16 @@ def _build_panel(
     train_mean: float,
     prev_score_map: dict[object, float] | None,
     is_train: bool,
+    sequential: bool = False,
 ) -> PanelData:
-    """Assemble a PanelData from a joined split/feature frame."""
+    """Assemble a PanelData from a joined split/feature frame.
+
+    ``sequential`` mirrors evaluate.py's within-entity temporal test protocol:
+    each test event's prev_score is the preceding test event's label (teacher
+    forcing), with the entity's first test event falling back to
+    ``prev_score_map`` (its last validation/train score). Non-sequential test
+    panels (entity-disjoint cold start) use the map alone.
+    """
     entity_col = descriptor.entity_col
     target_col = descriptor.target_col
     merged = join_splits_with_features(split_df, features_df, name="baseline_panel")
@@ -99,9 +107,9 @@ def _build_panel(
     y = pd.to_numeric(merged[target_col], errors="coerce").to_numpy(dtype=float)
     entity = merged[entity_col].to_numpy()
 
-    if is_train:
+    if is_train or sequential:
         # Order chronologically within entity before shift(1) so prev_score is
-        # the true predecessor, not a random row (mirrors _entity_last_train_score).
+        # the true predecessor, not a random row (mirrors _entity_last_score).
         sort_cols = [entity_col]
         if descriptor.parsed_date_col in merged.columns:
             sort_cols.append(descriptor.parsed_date_col)
@@ -109,11 +117,33 @@ def _build_panel(
             sort_cols.append(descriptor.event_col)
         ordered = merged.sort_values(sort_cols, kind="stable", na_position="first")
         prev = ordered.groupby(entity_col)[target_col].shift(1)
-        prev = prev.reindex(merged.index).fillna(train_mean)
-        prev_score = pd.to_numeric(prev, errors="coerce").to_numpy(dtype=float)
+        prev = pd.to_numeric(prev.reindex(merged.index), errors="coerce")
+        if is_train:
+            prev = prev.fillna(train_mean)
+        else:
+            boundary = pd.Series(
+                [(prev_score_map or {}).get(e, train_mean) for e in entity],
+                index=merged.index,
+                dtype=float,
+            )
+            prev = prev.fillna(boundary)
+        prev_score = prev.to_numpy(dtype=float)
     else:
         pmap = prev_score_map or {}
         prev_score = np.array([pmap.get(e, train_mean) for e in entity], dtype=float)
+
+    if not is_train:
+        # Mirror evaluate.py's test-row validity filter (NaN/<=0 n_reviews are
+        # dropped there before scoring) so the bayes row and the baseline rows
+        # score the same test subset.
+        nrev_col = "n_reviews" if "n_reviews" in merged.columns else descriptor.n_obs_col
+        if nrev_col in merged.columns:
+            nrev = pd.to_numeric(merged[nrev_col], errors="coerce")
+            invalid = (nrev.isna() | (nrev <= 0)).to_numpy()
+            if invalid.any():
+                log.info("baseline_invalid_n_reviews_dropped", n_dropped=int(invalid.sum()))
+                keep = ~invalid
+                X, y, entity, prev_score = X[keep], y[keep], entity[keep], prev_score[keep]
 
     return PanelData(
         X=X,
@@ -148,7 +178,28 @@ def load_panel_pair(
 
     target_col = descriptor.target_col
     train_mean = float(pd.to_numeric(train_split[target_col], errors="coerce").mean())
-    prev_map = _entity_last_train_score(train_split, descriptor)
+    prev_map = _entity_last_score(train_split, descriptor)
+
+    # Sequential protocol only for the within-entity temporal split, mirroring
+    # evaluate.py: a validation event's score is the most recent known value
+    # before the entity's first test event. The entity-disjoint split keeps the
+    # cold-start protocol (train-mean prev), matching the model's evaluation.
+    sequential = split_type is SplitType.WITHIN_ENTITY_TEMPORAL
+    if sequential:
+        for val_name in ("validation.parquet", "val.parquet"):
+            val_path = split_dir / val_name
+            if not val_path.exists():
+                continue
+            val_split = pd.read_parquet(val_path)
+            if not val_split.empty:
+                val_map = _entity_last_score(val_split, descriptor)
+                prev_map.update(val_map)
+                log.info(
+                    "baseline_prev_score_mode",
+                    mode="sequential_with_val",
+                    n_val_entities=len(val_map),
+                )
+            break
 
     train_panel = _build_panel(
         train_split,
@@ -167,6 +218,7 @@ def load_panel_pair(
         train_mean=train_mean,
         prev_score_map=prev_map,
         is_train=False,
+        sequential=sequential,
     )
     return train_panel, test_panel
 
@@ -217,6 +269,28 @@ def _bayes_rows_from_metrics(
     row["ppc_skew_p"] = _nan_get(ppc_summary, "skewness", "p_value")
     row["runtime_s"] = float("nan")
     return [row]
+
+
+def _check_n_obs_alignment(bayes_rows: list[dict], scores: list[BaselineScore]) -> None:
+    """Warn loudly when bayes and baseline rows were scored on different test subsets.
+
+    The baseline panels mirror evaluate.py's NaN/<=0 n_reviews validity filter,
+    so a count mismatch on the same split means the table's rows are not
+    directly comparable (stale metrics.json, diverging filters, ...).
+    """
+    for row in bayes_rows:
+        n_bayes = row.get("n_obs")
+        if not isinstance(n_bayes, (int, float)) or not math.isfinite(float(n_bayes)):
+            continue
+        baseline_n = {s.n_obs for s in scores if s.split == row.get("split")}
+        if baseline_n and baseline_n != {int(n_bayes)}:
+            log.warning(
+                "baseline_n_obs_mismatch",
+                split=row.get("split"),
+                bayes_n_obs=int(n_bayes),
+                baseline_n_obs=sorted(baseline_n),
+                message="bayes and baseline rows scored different test subsets",
+            )
 
 
 def _verify_features_match_metrics(metrics_path: Path) -> None:
@@ -276,7 +350,9 @@ def run_baseline_comparison(
         all_rows.extend(s.to_row(levels) for s in scores)
 
     if include_bayes:
-        all_rows.extend(_bayes_rows_from_metrics(metrics_path, levels))
+        bayes_rows = _bayes_rows_from_metrics(metrics_path, levels)
+        _check_n_obs_alignment(bayes_rows, all_scores)
+        all_rows.extend(bayes_rows)
 
     table = create_baseline_benchmark_table(all_rows, levels=levels)
 
