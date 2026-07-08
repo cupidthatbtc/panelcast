@@ -633,7 +633,7 @@ When `n_ref` is provided, the model uses sigma-ref reparameterization (see Part 
 | Diagnostic | Threshold | Source |
 |-----------|-----------|--------|
 | R-hat | `< rhat_threshold` (default 1.01) | ArviZ rank-normalized split-R-hat |
-| ESS-bulk | `>= ess_threshold * num_chains` (default 1600) | ArviZ ESS-bulk |
+| ESS-bulk | `>= ess_threshold` total across chains (default 400) | ArviZ ESS-bulk |
 | ESS-tail | Reported but not in pass/fail | ArviZ ESS-tail |
 | Divergences | 0 unless `allow_divergences=True` | `sample_stats["diverging"]` |
 

@@ -276,8 +276,8 @@ def create_diagnostics_table(
     rhat_threshold : float, default 1.01
         Maximum acceptable R-hat value for convergence.
     ess_threshold : int, default 400
-        Minimum acceptable ESS per chain. Multiplied by number of chains
-        to get total ESS threshold.
+        Minimum acceptable total ESS-bulk (summed across chains), matching
+        the check_convergence gate.
 
     Returns
     -------
@@ -300,9 +300,9 @@ def create_diagnostics_table(
 
     Notes
     -----
-    The ESS threshold is applied per-chain. With 4 chains and threshold=400,
-    total ESS must be >= 1600 to pass. R-hat values are formatted to 4
-    decimal places; ESS values are shown as integers.
+    The ESS threshold is a floor on total ESS-bulk (summed across chains),
+    the quantity ArviZ reports. R-hat values are formatted to 4 decimal
+    places; ESS values are shown as integers.
     """
     if "posterior" not in idata.groups():
         raise ValueError("InferenceData must have 'posterior' group")
@@ -310,10 +310,6 @@ def create_diagnostics_table(
     # Handle empty var_names
     if var_names is not None and len(var_names) == 0:
         return pd.DataFrame(columns=["R-hat", "ESS Bulk", "ESS Tail", "MCSE Mean", "Status"])
-
-    # Get number of chains for ESS threshold
-    num_chains = idata.posterior.sizes.get("chain", 1)
-    total_ess_threshold = ess_threshold * num_chains
 
     # Get ArviZ summary with diagnostics only
     summary = pd.DataFrame(az.summary(idata, var_names=var_names, kind="diagnostics"))
@@ -342,7 +338,7 @@ def create_diagnostics_table(
         ess_bulk = float(summary.at[row_name, "ess_bulk"])
 
         rhat_ok = rhat <= rhat_threshold
-        ess_ok = ess_bulk >= total_ess_threshold
+        ess_ok = ess_bulk >= ess_threshold
 
         if rhat_ok and ess_ok:
             return "Pass"

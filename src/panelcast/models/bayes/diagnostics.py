@@ -3,8 +3,11 @@
 This module provides publication-standard convergence assessment for NumPyro models.
 The recommended thresholds follow current best practices:
 - R-hat < 1.01 (Vehtari et al. 2021, rank-normalized split-R-hat)
-- ESS-bulk and ESS-tail > 400 per chain (1600 total with 4 chains)
+- ESS-bulk >= 400 total across chains (Vehtari et al. 2021)
 - Zero divergent transitions (or minimal with documented justification)
+
+ESS-tail is reported for inspection but is deliberately NOT part of the
+pass/fail gate (see docs/DATA_LINEAGE.md section 3.4.5).
 
 Usage:
     >>> from panelcast.models.bayes import fit_model, user_score_model
@@ -42,10 +45,12 @@ class ConvergenceDiagnostics:
 
     Attributes:
         rhat_max: Maximum R-hat across all parameters. Should be < 1.01.
-        ess_bulk_min: Minimum ESS-bulk (total across chains). Should be > 400 * num_chains.
-        ess_tail_min: Minimum ESS-tail (total across chains). Should be > 400 * num_chains.
+        ess_bulk_min: Minimum ESS-bulk (total across chains). Should be >= ess_threshold.
+        ess_tail_min: Minimum ESS-tail (total across chains). Informational only —
+            not part of the pass/fail gate.
         divergences: Total divergent transitions across all chains.
-        passed: True if all criteria met (R-hat, ESS, and divergences).
+        passed: True if the gate criteria are met: R-hat, bulk-ESS (total floor),
+            and divergences. Tail ESS is reported but never gates.
         failing_params: List of parameter names failing R-hat or ESS thresholds.
         summary_df: Full ArviZ diagnostic summary DataFrame for inspection.
 
@@ -97,9 +102,9 @@ def check_convergence(
         Maximum acceptable R-hat value. Parameters with R-hat >= threshold
         are flagged as failing. Default follows publication standards.
     ess_threshold : int, default 400
-        Minimum acceptable ESS per chain. With 4 chains, this means total
-        ESS must be >= 1600. ArviZ summary reports total ESS, so the
-        actual comparison is against ess_threshold * num_chains.
+        Minimum acceptable total ESS-bulk (summed across chains), matching
+        ArviZ's reporting convention. Default 400 total per Vehtari et al.
+        (2021) and the publication-readiness gate.
     allow_divergences : bool, default False
         If True, divergences do not cause overall failure (useful for
         sensitivity analysis where some divergences may be acceptable).
@@ -127,9 +132,9 @@ def check_convergence(
 
     Notes
     -----
-    The ESS threshold is applied as total ESS (not per-chain). With the
-    default of 400 and 4 chains, this requires total ESS >= 1600. This
-    follows the convention that az.summary() reports total ESS across chains.
+    The ESS threshold is a floor on total ESS (summed across chains), the
+    same quantity az.summary() reports and the same floor the publication
+    gate applies. Tail ESS is extracted for reporting but never gates.
 
     R-hat uses ArviZ's rank-normalized split-R-hat implementation, which
     is more robust than the original Gelman-Rubin statistic.
@@ -140,9 +145,6 @@ def check_convergence(
     if "sample_stats" not in idata.groups():
         raise ValueError("InferenceData must have 'sample_stats' group for divergence extraction")
 
-    # Detect number of chains from posterior (use .sizes for dict-like access)
-    num_chains = idata.posterior.sizes.get("chain", 1)
-
     # Get diagnostic summary (R-hat, ESS-bulk, ESS-tail, MCSE)
     # kind="diagnostics" is more efficient than "all"
     summary = az.summary(idata, kind="diagnostics")
@@ -150,17 +152,13 @@ def check_convergence(
     # Extract R-hat (max across all parameters)
     rhat_max = float(summary["r_hat"].max())
 
-    # Extract ESS (min across all parameters)
-    # ArviZ reports total ESS, so compare against threshold * num_chains
+    # Extract ESS (min across all parameters); ArviZ reports total ESS
     ess_bulk_min = int(summary["ess_bulk"].min())
     ess_tail_min = int(summary["ess_tail"].min())
 
-    # Calculate total ESS threshold
-    total_ess_threshold = ess_threshold * num_chains
-
     # Identify failing parameters
     failing_rhat = summary[summary["r_hat"] >= rhat_threshold].index.tolist()
-    failing_ess = summary[summary["ess_bulk"] < total_ess_threshold].index.tolist()
+    failing_ess = summary[summary["ess_bulk"] < ess_threshold].index.tolist()
     failing_params = list(set(failing_rhat + failing_ess))
 
     # Extract divergences from sample_stats
@@ -173,7 +171,7 @@ def check_convergence(
 
     # Determine pass/fail
     rhat_ok = rhat_max < rhat_threshold
-    ess_ok = ess_bulk_min >= total_ess_threshold
+    ess_ok = ess_bulk_min >= ess_threshold
     divergences_ok = (divergences == 0) or allow_divergences
 
     passed = rhat_ok and ess_ok and divergences_ok
