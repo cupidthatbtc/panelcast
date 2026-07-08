@@ -80,7 +80,14 @@ class SweepConfig:
     num_warmup: int | None = None
     extra_config: dict[str, Any] = field(default_factory=dict)
     panelcast_bin: str | None = None
-    arm_timeout_seconds: float | None = None
+    # Per-arm kill threshold: seconds, or "auto" to size each arm's timeout from
+    # its predicted runtime (a fixed timeout structurally kills every arm that
+    # retains the ~10x-cost offset_logit transform, #138). The multiplier
+    # absorbs non-train stages and prediction error; the floor keeps sparse
+    # history from producing hair-trigger kills.
+    arm_timeout_seconds: float | str | None = None
+    arm_timeout_multiplier: float = 3.0
+    arm_timeout_floor_seconds: float = 1800.0
 
     @property
     def sweep_dir(self) -> Path:
@@ -100,6 +107,9 @@ class ArmRecord:
     error: str | None = None
     score: dict[str, Any] | None = None
     note: str | None = None
+    # Optional with defaults so 0.7.x-era ledgers (without these keys) still load.
+    predicted_seconds: float | None = None
+    timeout_seconds_used: float | None = None
 
 
 def arm_id(knobs: dict[str, Any]) -> str:
@@ -365,6 +375,38 @@ def _write_arm_config(
     path.write_text(yaml.safe_dump(payload, sort_keys=True), encoding="utf-8")
 
 
+def resolve_arm_timeout(
+    cfg: SweepConfig, merged: dict[str, Any], dims: dict[str, int] | None = None
+) -> tuple[float | None, Any]:
+    """One arm's kill threshold; returns (timeout_seconds, RuntimePrediction | None).
+
+    An explicit numeric ``arm_timeout_seconds`` passes through untouched
+    (reproducibility: a number the user typed always wins). ``"auto"`` predicts
+    the arm's own runtime — transform-aware, at the sampler scale the arm
+    subprocess will actually run — and uses max(floor, multiplier * predicted).
+    Without data dims to predict from, auto falls back to the floor.
+    """
+    if cfg.arm_timeout_seconds is None:
+        return None, None
+    if cfg.arm_timeout_seconds != "auto":
+        return float(cfg.arm_timeout_seconds), None
+    if dims is None:
+        return cfg.arm_timeout_floor_seconds, None
+    from panelcast.gpu_memory.runtime_predictor import predict_fit_seconds
+    from panelcast.pipelines.orchestrator import PipelineConfig
+
+    defaults = PipelineConfig()
+    prediction = predict_fit_seconds(
+        cfg.num_chains or defaults.num_chains,
+        cfg.num_samples or defaults.num_samples,
+        cfg.num_warmup or defaults.num_warmup,
+        int(dims.get("n_observations") or 0),
+        transform=merged.get("target_transform") or defaults.target_transform,
+    )
+    timeout = max(cfg.arm_timeout_floor_seconds, cfg.arm_timeout_multiplier * prediction.seconds)
+    return timeout, prediction
+
+
 def launch_arm(
     config_path: Path, panelcast_bin: str, timeout_seconds: float | None = None
 ) -> tuple[int, str]:
@@ -455,6 +497,24 @@ def _resolve_attributed_run(
     return run_dir, problem
 
 
+def _apply_arm_timeout(
+    cfg: SweepConfig, merged: dict[str, Any], dims: dict[str, int] | None, record: ArmRecord
+) -> float | None:
+    """Resolve one arm's timeout onto its record; auto predictions are logged."""
+    timeout_seconds, prediction = resolve_arm_timeout(cfg, merged, dims)
+    record.timeout_seconds_used = timeout_seconds
+    if prediction is not None:
+        record.predicted_seconds = round(prediction.seconds, 1)
+        log.info(
+            "arm_timeout_auto",
+            arm_id=record.arm_id,
+            predicted_seconds=record.predicted_seconds,
+            timeout_seconds=timeout_seconds,
+            source=prediction.source,
+        )
+    return timeout_seconds
+
+
 def _record_launch_failure(record: ArmRecord, code: int, tail: str) -> None:
     if code == ARM_TIMEOUT_RETURNCODE:
         record.status = "timeout"
@@ -472,12 +532,15 @@ def run_sweep(
     available_columns: frozenset[str] | None = None,
     launch: Callable[..., tuple[int, str]] | None = None,
     scorer: Callable[[Path, Path | None], dict[str, Any]] | None = None,
+    dims: dict[str, int] | None = None,
 ) -> SweepLedger:
     """Execute the staged sweep serially; every arm checkpoints the ledger.
 
     ``launch`` and ``scorer`` are injectable for tests; the defaults run the
     real pipeline subprocess and (when the scoring module is present) the
-    paired-ELPD scorer against the reference arm's snapshot.
+    paired-ELPD scorer against the reference arm's snapshot. ``dims`` are the
+    data dimensions the orchestrator already resolved from the prepared
+    feature matrix; the "auto" arm timeout predicts from them per arm.
     """
     launch = launch or launch_arm
     panelcast_bin = cfg.panelcast_bin or _default_panelcast_bin()
@@ -531,10 +594,11 @@ def run_sweep(
         record = ArmRecord(arm_id=aid, knobs=arm, stage=stage, note=note)
         config_path = cfg.sweep_dir / f"arm_{aid}.yaml"
         _write_arm_config(cfg, merged, stages, config_path)
+        timeout_seconds = _apply_arm_timeout(cfg, merged, dims, record)
         log.info("arm_start", arm_id=aid, stage=stage, knobs=arm, stages=stages)
         started = time.monotonic()
         launched_at = datetime.now()
-        code, tail = launch(config_path, panelcast_bin, cfg.arm_timeout_seconds)
+        code, tail = launch(config_path, panelcast_bin, timeout_seconds)
         record.wall_clock_seconds = time.monotonic() - started
         if code != 0:
             _record_launch_failure(record, code, tail)

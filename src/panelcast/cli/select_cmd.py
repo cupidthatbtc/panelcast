@@ -37,14 +37,14 @@ def select(
     budget_hours: float | None = typer.Option(
         None, "--budget-hours", min=0.1, help="GPU-hour budget; stages truncate in priority order."
     ),
-    arm_timeout: float | None = typer.Option(
-        1800.0,
+    arm_timeout: str = typer.Option(
+        "1800",
         "--arm-timeout",
         help=(
-            "Per-arm wall-clock timeout in seconds; a fit exceeding it is "
+            "Per-arm wall-clock timeout in seconds, or 'auto' to size each "
+            "arm's timeout from its predicted runtime; a fit exceeding it is "
             "killed and marked failed."
         ),
-        min=1.0,
     ),
     sweep_id: str = typer.Option(
         "sweep", "--sweep-id", help="Sweep directory name under outputs/select/ (enables --resume)."
@@ -91,16 +91,17 @@ def select(
         max_fits=max_fits,
         budget_hours=budget_hours,
         promote_z=rules.promote_z,
-        arm_timeout_seconds=arm_timeout,
+        arm_timeout_seconds=_parse_arm_timeout(arm_timeout),
     )
 
+    dims = resolve_dims(_prepared_paths(descriptor))
     plan = build_plan(
         descriptor,
         tier,
         cfg,
         dataset_label=label,
         n_confirmation_seeds=len(rules.confirmation_seeds),
-        dims=resolve_dims(_prepared_paths(descriptor)),
+        dims=dims,
     )
     plan.notes.append(
         f"pre-registered rules in effect: promote_z={rules.promote_z:g}, "
@@ -128,6 +129,7 @@ def select(
         train_df=train_df,
         feature_cols=feature_cols,
         available_columns=frozenset(train_df.columns) if train_df is not None else None,
+        dims=dims,
     )
     typer.echo(f"\nSweep complete. Report: {result['report_dir']}/report.md")
     if result["winner_arm"]:
@@ -142,6 +144,22 @@ def select(
         )
     else:
         typer.echo("No candidate cleared the pre-registered bar; defaults hold.")
+
+
+def _parse_arm_timeout(value: str) -> float | str:
+    """Seconds as a number, or the literal 'auto' (predicted-runtime timeouts)."""
+    if value.strip().lower() == "auto":
+        return "auto"
+    try:
+        seconds = float(value)
+    except ValueError:
+        raise typer.BadParameter(
+            f"expected a number of seconds or 'auto', got {value!r}",
+            param_hint="--arm-timeout",
+        ) from None
+    if seconds < 1.0:
+        raise typer.BadParameter("must be at least 1 second", param_hint="--arm-timeout")
+    return seconds
 
 
 _FEATURES_PATH = Path("data/features/train_features.parquet")

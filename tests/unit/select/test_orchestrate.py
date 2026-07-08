@@ -67,6 +67,17 @@ class TestBuildPlan:
         plan = build_plan(AOTY, STANDARD, _cfg(tmp_path, max_fits=3), dataset_label="aoty")
         assert plan.min_fits <= plan.max_fits_planned == 3
 
+    def test_auto_timeout_noted_in_plan(self, tmp_path):
+        cfg = _cfg(tmp_path, arm_timeout_seconds="auto")
+        plan = build_plan(AOTY, STANDARD, cfg, dataset_label="aoty")
+        assert any("per-arm timeout: auto" in n for n in plan.notes)
+        assert "per-arm timeout: auto" in render_plan(plan)
+
+    def test_numeric_timeout_not_noted(self, tmp_path):
+        cfg = _cfg(tmp_path, arm_timeout_seconds=1800.0)
+        plan = build_plan(AOTY, STANDARD, cfg, dataset_label="aoty")
+        assert not any("per-arm timeout" in n for n in plan.notes)
+
 
 class TestRenderPlan:
     def test_contains_space_and_pruned(self):
@@ -390,7 +401,7 @@ class TestScreeningCandidate:
             def to_dict(self):
                 return {"confirmed": True}
 
-        def fake_confirm(winner_knobs, cfg, seeds, promote_z, sampler_overrides, launch):
+        def fake_confirm(winner_knobs, cfg, seeds, promote_z, sampler_overrides, launch, dims=None):
             captured["overrides"] = sampler_overrides
             captured["knobs"] = winner_knobs
             return _Result()

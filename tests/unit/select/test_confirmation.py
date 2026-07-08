@@ -12,6 +12,7 @@ import xarray as xr
 from panelcast.select.confirmation import (
     ConfirmationResult,
     SeedResult,
+    _confirmation_timeout,
     render_confirmation,
     run_confirmation,
 )
@@ -187,6 +188,48 @@ class TestConfirmationTimeout:
             tmp_path, monkeypatch, cfg, {"num_samples": 5000, "num_warmup": 5000}
         )
         assert timeouts == [None, None]
+
+
+class TestConfirmationAutoTimeout:
+    def _auto_cfg(self, tmp_path) -> SweepConfig:
+        return SweepConfig(
+            sweep_id="c", output_root=tmp_path / "select", panelcast_bin="pc",
+            num_samples=1000, num_warmup=1000, arm_timeout_seconds="auto",
+        )
+
+    def test_auto_base_is_the_resolved_timeout_scaled(self, tmp_path, monkeypatch):
+        import panelcast.gpu_memory.runtime_predictor as rp
+
+        monkeypatch.setattr(
+            rp, "predict_fit_seconds",
+            lambda *a, **k: rp.RuntimePrediction(seconds=1000.0, source="stub"),
+        )
+        timeout = _confirmation_timeout(
+            self._auto_cfg(tmp_path), {"num_samples": 5000, "num_warmup": 5000},
+            winner_knobs={"latent_process": "ar1"}, dims={"n_observations": 5000},
+        )
+        # base max(1800 floor, 3x1000) = 3000, x5 publication sampler ratio.
+        assert timeout == 15000.0
+
+    def test_auto_without_dims_scales_the_floor(self, tmp_path):
+        timeout = _confirmation_timeout(
+            self._auto_cfg(tmp_path), {"num_samples": 5000, "num_warmup": 5000},
+            winner_knobs={}, dims=None,
+        )
+        assert timeout == 1800.0 * 5
+
+    def test_run_confirmation_threads_auto_timeout(self, tmp_path, monkeypatch):
+        _, launch = _fake_env(tmp_path, monkeypatch)
+        cfg = self._auto_cfg(tmp_path)
+        timeouts: list = []
+
+        def capturing(config_path, panelcast_bin, timeout_seconds=None):
+            timeouts.append(timeout_seconds)
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=capturing)
+        # No dims: auto resolves to the floor, unscaled without overrides.
+        assert timeouts == [1800.0, 1800.0]
 
 
 class TestSelfPairGuard:
