@@ -193,3 +193,38 @@ def apply_yaml_overrides(
             ),
         )
     return out
+
+
+def dump_resolved_config(config: Any) -> str:
+    """The fully-resolved PipelineConfig as YAML that round-trips losslessly.
+
+    Emits every mapped YAML key from the post-layering config object (preset +
+    --config overlays + CLI wins + descriptor-resolved values collapsed), so a
+    run can be re-executed from its run directory alone. Round-trip identity
+    (config -> yaml -> config) is test-pinned, which permanently prevents new
+    config knobs from escaping provenance.
+    """
+    import yaml  # type: ignore[import-untyped]
+
+    payload: dict[str, Any] = {}
+    for yaml_key, spec in PIPELINE_YAML_MAPPING.items():
+        value = getattr(config, spec.config_field, None)
+        if value is None:
+            # None is "unset" for every mapped knob (stages=all, dataset=AOTY,
+            # checkpointing off); omitting round-trips to the same default and
+            # keeps transforms that reject None out of the load path.
+            continue
+        if isinstance(value, tuple):
+            value = list(value)
+        payload[yaml_key] = value
+    return yaml.safe_dump(payload, sort_keys=True)
+
+
+def load_resolved_config(path: Any) -> dict[str, Any]:
+    """PipelineConfig kwargs from a resolved_config.yaml (inverse of dump)."""
+    from pathlib import Path
+
+    import yaml  # type: ignore[import-untyped]
+
+    yaml_data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    return apply_yaml_overrides({}, yaml_data)

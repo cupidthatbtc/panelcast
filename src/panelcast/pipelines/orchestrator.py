@@ -672,6 +672,15 @@ class PipelineOrchestrator:
         # Save initial manifest
         save_run_manifest(self.manifest, self.run_dir)
 
+        # The post-layering truth (preset + YAML overlays + CLI wins +
+        # descriptor-resolved values) — the manifest command string cannot
+        # express YAML-only gates, so this is what `runs reproduce` re-executes.
+        from panelcast.config.pipeline_yaml import dump_resolved_config
+
+        (self.run_dir / "resolved_config.yaml").write_text(
+            dump_resolved_config(self.config), encoding="utf-8"
+        )
+
     # MCMC config keys that should be restored from manifest on resume
     RESUME_CONFIG_KEYS = (
         # The RNG seed governs the whole MCMC draw; a resume that reverts to the
