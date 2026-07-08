@@ -72,6 +72,17 @@ class TestStore:
         append_record(_inputs(), 8.3, 7.4, 3000.0, path=path)
         assert len(load_records(path)) == 1
 
+    def test_non_object_json_store_treated_as_corrupt(self, tmp_path):
+        """Valid JSON that isn't an object ([], null, string) must not raise
+        out of append_record — telemetry never breaks a fit."""
+        for content in ('[{"records": []}]', "null", '"records"'):
+            path = tmp_path / "cal.json"
+            path.write_text(content, encoding="utf-8")
+            assert load_records(path) == []
+            append_record(_inputs(), 8.3, 7.4, 3000.0, path=path)
+            assert len(load_records(path)) == 1
+            path.unlink()
+
     def test_cap_keeps_most_recent(self, tmp_path):
         path = tmp_path / "cal.json"
         for i in range(205):

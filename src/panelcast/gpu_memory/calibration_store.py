@@ -101,9 +101,17 @@ def _read_records_for_append(path: Path) -> list[dict[str, Any]] | None:
         except OSError:
             time.sleep(delay)
             continue
-        records = payload.get("records", [])
-        return records if isinstance(records, list) else []
+        return _records_from_payload(payload)
     return None
+
+
+def _records_from_payload(payload: Any) -> list[dict[str, Any]]:
+    """Records list from a parsed store payload; non-dict payloads (a JSON
+    array, null, bare string) are corruption too — treat as empty."""
+    if not isinstance(payload, dict):
+        return []
+    records = payload.get("records", [])
+    return records if isinstance(records, list) else []
 
 
 def load_records(path: Path | None = None) -> list[dict[str, Any]]:
@@ -111,10 +119,9 @@ def load_records(path: Path | None = None) -> list[dict[str, Any]]:
     path = path or default_store_path()
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
-        records = payload.get("records", [])
-        return records if isinstance(records, list) else []
     except (OSError, ValueError):
         return []
+    return _records_from_payload(payload)
 
 
 def _linear_terms(inputs: dict[str, Any]) -> tuple[float, float] | None:

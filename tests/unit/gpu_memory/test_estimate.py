@@ -294,6 +294,17 @@ class TestGatedVectorSites:
         expected = _collection_term_gb(big["n_artists"], big["num_samples"])
         assert no_excl_on.per_chain_gb - no_excl_off.per_chain_gb == pytest.approx(expected)
 
+    def test_entity_obs_kept_at_exact_cap(self):
+        """At exactly ENTITY_OBS_KEEP_MAX the site stays in collection — the
+        drop condition is strictly greater-than (train_bayes wiring)."""
+        at_cap = {**STANDARD_PARAMS, "n_artists": ENTITY_OBS_KEEP_MAX}
+        off = estimate_memory_gb(**at_cap, exclude_rw_raw_from_collection=True)
+        on = estimate_memory_gb(
+            **at_cap, exclude_rw_raw_from_collection=True, heteroscedastic_entity_obs=True
+        )
+        expected = _collection_term_gb(at_cap["n_artists"], at_cap["num_samples"])
+        assert on.per_chain_gb - off.per_chain_gb == pytest.approx(expected)
+
     def test_group_pooling_adds_n_groups_term(self):
         off = estimate_memory_gb(**STANDARD_PARAMS)
         on = estimate_memory_gb(**STANDARD_PARAMS, entity_group_pooling=True, n_groups=7)
