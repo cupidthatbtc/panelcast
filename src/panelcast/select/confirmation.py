@@ -20,7 +20,12 @@ from typing import Any
 import structlog
 import yaml  # type: ignore[import-untyped]
 
-from panelcast.select.runner import SweepConfig, _default_panelcast_bin, launch_arm
+from panelcast.select.runner import (
+    SweepConfig,
+    _default_panelcast_bin,
+    launch_arm,
+    resolve_arm_timeout,
+)
 from panelcast.select.scoring import PairedElpd, paired_elpd
 from panelcast.select.space import default_arm
 
@@ -114,23 +119,37 @@ def _write_config(
 
 
 def _confirmation_timeout(
-    cfg: SweepConfig, sampler_overrides: dict[str, int] | None
+    cfg: SweepConfig,
+    sampler_overrides: dict[str, int] | None,
+    winner_knobs: dict[str, Any] | None = None,
+    dims: dict[str, int] | None = None,
 ) -> float | None:
     """Per-fit timeout for confirmation, scaled from the screening arm timeout.
 
     Confirmation may run at publication scale (5-10x the screening sampler):
     reusing the screening timeout would kill legitimate fits, while no timeout
     lets one hang stall `panelcast select` forever. The screening timeout is
-    the floor.
+    the floor. With ``arm_timeout_seconds="auto"`` the screening base is the
+    larger of the reference arm's and the winner arm's resolved auto timeouts
+    (both sides fit every seed under one shared threshold), falling back to
+    the configured floor when there are no dims to predict from.
     """
     if cfg.arm_timeout_seconds is None:
         return None
+    if cfg.arm_timeout_seconds == "auto":
+        base_arm = default_arm()
+        screening = max(
+            resolve_arm_timeout(cfg, merged, dims)[0]
+            for merged in (base_arm, {**base_arm, **(winner_knobs or {})})
+        )
+    else:
+        screening = float(cfg.arm_timeout_seconds)
     overrides = sampler_overrides or {}
     base = (cfg.num_samples or 1000) + (cfg.num_warmup or 1000)
     scaled = overrides.get("num_samples", cfg.num_samples or 1000) + overrides.get(
         "num_warmup", cfg.num_warmup or 1000
     )
-    return cfg.arm_timeout_seconds * max(1.0, scaled / base)
+    return screening * max(1.0, scaled / base)
 
 
 def run_confirmation(
@@ -140,6 +159,7 @@ def run_confirmation(
     promote_z: float = 2.0,
     sampler_overrides: dict[str, int] | None = None,
     launch: Callable[..., tuple[int, str]] | None = None,
+    dims: dict[str, int] | None = None,
 ) -> ConfirmationResult:
     """Fit reference + winner on each seed, pair per seed, demand consistency.
 
@@ -156,7 +176,7 @@ def run_confirmation(
     cfg.sweep_dir.mkdir(parents=True, exist_ok=True)
     base = default_arm()
     result = ConfirmationResult(winner_knobs=winner_knobs, promote_z=promote_z)
-    timeout = _confirmation_timeout(cfg, sampler_overrides)
+    timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
     def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:
         config_path = cfg.sweep_dir / f"confirm_{label}_seed{seed}.yaml"

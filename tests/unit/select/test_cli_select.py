@@ -57,6 +57,35 @@ class TestArgs:
         assert "planned fits: " in result.stdout
 
 
+class TestArmTimeoutOption:
+    def test_auto_shown_in_plan(self):
+        result = runner.invoke(
+            app, ["select", "--dry-run", "--arm-timeout", "auto", "--config", CONFIG]
+        )
+        assert result.exit_code == 0
+        assert "per-arm timeout: auto" in result.stdout
+
+    def test_numeric_accepted_without_auto_note(self):
+        result = runner.invoke(
+            app, ["select", "--dry-run", "--arm-timeout", "900", "--config", CONFIG]
+        )
+        assert result.exit_code == 0
+        assert "per-arm timeout: auto" not in result.stdout
+
+    def test_garbage_value_rejected(self):
+        result = runner.invoke(
+            app, ["select", "--dry-run", "--arm-timeout", "soonish", "--config", CONFIG]
+        )
+        assert result.exit_code == 2
+        assert "auto" in result.output
+
+    def test_sub_second_value_rejected(self):
+        result = runner.invoke(
+            app, ["select", "--dry-run", "--arm-timeout", "0.5", "--config", CONFIG]
+        )
+        assert result.exit_code == 2
+
+
 class TestConfigHandling:
     def test_explicit_missing_config_errors(self):
         # A typo'd --config must not silently run under shipped defaults.

@@ -23,6 +23,7 @@ from panelcast.select.runner import (
     feature_signature,
     ofat_arms,
     reorder_arms,
+    resolve_arm_timeout,
     run_sweep,
     stage2_arms,
     stage2_winners,
@@ -410,6 +411,105 @@ class TestArmTimeout:
         assert relaunched.records[timeout_id].status == "timeout"
         # The failed arm is retryable: resume re-ran it and it completed this time.
         assert relaunched.records[failed_id].status == "completed"
+
+
+class TestAdaptiveTimeout:
+    DIMS = {"n_observations": 5000, "n_features": 40, "n_artists": 900, "max_seq": 30}
+
+    def _stub_predict(self, monkeypatch, seconds, source="local history (offset_logit), n=3"):
+        import panelcast.gpu_memory.runtime_predictor as rp
+
+        calls: list[dict] = []
+
+        def fake(num_chains, num_samples, num_warmup, n_obs, transform=None, store_path=None):
+            calls.append({"transform": transform, "n_obs": n_obs})
+            return rp.RuntimePrediction(seconds=seconds, source=source)
+
+        monkeypatch.setattr(rp, "predict_fit_seconds", fake)
+        return calls
+
+    def _auto_cfg(self, tmp_path) -> SweepConfig:
+        return SweepConfig(
+            sweep_id="t", output_root=tmp_path / "select", panelcast_bin="pc",
+            arm_timeout_seconds="auto", num_chains=4, num_samples=1000, num_warmup=1000,
+        )
+
+    def test_auto_is_multiplier_times_predicted(self, tmp_path, monkeypatch):
+        self._stub_predict(monkeypatch, seconds=6000.0)
+        timeout, prediction = resolve_arm_timeout(self._auto_cfg(tmp_path), default_arm(), self.DIMS)
+        assert timeout == 3.0 * 6000.0
+        assert prediction.seconds == 6000.0
+
+    def test_floor_wins_for_cheap_arms(self, tmp_path, monkeypatch):
+        self._stub_predict(monkeypatch, seconds=100.0)
+        timeout, _ = resolve_arm_timeout(self._auto_cfg(tmp_path), default_arm(), self.DIMS)
+        assert timeout == 1800.0
+
+    def test_explicit_numeric_never_predicts(self, tmp_path, monkeypatch):
+        calls = self._stub_predict(monkeypatch, seconds=6000.0)
+        cfg = self._auto_cfg(tmp_path)
+        cfg.arm_timeout_seconds = 900.0
+        assert resolve_arm_timeout(cfg, default_arm(), self.DIMS) == (900.0, None)
+        assert calls == []
+
+    def test_auto_without_dims_falls_back_to_floor(self, tmp_path, monkeypatch):
+        calls = self._stub_predict(monkeypatch, seconds=6000.0)
+        assert resolve_arm_timeout(self._auto_cfg(tmp_path), default_arm(), None) == (1800.0, None)
+        assert calls == []
+
+    def test_prediction_uses_the_arms_own_transform(self, tmp_path, monkeypatch):
+        calls = self._stub_predict(monkeypatch, seconds=6000.0)
+        merged = {**default_arm(), "target_transform": "identity"}
+        resolve_arm_timeout(self._auto_cfg(tmp_path), merged, self.DIMS)
+        assert calls[-1]["transform"] == "identity"
+
+    def test_sweep_records_prediction_and_timeout(self, tmp_path, monkeypatch):
+        self._stub_predict(monkeypatch, seconds=6000.0)
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.max_fits = 2
+        cfg.arm_timeout_seconds = "auto"
+        seen_timeouts: list = []
+
+        def capturing(config_path, panelcast_bin, timeout_seconds=None):
+            seen_timeouts.append(timeout_seconds)
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        ledger = run_sweep(cfg, AOTY, launch=capturing, dims=self.DIMS)
+        assert seen_timeouts == [18000.0, 18000.0]
+        for record in ledger.records.values():
+            assert record.predicted_seconds == 6000.0
+            assert record.timeout_seconds_used == 18000.0
+
+    def test_prediction_source_is_logged(self, tmp_path, monkeypatch):
+        from structlog.testing import capture_logs
+
+        source = "cold-start planning numbers (RTX 5090, offset_logit)"
+        self._stub_predict(monkeypatch, seconds=6000.0, source=source)
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.max_fits = 1
+        cfg.arm_timeout_seconds = "auto"
+        with capture_logs() as logs:
+            run_sweep(cfg, AOTY, launch=launch, dims=self.DIMS)
+        events = [e for e in logs if e["event"] == "arm_timeout_auto"]
+        assert events and events[0]["source"] == source
+        assert events[0]["timeout_seconds"] == 18000.0
+
+    def test_old_ledger_entry_without_timeout_fields_loads(self, tmp_path):
+        # A 0.7.x ledger predates predicted_seconds/timeout_seconds_used;
+        # resume must load it unchanged.
+        old_entry = {
+            "arm_id": "abc", "knobs": {"latent_process": "ar1"}, "stage": 1,
+            "status": "completed", "run_dir": None, "wall_clock_seconds": 12.0,
+            "error": None, "score": {"z": 3.0}, "note": None,
+        }
+        record = ArmRecord(**old_entry)
+        assert record.predicted_seconds is None
+        assert record.timeout_seconds_used is None
+        path = tmp_path / "ledger.json"
+        path.write_text(json.dumps({"arms": [old_entry]}), encoding="utf-8")
+        assert SweepLedger(path).records["abc"].status == "completed"
 
 
 class TestStage2Winners:

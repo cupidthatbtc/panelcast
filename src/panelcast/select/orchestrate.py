@@ -124,6 +124,11 @@ def build_plan(
         )
     if cfg.budget_hours is not None:
         notes.append(f"budget cap: {cfg.budget_hours:g} GPU-h (stages truncate in priority order)")
+    if cfg.arm_timeout_seconds == "auto":
+        notes.append(
+            f"per-arm timeout: auto — max({cfg.arm_timeout_floor_seconds:g}s floor, "
+            f"{cfg.arm_timeout_multiplier:g}x each arm's predicted runtime)"
+        )
     return SelectPlan(
         dataset=dataset_label,
         effort=tier.name,
@@ -215,12 +220,14 @@ def run_select(
     available_columns: frozenset[str] | None = None,
     launch=None,
     audit_root: Path = Path(".audit"),
+    dims: dict[str, int] | None = None,
 ) -> dict[str, Any]:
     """Run the full protocol and write the report; returns a result summary.
 
     ``train_df`` / ``feature_cols`` drive the prior screen and data diagnostics;
     when absent the sweep still runs (the runner rebuilds features per arm) but
-    the prior screen is skipped with a note.
+    the prior screen is skipped with a note. ``dims`` (resolved once from the
+    prepared feature matrix) feed the "auto" per-arm timeout prediction.
     """
     from panelcast.select.runner import run_sweep
     from panelcast.select.scoring import rank_arms, render_report, score_arm
@@ -241,7 +248,7 @@ def run_select(
 
     ledger = run_sweep(
         cfg, descriptor, train_df=train_df, available_columns=available_columns, launch=launch,
-        scorer=_snapshot_scorer,
+        scorer=_snapshot_scorer, dims=dims,
     )
 
     reference_nc: Path | None = None
@@ -310,6 +317,7 @@ def run_select(
             promote_z=rules.promote_z,
             sampler_overrides=tier.publication_confirm,
             launch=launch,
+            dims=dims,
         )
         report_md += "\n" + render_confirmation(result)
         confirmed = result.confirmed
