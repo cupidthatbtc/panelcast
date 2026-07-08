@@ -838,9 +838,10 @@ def _build_resource_usage(
         "ratio": round(actual / expected, 3) if actual is not None and expected > 0 else None,
         "wall_clock_seconds": fit_result.runtime_seconds,
     }
-    # Only GPU-measured fits become calibration datapoints: CPU runs (tests,
-    # smoke) have no peak and would poison the wall-clock history.
-    if actual is not None:
+    # Only GPU-measured, full-cost fits become calibration datapoints: CPU runs
+    # have no peak, and a checkpoint-resumed fit's wall clock covers only the
+    # blocks this process ran — both would poison the wall-clock history.
+    if actual is not None and not getattr(fit_result, "resumed_from_checkpoint", False):
         try:
             from panelcast.gpu_memory.calibration_store import append_record
 
@@ -1057,6 +1058,7 @@ def train_models(
         target_accept_prob=ctx.target_accept,
         max_tree_depth=ctx.max_tree_depth,
         chain_method=ctx.chain_method,
+        checkpoint_every_draws=getattr(ctx, "checkpoint_every_draws", None),
     )
 
     # Get priors with heteroscedastic config from CLI; the transform factory
@@ -1135,6 +1137,9 @@ def train_models(
             kept=not drop_entity_obs,
             keep_max=_ENTITY_OBS_KEEP_MAX,
         )
+    checkpoint_dir = (
+        Path(paths.models) / "checkpoint" if mcmc_config.checkpoint_every_draws else None
+    )
     fit_result = fit_model(
         model=make_score_model(prefix),
         model_args=model_args,
@@ -1146,6 +1151,7 @@ def train_models(
         # (~96% peak-GPU cut at production settings; posterior parity for all
         # other sites is guarded by tests).
         exclude_from_collection=(tuple(collection_excludes) or None),
+        checkpoint_dir=checkpoint_dir,
     )
 
     log.info(
@@ -1226,6 +1232,14 @@ def train_models(
     )
 
     log.info("model_saved", path=str(model_path))
+
+    if checkpoint_dir is not None and checkpoint_dir.exists():
+        # The saved NetCDF now carries the full posterior; the block files were
+        # only crash insurance and would double the run's disk footprint.
+        import shutil
+
+        shutil.rmtree(checkpoint_dir, ignore_errors=True)
+        log.info("checkpoint_cleaned", path=str(checkpoint_dir))
 
     # Save training summary
     summary = {

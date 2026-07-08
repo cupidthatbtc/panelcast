@@ -157,6 +157,7 @@ class PipelineConfig:
     target_accept: float = 0.90
     max_tree_depth: int = 10
     chain_method: ChainMethod = "sequential"
+    checkpoint_every_draws: int | None = None
     # Convergence thresholds
     rhat_threshold: float = 1.01
     ess_threshold: int = 400
@@ -306,6 +307,8 @@ class PipelineConfig:
             raise ValueError("num_chains must be >= 1.")
         if self.num_samples < 1:
             raise ValueError("num_samples must be >= 1.")
+        if self.checkpoint_every_draws is not None and self.checkpoint_every_draws < 1:
+            raise ValueError("checkpoint_every_draws must be >= 1 when set.")
         if self.ess_threshold < 1:
             raise ValueError("ess_threshold must be >= 1.")
         if self.strict and self.num_chains < 2:
@@ -677,6 +680,8 @@ class PipelineOrchestrator:
         "num_chains",
         "num_samples",
         "num_warmup",
+        # Resume must reuse the checkpoint identity, which hashes the MCMC config.
+        "checkpoint_every_draws",
         "n_exponent",
         "learn_n_exponent",
         "n_exponent_prior",
@@ -871,6 +876,8 @@ class PipelineOrchestrator:
             parts.append(f"--max-tree-depth {self.config.max_tree_depth}")
         if self.config.chain_method != defaults.chain_method:
             parts.append(f"--chain-method {self.config.chain_method}")
+        if self.config.checkpoint_every_draws is not None:
+            parts.append(f"--checkpoint-every {self.config.checkpoint_every_draws}")
         # Convergence thresholds
         if self.config.rhat_threshold != defaults.rhat_threshold:
             parts.append(f"--rhat-threshold {self.config.rhat_threshold}")

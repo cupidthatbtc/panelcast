@@ -89,6 +89,7 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "target_accept": _spec("target_accept", "target_accept"),
     "max_tree_depth": _spec("max_tree_depth", "max_tree_depth"),
     "chain_method": _spec("chain_method", "chain_method", _as_chain_method),
+    "checkpoint_every": _spec("checkpoint_every_draws", "checkpoint_every"),
     # Convergence thresholds
     "rhat_threshold": _spec("rhat_threshold", "rhat_threshold"),
     "ess_threshold": _spec("ess_threshold", "ess_threshold"),
