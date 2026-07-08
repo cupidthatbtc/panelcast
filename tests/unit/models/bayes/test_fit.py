@@ -337,6 +337,7 @@ class TestMCMCConfigExpanded:
             "max_tree_depth",
             "target_accept_prob",
             "init_strategy",
+            "checkpoint_every_draws",
         }
         assert set(d.keys()) == expected_keys
 

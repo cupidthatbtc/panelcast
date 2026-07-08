@@ -568,6 +568,17 @@ def run(
             help="Chain method: 'sequential', 'vectorized', or 'parallel' (multi-GPU)",
         ),
     ] = "sequential",
+    checkpoint_every: Annotated[
+        int | None,
+        typer.Option(
+            "--checkpoint-every",
+            min=1,
+            help=(
+                "Checkpoint the fit every N post-warmup draws so an interrupted "
+                "run resumes from the last block (default: single-shot fit)"
+            ),
+        ),
+    ] = None,
     # Convergence Thresholds
     rhat_threshold: Annotated[
         float,
@@ -864,6 +875,7 @@ def run(
         target_accept=target_accept,
         max_tree_depth=max_tree_depth,
         chain_method=chain_method,
+        checkpoint_every_draws=checkpoint_every,
         # Convergence thresholds
         rhat_threshold=rhat_threshold,
         ess_threshold=ess_threshold,
