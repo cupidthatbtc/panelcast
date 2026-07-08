@@ -2908,3 +2908,87 @@ class TestIdentifiedPredictionsPayload:
                 prediction_interval=0.8,
                 row_ids=row_ids,
             )
+
+
+class TestConformalBlock:
+    """_conformal_block degradation and happy path (#156)."""
+
+    def _ctx(self):
+        return SimpleNamespace(seed=7, predictive_batch_size=16)
+
+    def test_requires_validation_split(self, mock_summary, tmp_path):
+        from panelcast.pipelines.evaluate import _conformal_block
+
+        with pytest.raises(ValueError, match="validation split"):
+            _conformal_block(
+                summary=mock_summary,
+                prefix="user",
+                ctx=self._ctx(),
+                posterior_samples={},
+                val_df=None,
+                train_df=pd.DataFrame(),
+                features_dir=tmp_path,
+                transform=SimpleNamespace(name="identity"),
+                y_test=np.zeros(2),
+                test_samples=np.zeros((4, 2)),
+                intervals=(0.8,),
+            )
+
+    def test_requires_validation_features(self, mock_summary, tmp_path):
+        from panelcast.pipelines.evaluate import _conformal_block
+
+        val_df = pd.DataFrame({"Artist": ["Artist_A"], "User_Score": [70.0]})
+        with pytest.raises(FileNotFoundError, match="validation_features"):
+            _conformal_block(
+                summary=mock_summary,
+                prefix="user",
+                ctx=self._ctx(),
+                posterior_samples={},
+                val_df=val_df,
+                train_df=pd.DataFrame(),
+                features_dir=tmp_path,
+                transform=SimpleNamespace(name="identity"),
+                y_test=np.zeros(2),
+                test_samples=np.zeros((4, 2)),
+                intervals=(0.8,),
+            )
+
+    def test_happy_path_returns_conformal_payload(self, mock_summary, tmp_path):
+        from panelcast.pipelines.evaluate import _conformal_block
+
+        val_df = pd.DataFrame(
+            {"Artist": ["Artist_A", "Artist_B"], "User_Score": [70.0, 75.0]}
+        )
+        pd.DataFrame({"feat_1": [1.0, 2.0], "feat_2": [2.0, 3.0]}).to_parquet(
+            tmp_path / "validation_features.parquet"
+        )
+        rng = np.random.default_rng(0)
+        val_y = np.array([70.0, 75.0], dtype=np.float32)
+        val_samples = rng.normal(72.0, 5.0, size=(100, 2))
+
+        with (
+            patch(
+                "panelcast.pipelines.evaluate._prepare_test_model_args",
+                return_value=({"artist_idx": np.array([0, 1])}, val_y, pd.DataFrame()),
+            ),
+            patch(
+                "panelcast.pipelines.evaluate._run_known_artist_predictive",
+                return_value=val_samples,
+            ),
+        ):
+            block = _conformal_block(
+                summary=mock_summary,
+                prefix="user",
+                ctx=self._ctx(),
+                posterior_samples={},
+                val_df=val_df,
+                train_df=pd.DataFrame(),
+                features_dir=tmp_path,
+                transform=SimpleNamespace(name="identity"),
+                y_test=rng.normal(72.0, 5.0, size=30),
+                test_samples=rng.normal(72.0, 5.0, size=(100, 30)),
+                intervals=(0.8, 0.95),
+            )
+        assert block["n_calibration"] == 2
+        assert set(block["levels"]) == {"0.80", "0.95"}
+        assert len(block["pit_quantile_grid"]["levels"]) == 101
