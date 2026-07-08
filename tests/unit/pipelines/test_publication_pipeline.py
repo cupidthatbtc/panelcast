@@ -422,3 +422,43 @@ def test_publication_ppc_summary_missing_fields_is_tolerated(tmp_path):
     # generated and a malformed summary never produces an error or figure.
     assert not any(err["artifact"] == "ppc_density_plot" for err in artifacts["errors"])
     assert not any("ppc_density" in str(p) for p in artifacts["figures"])
+
+
+class TestRankScatterStep:
+    """Publication wiring for the #182 rank scatter."""
+
+    def _inp(self, tmp_path, with_slate: bool):
+        eval_dir = tmp_path / "evaluation"
+        split_dir = eval_dir / "within_entity_temporal"
+        split_dir.mkdir(parents=True)
+        if with_slate:
+            pd.DataFrame(
+                {
+                    "entity": ["a", "b", "c"],
+                    "predicted_rank": [1, 2, 3],
+                    "realized_rank": [2, 1, 3],
+                    "p_top10": [0.9, 0.5, 0.1],
+                }
+            ).to_csv(split_dir / "ranked_slate.csv", index=False)
+        return SimpleNamespace(
+            eval_dir=eval_dir,
+            primary_split_name="within_entity_temporal",
+            figures_dir=tmp_path / "figures",
+        )
+
+    def test_writes_figures_when_slate_exists(self, tmp_path):
+        from panelcast.pipelines.publication import _save_rank_scatter
+
+        artifacts = {"figures": [], "errors": []}
+        _save_rank_scatter(self._inp(tmp_path, with_slate=True), artifacts)
+        assert len(artifacts["figures"]) == 2
+        assert not artifacts["errors"]
+        assert (tmp_path / "figures" / "rank_scatter_primary.png").exists()
+
+    def test_skips_without_slate(self, tmp_path):
+        from panelcast.pipelines.publication import _save_rank_scatter
+
+        artifacts = {"figures": [], "errors": []}
+        _save_rank_scatter(self._inp(tmp_path, with_slate=False), artifacts)
+        assert artifacts["figures"] == []
+        assert artifacts["errors"] == []

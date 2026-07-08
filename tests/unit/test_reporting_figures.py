@@ -1128,3 +1128,12 @@ class TestSaveRankScatterPlot:
 
         with pytest.raises(ValueError, match="lacks"):
             save_rank_scatter_plot(pd.DataFrame({"x": [1]}), tmp_path, "rank_scatter")
+
+
+class TestRankScatterNoColorColumn:
+    def test_plots_without_p_top_column(self, tmp_path):
+        from panelcast.reporting.figures import save_rank_scatter_plot
+
+        slate = pd.DataFrame({"predicted_rank": [1, 2], "realized_rank": [2, 1]})
+        pdf, png = save_rank_scatter_plot(slate, tmp_path, "rank_scatter_plain")
+        assert pdf.exists() and png.exists()

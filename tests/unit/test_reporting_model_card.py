@@ -955,3 +955,27 @@ class TestFlaggedSlicesSection:
 
         card = generate_model_card(self._data(), format="markdown")
         assert "Flagged calibration slices" not in card
+
+
+class TestRankingSummaryLine:
+    """Ranking one-liner in Predictive Performance (#182)."""
+
+    def test_rendered_when_set(self):
+        from panelcast.reporting.model_card import (
+            create_default_model_card_data,
+            generate_model_card,
+        )
+
+        data = create_default_model_card_data()
+        data.ranking_summary = "Spearman 0.712, precision@10 0.60 (single-slate, descriptive)."
+        card = generate_model_card(data, format="markdown")
+        assert "**Ranking:** Spearman 0.712" in card
+
+    def test_absent_by_default(self):
+        from panelcast.reporting.model_card import (
+            create_default_model_card_data,
+            generate_model_card,
+        )
+
+        card = generate_model_card(create_default_model_card_data(), format="markdown")
+        assert "**Ranking:**" not in card
