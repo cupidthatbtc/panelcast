@@ -250,6 +250,46 @@ class TestRunStack:
         report = (sweep_dir / "stacking.md").read_text(encoding="utf-8")
         assert "Not scored" in report
 
+    def test_partial_snapshots_renormalize_with_disclosed_dropped_mass(self, tmp_path):
+        """A low-weight arm without predictive.npz must not nuke the headline."""
+        sweep_dir = _make_sweep(tmp_path)
+        bare_run = tmp_path / "runs" / "nosnap"
+        _write_run(bare_run, elpd_value=-3.0, predictive=False)
+        arms_json = json.loads((sweep_dir / "ledger.json").read_text())["arms"]
+        arms_json.append(
+            {"arm_id": "nosnap", "knobs": {"latent_process": "ar1"}, "stage": 1,
+             "status": "completed", "run_dir": str(bare_run)}
+        )
+        _write_sweep(tmp_path, arms_json)
+        result = run_stack(sweep_dir)
+        assert "beats" in result["verdict"] or "does not beat" in result["verdict"]
+        report = (sweep_dir / "stacking.md").read_text(encoding="utf-8")
+        assert "renormalized over the rest" in report
+        assert "nosnap" in report
+        payload = json.loads((sweep_dir / "stacking.json").read_text(encoding="utf-8"))
+        assert "renormalized" in payload["splits"]["secondary"]["note"]
+
+    def test_champion_reference_row_deduped(self, tmp_path):
+        """When the reference IS the champion, the table shows one row, not two."""
+        ref_run = tmp_path / "runs" / "ref"
+        arm_run = tmp_path / "runs" / "armb"
+        _write_run(ref_run, elpd_value=-1.5, center=70.0)  # reference wins
+        _write_run(arm_run, elpd_value=-2.0, center=71.0)
+        sweep_dir = _write_sweep(
+            tmp_path,
+            [
+                {"arm_id": "ref", "knobs": {}, "stage": 1, "status": "completed",
+                 "run_dir": str(ref_run)},
+                {"arm_id": "armb", "knobs": {"target_transform": "logit"}, "stage": 1,
+                 "status": "completed", "run_dir": str(arm_run)},
+            ],
+        )
+        run_stack(sweep_dir)
+        payload = json.loads((sweep_dir / "stacking.json").read_text(encoding="utf-8"))
+        labels = set(payload["splits"]["secondary"])
+        assert "champion (reference)" in labels
+        assert "reference (reference)" not in labels
+
     def test_fewer_than_two_arms_raises(self, tmp_path):
         run_dir = tmp_path / "runs" / "only"
         _write_run(run_dir, elpd_value=-1.0)

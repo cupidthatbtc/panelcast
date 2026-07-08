@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import structlog
 from scipy.optimize import minimize
 from scipy.special import logsumexp, softmax
 
@@ -29,6 +30,8 @@ from panelcast.evaluation.calibration import (
 )
 from panelcast.evaluation.metrics import compute_crps, compute_point_metrics
 from panelcast.select.scoring import _baseline_rows, _baseline_section, pointwise_elpd
+
+log = structlog.get_logger()
 
 WEIGHT_SPLIT = "primary"
 HONEST_SPLIT = "secondary"
@@ -66,6 +69,11 @@ def stacking_weights(elpd_matrix: np.ndarray) -> np.ndarray:
         return -float(log_mix.sum()), -grad_theta
 
     result = minimize(neg_score_and_grad, np.zeros(n_arms), jac=True, method="L-BFGS-B")
+    if not result.success:
+        # The weights are the whole product: a silent optimizer failure would
+        # ship a plausible-looking mixture, so make it loud (still returned —
+        # the last iterate is the best available point on the simplex).
+        log.warning("stacking_optimizer_not_converged", message=str(result.message))
     return softmax(result.x)
 
 
@@ -92,9 +100,14 @@ def allocate_mixture_draws(weights: np.ndarray, n_draws: int) -> np.ndarray:
     """Largest-remainder apportionment of ``n_draws`` mixture slots by weight.
 
     Deterministic (no RNG), so the stacked predictive is as reproducible as
-    the weights themselves.
+    the weights themselves. Weights are normalized defensively so an
+    unnormalized vector cannot over-allocate.
     """
-    target = np.asarray(weights, dtype=float) * n_draws
+    weights = np.asarray(weights, dtype=float)
+    total = weights.sum()
+    if total > 0:
+        weights = weights / total
+    target = weights * n_draws
     counts = np.floor(target).astype(int)
     remainder = int(n_draws - counts.sum())
     if remainder > 0:
@@ -223,49 +236,64 @@ def load_stack_arms(sweep_dir: Path) -> tuple[list[StackArm], list[tuple[str, st
     return arms, excluded
 
 
+def _thin_draws(draws: np.ndarray, n: int) -> np.ndarray:
+    """Evenly thin to ``n`` draws (spread through the chain, not the head)."""
+    draws = np.asarray(draws)
+    if draws.shape[0] <= n:
+        return draws
+    idx = np.linspace(0, draws.shape[0] - 1, num=n).astype(int)
+    return draws[idx]
+
+
 def _split_evaluation(
     arms: list[StackArm], weights: np.ndarray, split: str
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """(rows payload, None) for one split's mixture-vs-singles scoreboard, or
-    (None, reason) when the split cannot be honestly scored."""
-    n = _min_snapshot_draws(arms, split)
-    if n == 0:
+    """(rows payload, note) for one split's mixture-vs-singles scoreboard.
+
+    rows=None means the split cannot be scored (note says why). rows with a
+    note is a scored-with-caveat: arms lacking this split's snapshot are
+    dropped and the mixture renormalized over the rest, with the dropped
+    weight mass disclosed rather than an all-or-nothing refusal.
+    """
+    weights = np.asarray(weights, dtype=float)
+    have = np.asarray([split in a.predictive for a in arms])
+    covered = float(weights[have].sum()) if have.any() else 0.0
+    if covered <= 0.0:
         return None, (
             f"no {split} predictive snapshots in this sweep — evaluate persists "
             "evaluation/predictive.npz per arm on newer sweeps"
         )
-    counts = allocate_mixture_draws(weights, n)
-    contributing = []
-    for arm, w, k in zip(arms, weights, counts):
-        if k == 0:
-            continue
-        if split not in arm.predictive:
-            return None, f"arm {arm.label} carries weight but no {split} predictive snapshot"
-        contributing.append((arm, w))
+    contributing = [(a, w) for a, w, h in zip(arms, weights, have) if h]
     y_ref = contributing[0][0].predictive[split][1]
     for arm, _ in contributing[1:]:
         y_arm = arm.predictive[split][1]
         if y_arm.shape != y_ref.shape or not np.allclose(y_arm, y_ref):
             return None, f"arm {arm.label} evaluated different {split} test rows"
-    subset_w = np.asarray([w for _, w in contributing])
-    mixture = mixture_predictive(
-        [a.predictive[split][0] for a, _ in contributing], subset_w / subset_w.sum()
-    )
+    dropped = float(weights.sum() - covered)
+    note = None
+    if dropped > 1e-9:
+        missing = [a.label for a, h in zip(arms, have) if not h]
+        note = (
+            f"{dropped:.1%} of stacking weight belongs to arms without a {split} "
+            f"snapshot ({', '.join(missing)}); mixture renormalized over the rest"
+        )
+    subset_w = np.asarray([w for _, w in contributing]) / covered
+    mixture = mixture_predictive([a.predictive[split][0] for a, _ in contributing], subset_w)
+    n_mix = int(mixture.shape[0])
     rows: dict[str, Any] = {"stacked mixture": score_predictive(y_ref, mixture)}
     champion = max(arms, key=lambda a: a.total_elpd if a.total_elpd is not None else -np.inf)
     reference = next((a for a in arms if not a.knobs), None)
+    if reference is champion:
+        reference = None  # one row is enough when the champion IS the reference
     for label, arm in (("champion", champion), ("reference", reference)):
         if arm is None or split not in arm.predictive:
             continue
         draws, y_arm = arm.predictive[split]
         if y_arm.shape == y_ref.shape and np.allclose(y_arm, y_ref):
-            rows[f"{label} ({arm.label})"] = score_predictive(y_ref, draws)
-    return rows, None
-
-
-def _min_snapshot_draws(arms: list[StackArm], split: str) -> int:
-    sizes = [int(a.predictive[split][0].shape[0]) for a in arms if split in a.predictive]
-    return min(sizes) if sizes else 0
+            # Thin to the mixture's draw count: CRPS/coverage carry a mild
+            # finite-sample dependence on draws, so keep the comparison fair.
+            rows[f"{label} ({arm.label})"] = score_predictive(y_ref, _thin_draws(draws, n_mix))
+    return rows, note
 
 
 _METRIC_COLS = ("crps", "mae", "rmse", "r2", "cov80", "cov95", "wis")
@@ -320,6 +348,8 @@ def render_stack_report(
         rows = split_rows.get(split)
         if rows:
             lines += _metric_table(rows)
+            if split in split_notes:
+                lines += ["", f"_Caveat: {split_notes[split]}._"]
         else:
             lines.append(f"_Not scored: {split_notes.get(split, 'unavailable')}._")
     lines += ["", _stack_verdict(split_rows)]
@@ -343,7 +373,11 @@ def render_stack_report(
         ],
         "excluded": [{"arm": aid, "reason": reason} for aid, reason in excluded],
         "splits": {
-            split: (rows if rows else {"note": split_notes.get(split)})
+            split: (
+                {**rows, **({"note": split_notes[split]} if split in split_notes else {})}
+                if rows
+                else {"note": split_notes.get(split)}
+            )
             for split, rows in split_rows.items()
         },
         "verdict": _stack_verdict(split_rows),
