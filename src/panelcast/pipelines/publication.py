@@ -26,6 +26,7 @@ from panelcast.reporting.figures import (
     save_posterior_plot,
     save_predictions_plot,
     save_reliability_plot,
+    save_slice_coverage_plot,
     save_trace_plot,
     select_artist_subsets,
 )
@@ -807,6 +808,23 @@ def _save_reliability_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -
         artifacts["errors"].append({"artifact": "reliability_plot", "error": str(e)})
 
 
+def _save_slice_coverage_figure(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
+    try:
+        by_slice = (inp.primary_metrics.get("calibration") or {}).get("by_slice") or {}
+        if not by_slice.get("slices"):
+            log.warning("slice_coverage_plot_skipped", reason="no by_slice block in metrics")
+            return
+        pdf_path, png_path = save_slice_coverage_plot(
+            by_slice, inp.figures_dir, "slice_coverage_primary"
+        )
+        artifacts["figures"].append(str(pdf_path))
+        artifacts["figures"].append(str(png_path))
+        log.info("slice_coverage_plot_saved", pdf=str(pdf_path), png=str(png_path))
+    except Exception as e:
+        log.exception("slice_coverage_plot_failed")
+        artifacts["errors"].append({"artifact": "slice_coverage_plot", "error": str(e)})
+
+
 def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
         pred_path_for_fans = next(
@@ -1037,6 +1055,12 @@ def _generate_model_card(inp: _PublicationInputs, artifacts: dict[str, Any]) -> 
             prior_justification=prior_justification,
         )
 
+        by_slice = (inp.primary_metrics.get("calibration") or {}).get("by_slice") or {}
+        flagged = [s for s in by_slice.get("slices", []) if s.get("flagged")]
+        if flagged:
+            model_card_data.flagged_slices = flagged
+            model_card_data.expected_false_flags = by_slice.get("expected_false_flags")
+
         model_card_path = inp.reports_dir / "MODEL_CARD.md"
         write_model_card(model_card_data, model_card_path)
         artifacts["docs"].append(str(model_card_path))
@@ -1114,6 +1138,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
     _save_posterior_plot(inp, artifacts)
     _save_predictions_plot(inp, artifacts)
     _save_reliability_plot(inp, artifacts)
+    _save_slice_coverage_figure(inp, artifacts)
     _save_artist_fan_charts(inp, artifacts)
     _generate_model_card(inp, artifacts)
 
