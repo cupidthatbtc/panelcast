@@ -407,9 +407,6 @@ class TestSaveModel:
         mock_result.divergences = 2
         mock_result.runtime_seconds = 45.5
         mock_result.gpu_info = "Mock GPU"
-        # Mock MCMC object
-        mock_result.mcmc = MagicMock()
-        mock_result.mcmc._kernel_params = {"max_tree_depth": 10}
 
         return mock_result
 
@@ -485,6 +482,38 @@ class TestSaveModel:
         assert manifest.divergences == 2
         assert manifest.runtime_seconds == 45.5
         assert manifest.gpu_info == "Mock GPU"
+
+    def test_mcmc_config_defaults_empty(self, tmp_path, mock_fit_result):
+        """Omitting mcmc_config records an empty dict."""
+        path, manifest = save_model(
+            fit_result=mock_fit_result,
+            model_type="user_score",
+            priors=PriorConfig(),
+            data_hash="test_hash",
+            output_dir=tmp_path,
+        )
+
+        assert manifest.mcmc_config == {}
+
+    def test_mcmc_config_roundtrip(self, tmp_path, mock_fit_result):
+        """A real MCMCConfig survives save -> manifest reload."""
+        from panelcast.models.bayes.fit import MCMCConfig
+
+        config = MCMCConfig(num_warmup=250, num_samples=500, num_chains=2, seed=7)
+
+        path, manifest = save_model(
+            fit_result=mock_fit_result,
+            model_type="user_score",
+            priors=PriorConfig(),
+            data_hash="test_hash",
+            output_dir=tmp_path,
+            mcmc_config=config,
+        )
+
+        assert manifest.mcmc_config == config.to_dict()
+        loaded = load_manifest(tmp_path)
+        assert loaded is not None
+        assert loaded.history[0].mcmc_config == config.to_dict()
 
 
 class TestLoadModel:
@@ -581,8 +610,8 @@ class TestToPythonNative:
         assert isinstance(result[0], float)
         assert isinstance(result[1], int)
 
-    def test_save_model_with_jax_kernel_params(self, tmp_path):
-        """save_model should serialize mcmc_config with numpy/JAX values."""
+    def test_save_model_with_numpy_mcmc_config(self, tmp_path):
+        """A dict mcmc_config with numpy values is converted to native types."""
         posterior = xr.Dataset(
             {"param": xr.DataArray(np.random.randn(2, 10), dims=["chain", "draw"])}
         )
@@ -593,11 +622,6 @@ class TestToPythonNative:
         mock_result.divergences = 0
         mock_result.runtime_seconds = 1.0
         mock_result.gpu_info = "CPU"
-        mock_result.mcmc = MagicMock(spec=[])  # empty spec avoids auto-creating attrs
-        mock_result.mcmc._kernel_params = {
-            "max_tree_depth": np.int32(10),
-            "target_accept": np.float64(0.9),
-        }
 
         priors = PriorConfig()
         path, manifest = save_model(
@@ -606,6 +630,10 @@ class TestToPythonNative:
             priors=priors,
             data_hash="test",
             output_dir=tmp_path,
+            mcmc_config={
+                "max_tree_depth": np.int32(10),
+                "target_accept": np.float64(0.9),
+            },
         )
 
         # Verify the mcmc_config values are native Python types (JSON-serializable)
@@ -616,6 +644,67 @@ class TestToPythonNative:
         loaded = load_manifest(tmp_path)
         assert loaded is not None
         assert loaded.history[0].mcmc_config["max_tree_depth"] == 10
+
+
+def _minimal_fit_result():
+    """Mock fit result with just enough for save_model."""
+    posterior = xr.Dataset(
+        {"param": xr.DataArray(np.random.randn(2, 10), dims=["chain", "draw"])}
+    )
+    mock_result = MagicMock()
+    mock_result.idata = az.InferenceData(posterior=posterior)
+    mock_result.divergences = 0
+    mock_result.runtime_seconds = 1.0
+    mock_result.gpu_info = "CPU"
+    return mock_result
+
+
+class TestManifestCorruptionHandling:
+    """Atomic manifest writes and preservation of corrupt manifests."""
+
+    def test_atomic_write_leaves_no_tmp(self, tmp_path):
+        save_manifest(ModelsManifest(), tmp_path)
+
+        assert (tmp_path / "manifest.json").exists()
+        assert list(tmp_path.glob("*.tmp")) == []
+
+    def test_corrupt_manifest_moved_aside(self, tmp_path):
+        manifest_path = tmp_path / "manifest.json"
+        manifest_path.write_text("{ not json", encoding="utf-8")
+
+        assert load_manifest(tmp_path) is None
+        corrupt = tmp_path / "manifest.json.corrupt"
+        assert corrupt.read_text(encoding="utf-8") == "{ not json"
+        assert not manifest_path.exists()
+
+    def test_save_model_after_corruption_keeps_evidence(self, tmp_path):
+        (tmp_path / "manifest.json").write_text("{ not json", encoding="utf-8")
+
+        save_model(
+            fit_result=_minimal_fit_result(),
+            model_type="user_score",
+            priors=PriorConfig(),
+            data_hash="h",
+            output_dir=tmp_path,
+        )
+
+        # Fresh manifest written; corrupt evidence still on disk
+        corrupt = tmp_path / "manifest.json.corrupt"
+        assert corrupt.read_text(encoding="utf-8") == "{ not json"
+        loaded = load_manifest(tmp_path)
+        assert loaded is not None
+        assert len(loaded.history) == 1
+
+    def test_second_corruption_gets_timestamped_name(self, tmp_path):
+        (tmp_path / "manifest.json.corrupt").write_text("older evidence", encoding="utf-8")
+        (tmp_path / "manifest.json").write_text("{ newer corruption", encoding="utf-8")
+
+        assert load_manifest(tmp_path) is None
+        corrupt = tmp_path / "manifest.json.corrupt"
+        assert corrupt.read_text(encoding="utf-8") == "older evidence"
+        stamped = list(tmp_path.glob("manifest.json.corrupt.*"))
+        assert len(stamped) == 1
+        assert stamped[0].read_text(encoding="utf-8") == "{ newer corruption"
 
 
 # --- from unit/models/bayes/test_io_expanded.py ---

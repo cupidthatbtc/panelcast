@@ -179,7 +179,7 @@ class TestCheckConvergencePassing:
 
         assert diags.passed is True
         assert diags.rhat_max < 1.01
-        assert diags.ess_bulk_min >= 400 * 4  # 4 chains
+        assert diags.ess_bulk_min >= 400  # total-ESS floor
         assert diags.divergences == 0
         assert diags.failing_params == []
 
@@ -227,14 +227,15 @@ class TestCheckConvergenceFailingESS:
         assert "sigma" in diags.failing_params
 
     def test_check_convergence_ess_threshold(self, good_idata):
-        """Verify custom ESS threshold is respected."""
-        # With very high threshold, even good idata should fail
-        diags = check_convergence(good_idata, ess_threshold=10000)
+        """Total-ESS floor: unreachable threshold fails, permissive one passes."""
+        # 4 chains x 1000 draws caps total ESS well below 10 million
+        strict = check_convergence(good_idata, ess_threshold=10_000_000)
+        assert strict.passed is False
+        assert set(strict.failing_params) == {"alpha", "beta", "sigma"}
 
-        # This should fail due to ESS being below 10000 * 4 chains
-        # (unless the mock generates extremely high ESS)
-        # Just verify threshold affects the check
-        assert diags.ess_bulk_min < 10000 * 4
+        permissive = check_convergence(good_idata, ess_threshold=1)
+        assert permissive.passed is True
+        assert permissive.failing_params == []
 
 
 class TestCheckConvergenceDivergences:
@@ -272,21 +273,21 @@ class TestCheckConvergenceCustomThresholds:
         )
 
         # With such permissive thresholds, should pass
-        # (unless ESS is literally 0)
+        assert diags.passed is True
         assert diags.rhat_max < 100.0
-        assert diags.ess_bulk_min >= 4  # 1 * 4 chains
+        assert diags.ess_bulk_min >= 1
 
     def test_check_convergence_strict_thresholds(self, good_idata):
         """Verify strict thresholds cause appropriate failures."""
         diags = check_convergence(
             good_idata,
             rhat_threshold=1.0001,  # Very strict
-            ess_threshold=10000,  # Very strict
+            ess_threshold=10_000_000,  # Unreachable total-ESS floor
         )
 
-        # With strict thresholds, even good idata might fail
-        # Just verify the function runs and returns valid result
-        assert isinstance(diags, ConvergenceDiagnostics)
+        assert diags.passed is False
+        # Every parameter is below the unreachable total-ESS floor
+        assert {"alpha", "beta", "sigma"} <= set(diags.failing_params)
 
 
 class TestCheckConvergenceEdgeCases:

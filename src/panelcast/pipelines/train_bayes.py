@@ -1153,6 +1153,7 @@ def train_models(
         priors=priors,
         data_hash=data_hash,
         output_dir=model_dir,
+        mcmc_config=mcmc_config,
     )
 
     log.info("model_saved", path=str(model_path))

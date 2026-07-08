@@ -23,7 +23,7 @@ import structlog
 from panelcast.models.bayes.priors import PriorConfig
 
 if TYPE_CHECKING:
-    from panelcast.models.bayes.fit import FitResult
+    from panelcast.models.bayes.fit import FitResult, MCMCConfig
 
 logger = structlog.get_logger(__name__)
 
@@ -190,6 +190,7 @@ def save_model(
     priors: PriorConfig,
     data_hash: str,
     output_dir: Path = Path("models"),
+    mcmc_config: MCMCConfig | dict[str, Any] | None = None,
 ) -> tuple[Path, ModelManifest]:
     """Save fitted model to NetCDF and update manifest.
 
@@ -208,6 +209,9 @@ def save_model(
         SHA256 hash of training data for verification.
     output_dir : Path, default Path("models")
         Directory to save model files.
+    mcmc_config : MCMCConfig or dict, optional
+        MCMC settings recorded in the manifest (an MCMCConfig is stored via
+        its to_dict()). Empty dict when not provided.
 
     Returns
     -------
@@ -240,21 +244,18 @@ def save_model(
     # Save InferenceData to NetCDF
     fit_result.idata.to_netcdf(filepath)
 
-    # Extract MCMC kernel config for manifest metadata.
-    # Try _kernel_params first (available in current NumPyro versions),
-    # then fall back to empty dict if the attribute doesn't exist or
-    # contains non-serializable values.
-    mcmc_config: dict = {}
-    if hasattr(fit_result.mcmc, "_kernel_params"):
-        raw = fit_result.mcmc._kernel_params
-        if isinstance(raw, dict):
-            mcmc_config = _to_python_native(raw)
+    if mcmc_config is None:
+        mcmc_dict: dict[str, Any] = {}
+    elif isinstance(mcmc_config, dict):
+        mcmc_dict = _to_python_native(mcmc_config)
+    else:
+        mcmc_dict = mcmc_config.to_dict()
     manifest = ModelManifest(
         version="1.0",
         created_at=datetime.now(UTC).isoformat(),
         model_type=model_type,
         filename=filename,
-        mcmc_config=mcmc_config,
+        mcmc_config=mcmc_dict,
         priors=asdict(priors),
         data_hash=data_hash,
         git_commit=get_git_commit(),
@@ -314,7 +315,10 @@ def load_manifest(output_dir: Path = Path("models")) -> ModelsManifest | None:
     Returns
     -------
     ModelsManifest or None
-        Loaded manifest, or None if file doesn't exist.
+        Loaded manifest, or None if the file doesn't exist. A manifest that
+        exists but fails to parse is moved aside to manifest.json.corrupt
+        (timestamp-suffixed if that name is taken) and None is returned, so
+        a subsequent save starts fresh without destroying the evidence.
     """
     manifest_path = Path(output_dir) / "manifest.json"
     if not manifest_path.exists():
@@ -324,7 +328,19 @@ def load_manifest(output_dir: Path = Path("models")) -> ModelsManifest | None:
         with open(manifest_path, encoding="utf-8") as f:
             data = json.load(f)
     except (json.JSONDecodeError, ValueError) as e:
-        logger.warning("manifest_parse_failed", path=str(manifest_path), error=str(e))
+        # Preserve the corrupt file: the next save_model would otherwise
+        # start a fresh manifest and silently erase history.
+        corrupt_path = manifest_path.with_name(manifest_path.name + ".corrupt")
+        if corrupt_path.exists():
+            stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S_%f")
+            corrupt_path = manifest_path.with_name(f"{manifest_path.name}.corrupt.{stamp}")
+        manifest_path.rename(corrupt_path)
+        logger.error(
+            "manifest_parse_failed",
+            path=str(manifest_path),
+            preserved_as=str(corrupt_path),
+            error=str(e),
+        )
         return None
     return ModelsManifest.from_dict(data)
 
@@ -349,7 +365,10 @@ def save_manifest(manifest: ModelsManifest, output_dir: Path = Path("models")) -
 
     manifest_path = output_dir / "manifest.json"
 
-    with open(manifest_path, "w", encoding="utf-8") as f:
+    # Atomic write: a crash mid-dump must not corrupt the manifest.
+    tmp_path = manifest_path.with_name(manifest_path.name + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(manifest.to_dict(), f, indent=2)
+    tmp_path.replace(manifest_path)
 
     return manifest_path
