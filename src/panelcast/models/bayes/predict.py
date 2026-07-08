@@ -311,6 +311,10 @@ def predict_new_entity(
         - {prefix}rho: AR(1) coefficient
         - {prefix}sigma_obs: Observation noise
         - {prefix}n_exponent (optional): Heteroscedastic scaling exponent
+        - {prefix}tau_entity (optional): Entity noise-inflation scale from
+          the entity-overdispersion gate. When present, sigma is inflated
+          by exp(tau_entity * z) with z ~ Normal(0, 1) drawn per posterior
+          sample (shared across this entity's events).
     X_new : jnp.ndarray
         Feature vector for the new event. Shape: (n_features,) for single
         prediction or (n_events, n_features) for multiple events.
@@ -427,6 +431,9 @@ def predict_new_entity(
     # Genre/group pooling (entity_group_pooling fits): fitted per-group offsets,
     # (n_samples, n_groups). None on gate-off fits -> group_idx_new is ignored.
     group_offset = posterior_samples.get(f"{prefix}group_offset")
+    # Entity-overdispersion gate (heteroscedastic_entity_obs fits): scalar
+    # noise-inflation scale, present only on gate-on fits.
+    tau_entity = posterior_samples.get(f"{prefix}tau_entity")
 
     n_samples = mu_artist.shape[0]
 
@@ -461,6 +468,8 @@ def predict_new_entity(
         }
         if group_offset is not None:
             group_offset = group_offset[indices]
+        if tau_entity is not None:
+            tau_entity = tau_entity[indices]
         # Handle exponent samples based on learned vs fixed mode
         if has_learned_exponent:
             n_exponent_samples = posterior_samples[f"{prefix}n_exponent"]
@@ -556,6 +565,17 @@ def predict_new_entity(
     else:
         # Homoscedastic fallback: (n_samples, 1) or (n_samples, n_albums)
         sigma_scaled = sigma_obs[:, None]
+
+    # Entity overdispersion (gated): a new entity's noise-inflation factor is
+    # unobserved, so marginalize it over its prior — one z ~ Normal(0, 1) per
+    # posterior draw, shared across this entity's events — mirroring the
+    # new_artist_effect treatment. Training scales sigma by
+    # exp(tau_entity * z_entity); omitting this leaves cold-start intervals
+    # systematically too narrow on gate-on fits.
+    if tau_entity is not None:
+        rng_key, subkey = random.split(rng_key)
+        z_entity = random.normal(subkey, (n_samples,))
+        sigma_scaled = sigma_scaled * jnp.exp((tau_entity * z_entity)[:, None])
 
     # Validate sigma_scaled is broadcastable to mu_pred shape
     if sigma_scaled.shape != mu_pred.shape and sigma_scaled.shape != (n_samples, 1):
