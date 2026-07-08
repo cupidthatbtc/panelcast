@@ -1234,6 +1234,16 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
             ctx, artifacts, status_path, readiness_json_path, readiness_md_path
         )
 
+    # Best-effort run dashboard (#159): never blocks the stage.
+    if ctx.run_dir and ctx.run_dir.exists():
+        try:
+            from panelcast.reporting.html_report import write_run_report
+
+            report_path = write_run_report(ctx.run_dir)
+            artifacts["docs"].append(str(report_path))
+        except Exception as e:
+            log.warning("run_report_failed", error=str(e)[:300])
+
     log.info(
         "publication_pipeline_complete",
         n_tables=len(artifacts["tables"]),
