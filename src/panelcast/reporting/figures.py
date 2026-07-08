@@ -867,6 +867,28 @@ def select_artist_subsets(
     return subsets
 
 
+def _fan_chart_quantiles(
+    pred_samples: np.ndarray,
+    forecast_quantiles: np.ndarray | None = None,
+) -> tuple[np.ndarray, ...]:
+    """Percentile bands (q05..q95) for the fan chart.
+
+    When ``forecast_quantiles`` carries the stored (q05, q25, q50, q75, q95)
+    for the final (forecast) point, those values are used directly —
+    re-percentiling five stacked order statistics shrinks the outer band.
+    The unstored 10/90 pair is interpolated between adjacent stored levels.
+    """
+    q05, q10, q25, q50, q75, q90, q95 = (
+        np.percentile(pred_samples, p, axis=0) for p in (5, 10, 25, 50, 75, 90, 95)
+    )
+    if forecast_quantiles is not None:
+        f05, f25, f50, f75, f95 = (float(v) for v in np.asarray(forecast_quantiles))
+        q05[-1], q25[-1], q50[-1], q75[-1], q95[-1] = f05, f25, f50, f75, f95
+        q10[-1] = f05 + (f25 - f05) * (0.10 - 0.05) / (0.25 - 0.05)
+        q90[-1] = f75 + (f95 - f75) * (0.90 - 0.75) / (0.95 - 0.75)
+    return q05, q10, q25, q50, q75, q90, q95
+
+
 def save_artist_prediction_plot(
     artist: str,
     actual_scores: np.ndarray,
@@ -876,6 +898,7 @@ def save_artist_prediction_plot(
     filename_base: str,
     categories: list[str] | None = None,
     figsize: tuple[float, float] = (8, 5),
+    forecast_quantiles: np.ndarray | None = None,
 ) -> tuple[Path, Path]:
     """Generate and save a per-artist prediction fan chart.
 
@@ -901,6 +924,10 @@ def save_artist_prediction_plot(
         Category labels to annotate (e.g., ["best_predicted", "most_prolific"]).
     figsize : tuple[float, float]
         Figure size in inches.
+    forecast_quantiles : np.ndarray | None
+        Precomputed (q05, q25, q50, q75, q95) for the final (forecast) point.
+        When given, these render exactly as the band bounds instead of being
+        re-percentiled from ``pred_samples``.
 
     Returns
     -------
@@ -910,13 +937,7 @@ def save_artist_prediction_plot(
     n_albums = len(actual_scores)
     x = np.arange(n_albums)
 
-    q05 = np.percentile(pred_samples, 5, axis=0)
-    q10 = np.percentile(pred_samples, 10, axis=0)
-    q25 = np.percentile(pred_samples, 25, axis=0)
-    q50 = np.percentile(pred_samples, 50, axis=0)
-    q75 = np.percentile(pred_samples, 75, axis=0)
-    q90 = np.percentile(pred_samples, 90, axis=0)
-    q95 = np.percentile(pred_samples, 95, axis=0)
+    q05, q10, q25, q50, q75, q90, q95 = _fan_chart_quantiles(pred_samples, forecast_quantiles)
 
     with set_publication_style():
         fig, ax = plt.subplots(figsize=figsize)

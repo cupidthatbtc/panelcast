@@ -170,6 +170,26 @@ class TestModelCardData:
         assert "Album of the Year" not in data.architecture_summary
 
 
+class TestDefaultCardMatchesCurrentModel:
+    """The static AOTY card must describe the shipped 0.5.0+/0.6.0+ defaults."""
+
+    def test_architecture_describes_current_defaults(self):
+        data = create_default_model_card_data()
+        assert "y_ij ~ StudentT(df=4" in data.architecture_summary
+        assert "y_ij ~ Normal(" not in data.architecture_summary
+        assert "offset-logit transformed" in data.architecture_summary
+        assert "gbm_offset" in data.architecture_summary
+
+    def test_limitations_reflect_offset_logit_default(self):
+        data = create_default_model_card_data()
+        text = "\n".join(data.limitations)
+        # Pre-0.5.0 claims: the transform was "HELD" and "the clip stays".
+        assert "is HELD" not in text
+        assert "the clip stays" not in text
+        assert "default since 0.5.0" in text
+        assert "no clip is applied" in text
+
+
 class TestGenerateModelCard:
     """Tests for generate_model_card function."""
 
@@ -379,6 +399,36 @@ class TestUpdateWithResults:
 
         assert "FAILED" in updated.convergence_summary
         assert "param1" in updated.convergence_summary
+
+    def test_missing_ess_tail_renders_unavailable(self, sample_model_card_data):
+        """A None ess_tail_min must print 'unavailable', never the bulk value."""
+        convergence = MagicMock()
+        convergence.passed = True
+        convergence.rhat_max = 1.005
+        convergence.ess_bulk_min = 2100
+        convergence.ess_tail_min = None
+        convergence.divergences = 0
+        convergence.failing_params = []
+
+        updated = update_model_card_with_results(sample_model_card_data, convergence=convergence)
+
+        assert "ESS tail (min): unavailable" in updated.convergence_summary
+        assert "ESS tail (min): 2,100" not in updated.convergence_summary
+        assert "ESS bulk (min): 2,100" in updated.convergence_summary
+
+    def test_failing_params_line_rendered(self, sample_model_card_data):
+        """failing_params from the diagnostics payload should render."""
+        convergence = MagicMock()
+        convergence.passed = False
+        convergence.rhat_max = 1.02
+        convergence.ess_bulk_min = 300
+        convergence.ess_tail_min = 250
+        convergence.divergences = 0
+        convergence.failing_params = ["user_sigma_artist", "user_rho"]
+
+        updated = update_model_card_with_results(sample_model_card_data, convergence=convergence)
+
+        assert "Failing parameters: user_sigma_artist, user_rho" in updated.convergence_summary
 
     def test_fills_calibration(self, sample_model_card_data):
         """Should populate calibration summary from coverage results."""

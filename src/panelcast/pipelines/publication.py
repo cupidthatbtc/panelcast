@@ -19,7 +19,7 @@ import structlog
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.evaluation.calibration import ReliabilityData
 from panelcast.models.bayes.io import load_manifest, load_model
-from panelcast.paths import ArtifactPaths
+from panelcast.paths import ArtifactPaths, resolve_latest
 from panelcast.reporting.figures import (
     get_trace_plot_vars,
     save_artist_prediction_plot,
@@ -201,9 +201,9 @@ def _parse_convergence(
     except (TypeError, ValueError):
         divergences_int = 0
 
+    # Older diagnostics payloads don't serialize ess_tail_min; leave it None so
+    # the model card reports "unavailable" instead of a fabricated number.
     ess_tail = _safe_float(payload.get("ess_tail_min"))
-    if ess_tail is None:
-        ess_tail = ess_bulk_min
 
     # Keep partial diagnostics when available (e.g., single-chain runs with no R-hat).
     if (
@@ -232,6 +232,7 @@ def _build_publication_readiness(
     training_summary: dict[str, Any],
     artifact_errors: list[dict[str, str]],
     require_secondary_split: bool,
+    prior_predictive_available: bool = False,
 ) -> dict[str, Any]:
     """Build publication-readiness checks from generated artifacts."""
     checks: list[dict[str, Any]] = []
@@ -303,9 +304,9 @@ def _build_publication_readiness(
         f"ess_bulk_min={ess_bulk_min}",
     )
     if ess_bulk_min is not None:
-        # ess_threshold is a TOTAL bulk-ESS floor (the evaluate stage checks
-        # ess_bulk_min >= ess_threshold directly); it is not per-chain, so don't
-        # multiply by num_chains.
+        # ess_threshold is a TOTAL bulk-ESS floor (summed across chains) —
+        # the same gate check_convergence applies (post-#142); never multiply
+        # by num_chains.
         ess_threshold = _safe_int(diagnostics.get("ess_threshold")) or 400
         add_check(
             "ess_within_threshold",
@@ -313,6 +314,17 @@ def _build_publication_readiness(
             ess_bulk_min >= ess_threshold,
             f"ess_bulk_min={ess_bulk_min:.0f}, threshold={ess_threshold}",
         )
+
+    # The prior-predictive check is best-effort in evaluate (its failure only
+    # gates strict runs), so a missing artifact is a recommended failure —
+    # surfaced instead of silently passing.
+    add_check(
+        "prior_predictive_artifact_present",
+        "recommended",
+        prior_predictive_available,
+        "evaluation/prior_predictive.json "
+        + ("present" if prior_predictive_available else "missing (check did not run)"),
+    )
 
     primary_metrics = _resolve_primary_metrics(metrics) if isinstance(metrics, dict) else {}
     primary_calibration = primary_metrics.get("calibration", {})
@@ -492,6 +504,8 @@ class _PublicationInputs:
     point_metrics: _PointMetricsLike | None
     known_csv: Path
     input_errors: list[dict[str, str]]
+    rhat_threshold: float
+    ess_threshold: int
 
 
 def _load_publication_inputs(ctx: StageContext) -> _PublicationInputs:
@@ -550,6 +564,14 @@ def _load_publication_inputs(ctx: StageContext) -> _PublicationInputs:
         if isinstance(metrics, dict)
         else str(SplitType.WITHIN_ENTITY_TEMPORAL.value)
     )
+    # Threshold provenance: prefer the values the evaluate gate recorded in
+    # diagnostics.json, then the run configuration, then the defaults.
+    rhat_threshold = _safe_float(diagnostics.get("rhat_threshold"))
+    if rhat_threshold is None:
+        rhat_threshold = _safe_float(getattr(ctx, "rhat_threshold", None)) or 1.01
+    ess_threshold = _safe_int(diagnostics.get("ess_threshold"))
+    if ess_threshold is None:
+        ess_threshold = _safe_int(getattr(ctx, "ess_threshold", None)) or 400
     return _PublicationInputs(
         ctx=ctx,
         reports_dir=reports_dir,
@@ -566,6 +588,8 @@ def _load_publication_inputs(ctx: StageContext) -> _PublicationInputs:
         point_metrics=_parse_point_metrics(primary_metrics),
         known_csv=Path(paths.predictions) / "next_event_known_entities.csv",
         input_errors=input_errors,
+        rhat_threshold=rhat_threshold,
+        ess_threshold=ess_threshold,
     )
 
 
@@ -587,7 +611,13 @@ def _build_coefficient_table(inp: _PublicationInputs, artifacts: dict[str, Any])
 
 def _build_diagnostics_table(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
-        diag_df = create_diagnostics_table(inp.idata)
+        # Pass the run's gate thresholds so the exported Status column agrees
+        # with the readiness verdict for non-default runs.
+        diag_df = create_diagnostics_table(
+            inp.idata,
+            rhat_threshold=inp.rhat_threshold,
+            ess_threshold=inp.ess_threshold,
+        )
         diag_path = inp.tables_dir / "diagnostics"
         export_table(diag_df, str(diag_path), caption="Convergence diagnostics")
         artifacts["tables"].append(str(diag_path) + ".csv")
@@ -834,7 +864,8 @@ def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) 
             pred_quantiles = same_preds[q_cols].values[0]
             # Build a fan: the observed trajectory (no predictive spread) plus one
             # appended forecast point carrying the quantile fan. The appended slot
-            # has no observed value (NaN -> rendered as a gap).
+            # has no observed value (NaN -> rendered as a gap). The stored
+            # quantiles are passed through so the plotted band bounds are exact.
             pred_for_fan = np.tile(actual, (5, 1))
             pred_for_fan = np.column_stack([pred_for_fan, pred_quantiles[:, None]])
             actual_for_fan = np.append(np.asarray(actual, dtype=float), np.nan)
@@ -850,6 +881,7 @@ def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) 
                     output_dir=inp.figures_dir,
                     filename_base=f"artist_{safe_name}",
                     categories=categories,
+                    forecast_quantiles=pred_quantiles,
                 )
                 artifacts["figures"].append(str(pdf_path))
                 artifacts["figures"].append(str(png_path))
@@ -915,7 +947,13 @@ def _build_prior_justification(inp: _PublicationInputs) -> str | None:
                 log.warning("prior_predictive_load_failed", error=str(e))
 
         sensitivity_summary = None
-        oat_path = Path("outputs/sensitivity/oat_summary.csv")
+        # The sensitivity stage writes under the run's reports root; fall back
+        # to the latest run's reports when generating reports for another run.
+        oat_path = inp.reports_dir / "sensitivity" / "oat_summary.csv"
+        if not oat_path.exists():
+            latest_run = resolve_latest()
+            if latest_run is not None:
+                oat_path = latest_run / "reports" / "sensitivity" / "oat_summary.csv"
         if oat_path.exists():
             try:
                 sensitivity_summary = pd.read_csv(oat_path)
@@ -967,6 +1005,15 @@ def _generate_model_card(inp: _PublicationInputs, artifacts: dict[str, Any]) -> 
             ):
                 if key in mcmc_cfg:
                     model_card_data.hyperparameters[key] = mcmc_cfg[key]
+        # Record the run's actual model configuration so the card cannot
+        # contradict the training summary; keys absent from older summaries
+        # are omitted rather than guessed.
+        for key in ("target_transform", "likelihood_family", "entity_group_pooling"):
+            if key in training_summary:
+                model_card_data.hyperparameters[key] = training_summary[key]
+        feature_cols = training_summary.get("feature_cols")
+        if isinstance(feature_cols, list):
+            model_card_data.hyperparameters["gbm_offset"] = "gbm_offset" in feature_cols
 
         convergence = _parse_convergence(inp.diagnostics, inp.metrics)
         coverage_results = _parse_coverage_results(inp.primary_metrics)
@@ -1076,6 +1123,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
         training_summary=inp.training_summary if isinstance(inp.training_summary, dict) else {},
         artifact_errors=artifacts["errors"],
         require_secondary_split=bool(getattr(ctx, "evaluate_secondary_split", True)),
+        prior_predictive_available=(inp.eval_dir / "prior_predictive.json").exists(),
     )
     readiness_json_path = inp.reports_dir / "publication_readiness.json"
     with open(readiness_json_path, "w", encoding="utf-8") as f:
