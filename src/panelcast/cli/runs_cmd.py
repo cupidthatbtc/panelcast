@@ -456,3 +456,65 @@ def _load_metrics_from_manifest_dir(manifest, output_base: Path) -> dict:
         if (candidate / "manifest.json").exists():
             return _load_metrics(candidate)
     return {}
+
+
+@runs_app.command("why")
+def runs_why(
+    run_id: str = typer.Argument(
+        None, help="Failed run id (default: the most recent under outputs/failed/)."
+    ),
+    output_base: Path = typer.Option(
+        Path("outputs"), "--output-base", help="Run directory root."
+    ),
+) -> None:
+    """Explain a failed run: stage, exception, hint, resume command, recent events."""
+    import json
+
+    if run_id is None:
+        failed_root = output_base / "failed"
+        candidates = sorted(
+            (p for p in failed_root.glob("*") if (p / "manifest.json").exists()),
+            key=lambda p: p.name,
+        )
+        if not candidates:
+            typer.echo(f"no failed runs under {failed_root}")
+            raise typer.Exit(code=0)
+        run_dir = candidates[-1]
+    else:
+        run_dir = resolve_run_dir(run_id, output_base)
+
+    failure_path = run_dir / "failure.json"
+    if not failure_path.exists():
+        # Pre-0.9.0 failure (or an incomplete run): fall back to the manifest.
+        from panelcast.pipelines.manifest import load_run_manifest
+
+        manifest = load_run_manifest(run_dir / "manifest.json")
+        typer.echo(f"run     {manifest.run_id}")
+        typer.echo("no failure.json recorded for this run; manifest error field:")
+        typer.echo(f"error   {manifest.error or '(none — run may be incomplete, not failed)'}")
+        typer.echo(f"resume  panelcast run --resume {run_dir.name}")
+        return
+
+    payload = json.loads(failure_path.read_text(encoding="utf-8"))
+    typer.echo(f"run      {payload.get('run_id') or run_dir.name}")
+    typer.echo(f"stage    {payload.get('stage')}")
+    typer.echo(f"error    {payload.get('exception_type')}: {payload.get('message')}")
+    if payload.get("stages_completed"):
+        typer.echo(f"done     {', '.join(payload['stages_completed'])}")
+    if payload.get("hint"):
+        typer.echo(f"hint     {payload['hint']}")
+    typer.echo(f"resume   {payload.get('resume_command')}")
+    tail = payload.get("traceback_tail") or []
+    if tail:
+        typer.echo("\ntraceback tail:")
+        for line in tail:
+            typer.echo("  " + line.rstrip())
+    events = payload.get("recent_events") or []
+    if events:
+        typer.echo("\nlast events:")
+        for event in events[-10:]:
+            label = event.get("event", "")
+            extras = ", ".join(
+                f"{k}={v}" for k, v in event.items() if k not in ("event", "level")
+            )
+            typer.echo(f"  [{event.get('level', '?'):<8}] {label}  {extras}"[:160])

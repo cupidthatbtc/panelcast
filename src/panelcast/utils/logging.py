@@ -7,9 +7,29 @@ at DEBUG level (JSON for structured analysis).
 
 import logging
 import sys
+from collections import deque
 from pathlib import Path
 
 import structlog
+
+_RECENT_EVENTS: deque = deque(maxlen=20)
+
+
+def recent_events() -> list[dict]:
+    """The last ~20 structured log events, for failure.json forensics."""
+    return list(_RECENT_EVENTS)
+
+
+def _capture_recent(logger, method_name, event_dict):
+    """Structlog processor: keep a small ring of recent events in memory."""
+    if method_name in ("info", "warning", "error", "critical"):
+        _RECENT_EVENTS.append(
+            {
+                "level": method_name,
+                **{k: str(v) for k, v in event_dict.items() if k not in ("exc_info",)},
+            }
+        )
+    return event_dict
 
 
 def setup_pipeline_logging(
@@ -62,6 +82,7 @@ def setup_pipeline_logging(
         structlog.stdlib.PositionalArgumentsFormatter(),
         structlog.processors.StackInfoRenderer(),
         structlog.processors.UnicodeDecoder(),
+        _capture_recent,
         structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
     ]
 
