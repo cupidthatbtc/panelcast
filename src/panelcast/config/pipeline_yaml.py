@@ -90,6 +90,9 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "max_tree_depth": _spec("max_tree_depth", "max_tree_depth"),
     "chain_method": _spec("chain_method", "chain_method", _as_chain_method),
     "checkpoint_every": _spec("checkpoint_every_draws", "checkpoint_every"),
+    # Warmup-transfer seams (no CLI flags; the select runner writes them per arm).
+    "warmup_export_path": _spec("warmup_export_path"),
+    "warmup_import_path": _spec("warmup_import_path"),
     # Convergence thresholds
     "rhat_threshold": _spec("rhat_threshold", "rhat_threshold"),
     "ess_threshold": _spec("ess_threshold", "ess_threshold"),

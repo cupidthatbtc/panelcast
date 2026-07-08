@@ -49,6 +49,14 @@ def select(
             "killed and marked failed."
         ),
     ),
+    warmup_transfer: bool = typer.Option(
+        False,
+        "--warmup-transfer",
+        help=(
+            "Screening arms reuse the reference fit's adapted mass matrix at reduced "
+            "warmup (exact model-signature match only); confirmation always runs cold."
+        ),
+    ),
     sweep_id: str = typer.Option(
         "sweep", "--sweep-id", help="Sweep directory name under outputs/select/ (enables --resume)."
     ),
@@ -95,6 +103,7 @@ def select(
         budget_hours=budget_hours,
         promote_z=rules.promote_z,
         arm_timeout_seconds=_parse_arm_timeout(arm_timeout),
+        warmup_transfer=warmup_transfer,
     )
 
     dims = resolve_dims(_prepared_paths(descriptor))

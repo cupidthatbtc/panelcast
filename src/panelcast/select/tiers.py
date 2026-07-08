@@ -118,6 +118,7 @@ def tier_to_sweep_config(
     promote_z: float = 2.0,
     panelcast_bin: str | None = None,
     arm_timeout_seconds: float | str | None = None,
+    warmup_transfer: bool = False,
 ) -> SweepConfig:
     """Map a tier (plus raw overrides) onto the runner's SweepConfig."""
     return SweepConfig(
@@ -134,6 +135,7 @@ def tier_to_sweep_config(
         num_warmup=tier.num_warmup,
         panelcast_bin=panelcast_bin,
         arm_timeout_seconds=arm_timeout_seconds,
+        warmup_transfer=warmup_transfer,
     )
 
 
