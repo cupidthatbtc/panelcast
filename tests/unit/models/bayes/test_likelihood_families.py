@@ -96,6 +96,58 @@ class TestLikelihoodSites:
         assert PriorConfig().likelihood_family == "studentt"
 
 
+class TestSigmaSideSitesForSigmaIgnoringFamilies:
+    """Beta families never read sigma: the gated sigma-side sites must not be
+    sampled (pure prior draws invite misreading), while sigma_obs itself stays
+    sampled because publication tables and cold-start prediction read it."""
+
+    @pytest.mark.parametrize("family", ["beta", "beta_binomial"])
+    def test_learn_n_exponent_site_skipped(self, family):
+        model = make_score_model("user")
+        args = _model_args(family)
+        tr = trace(seed(model, random.PRNGKey(0))).get_trace(
+            y=None, learn_n_exponent=True, **args
+        )
+        assert "user_n_exponent" not in tr
+        assert "user_sigma_obs" in tr
+
+    def test_entity_overdispersion_sites_skipped(self):
+        model = make_score_model("user")
+        args = _model_args("beta")
+        args["priors"] = PriorConfig(
+            likelihood_family="beta", heteroscedastic_entity_obs=True
+        )
+        tr = trace(seed(model, random.PRNGKey(0))).get_trace(y=None, **args)
+        assert "user_tau_entity" not in tr
+        assert "user_entity_obs_raw" not in tr
+
+    def test_sigma_ref_site_skipped(self):
+        model = make_score_model("user")
+        args = _model_args("beta")
+        tr = trace(seed(model, random.PRNGKey(0))).get_trace(
+            y=None, n_ref=50.0, n_exponent=0.5, **args
+        )
+        assert "user_sigma_ref" not in tr
+        assert "user_sigma_obs" in tr
+
+    def test_studentt_sigma_sites_unchanged(self):
+        """The guard must not touch sigma-using families."""
+        model = make_score_model("user")
+        args = _model_args("studentt")
+        tr = trace(seed(model, random.PRNGKey(0))).get_trace(
+            y=None, learn_n_exponent=True, **args
+        )
+        assert "user_n_exponent" in tr
+        assert "user_sigma_obs" in tr
+
+        args["priors"] = PriorConfig(
+            likelihood_family="studentt", heteroscedastic_entity_obs=True
+        )
+        tr = trace(seed(model, random.PRNGKey(0))).get_trace(y=None, **args)
+        assert "user_tau_entity" in tr
+        assert "user_entity_obs_raw" in tr
+
+
 class TestPredictNewEntityDispatch:
     def _posterior(self, n=40, extra=None):
         rng = np.random.default_rng(2)

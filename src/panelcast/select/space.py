@@ -376,6 +376,16 @@ def arm_conflicts(
             conflicts.append(
                 f"discretize_observation is unsupported for likelihood_family='{family}'"
             )
+        if not spec.uses_sigma:
+            # Sigma-side knobs are inert for families that never read sigma;
+            # such arms would score identically to the base arm while labeled
+            # as different models.
+            for knob_name in ("learn_n_exponent", "heteroscedastic_entity_obs"):
+                if merged[knob_name]:
+                    conflicts.append(
+                        f"{knob_name} has no effect with likelihood_family='{family}' "
+                        "(the family ignores sigma)"
+                    )
     if merged["discretize_observation"] and transform != "identity":
         conflicts.append(
             f"discretize_observation requires target_transform='identity' (got '{transform}')"
