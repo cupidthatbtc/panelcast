@@ -142,3 +142,31 @@ class TestRunBacktestResume:
         assert reloaded.records[1].status == "failed"
         assert (cfg.backtest_dir / "backtest_metrics.json").exists()
         assert (cfg.backtest_dir / "backtest_report.md").exists()
+
+
+def test_dig_paths_match_the_real_metrics_shape():
+    # Pin every aggregation path against the actual metrics.json nesting the
+    # evaluate stage writes — the elpd path was silently wrong once already.
+    payload = {
+        "n_test": 500,
+        "point_metrics": {"mae": 5.3, "rmse": 7.1, "r2": 0.5},
+        "crps": {"mean_crps": 3.9},
+        "calibration": {
+            "coverages": {"0.80": {"empirical": 0.79}, "0.95": {"empirical": 0.94}},
+            "wis": 4.2,
+        },
+        "info_criteria": {
+            "heldout_elpd": {"elpd": -1000.0, "se": 30.0, "elpd_per_obs": -4.115}
+        },
+    }
+    harvested = {name: bt._dig(payload, path) for name, path in bt._AGGREGATED_METRICS}
+    assert harvested == {
+        "mae": 5.3,
+        "rmse": 7.1,
+        "r2": 0.5,
+        "crps": 3.9,
+        "coverage_0.80": 0.79,
+        "coverage_0.95": 0.94,
+        "wis": 4.2,
+        "elpd_per_obs": -4.115,
+    }

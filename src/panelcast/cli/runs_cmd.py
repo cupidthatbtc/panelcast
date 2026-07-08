@@ -490,6 +490,9 @@ def runs_why(
 
         manifest = load_run_manifest(run_dir / "manifest.json")
         typer.echo(f"run     {manifest.run_id}")
+        if manifest.success:
+            typer.echo("run completed successfully — nothing to explain.")
+            return
         typer.echo("no failure.json recorded for this run; manifest error field:")
         typer.echo(f"error   {manifest.error or '(none — run may be incomplete, not failed)'}")
         typer.echo(f"resume  panelcast run --resume {run_dir.name}")

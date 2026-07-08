@@ -1252,15 +1252,24 @@ def _evaluate_primary_split(
 
     # Informational AR(1) adequacy check: within-artist lag-1 autocorrelation
     # of posterior-mean residuals (rows are artist/date sorted upstream).
-    residual_acf = compute_residual_autocorrelation(
-        primary_y_true - primary_y_samples.mean(axis=0),
-        primary_model_args["artist_idx"],
-    )
-    log.info(
-        "residual_autocorrelation",
-        lag1_acf=residual_acf["lag1_acf"],
-        n_pairs=residual_acf["n_pairs"],
-    )
+    # Informational like its neighbors — never fail the stage over it.
+    try:
+        residual_acf = compute_residual_autocorrelation(
+            primary_y_true - primary_y_samples.mean(axis=0),
+            primary_model_args["artist_idx"],
+        )
+        log.info(
+            "residual_autocorrelation",
+            lag1_acf=residual_acf["lag1_acf"],
+            n_pairs=residual_acf["n_pairs"],
+        )
+    except Exception as e:
+        log.warning(
+            "residual_autocorrelation_failed",
+            error_type=type(e).__name__,
+            error=str(e)[:500],
+        )
+        residual_acf = {"lag1_acf": None, "n_pairs": 0}
 
     # Ranking metrics (#182): the ordinal read on the held-out slate.
     # Informational — never fail the stage over it.

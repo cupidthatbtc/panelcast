@@ -22,7 +22,16 @@ def doctor(
     """
     from panelcast.doctor import run_doctor
 
-    results = run_doctor(dataset)
+    if as_json:
+        import contextlib
+        import sys
+
+        # Checks may emit structlog lines to stdout (e.g. the compile-cache
+        # probe); JSON mode must keep stdout parseable for piping.
+        with contextlib.redirect_stdout(sys.stderr):
+            results = run_doctor(dataset)
+    else:
+        results = run_doctor(dataset)
 
     if as_json:
         import json
