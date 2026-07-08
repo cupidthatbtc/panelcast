@@ -758,3 +758,52 @@ class TestReorderCost:
     def test_no_cost_keeps_enumeration_order(self):
         arms = [({"a": 1}, None), ({"b": 1}, None)]
         assert reorder_arms(arms, {}) == arms
+
+
+class TestWarmupTransferWiring:
+    """Reference exports adaptation; later arms import at reduced warmup (#178)."""
+
+    def _configs_written(self, tmp_path, monkeypatch, transfer: bool):
+        import yaml
+
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.max_fits = 3
+        cfg.warmup_transfer = transfer
+
+        def launch_and_touch(config_path, panelcast_bin, timeout_seconds=None):
+            code, tail = launch(config_path, panelcast_bin, timeout_seconds)
+            # The reference subprocess would write the export; fake it.
+            payload = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+            if "warmup_export_path" in payload:
+                Path(payload["warmup_export_path"]).write_bytes(b"x")
+            return code, tail
+
+        ledger = run_sweep(cfg, AOTY, launch=launch_and_touch)
+        configs = {
+            p.name: __import__("yaml").safe_load(p.read_text(encoding="utf-8"))
+            for p in cfg.sweep_dir.glob("arm_*.yaml")
+        }
+        return ledger, configs
+
+    def test_reference_exports_arms_import(self, tmp_path, monkeypatch):
+        ledger, configs = self._configs_written(tmp_path, monkeypatch, transfer=True)
+        reference = next(r for r in ledger.records.values() if not r.knobs)
+        ref_config = configs[f"arm_{reference.arm_id}.yaml"]
+        assert "warmup_export_path" in ref_config
+        assert "warmup_import_path" not in ref_config
+
+        arm_records = [r for r in ledger.records.values() if r.knobs]
+        assert arm_records
+        for r in arm_records:
+            payload = configs[f"arm_{r.arm_id}.yaml"]
+            assert payload["warmup_import_path"] == ref_config["warmup_export_path"]
+            assert payload["num_warmup"] == 200
+            assert r.warm_started is True
+        assert reference.warm_started is None
+
+    def test_default_off_writes_no_warmup_keys(self, tmp_path, monkeypatch):
+        _, configs = self._configs_written(tmp_path, monkeypatch, transfer=False)
+        for payload in configs.values():
+            assert "warmup_export_path" not in payload
+            assert "warmup_import_path" not in payload

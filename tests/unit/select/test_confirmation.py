@@ -389,3 +389,16 @@ class TestConfirmationResume:
         result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
         assert result.seeds[0].winner_converged is False
         assert not result.confirmed
+
+
+class TestConfirmationAlwaysCold:
+    def test_confirmation_configs_never_carry_warmup_transfer(self, tmp_path, monkeypatch):
+        import yaml
+
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.warmup_transfer = True  # even when the sweep transferred, confirmation is cold
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        for p in cfg.sweep_dir.glob("confirm_*.yaml"):
+            payload = yaml.safe_load(p.read_text(encoding="utf-8"))
+            assert "warmup_import_path" not in payload
+            assert "warmup_export_path" not in payload

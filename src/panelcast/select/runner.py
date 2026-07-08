@@ -90,6 +90,12 @@ class SweepConfig:
     arm_timeout_seconds: float | str | None = None
     arm_timeout_multiplier: float = 3.0
     arm_timeout_floor_seconds: float = 1800.0
+    # Warmup transfer (#178): arms reuse the reference fit's adapted mass matrix
+    # (exact latent-signature match only) at a reduced warmup. Screening-grade —
+    # confirmation always runs cold, so no promoted champion's evidence depends
+    # on transferred adaptation.
+    warmup_transfer: bool = False
+    warmup_transfer_num_warmup: int = 200
 
     @property
     def sweep_dir(self) -> Path:
@@ -112,6 +118,7 @@ class ArmRecord:
     # Optional with defaults so 0.7.x-era ledgers (without these keys) still load.
     predicted_seconds: float | None = None
     timeout_seconds_used: float | None = None
+    warm_started: bool | None = None
 
 
 def arm_id(knobs: dict[str, Any]) -> str:
@@ -368,7 +375,11 @@ def _default_panelcast_bin() -> str:
 
 
 def _write_arm_config(
-    cfg: SweepConfig, merged: dict[str, Any], stages: list[str], path: Path
+    cfg: SweepConfig,
+    merged: dict[str, Any],
+    stages: list[str],
+    path: Path,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     payload: dict[str, Any] = {**cfg.extra_config, **merged, "stages": stages}
     if cfg.dataset is not None:
@@ -380,9 +391,31 @@ def _write_arm_config(
     ):
         if value is not None:
             payload[key] = value
+    payload.update(extra or {})
     import yaml  # type: ignore[import-untyped]
 
     path.write_text(yaml.safe_dump(payload, sort_keys=True), encoding="utf-8")
+
+
+def _warmup_transfer_extra(cfg: SweepConfig, arm: dict[str, Any], record: ArmRecord) -> dict:
+    """Per-arm warmup-transfer config keys: reference exports, later arms import.
+
+    The import runs at the reduced warmup; a signature mismatch inside the fit
+    misses cleanly to a cold fit at that same reduced warmup, which the
+    divergence/Rhat gates then judge — never silently biased.
+    """
+    if not cfg.warmup_transfer:
+        return {}
+    export_path = cfg.sweep_dir / "warmup_reference.pkl"
+    if not arm:
+        return {"warmup_export_path": str(export_path)}
+    if export_path.exists():
+        record.warm_started = True
+        return {
+            "warmup_import_path": str(export_path),
+            "num_warmup": cfg.warmup_transfer_num_warmup,
+        }
+    return {}
 
 
 def _predict_arm_seconds(
@@ -674,7 +707,9 @@ def run_sweep(
         stages = _FEATURE_STAGES if signature != cache_signature else _MODEL_STAGES
         record = ArmRecord(arm_id=aid, knobs=arm, stage=stage, note=note)
         config_path = cfg.sweep_dir / f"arm_{aid}.yaml"
-        _write_arm_config(cfg, merged, stages, config_path)
+        _write_arm_config(
+            cfg, merged, stages, config_path, extra=_warmup_transfer_extra(cfg, arm, record)
+        )
         timeout_seconds = _apply_arm_timeout(cfg, merged, dims, record)
         log.info("arm_start", arm_id=aid, stage=stage, knobs=arm, stages=stages)
         started = time.monotonic()

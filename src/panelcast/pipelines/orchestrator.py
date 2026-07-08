@@ -158,6 +158,9 @@ class PipelineConfig:
     max_tree_depth: int = 10
     chain_method: ChainMethod = "sequential"
     checkpoint_every_draws: int | None = None
+    # Warmup-transfer seams (YAML-only; the select runner writes them per arm).
+    warmup_export_path: str | None = None
+    warmup_import_path: str | None = None
     # Convergence thresholds
     rhat_threshold: float = 1.01
     ess_threshold: int = 400

@@ -1745,7 +1745,7 @@ class TestTrainModelsFeatureStandardization:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
-            checkpoint_dir=None,
+            **_fit_kwargs,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -1816,7 +1816,7 @@ class TestTrainModelsFeatureStandardization:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
-            checkpoint_dir=None,
+            **_fit_kwargs,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -1932,7 +1932,7 @@ class TestTrainModelsNRefComputation:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
-            checkpoint_dir=None,
+            **_fit_kwargs,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -2021,7 +2021,7 @@ class TestTrainModelsNRefComputation:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
-            checkpoint_dir=None,
+            **_fit_kwargs,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -2077,7 +2077,7 @@ class TestTrainModelsMCMCConfigPassthrough:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
-            checkpoint_dir=None,
+            **_fit_kwargs,
         ):
             captured_config["config"] = config
             return _make_fake_fit_result()
@@ -2166,7 +2166,7 @@ class TestTrainModelsHeteroscedasticConfig:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
-            checkpoint_dir=None,
+            **_fit_kwargs,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()
@@ -2222,7 +2222,7 @@ class TestTrainModelsPriorsPassthrough:
             progress_bar,
             exclude_from_idata,
             exclude_from_collection=None,
-            checkpoint_dir=None,
+            **_fit_kwargs,
         ):
             captured_model_args.update(model_args)
             return _make_fake_fit_result()

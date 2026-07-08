@@ -126,6 +126,9 @@ class FitResult:
             restored from a checkpoint — its wall clock covers only the blocks
             this process ran, so it must not become a runtime-calibration
             datapoint.
+        warm_started: True when the fit ran with an imported inverse mass
+            matrix (warmup-transfer); such fits are screening-grade evidence,
+            never confirmation evidence.
     """
 
     mcmc: MCMC | None
@@ -136,6 +139,7 @@ class FitResult:
     peak_gpu_memory_bytes: int | None = None
     tree_depth_saturation: float | None = None
     resumed_from_checkpoint: bool = False
+    warm_started: bool = False
 
 
 def measure_peak_gpu_bytes() -> int | None:
@@ -239,6 +243,81 @@ def _log_tree_depth_saturation(extra_fields: dict, max_tree_depth: int) -> float
             f"max_tree_depth={max_tree_depth}; consider raising it."
         )
     return saturation
+
+
+def _model_latent_signature(model: Callable, run_args: dict) -> list[tuple[str, tuple[int, ...]]]:
+    """Ordered (site, shape) of the model's sampled latents via one forward trace."""
+    from numpyro import handlers
+
+    tr = handlers.trace(handlers.seed(model, 0)).get_trace(**run_args)
+    return sorted(
+        (name, tuple(np.asarray(site["value"]).shape))
+        for name, site in tr.items()
+        if site["type"] == "sample" and not site.get("is_observed", False)
+    )
+
+
+def _export_warmup_state(mcmc: MCMC, model: Callable, run_args: dict, config, path: Path) -> None:
+    """Persist the adapted step size / inverse mass matrix plus the latent signature."""
+    import numpyro
+
+    adapt = jax.device_get(mcmc.last_state.adapt_state)
+    payload = {
+        "signature": _model_latent_signature(model, run_args),
+        "step_size": np.asarray(adapt.step_size),
+        "inverse_mass_matrix": adapt.inverse_mass_matrix,
+        "num_chains": config.num_chains,
+        "numpyro_version": numpyro.__version__,
+    }
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("wb") as fh:
+        pickle.dump(payload, fh)
+    logger.info("Warmup adaptation exported to %s", path)
+
+
+def _strip_chain_axis(value, num_chains: int) -> np.ndarray:
+    """Adapt-state arrays carry a leading chain axis only for multi-chain fits."""
+    arr = np.asarray(value)
+    if num_chains > 1 and arr.ndim >= 1 and arr.shape[0] == num_chains:
+        return arr[0]
+    return arr
+
+
+def _load_warm_start(
+    model: Callable, run_args: dict, config, path: Path
+) -> tuple[dict, str | None]:
+    """(NUTS kwargs, miss reason) — a transfer misses cleanly to a cold fit.
+
+    The imported inverse mass matrix only fits a posterior with the exact same
+    latent sites and shapes (knobs like heteroscedastic_entity_obs or
+    errors_in_variables add sites and must miss); step size stays adaptive so
+    the reduced warmup re-tunes it against the inherited geometry.
+    """
+    import numpyro
+
+    try:
+        with Path(path).open("rb") as fh:
+            payload = pickle.load(fh)
+    except Exception as exc:
+        return {}, f"unreadable warmup export ({exc})"
+    if payload.get("numpyro_version") != numpyro.__version__:
+        return {}, "numpyro version changed"
+    if payload.get("num_chains") != config.num_chains:
+        return {}, "chain count differs"
+    if payload.get("signature") != _model_latent_signature(model, run_args):
+        return {}, "latent site signature differs"
+    imm = payload["inverse_mass_matrix"]
+    if isinstance(imm, dict):
+        imm = {k: _strip_chain_axis(v, config.num_chains) for k, v in imm.items()}
+    else:
+        imm = _strip_chain_axis(imm, config.num_chains)
+    step_size = float(np.median(np.asarray(payload["step_size"])))
+    return {
+        "inverse_mass_matrix": imm,
+        "adapt_mass_matrix": False,
+        "step_size": step_size,
+    }, None
 
 
 def _block_sizes(num_samples: int, block: int) -> list[int]:
@@ -355,6 +434,30 @@ def _run_blocked(
     return mcmc, samples, extra_flat, start_block > 0
 
 
+def _resolve_warm_start(
+    model: Callable, run_args: dict, config, warmup_import_path: Path | None
+) -> tuple[dict, bool]:
+    if warmup_import_path is None:
+        return {}, False
+    kwargs, miss = _load_warm_start(model, run_args, config, warmup_import_path)
+    if miss:
+        logger.info("warm_start_skipped: %s", miss)
+        return {}, False
+    logger.info("Warm start: adaptation imported from %s", warmup_import_path)
+    return kwargs, True
+
+
+def _maybe_export_warmup(
+    mcmc: MCMC | None, model: Callable, run_args: dict, config, path: Path | None
+) -> None:
+    if path is None or mcmc is None:
+        return
+    try:
+        _export_warmup_state(mcmc, model, run_args, config, path)
+    except Exception as exc:  # the export is an optimization, never a failure
+        logger.warning("warmup export failed: %s", exc)
+
+
 def _run_sampling(
     kernel: NUTS,
     config: MCMCConfig,
@@ -392,6 +495,8 @@ def fit_model(
     exclude_from_idata: tuple[str, ...] | None = None,
     exclude_from_collection: tuple[str, ...] | None = None,
     checkpoint_dir: Path | None = None,
+    warmup_export_path: Path | None = None,
+    warmup_import_path: Path | None = None,
 ) -> FitResult:
     """Fit NumPyro model via MCMC with GPU acceleration.
 
@@ -437,6 +542,14 @@ def fit_model(
         Where checkpointed sampling persists per-block draws, the sampler
         state, and its cursor. Required when
         ``config.checkpoint_every_draws`` is set; ignored otherwise.
+    warmup_export_path : Path, optional
+        Persist this fit's adapted step size / inverse mass matrix (plus the
+        latent signature that scopes its reuse) after sampling.
+    warmup_import_path : Path, optional
+        Reuse a previously exported adaptation when the latent signature,
+        chain count, and numpyro version match exactly; any mismatch logs
+        ``warm_start_skipped`` and runs a cold fit. Pair with a reduced
+        ``num_warmup`` — step size still re-adapts, the mass matrix is frozen.
 
     Returns
     -------
@@ -467,11 +580,20 @@ def fit_model(
 
     logger.info(f"NUTS init strategy: {config.init_strategy}")
 
+    # Separate metadata-only keys from actual model parameters
+    _metadata_keys = {"n_ref_method"}
+    run_args = {k: v for k, v in model_args.items() if k not in _metadata_keys}
+
+    warm_start_kwargs, warm_started = _resolve_warm_start(
+        model, run_args, config, warmup_import_path
+    )
+
     kernel = NUTS(
         model,
         max_tree_depth=config.max_tree_depth,
         target_accept_prob=config.target_accept_prob,
         init_strategy=_resolve_init_strategy(config.init_strategy),
+        **warm_start_kwargs,
     )
 
     # Generate random key (using modern JAX API)
@@ -483,10 +605,6 @@ def fit_model(
         f"{config.num_warmup} warmup, {config.num_samples} samples"
     )
     start_time = time.perf_counter()
-
-    # Separate metadata-only keys from actual model parameters
-    _metadata_keys = {"n_ref_method"}
-    run_args = {k: v for k, v in model_args.items() if k not in _metadata_keys}
 
     extra_field_names: list[str] = ["diverging", "num_steps"]
     if exclude_from_collection:
@@ -502,6 +620,8 @@ def fit_model(
     )
 
     runtime_seconds = time.perf_counter() - start_time
+
+    _maybe_export_warmup(mcmc, model, run_args, config, warmup_export_path)
 
     # Measure peak GPU allocation right after sampling, before any
     # InferenceData construction allocates on top of it.
@@ -681,4 +801,5 @@ def fit_model(
         peak_gpu_memory_bytes=peak_gpu_memory_bytes,
         tree_depth_saturation=tree_depth_saturation,
         resumed_from_checkpoint=resumed_from_checkpoint,
+        warm_started=warm_started,
     )

@@ -1197,6 +1197,8 @@ def train_models(
     checkpoint_dir = (
         Path(paths.models) / "checkpoint" if mcmc_config.checkpoint_every_draws else None
     )
+    warmup_export = getattr(ctx, "warmup_export_path", None)
+    warmup_import = getattr(ctx, "warmup_import_path", None)
     fit_result = fit_model(
         model=make_score_model(prefix),
         model_args=model_args,
@@ -1209,6 +1211,8 @@ def train_models(
         # other sites is guarded by tests).
         exclude_from_collection=(tuple(collection_excludes) or None),
         checkpoint_dir=checkpoint_dir,
+        warmup_export_path=Path(warmup_export) if warmup_export else None,
+        warmup_import_path=Path(warmup_import) if warmup_import else None,
     )
 
     log.info(
@@ -1308,6 +1312,8 @@ def train_models(
         # The resolved method lives in mcmc_config; keep the request auditable.
         "chain_method_requested": requested_chain_method,
         "chain_method_resolution": chain_method_reason,
+        # Warm-started fits are screening-grade evidence, never confirmation.
+        "warm_started": fit_result.warm_started,
         "convergence_thresholds": {
             "rhat_threshold": ctx.rhat_threshold,
             "ess_threshold": ctx.ess_threshold,
