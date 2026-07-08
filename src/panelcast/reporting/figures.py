@@ -47,6 +47,7 @@ __all__ = [
     "save_posterior_plot",
     "save_predictions_plot",
     "save_reliability_plot",
+    "save_slice_coverage_plot",
     "save_trace_plot",
     "select_artist_subsets",
     "set_publication_style",
@@ -570,6 +571,87 @@ def save_reliability_plot(
         pdf_path, png_path = _save_dual_format(fig, output_dir, filename_base)
 
         # Clean up
+        plt.close(fig)
+
+    return pdf_path, png_path
+
+
+def save_slice_coverage_plot(
+    by_slice: dict,
+    output_dir: Path,
+    filename_base: str = "slice_coverage",
+    figsize: tuple[float, float] | None = None,
+) -> tuple[Path, Path]:
+    """Small-multiples coverage audit: one panel per slice dimension.
+
+    Each panel plots empirical coverage with Wilson CI whiskers per slice
+    against dashed lines at the nominal levels; slices whose nominal level
+    falls outside the CI are drawn in the warning color. Input is the
+    ``calibration.by_slice`` block from metrics.json (#181).
+    """
+    slices = by_slice.get("slices") or []
+    dimensions: dict[str, list[dict]] = {}
+    for s in slices:
+        dimensions.setdefault(s["dimension"], []).append(s)
+    if not dimensions:
+        raise ValueError("by_slice payload has no slices to plot")
+
+    levels = sorted({lv for s in slices for lv in s["levels"]})
+    n_panels = len(dimensions)
+    if figsize is None:
+        figsize = (max(6.0, 3.2 * n_panels), 4.0)
+
+    with set_publication_style():
+        fig, axes = plt.subplots(1, n_panels, figsize=figsize, sharey=True)
+        axes = np.atleast_1d(axes)
+        for ax, (dimension, dim_slices) in zip(axes, sorted(dimensions.items()), strict=True):
+            xs = np.arange(len(dim_slices))
+            for li, level in enumerate(levels):
+                per = [s["levels"].get(level) for s in dim_slices]
+                keep = [i for i, p in enumerate(per) if p is not None]
+                if not keep:
+                    continue
+                emp = np.array([per[i]["empirical"] for i in keep])
+                lo = np.array([per[i]["wilson_lo"] for i in keep])
+                hi = np.array([per[i]["wilson_hi"] for i in keep])
+                flagged = np.array([bool(per[i]["flagged"]) for i in keep])
+                x = xs[keep] + (li - (len(levels) - 1) / 2) * 0.15
+                # errorbar takes one ecolor, so flagged/ok are drawn separately.
+                for mask, color in (
+                    (~flagged, COLORBLIND_COLORS[0]),
+                    (flagged, COLORBLIND_COLORS[1]),
+                ):
+                    if not mask.any():
+                        continue
+                    ax.errorbar(
+                        x[mask],
+                        emp[mask],
+                        yerr=[emp[mask] - lo[mask], hi[mask] - emp[mask]],
+                        fmt="none",
+                        ecolor=color,
+                        elinewidth=1,
+                        capsize=2,
+                    )
+                    ax.scatter(x[mask], emp[mask], s=18, color=color, zorder=3)
+                ax.axhline(
+                    float(level), linestyle="--", linewidth=0.8, color="grey", alpha=0.6
+                )
+            ax.set_xticks(xs)
+            ax.set_xticklabels(
+                [f"{s['label']}\n(n={s['n']})" for s in dim_slices],
+                rotation=45,
+                ha="right",
+                fontsize=7,
+            )
+            ax.set_title(dimension, fontsize=9)
+        axes[0].set_ylabel("Empirical coverage")
+        fig.suptitle(
+            f"Coverage by slice (Wilson 95% CI; ~{by_slice.get('expected_false_flags', '?')} "
+            "false flags expected under perfect calibration)",
+            fontsize=9,
+        )
+        fig.tight_layout()
+        pdf_path, png_path = _save_dual_format(fig, output_dir, filename_base)
         plt.close(fig)
 
     return pdf_path, png_path

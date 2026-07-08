@@ -39,6 +39,7 @@ from panelcast.evaluation.calibration import (
 )
 from panelcast.evaluation.metrics import compute_crps, compute_point_metrics
 from panelcast.evaluation.ppc import compute_ppc_statistics
+from panelcast.evaluation.slices import calibration_by_slice, stratified_history_metrics
 from panelcast.models.bayes.diagnostics import (
     check_convergence,
     compute_residual_autocorrelation,
@@ -145,65 +146,6 @@ def _transform_from_summary(summary: dict):
 def _ar_center_from_summary(summary: dict) -> float:
     """Model-scale AR(1) center the model was trained with."""
     return ar_center_on_model_scale(summary)
-
-
-_HISTORY_BINS: tuple[tuple[int, int | None], ...] = ((1, 2), (3, 5), (6, 10), (11, None))
-
-
-def _stratify_metrics_by_history(
-    artist_idx: np.ndarray,
-    train_df: pd.DataFrame,
-    summary: dict,
-    y_true: np.ndarray,
-    y_samples: np.ndarray,
-    interval: float,
-) -> list[dict]:
-    """Per-history-bin accuracy/coverage/interval-width diagnostics.
-
-    Rows are binned by the artist's TRAINING album count (the information the
-    model had), using the same entity->index mapping as the model args so the
-    bins line up with the (internally sorted) prediction rows.
-    """
-    ds = _summary_dataset(summary)
-    entity_col = ds["entity_col"]
-    artist_to_idx = summary["artist_to_idx"]
-
-    counts_by_idx = np.zeros(int(summary["n_artists"]), dtype=np.int64)
-    for entity, count in train_df.groupby(entity_col).size().items():
-        idx = artist_to_idx.get(entity)
-        if idx is not None:
-            counts_by_idx[int(idx)] = int(count)
-    row_counts = counts_by_idx[np.asarray(artist_idx, dtype=np.int64)]
-
-    lo_q = 100.0 * (1.0 - interval) / 2.0
-    hi_q = 100.0 - lo_q
-    lo = np.percentile(y_samples, lo_q, axis=0)
-    hi = np.percentile(y_samples, hi_q, axis=0)
-    pred_mean = y_samples.mean(axis=0)
-
-    rows: list[dict] = []
-    for low, high in _HISTORY_BINS:
-        upper = np.inf if high is None else high
-        mask = (row_counts >= low) & (row_counts <= upper)
-        n = int(mask.sum())
-        if n == 0:
-            continue
-        yt = y_true[mask]
-        residuals = yt - pred_mean[mask]
-        ss_res = float(np.sum(residuals**2))
-        ss_tot = float(np.sum((yt - yt.mean()) ** 2))
-        rows.append(
-            {
-                "train_albums_bin": f"{low}+" if high is None else f"{low}-{high}",
-                "n": n,
-                "rmse": float(np.sqrt(np.mean(residuals**2))),
-                "r2": float(1.0 - ss_res / ss_tot) if ss_tot > 0 else None,
-                "coverage": float(np.mean((yt >= lo[mask]) & (yt <= hi[mask]))),
-                "mean_interval_width": float(np.mean(hi[mask] - lo[mask])),
-                "interval": interval,
-            }
-        )
-    return rows
 
 
 def _resolve_eval_horizon(
@@ -1280,12 +1222,10 @@ def _evaluate_primary_split(
     # vary with the amount of artist history available at training time?
     # Informational only — never fail the stage over it.
     try:
-        stratified_by_history = _stratify_metrics_by_history(
-            artist_idx=np.asarray(primary_model_args["artist_idx"]),
-            train_df=primary_train_df,
-            summary=summary,
-            y_true=primary_y_true,
-            y_samples=primary_y_samples,
+        stratified_by_history = stratified_history_metrics(
+            primary_y_true,
+            primary_y_samples,
+            primary_row_ids["train_history"].to_numpy(),
             interval=ctx.prediction_interval,
         )
     except Exception as e:
@@ -1295,6 +1235,19 @@ def _evaluate_primary_split(
             error=str(e)[:500],
         )
         stratified_by_history = []
+
+    # Sliced calibration audit (#181): coverage per subgroup with Wilson CIs.
+    # Informational — the strict gate stays on global coverage only.
+    try:
+        primary_metrics["calibration"]["by_slice"] = calibration_by_slice(
+            primary_y_true, primary_y_samples, primary_row_ids, intervals
+        )
+    except Exception as e:
+        log.warning(
+            "sliced_calibration_failed",
+            error_type=type(e).__name__,
+            error=str(e)[:500],
+        )
 
     # Informational AR(1) adequacy check: within-artist lag-1 autocorrelation
     # of posterior-mean residuals (rows are artist/date sorted upstream).
@@ -1484,6 +1437,17 @@ def evaluate_models(ctx: StageContext) -> dict:
                 discretize=discretize_obs,
                 row_ids=secondary_row_ids,
             )
+            try:
+                secondary_metrics["calibration"]["by_slice"] = calibration_by_slice(
+                    secondary_y_true, secondary_y_samples, secondary_row_ids, intervals
+                )
+            except Exception as e:
+                log.warning(
+                    "sliced_calibration_failed",
+                    split=SECONDARY_SPLIT,
+                    error_type=type(e).__name__,
+                    error=str(e)[:500],
+                )
             split_results[SECONDARY_SPLIT] = {
                 **secondary_metrics,
                 "n_test": int(len(secondary_y_true)),

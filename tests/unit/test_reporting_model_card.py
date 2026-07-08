@@ -912,3 +912,46 @@ class TestUpdateModelCardExpanded:
         assert "MAE: 2.00" in updated.predictive_summary
         assert updated.loo_elpd == -800.0
         assert updated.priors_description == "Custom priors text."
+
+
+class TestFlaggedSlicesSection:
+    """Flagged calibration slices table in the model card (#181)."""
+
+    def _data(self, **overrides):
+        from panelcast.reporting.model_card import create_default_model_card_data
+
+        data = create_default_model_card_data()
+        for key, value in overrides.items():
+            setattr(data, key, value)
+        return data
+
+    def test_flagged_table_rendered(self):
+        from panelcast.reporting.model_card import generate_model_card
+
+        data = self._data(
+            flagged_slices=[
+                {
+                    "dimension": "group",
+                    "label": "pop",
+                    "n": 45,
+                    "levels": {
+                        "0.95": {
+                            "nominal": 0.95, "empirical": 0.82,
+                            "wilson_lo": 0.68, "wilson_hi": 0.90,
+                            "mean_interval_width": 20.0, "flagged": True,
+                        },
+                    },
+                },
+            ],
+            expected_false_flags=1.2,
+        )
+        card = generate_model_card(data, format="markdown")
+        assert "Flagged calibration slices" in card
+        assert "| group | pop | 45 | 0.95 | 0.820 | [0.680, 0.900] |" in card
+        assert "~1.2" in card
+
+    def test_section_absent_without_flags(self):
+        from panelcast.reporting.model_card import generate_model_card
+
+        card = generate_model_card(self._data(), format="markdown")
+        assert "Flagged calibration slices" not in card

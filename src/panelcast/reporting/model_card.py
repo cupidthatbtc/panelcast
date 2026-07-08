@@ -121,6 +121,10 @@ class ModelCardData:
     calibration_summary: str = "Not yet evaluated"
     predictive_summary: str = "Not yet evaluated"
     loo_elpd: float | None = None
+    # Sliced calibration audit (#181): flagged slices from calibration.by_slice
+    # plus the expected false-flag count so a lone flag is not over-read.
+    flagged_slices: list[dict] = field(default_factory=list)
+    expected_false_flags: float | None = None
 
     # Limitations and ethics
     limitations: list[str] = field(default_factory=list)
@@ -291,6 +295,31 @@ def _generate_markdown(data: ModelCardData) -> str:
     lines.append("")
     lines.append(data.calibration_summary)
     lines.append("")
+
+    if data.flagged_slices:
+        lines.append("#### Flagged calibration slices")
+        lines.append("")
+        expected = (
+            f"~{data.expected_false_flags}" if data.expected_false_flags is not None else "a few"
+        )
+        lines.append(
+            f"Slices whose nominal level falls outside the Wilson 95% CI. Under "
+            f"perfect calibration {expected} flags are expected by chance — read "
+            "clusters, not lone flags."
+        )
+        lines.append("")
+        lines.append("| Dimension | Slice | n | Level | Empirical | Wilson 95% CI |")
+        lines.append("|-----------|-------|---|-------|-----------|----------------|")
+        for s in data.flagged_slices:
+            for level, lv in sorted(s.get("levels", {}).items()):
+                if not lv.get("flagged"):
+                    continue
+                lines.append(
+                    f"| {s['dimension']} | {s['label']} | {s['n']} | {level} "
+                    f"| {lv['empirical']:.3f} "
+                    f"| [{lv['wilson_lo']:.3f}, {lv['wilson_hi']:.3f}] |"
+                )
+        lines.append("")
 
     # Predictive Performance
     lines.append("### Predictive Performance")

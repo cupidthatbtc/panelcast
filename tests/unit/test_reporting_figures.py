@@ -1052,3 +1052,55 @@ class TestGetTracePlotVars:
     def test_returns_list(self, idata_basic):
         vars = get_trace_plot_vars(idata_basic, prefix="user_")
         assert isinstance(vars, list)
+
+
+class TestSaveSliceCoveragePlot:
+    """Smoke coverage for the sliced-calibration figure (#181)."""
+
+    def _by_slice(self):
+        return {
+            "expected_false_flags": 0.4,
+            "slices": [
+                {
+                    "dimension": "group",
+                    "label": "rock",
+                    "n": 120,
+                    "levels": {
+                        "0.80": {
+                            "nominal": 0.8, "empirical": 0.78,
+                            "wilson_lo": 0.70, "wilson_hi": 0.85,
+                            "mean_interval_width": 12.0, "flagged": False,
+                        },
+                    },
+                    "pit_max_abs_dev": 0.03,
+                    "flagged": False,
+                },
+                {
+                    "dimension": "train_history",
+                    "label": "1-2",
+                    "n": 60,
+                    "levels": {
+                        "0.80": {
+                            "nominal": 0.8, "empirical": 0.55,
+                            "wilson_lo": 0.42, "wilson_hi": 0.67,
+                            "mean_interval_width": 8.0, "flagged": True,
+                        },
+                    },
+                    "pit_max_abs_dev": 0.2,
+                    "flagged": True,
+                },
+            ],
+        }
+
+    def test_creates_files(self, tmp_path):
+        from panelcast.reporting.figures import save_slice_coverage_plot
+
+        pdf, png = save_slice_coverage_plot(self._by_slice(), tmp_path, "slice_cov")
+        assert pdf.exists() and pdf.suffix == ".pdf"
+        assert png.exists() and png.suffix == ".png"
+
+    def test_empty_payload_raises(self, tmp_path):
+        from panelcast.reporting.figures import save_slice_coverage_plot
+
+        with pytest.raises(ValueError, match="no slices"):
+            save_slice_coverage_plot({"slices": []}, tmp_path, "slice_cov")
