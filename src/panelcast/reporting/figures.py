@@ -46,6 +46,7 @@ __all__ = [
     "save_ppc_density_plot",
     "save_posterior_plot",
     "save_predictions_plot",
+    "save_rank_scatter_plot",
     "save_reliability_plot",
     "save_slice_coverage_plot",
     "save_trace_plot",
@@ -571,6 +572,54 @@ def save_reliability_plot(
         pdf_path, png_path = _save_dual_format(fig, output_dir, filename_base)
 
         # Clean up
+        plt.close(fig)
+
+    return pdf_path, png_path
+
+
+def save_rank_scatter_plot(
+    slate: pd.DataFrame,
+    output_dir: Path,
+    filename_base: str = "rank_scatter",
+    figsize: tuple[float, float] = (5.5, 5),
+) -> tuple[Path, Path]:
+    """Predicted vs realized rank for the held-out slate (#182).
+
+    Input is the ranked_slate frame from the evaluate stage. Points on the
+    diagonal are perfectly ordered; color encodes P(top-10) when present.
+    """
+    required = {"predicted_rank", "realized_rank"}
+    if not required <= set(slate.columns):
+        raise ValueError(f"slate frame lacks {sorted(required - set(slate.columns))}")
+
+    with set_publication_style():
+        fig, ax = plt.subplots(figsize=figsize)
+        color_col = next((c for c in slate.columns if c.startswith("p_top")), None)
+        if color_col is not None:
+            sc = ax.scatter(
+                slate["predicted_rank"],
+                slate["realized_rank"],
+                c=slate[color_col],
+                cmap="viridis",
+                s=14,
+                alpha=0.8,
+            )
+            fig.colorbar(sc, ax=ax, label=f"P({color_col.removeprefix('p_')})")
+        else:
+            ax.scatter(
+                slate["predicted_rank"],
+                slate["realized_rank"],
+                s=14,
+                alpha=0.8,
+                color=COLORBLIND_COLORS[0],
+            )
+        lim = max(len(slate), 1)
+        ax.plot([1, lim], [1, lim], "k--", alpha=0.5, linewidth=1)
+        ax.set_xlabel("Predicted rank")
+        ax.set_ylabel("Realized rank")
+        ax.set_title("Held-out slate: predicted vs realized rank", fontsize=10)
+        fig.tight_layout()
+        pdf_path, png_path = _save_dual_format(fig, output_dir, filename_base)
         plt.close(fig)
 
     return pdf_path, png_path

@@ -25,6 +25,7 @@ from panelcast.reporting.figures import (
     save_artist_prediction_plot,
     save_posterior_plot,
     save_predictions_plot,
+    save_rank_scatter_plot,
     save_reliability_plot,
     save_slice_coverage_plot,
     save_trace_plot,
@@ -825,6 +826,22 @@ def _save_slice_coverage_figure(inp: _PublicationInputs, artifacts: dict[str, An
         artifacts["errors"].append({"artifact": "slice_coverage_plot", "error": str(e)})
 
 
+def _save_rank_scatter(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
+    try:
+        slate_path = resolve_split_dir(inp.eval_dir, inp.primary_split_name) / "ranked_slate.csv"
+        if not slate_path.exists():
+            log.warning("rank_scatter_skipped", reason="ranked_slate.csv not found")
+            return
+        slate = pd.read_csv(slate_path)
+        pdf_path, png_path = save_rank_scatter_plot(slate, inp.figures_dir, "rank_scatter_primary")
+        artifacts["figures"].append(str(pdf_path))
+        artifacts["figures"].append(str(png_path))
+        log.info("rank_scatter_saved", pdf=str(pdf_path), png=str(png_path))
+    except Exception as e:
+        log.exception("rank_scatter_failed")
+        artifacts["errors"].append({"artifact": "rank_scatter", "error": str(e)})
+
+
 def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) -> None:
     try:
         pred_path_for_fans = next(
@@ -1055,6 +1072,16 @@ def _generate_model_card(inp: _PublicationInputs, artifacts: dict[str, Any]) -> 
             prior_justification=prior_justification,
         )
 
+        ranking = inp.primary_metrics.get("ranking") or {}
+        if ranking.get("spearman") is not None:
+            parts = [f"Spearman {ranking['spearman']:.3f}", f"Kendall {ranking['kendall_tau']:.3f}"]
+            for k, block in sorted(
+                (ranking.get("top_k") or {}).items(), key=lambda kv: int(kv[0])
+            ):
+                if block is not None:
+                    parts.append(f"precision@{k} {block['precision']:.2f}")
+            model_card_data.ranking_summary = ", ".join(parts) + " (single-slate, descriptive)."
+
         by_slice = (inp.primary_metrics.get("calibration") or {}).get("by_slice") or {}
         flagged = [s for s in by_slice.get("slices", []) if s.get("flagged")]
         if flagged:
@@ -1139,6 +1166,7 @@ def generate_publication_artifacts(ctx: StageContext) -> dict:
     _save_predictions_plot(inp, artifacts)
     _save_reliability_plot(inp, artifacts)
     _save_slice_coverage_figure(inp, artifacts)
+    _save_rank_scatter(inp, artifacts)
     _save_artist_fan_charts(inp, artifacts)
     _generate_model_card(inp, artifacts)
 

@@ -1104,3 +1104,36 @@ class TestSaveSliceCoveragePlot:
 
         with pytest.raises(ValueError, match="no slices"):
             save_slice_coverage_plot({"slices": []}, tmp_path, "slice_cov")
+
+
+class TestSaveRankScatterPlot:
+    """Smoke coverage for the predicted-vs-realized rank scatter (#182)."""
+
+    def test_creates_files(self, tmp_path):
+        from panelcast.reporting.figures import save_rank_scatter_plot
+
+        slate = pd.DataFrame(
+            {
+                "entity": ["a", "b", "c"],
+                "predicted_rank": [1, 2, 3],
+                "realized_rank": [2, 1, 3],
+                "p_top10": [0.9, 0.8, 0.1],
+            }
+        )
+        pdf, png = save_rank_scatter_plot(slate, tmp_path, "rank_scatter")
+        assert pdf.exists() and png.exists()
+
+    def test_missing_columns_raise(self, tmp_path):
+        from panelcast.reporting.figures import save_rank_scatter_plot
+
+        with pytest.raises(ValueError, match="lacks"):
+            save_rank_scatter_plot(pd.DataFrame({"x": [1]}), tmp_path, "rank_scatter")
+
+
+class TestRankScatterNoColorColumn:
+    def test_plots_without_p_top_column(self, tmp_path):
+        from panelcast.reporting.figures import save_rank_scatter_plot
+
+        slate = pd.DataFrame({"predicted_rank": [1, 2], "realized_rank": [2, 1]})
+        pdf, png = save_rank_scatter_plot(slate, tmp_path, "rank_scatter_plain")
+        assert pdf.exists() and png.exists()
