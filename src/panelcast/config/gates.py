@@ -14,6 +14,7 @@ from typing import Literal
 TargetTransform = Literal["identity", "offset_logit"]
 LatentProcess = Literal["rw", "ar1"]
 SigmaObsPriorType = Literal["halfnormal", "lognormal"]
+BetaPriorType = Literal["normal", "horseshoe"]
 ArCenter = Literal["global", "none", "artist_running"]
 DebutPrevScoreSource = Literal["train_mean", "dataset_stats"]
 NExponentPrior = Literal["logit-normal", "beta"]
@@ -30,6 +31,7 @@ __all__ = [
     "TargetTransform",
     "LatentProcess",
     "SigmaObsPriorType",
+    "BetaPriorType",
     "ArCenter",
     "DebutPrevScoreSource",
     "NExponentPrior",

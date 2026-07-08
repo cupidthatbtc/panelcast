@@ -94,6 +94,7 @@ def _expected_variations() -> list[tuple[str, int]]:
         ("latent_process", 1),
         ("likelihood_family", 8),
         ("sigma_obs_prior_type", 1),
+        ("beta_prior_type", 1),
         ("ar_center", 2),
         ("debut_prev_score_source", 1),
         ("n_exponent_prior", 1),

@@ -139,6 +139,16 @@ KNOBS: tuple[Knob, ...] = (
         ),
     ),
     Knob(
+        "beta_prior_type",
+        "literal",
+        _literal_values(gates.BetaPriorType, "normal"),
+        "normal",
+        history=(
+            "horseshoe added #155 as the coefficient-dilution response to the "
+            "#76 cold-start covariate anomaly; untested on AOTY as of 0.11.0"
+        ),
+    ),
+    Knob(
         "ar_center",
         "literal",
         _literal_values(gates.ArCenter, "global"),

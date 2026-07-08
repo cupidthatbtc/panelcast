@@ -610,6 +610,7 @@ class TestBuildCommandStringExtended:
             latent_process="ar1",
             debut_prev_score_source="dataset_stats",
             sigma_obs_prior_type="lognormal",
+            beta_prior_type="horseshoe",
             heteroscedastic_entity_obs=True,
             tau_entity_scale=0.5,
             errors_in_variables=True,
@@ -626,6 +627,7 @@ class TestBuildCommandStringExtended:
         assert "--latent-process ar1" in cmd
         assert "--debut-prev-score-source dataset_stats" in cmd
         assert "--sigma-obs-prior-type lognormal" in cmd
+        assert "--beta-prior-type horseshoe" in cmd
         assert "--heteroscedastic-entity-obs" in cmd
         assert "--tau-entity-scale 0.5" in cmd
         assert "--errors-in-variables" in cmd

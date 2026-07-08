@@ -224,6 +224,54 @@ def _sample_sigma_obs(prefix: str, priors: PriorConfig) -> jnp.ndarray:
     )
 
 
+def _sample_beta(prefix: str, n_features: int, priors: PriorConfig) -> jnp.ndarray:
+    """Sample the covariate coefficient block under the configured prior.
+
+    "normal" is the exact legacy call in the exact legacy position, so the
+    gate-off draw sequence stays bit-identical. "horseshoe" is the regularized
+    horseshoe of Piironen & Vehtari (2017), non-centered: per-coefficient
+    HalfCauchy locals, a HalfCauchy global, and an InverseGamma slab that
+    bounds how far a coefficient escapes shrinkage. ``{prefix}beta`` is
+    exported as a deterministic so every downstream reader (evaluation,
+    predict_new_entity, the saved ``.nc``) is untouched; the replacement
+    happens mid-sequence, which legitimately reshuffles downstream RNG
+    (the entity_group_pooling precedent).
+    """
+    if priors.beta_prior_type == "normal":
+        return numpyro.sample(
+            f"{prefix}beta",
+            dist.Normal(priors.beta_loc, priors.beta_scale).expand([n_features]).to_event(1),
+        )
+    if priors.beta_prior_type == "horseshoe":
+        beta_z = numpyro.sample(
+            f"{prefix}beta_z",
+            dist.Normal(0.0, 1.0).expand([n_features]).to_event(1),
+        )
+        beta_lambda = numpyro.sample(
+            f"{prefix}beta_lambda",
+            dist.HalfCauchy(1.0).expand([n_features]).to_event(1),
+        )
+        beta_tau = numpyro.sample(
+            f"{prefix}beta_tau",
+            dist.HalfCauchy(priors.hs_global_scale),
+        )
+        beta_c2 = numpyro.sample(
+            f"{prefix}beta_c2",
+            dist.InverseGamma(
+                0.5 * priors.hs_slab_df,
+                0.5 * priors.hs_slab_df * priors.hs_slab_scale**2,
+            ),
+        )
+        lambda_tilde = jnp.sqrt(
+            beta_c2 * beta_lambda**2 / (beta_c2 + beta_tau**2 * beta_lambda**2)
+        )
+        return numpyro.deterministic(f"{prefix}beta", beta_z * lambda_tilde * beta_tau)
+    raise ValueError(
+        f"Invalid beta_prior_type: '{priors.beta_prior_type}'. "
+        f"Must be 'normal' or 'horseshoe'."
+    )
+
+
 def _apply_entity_overdispersion(
     prefix: str,
     sigma_scaled: jnp.ndarray,
@@ -701,11 +749,8 @@ def make_score_model(score_type: str) -> Callable:
         seq_idx = jnp.clip(album_seq - 1, 0, max_seq - 1).astype(jnp.int32)
         obs_artist_effect = artist_effects[seq_idx, artist_idx]
 
-        # === Fixed effects for covariates ===
-        beta = numpyro.sample(
-            f"{prefix}beta",
-            dist.Normal(priors.beta_loc, priors.beta_scale).expand([n_features]).to_event(1),
-        )
+        # === Fixed effects for covariates (prior-type seam) ===
+        beta = _sample_beta(prefix, n_features, priors)
 
         # === AR(1) term for album-to-album dependency ===
         # With ar_center=0 (legacy) debuts carry the training global mean as

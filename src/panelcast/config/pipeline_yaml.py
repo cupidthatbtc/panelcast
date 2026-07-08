@@ -122,6 +122,8 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     # sigma_obs prior family + entity-level overdispersion gate (no CLI flags;
     # configured per-domain via run_config.yaml, like logit_offset).
     "sigma_obs_prior_type": _spec("sigma_obs_prior_type", None),
+    # Covariate-block prior gate (#155; no CLI flag).
+    "beta_prior_type": _spec("beta_prior_type", None),
     "heteroscedastic_entity_obs": _spec("heteroscedastic_entity_obs", None),
     "tau_entity_scale": _spec("tau_entity_scale", None),
     # model-v2 gates (no CLI flags; configured per-domain via run_config.yaml).
