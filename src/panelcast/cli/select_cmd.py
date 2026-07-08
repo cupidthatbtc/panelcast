@@ -35,7 +35,10 @@ def select(
         None, "--max-fits", min=1, help="Hard cap on diagnostic fits (overrides the tier)."
     ),
     budget_hours: float | None = typer.Option(
-        None, "--budget-hours", min=0.1, help="GPU-hour budget; stages truncate in priority order."
+        None,
+        "--budget-hours",
+        min=0.1,
+        help="GPU-hour budget; arms that don't fit the remaining budget are skipped (retryable).",
     ),
     arm_timeout: str = typer.Option(
         "1800",

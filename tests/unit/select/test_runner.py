@@ -655,3 +655,106 @@ class TestAttribution:
         assert statuses.count("failed") == 1
         failed = next(r for r in ledger.records.values() if r.status == "failed")
         assert "already belongs to another arm" in failed.error
+
+
+class _FakePrediction:
+    def __init__(self, seconds: float):
+        self.seconds = seconds
+        self.source = "fake"
+
+
+class TestBudgetLookahead:
+    def _expensive_ar1(self, monkeypatch):
+        import panelcast.select.runner as runner_mod
+
+        def fake_predict(cfg, merged, dims):
+            if dims is None:
+                return None
+            return _FakePrediction(7200.0 if merged.get("latent_process") == "ar1" else 60.0)
+
+        monkeypatch.setattr(runner_mod, "_predict_arm_seconds", fake_predict)
+
+    def test_expensive_arm_skipped_cheap_arms_run(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.budget_hours = 1.0
+        self._expensive_ar1(monkeypatch)
+        ledger = run_sweep(cfg, AOTY, dims={"n_observations": 100}, launch=launch)
+        skipped = [r for r in ledger.records.values() if r.status == "skipped_budget"]
+        assert [r.knobs for r in skipped] == [{"latent_process": "ar1"}]
+        assert "exceeds remaining budget" in skipped[0].error
+        assert skipped[0].predicted_seconds == 7200.0
+        completed = [r for r in ledger.records.values() if r.status == "completed"]
+        assert len(completed) == len(ofat_arms(AOTY))  # reference + all but the skipped arm
+        assert len(launches) == len(completed)
+
+    def test_skipped_budget_retried_under_bigger_budget(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.budget_hours = 1.0
+        self._expensive_ar1(monkeypatch)
+        run_sweep(cfg, AOTY, dims={"n_observations": 100}, launch=launch)
+        cfg.budget_hours = 10.0
+        ledger = run_sweep(cfg, AOTY, dims={"n_observations": 100}, launch=launch)
+        record = ledger.records[arm_id({"latent_process": "ar1"})]
+        assert record.status == "completed"
+
+    def test_exhausted_budget_marks_all_remaining_skipped(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.budget_hours = 0.5
+        cfg.sweep_dir.mkdir(parents=True, exist_ok=True)
+        (cfg.sweep_dir / "ledger.json").write_text(
+            json.dumps(
+                {"arms": [{"arm_id": "prior", "knobs": {"x": 1}, "stage": 1,
+                           "status": "completed", "wall_clock_seconds": 3600.0}]}
+            ),
+            encoding="utf-8",
+        )
+        ledger = run_sweep(cfg, AOTY, launch=launch)
+        assert launches == []
+        skipped = [r for r in ledger.records.values() if r.status == "skipped_budget"]
+        assert len(skipped) == len(ofat_arms(AOTY)) + 1  # reference included
+        assert all("budget exhausted" in r.error for r in skipped)
+
+    def test_failed_record_not_clobbered_by_budget_skip(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.budget_hours = 0.5
+        aid = arm_id({"latent_process": "ar1"})
+        cfg.sweep_dir.mkdir(parents=True, exist_ok=True)
+        (cfg.sweep_dir / "ledger.json").write_text(
+            json.dumps(
+                {"arms": [
+                    {"arm_id": "prior", "knobs": {"x": 1}, "stage": 1,
+                     "status": "completed", "wall_clock_seconds": 3600.0},
+                    {"arm_id": aid, "knobs": {"latent_process": "ar1"}, "stage": 1,
+                     "status": "failed", "error": "boom"},
+                ]}
+            ),
+            encoding="utf-8",
+        )
+        ledger = run_sweep(cfg, AOTY, launch=launch)
+        assert ledger.records[aid].status == "failed"
+        assert ledger.records[aid].error == "boom"
+
+
+class TestReorderCost:
+    def test_cost_breaks_ties_within_priority(self):
+        arms = [({"a": 1}, None), ({"b": 1}, None), ({"c": 1}, None)]
+        cost = {"a": 30.0, "b": 10.0, "c": 20.0}
+        ordered = reorder_arms(arms, {}, cost=lambda arm: cost[next(iter(arm))])
+        assert [next(iter(a)) for a, _ in ordered] == ["b", "c", "a"]
+
+    def test_diagnostics_dominate_cost(self):
+        arms = [({"target_transform": "identity"}, None), ({"gbm_offset": False}, None)]
+        ordered = reorder_arms(
+            arms,
+            {"target_skewed": True},
+            cost=lambda arm: 100.0 if "target_transform" in arm else 1.0,
+        )
+        assert "target_transform" in ordered[0][0]
+
+    def test_no_cost_keeps_enumeration_order(self):
+        arms = [({"a": 1}, None), ({"b": 1}, None)]
+        assert reorder_arms(arms, {}) == arms
