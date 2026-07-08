@@ -1298,7 +1298,7 @@ class TestExportFiguresCommand_new:
         # Mock create_predictions_plot
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda y_true, y_pred_mean, y_pred_lower, y_pred_upper: go.Figure(),
+            lambda y_true, y_pred_mean, y_pred_lower, y_pred_upper, **kwargs: go.Figure(),
         )
 
         # Mock export_all_figures
@@ -1347,7 +1347,7 @@ class TestExportFiguresCommand_new:
         )
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: go.Figure(),
+            lambda *args, **kwargs: go.Figure(),
         )
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_forest_plot",
@@ -1410,7 +1410,7 @@ class TestExportFiguresCommand_new:
         )
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: go.Figure(),
+            lambda *args, **kwargs: go.Figure(),
         )
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_trace_plot",
@@ -1466,14 +1466,14 @@ class TestExportFiguresCommand_new:
         return result, captured
 
     def test_export_figures_trace_3d_samples_reshaped(self, monkeypatch, tmp_path):
-        """A 3-D posterior var is flattened to 2-D before plotting."""
+        """A 3-D posterior var is reduced to its first element per chain."""
         import numpy as np
 
         result, captured = self._run_export_with_trace_samples(
             monkeypatch, tmp_path, np.random.randn(4, 10, 5)
         )
         assert result.exit_code == 0
-        assert captured["shape"] == (4, 50)  # reshaped to (chains, flattened)
+        assert captured["shape"] == (4, 10)  # (chains, draws) for element [.., .., 0]
 
     def test_export_figures_trace_1d_samples_reshaped(self, monkeypatch, tmp_path):
         """A 1-D posterior var is promoted to a single-chain 2-D array."""
@@ -1511,7 +1511,7 @@ class TestExportFiguresCommand_new:
 
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: go.Figure(),
+            lambda *args, **kwargs: go.Figure(),
         )
         export_results = {"predictions": [tmp_path / "pred.png"]}
         monkeypatch.setattr(
@@ -1552,7 +1552,7 @@ class TestExportFiguresCommand_new:
         )
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: go.Figure(),
+            lambda *args, **kwargs: go.Figure(),
         )
 
         captured_export = {}
@@ -1621,7 +1621,7 @@ class TestExportFiguresCommand_new:
         )
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: go.Figure(),
+            lambda *args, **kwargs: go.Figure(),
         )
         monkeypatch.setattr(
             "panelcast.visualization.export.export_all_figures",
@@ -1716,7 +1716,7 @@ class TestAdditionalValidation:
         )
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: go.Figure(),
+            lambda *args, **kwargs: go.Figure(),
         )
         monkeypatch.setattr(
             "panelcast.visualization.export.export_all_figures",
@@ -1770,7 +1770,7 @@ class TestAdditionalValidation:
         )
         monkeypatch.setattr(
             "panelcast.visualization.charts.create_predictions_plot",
-            lambda *args: go.Figure(),
+            lambda *args, **kwargs: go.Figure(),
         )
         monkeypatch.setattr(
             "panelcast.visualization.export.export_all_figures",

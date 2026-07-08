@@ -56,9 +56,7 @@ def export_figures(
     scale: float = typer.Option(
         2.0, "--scale", "-s", help="Scale factor for raster output (2.0 = ~300dpi)"
     ),
-    run_dir: str | None = typer.Option(
-        None, "--run", "-r", help="Path to pipeline run directory"
-    ),
+    run_dir: str | None = typer.Option(None, "--run", "-r", help="Path to pipeline run directory"),
 ) -> None:
     """Export all visualization figures to static formats.
 
@@ -79,7 +77,7 @@ def export_figures(
         create_predictions_plot,
         create_reliability_plot,
     )
-    from panelcast.visualization.dashboard import load_dashboard_data
+    from panelcast.visualization.dashboard import _ci_label, load_dashboard_data
     from panelcast.visualization.export import ensure_kaleido_chrome, export_all_figures
 
     # Parse formats
@@ -106,6 +104,7 @@ def export_figures(
                 pred["y_pred_mean"],
                 pred["y_pred_lower"],
                 pred["y_pred_upper"],
+                ci_label=_ci_label(pred.get("interval_level")),
             )
 
     if data.coefficients is not None:
@@ -143,9 +142,11 @@ def export_figures(
                 if var_names:
                     var_name = var_names[0]
                     samples = posterior[var_name].values
-                    # Handle multi-dimensional samples
+                    # Multi-dimensional parameters: trace the first element
+                    # only, keeping (chain, draw) intact.
                     if samples.ndim > 2:
-                        samples = samples.reshape(samples.shape[0], -1)[:, 0:100]
+                        samples = samples.reshape(samples.shape[0], samples.shape[1], -1)[:, :, 0]
+                        var_name = f"{var_name}[0]"
                     elif samples.ndim == 1:
                         samples = samples.reshape(1, -1)
                     figures["trace"] = create_trace_plot(samples, var_name)

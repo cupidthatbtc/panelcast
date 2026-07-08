@@ -186,6 +186,31 @@ class TestCreateDashboardFigures:
         assert "coefficients" in figures
         assert "reliability" in figures
 
+    def test_interval_level_labels_predictions_legend(self):
+        pred = {
+            "y_true": np.array([70, 75]),
+            "y_pred_mean": np.array([72, 74]),
+            "y_pred_lower": np.array([67, 69]),
+            "y_pred_upper": np.array([77, 79]),
+            "interval_level": 0.80,
+        }
+        data = DashboardData(predictions=pred)
+        figures = create_dashboard_figures(data)
+        assert '"80% CI"' in figures["predictions"]
+        assert "94% CI" not in figures["predictions"]
+
+    def test_unknown_interval_level_uses_generic_label(self):
+        pred = {
+            "y_true": np.array([70, 75]),
+            "y_pred_mean": np.array([72, 74]),
+            "y_pred_lower": np.array([67, 69]),
+            "y_pred_upper": np.array([77, 79]),
+        }
+        data = DashboardData(predictions=pred)
+        figures = create_dashboard_figures(data)
+        assert "94% CI" not in figures["predictions"]
+        assert '"CI"' in figures["predictions"]
+
 
 class TestCreateArtistView:
     """Tests for create_artist_view."""
@@ -263,6 +288,34 @@ class TestCreateArtistView:
         )
         result = create_artist_view("Radiohead", df)
         assert isinstance(result, str)
+
+    def test_ci_label_parameter(self):
+        df = pd.DataFrame(
+            {
+                "artist": ["Radiohead", "Radiohead"],
+                "year": [2000, 2007],
+                "score": [85, 90],
+                "prediction": [84, 88],
+                "lower": [80, 84],
+                "upper": [88, 92],
+            }
+        )
+        result = create_artist_view("Radiohead", df, ci_label="80% CI")
+        assert "80% CI" in result
+
+    def test_default_ci_label_not_hardcoded_94(self):
+        df = pd.DataFrame(
+            {
+                "artist": ["Radiohead", "Radiohead"],
+                "year": [2000, 2007],
+                "score": [85, 90],
+                "prediction": [84, 88],
+                "lower": [80, 84],
+                "upper": [88, 92],
+            }
+        )
+        result = create_artist_view("Radiohead", df)
+        assert "94% CI" not in result
 
 
 class TestGetArtistList:
@@ -400,6 +453,30 @@ class TestCreateDashboardFiguresTracePlot:
         assert "trace" in figures
         assert isinstance(figures["trace"], str)
 
+    def test_trace_plot_multidim_uses_first_element_per_chain(self, monkeypatch):
+        # (chain, draw, k) must reduce to element [.., .., 0] per chain, not a
+        # flattened cross-section mixing draws and parameter dims.
+        import arviz as az
+
+        arr = np.arange(2 * 50 * 3, dtype=float).reshape(2, 50, 3)
+        idata = az.from_dict(posterior={"alpha": arr})
+        captured = {}
+
+        def fake_trace_plot(samples, var_name, template="aoty_light"):
+            captured["samples"] = np.asarray(samples)
+            captured["var_name"] = var_name
+            mock = MagicMock()
+            mock.to_html.return_value = "<div></div>"
+            return mock
+
+        monkeypatch.setattr("panelcast.visualization.dashboard.create_trace_plot", fake_trace_plot)
+        data = DashboardData(idata=idata)
+        figures = create_dashboard_figures(data)
+        assert "trace" in figures
+        assert captured["samples"].shape == (2, 50)
+        np.testing.assert_array_equal(captured["samples"], arr[:, :, 0])
+        assert captured["var_name"] == "alpha[0]"
+
     def test_trace_plot_2d_samples(self):
         # ndim == 2: shape (chain=2, draw=50) — normal path, no reshape
         import arviz as az
@@ -482,6 +559,20 @@ class TestLoadDashboardData:
         assert result.predictions is not None
         np.testing.assert_array_equal(result.predictions["y_true"], [70.0, 75.0])
 
+    def test_predictions_interval_level_kept(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        pred = {
+            "y_true": [70.0, 75.0],
+            "y_pred_mean": [71.0, 74.0],
+            "y_pred_lower": [65.0, 68.0],
+            "y_pred_upper": [77.0, 80.0],
+            "interval_level": 0.8,
+        }
+        self._write_json(tmp_path / "outputs" / "evaluation" / "predictions.json", pred)
+        result = load_dashboard_data()
+        assert result.predictions is not None
+        assert result.predictions["interval_level"] == 0.8
+
     def test_predictions_malformed_skipped(self, tmp_path, monkeypatch):
         # Missing required keys → predictions stays None
         monkeypatch.chdir(tmp_path)
@@ -541,9 +632,7 @@ class TestLoadDashboardData:
     def test_artist_data_user_score_parquet(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         df = pd.DataFrame({"artist": ["Radiohead", "Portishead"], "score": [85, 78]})
-        self._write_parquet(
-            tmp_path / "data" / "processed" / "user_score_data.parquet", df
-        )
+        self._write_parquet(tmp_path / "data" / "processed" / "user_score_data.parquet", df)
         result = load_dashboard_data()
         assert result.artist_data is not None
         assert "artist" in result.artist_data.columns
@@ -560,9 +649,7 @@ class TestLoadDashboardData:
         # Column named "Artist" (not "artist") → gets renamed
         monkeypatch.chdir(tmp_path)
         df = pd.DataFrame({"Artist": ["Miles Davis"], "score": [95]})
-        self._write_parquet(
-            tmp_path / "data" / "processed" / "user_score_capital.parquet", df
-        )
+        self._write_parquet(tmp_path / "data" / "processed" / "user_score_capital.parquet", df)
         result = load_dashboard_data()
         assert result.artist_data is not None
         assert "artist" in result.artist_data.columns
@@ -572,9 +659,7 @@ class TestLoadDashboardData:
         # Parquet with no artist/Artist/ARTIST column → artist_data stays None
         monkeypatch.chdir(tmp_path)
         df = pd.DataFrame({"name": ["Someone"], "score": [80]})
-        self._write_parquet(
-            tmp_path / "data" / "processed" / "user_score_noartist.parquet", df
-        )
+        self._write_parquet(tmp_path / "data" / "processed" / "user_score_noartist.parquet", df)
         result = load_dashboard_data()
         assert result.artist_data is None
 
@@ -629,9 +714,7 @@ class TestLoadDashboardData:
         """Exercise the run_dir code path with coefficients inside the run dir."""
         monkeypatch.chdir(tmp_path)
         run_dir = tmp_path / "outputs" / "20260101_150000"
-        coef_df = pd.DataFrame(
-            {"param": ["x"], "mean": [0.5], "hdi_3%": [0.1], "hdi_97%": [0.9]}
-        )
+        coef_df = pd.DataFrame({"param": ["x"], "mean": [0.5], "hdi_3%": [0.1], "hdi_97%": [0.9]})
         self._write_csv(run_dir / "reports" / "tables" / "coefficient_run.csv", coef_df)
         result = load_dashboard_data(run_dir=run_dir)
         # coefficients may come from run_dir or project-root search_dirs
