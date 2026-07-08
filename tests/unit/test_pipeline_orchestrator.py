@@ -1314,6 +1314,8 @@ class TestStageContextCreation:
             num_chains=8,
             n_exponent=0.3,
             enable_genre=False,
+            warmup_export_path="outputs/select/x/warmup_reference.pkl",
+            warmup_import_path="outputs/select/y/warmup_reference.pkl",
         )
         orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
 
@@ -1329,6 +1331,11 @@ class TestStageContextCreation:
         assert ctx.num_chains == 8
         assert ctx.n_exponent == 0.3
         assert ctx.enable_genre is False
+        # The warm-start paths MUST reach the context: train_bayes reads them
+        # via getattr, so a dropped field silently disables warmup transfer
+        # (exactly the 0.8.0 bug the #138 GPU validation exposed).
+        assert ctx.warmup_export_path == "outputs/select/x/warmup_reference.pkl"
+        assert ctx.warmup_import_path == "outputs/select/y/warmup_reference.pkl"
 
 
 class TestCloseLogHandlers:

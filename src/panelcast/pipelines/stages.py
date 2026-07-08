@@ -139,6 +139,10 @@ class StageContext:
     gbm_offset: bool = False
     # Opt-in in-sampler exclusion of the rw_raw tensor (peak-GPU cut)
     exclude_rw_raw_from_collection: bool = False
+    # Warm-start adaptation transfer (select --warmup-transfer): the reference
+    # arm exports, later signature-matched arms import.
+    warmup_export_path: str | None = None
+    warmup_import_path: str | None = None
     # Split configuration
     val_albums: int = 0
     origin_offset: int = 0

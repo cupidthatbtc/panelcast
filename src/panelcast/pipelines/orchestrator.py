@@ -1264,6 +1264,8 @@ class PipelineOrchestrator:
             entity_group_pooling=self.config.entity_group_pooling,
             gbm_offset=self.config.gbm_offset,
             exclude_rw_raw_from_collection=self.config.exclude_rw_raw_from_collection,
+            warmup_export_path=self.config.warmup_export_path,
+            warmup_import_path=self.config.warmup_import_path,
             val_albums=self.config.val_albums,
             origin_offset=self.config.origin_offset,
             min_train_albums=self.config.min_train_albums,
