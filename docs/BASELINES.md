@@ -9,6 +9,14 @@
 > the ridge/GBM baselines consume it too — every row in these tables sees the
 > same X. Full-corpus validation is tracked in
 > [#15](https://github.com/cupidthatbtc/panelcast/issues/15).
+>
+> **Fairness pass (2026-07)**: the ridge baseline now standardizes features
+> internally (its L2 penalty previously acted on raw feature scales), baseline
+> test panels mirror the model's review-count validity filter, and runs with a
+> validation split condition baselines on the same last-known validation score
+> the model sees. The committed tables predate the ridge standardization, so
+> the ridge rows may shift slightly on regeneration; the other two changes are
+> no-ops for this run (no validation split, all review counts valid).
 
 This page states, in the open, **where the hierarchical Bayesian model actually
 sits against simple baselines** — because that placement is the honest argument for

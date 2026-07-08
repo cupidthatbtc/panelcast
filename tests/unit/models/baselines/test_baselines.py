@@ -94,6 +94,47 @@ class TestPredictors:
         assert np.isfinite(point[2])
 
 
+class TestRidgeStandardization:
+    """Panels carry raw features; ridge must standardize internally so its L2
+    penalty does not depend on arbitrary column scales."""
+
+    @staticmethod
+    def _data(seed: int = 0):
+        rng = np.random.default_rng(seed)
+        n, n_test = 300, 50
+        X = rng.standard_normal((n, 2))
+        y = np.clip(60 + 5 * X[:, 0] - 3 * X[:, 1] + rng.normal(0, 2, n), 0, 100)
+        Xt = rng.standard_normal((n_test, 2))
+        yt = np.clip(60 + 5 * Xt[:, 0] - 3 * Xt[:, 1], 0, 100)
+        ent = np.array([f"E{i % 10}" for i in range(n)])
+        ent_t = np.array([f"E{i % 10}" for i in range(n_test)])
+        return X, y, ent, Xt, yt, ent_t
+
+    def test_predictions_invariant_to_feature_rescaling(self):
+        X, y, ent, Xt, yt, ent_t = self._data()
+        scale = np.array([1e6, 1.0])
+
+        def points(train_X, test_X):
+            train = PanelData(X=train_X, y=y, entity=ent)
+            test = PanelData(X=test_X, y=yt, entity=ent_t)
+            bl = RidgeBaseline(train.bounds).fit(train)
+            return bl.predict(test, n_samples=2, rng=np.random.default_rng(0)).point
+
+        np.testing.assert_allclose(
+            points(X, Xt), points(X * scale, Xt * scale), rtol=1e-6
+        )
+
+    def test_constant_feature_is_harmless(self):
+        X, y, ent, Xt, yt, ent_t = self._data(seed=1)
+        X[:, 1] = 2.5
+        Xt[:, 1] = 2.5
+        train = PanelData(X=X, y=y, entity=ent)
+        test = PanelData(X=Xt, y=yt, entity=ent_t)
+        bl = RidgeBaseline(train.bounds).fit(train)
+        point = bl.predict(test, n_samples=2, rng=np.random.default_rng(0)).point
+        assert np.all(np.isfinite(point))
+
+
 class TestBenchmark:
     def test_benchmark_rows_and_table(self):
         train, test = _panels()
