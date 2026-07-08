@@ -33,6 +33,7 @@ from rich.progress import (
     TimeElapsedColumn,
 )
 
+from panelcast import __version__ as panelcast_version
 from panelcast.config.descriptor import load_descriptor, resolve_descriptor_path
 from panelcast.config.gates import (
     ArCenter,
@@ -144,6 +145,9 @@ class PipelineConfig:
     # Execution mechanics only — never affects outputs, skip detection, or resume.
     progress_bar: bool | None = None
     resume: str | None = None
+    # Free-form run label recorded in the manifest (surfaced by `runs history`).
+    # Provenance only — never affects outputs or skip detection.
+    tag: str | None = None
     max_albums: int = 50
     # MCMC configuration
     num_chains: int = 4
@@ -579,6 +583,8 @@ class PipelineOrchestrator:
         self.manifest = RunManifest(
             run_id=run_id,
             created_at=datetime.now().isoformat(),
+            version=panelcast_version,
+            tag=self.config.tag,
             command=command,
             flags={
                 "seed": self.config.seed,
@@ -948,6 +954,8 @@ class PipelineOrchestrator:
             parts.append("--no-secondary-split")
         if self.config.dataset is not None:
             parts.append(f"--dataset {self.config.dataset}")
+        if self.config.tag is not None:
+            parts.append(f"--tag {self.config.tag}")
 
         return " ".join(parts)
 

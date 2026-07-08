@@ -472,3 +472,222 @@ def runs_list(
         typer.echo(f"{marker} {run_id:<24} {created_at:<28} {status:<10} {n_stages}")
     if latest_target is not None:
         typer.echo(f"\n* = {base / 'latest'} -> {latest_target}")
+
+
+# Same default the evaluate stage uses (PipelineConfig.coverage_tolerance);
+# each run's recorded calibration.coverage_tolerance wins when present.
+_COVERAGE_TOLERANCE_DEFAULT = 0.03
+# Relative regression vs the epoch best before mae / elpd_per_obs is flagged
+# (raw worse-than-best would flag every non-best run over MCMC noise).
+_DRIFT_REL_TOL = 0.02
+
+
+def _history_metrics(payload: dict) -> dict:
+    """Headline metrics from an evaluation metrics.json, null-tolerant.
+
+    Reads the top-level (primary split) fields, which exist in both the
+    current schema and legacy payloads.
+    """
+    point = payload.get("point_metrics") or {}
+    cal = payload.get("calibration") or {}
+    coverages = {
+        level: (entry or {}).get("empirical")
+        for level, entry in (cal.get("coverages") or {}).items()
+    }
+    info = payload.get("info_criteria")
+    heldout = info.get("heldout_elpd") if isinstance(info, dict) else None
+    return {
+        "mae": point.get("mae"),
+        "rmse": point.get("rmse"),
+        "r2": point.get("r2"),
+        "crps": (payload.get("crps") or {}).get("mean_crps"),
+        "coverage": coverages,
+        "wis": cal.get("wis"),
+        "elpd_per_obs": (heldout or {}).get("elpd_per_obs"),
+        "coverage_tolerance": cal.get("coverage_tolerance"),
+    }
+
+
+def _flag_history_drift(rows: list[dict]) -> None:
+    """Mark within-epoch drift on each row (rows share one feature stamp).
+
+    The reference is the epoch's best-MAE run. Coverage drifts when any
+    interval level moves more than the coverage tolerance the evaluate stage
+    recorded; mae / elpd_per_obs when worse than the epoch best by more than
+    _DRIFT_REL_TOL relative. Missing metrics never flag.
+    """
+    for row in rows:
+        row["drift"] = []
+    if len(rows) < 2:
+        return
+    maes = [r["metrics"]["mae"] for r in rows if r["metrics"]["mae"] is not None]
+    elpds = [r["metrics"]["elpd_per_obs"] for r in rows if r["metrics"]["elpd_per_obs"] is not None]
+    best_mae = min(maes) if maes else None
+    best_elpd = max(elpds) if elpds else None
+    ref = (
+        min(
+            (r for r in rows if r["metrics"]["mae"] is not None),
+            key=lambda r: r["metrics"]["mae"],
+        )
+        if best_mae is not None
+        else rows[0]
+    )
+    tolerance = ref["metrics"].get("coverage_tolerance") or _COVERAGE_TOLERANCE_DEFAULT
+    for row in rows:
+        m = row["metrics"]
+        if best_mae is not None and m["mae"] is not None:
+            if m["mae"] > best_mae + _DRIFT_REL_TOL * abs(best_mae):
+                row["drift"].append("mae")
+        if best_elpd is not None and m["elpd_per_obs"] is not None:
+            if m["elpd_per_obs"] < best_elpd - _DRIFT_REL_TOL * abs(best_elpd):
+                row["drift"].append("elpd_per_obs")
+        if row is not ref:
+            for level, ref_cov in ref["metrics"]["coverage"].items():
+                cov = m["coverage"].get(level)
+                if cov is not None and ref_cov is not None and abs(cov - ref_cov) > tolerance:
+                    row["drift"].append(f"coverage@{level}")
+
+
+@runs_app.command("history")
+def runs_history(
+    output_dir: str = typer.Option(
+        "outputs", "--output-dir", help="Directory holding the pipeline run directories."
+    ),
+    as_json: bool = typer.Option(
+        False, "--json", help="Emit machine-readable JSON instead of the table."
+    ),
+) -> None:
+    """Cross-run metrics history and drift monitor, grouped by feature epoch.
+
+    Walks the run directories (tolerating corrupt manifests, skipping dry
+    runs) and prints one row per successful run that completed evaluate:
+    version, tag, sampler settings, headline metrics, and wall-clock. Rows are
+    grouped by the feature stamp the metrics were computed against; a stamp
+    change is an explicit epoch break, and drift is only ever flagged within
+    an epoch. A run is flagged (*) when a coverage level moves more than the
+    coverage tolerance vs the epoch's best-MAE run, or when MAE /
+    elpd-per-obs regress more than 2% vs the epoch best.
+
+    Examples:
+        panelcast runs history
+        panelcast runs history --json
+    """
+    import json
+    from pathlib import Path
+
+    base = Path(output_dir)
+    if not base.is_dir():
+        typer.echo(f"No runs found: {base} does not exist.")
+        raise typer.Exit(code=0)
+
+    try:
+        run_dirs = sorted(p for p in base.iterdir() if p.is_dir())
+    except OSError:
+        run_dirs = []
+
+    rows: list[dict] = []
+    for run_dir in run_dirs:
+        if run_dir.name in ("latest", "failed"):
+            continue
+        manifest_path = run_dir / "manifest.json"
+        metrics_path = run_dir / "evaluation" / "metrics.json"
+        if not (manifest_path.exists() and metrics_path.exists()):
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            metrics_payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest, dict) or not isinstance(metrics_payload, dict):
+            continue
+        flags = manifest.get("flags") or {}
+        if flags.get("dry_run") or not manifest.get("success"):
+            continue
+        stamp = metrics_payload.get("feature_stamp")
+        rows.append(
+            {
+                "run_id": run_dir.name,
+                "created_at": manifest.get("created_at"),
+                "version": manifest.get("version"),
+                "tag": manifest.get("tag"),
+                "num_chains": flags.get("num_chains"),
+                "num_samples": flags.get("num_samples"),
+                "duration_seconds": manifest.get("duration_seconds"),
+                "feature_stamp": stamp if isinstance(stamp, dict) else None,
+                "metrics": _history_metrics(metrics_payload),
+            }
+        )
+
+    if not rows:
+        typer.echo(f"No evaluated runs found under {base}.")
+        raise typer.Exit(code=0)
+
+    # Group by feature stamp; epoch order follows each stamp's first run.
+    groups: dict[str | None, list[dict]] = {}
+    for row in rows:
+        groups.setdefault((row["feature_stamp"] or {}).get("input_hash"), []).append(row)
+    for group_rows in groups.values():
+        _flag_history_drift(group_rows)
+
+    if as_json:
+        payload = [
+            {
+                "feature_stamp": group_rows[0]["feature_stamp"],
+                "runs": [{k: v for k, v in r.items() if k != "feature_stamp"} for r in group_rows],
+            }
+            for group_rows in groups.values()
+        ]
+        typer.echo(json.dumps(payload, indent=2))
+        raise typer.Exit(code=0)
+
+    def cell(value: object, decimals: int = 3) -> str:
+        if value is None:
+            return "?"
+        if isinstance(value, float):
+            return f"{value:.{decimals}f}"
+        return str(value)
+
+    header = (
+        f"  {'run_id':<30} {'created_at':<20} {'version':<9} {'tag':<12} {'cfg':<9} "
+        f"{'mae':<9} {'rmse':<9} {'r2':<8} {'crps':<8} {'cov@80':<8} {'cov@95':<8} "
+        f"{'wis':<8} {'elpd/obs':<10} wall_s"
+    )
+    any_flagged = False
+    for idx, (stamp_hash, group_rows) in enumerate(groups.items()):
+        if idx:
+            typer.echo("")
+        stamp = group_rows[0]["feature_stamp"] or {}
+        source = f" (features from run {stamp['run_id']})" if stamp.get("run_id") else ""
+        typer.echo(f"= epoch {idx + 1}: feature stamp {(stamp_hash or 'unstamped')[:12]}{source} =")
+        typer.echo(header)
+        for row in group_rows:
+            m = row["metrics"]
+            drift = set(row["drift"])
+            any_flagged = any_flagged or bool(drift)
+
+            def metric(name: str, decimals: int = 3, *, d: set = drift, m: dict = m) -> str:
+                return cell(m[name], decimals) + ("*" if name in d else "")
+
+            def coverage(level: str, *, d: set = drift, m: dict = m) -> str:
+                return cell(m["coverage"].get(level)) + ("*" if f"coverage@{level}" in d else "")
+
+            created = str(row["created_at"] or "?")[:19]
+            tag = str(row["tag"] or "")[:12]
+            cfg = (
+                f"{row['num_chains']}x{row['num_samples']}"
+                if row["num_chains"] is not None and row["num_samples"] is not None
+                else "?"
+            )
+            wall = cell(float(row["duration_seconds"]), 0) if row["duration_seconds"] else "?"
+            typer.echo(
+                f"  {row['run_id']:<30} {created:<20} {cell(row['version']):<9} {tag:<12} "
+                f"{cfg:<9} {metric('mae'):<9} {metric('rmse'):<9} {metric('r2'):<8} "
+                f"{metric('crps'):<8} {coverage('0.80'):<8} {coverage('0.95'):<8} "
+                f"{metric('wis'):<8} {metric('elpd_per_obs'):<10} {wall}"
+            )
+    if any_flagged:
+        typer.echo(
+            "\n* drift within epoch vs the best-MAE run: coverage shifted beyond "
+            f"tolerance (default {_COVERAGE_TOLERANCE_DEFAULT:g}), or mae/elpd_per_obs "
+            f"worse than the epoch best by >{_DRIFT_REL_TOL:.0%}."
+        )

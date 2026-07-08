@@ -455,6 +455,11 @@ def run(
         "--resume",
         help="Resume failed run by run-id (e.g., '2026-01-19_143052')",
     ),
+    tag: str | None = typer.Option(
+        None,
+        "--tag",
+        help="Free-form label recorded in the run manifest (shown by `runs history`)",
+    ),
     max_albums: Annotated[
         int,
         typer.Option(
@@ -794,6 +799,7 @@ def run(
         # None = auto-detect (stderr TTY); --no-progress forces off.
         progress_bar=False if no_progress else None,
         resume=resume,
+        tag=tag,
         max_albums=max_albums,
         # MCMC config
         num_chains=num_chains,
