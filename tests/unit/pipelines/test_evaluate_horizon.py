@@ -75,6 +75,18 @@ class TestBuildHorizonPanel:
         assert panel["valid"].tolist() == [[True, True], [False, False]]
         assert panel["y_panel"][0].tolist() == [71.0, 60.0]
 
+    def test_mid_sequence_gap_masks_scoring_but_keeps_the_step(self, summary, frames):
+        """An invalid row mid-sequence is unscored, but the step stays in the
+        timeline (h=3 remains a 3-step-ahead forecast) with a median count fill
+        instead of the n=1 penalty trigger."""
+        test_df, test_features, train_df = frames
+        panel = _build_horizon_panel(
+            test_df, test_features, summary, 3, train_df=train_df, val_df=None
+        )
+        assert panel["valid"][:, 0].tolist() == [True, False, True]
+        assert panel["y_panel"][2, 0] == 73.0
+        assert panel["nrev_panel"][1, 0] == np.median([10.0, 20.0, 30.0])
+
     def test_covariates_standardized_with_train_scaler(self, summary, frames):
         test_df, test_features, train_df = frames
         panel = _build_horizon_panel(

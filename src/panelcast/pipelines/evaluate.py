@@ -394,8 +394,14 @@ def _build_horizon_panel(
     entity_pos = {e: i for i, e in enumerate(entity_ids)}
     h_index = test_df.groupby(entity_col).cumcount().to_numpy()
 
+    # An invalid/absent step is masked from SCORING only — the rollout still
+    # marches through it on its own sampled draw, or step h+1 would stop being
+    # an (h+1)-step-ahead forecast. The masked step's unknown observation count
+    # is filled with the valid rows' median so the heteroscedastic path never
+    # applies the n=1 single-review penalty to a purely pass-through draw.
+    nrev_fill = float(np.median(nrev_raw[row_valid])) if row_valid.any() else 1.0
     X_panel = np.zeros((horizon, n_entities, X.shape[1]), dtype=np.float32)
-    nrev_panel = np.ones((horizon, n_entities), dtype=np.float32)
+    nrev_panel = np.full((horizon, n_entities), nrev_fill, dtype=np.float32)
     y_panel = np.full((horizon, n_entities), np.nan, dtype=np.float32)
     valid = np.zeros((horizon, n_entities), dtype=bool)
     y_true_all = test_df[target_col].to_numpy(dtype=np.float32)
@@ -406,7 +412,7 @@ def _build_horizon_panel(
             continue
         e = entity_pos[cols[row]]
         X_panel[h, e] = X[row]
-        nrev_panel[h, e] = nrev_raw[row] if row_valid[row] else 1.0
+        nrev_panel[h, e] = nrev_raw[row] if row_valid[row] else nrev_fill
         y_panel[h, e] = y_true_all[row]
         valid[h, e] = bool(row_valid[row])
 

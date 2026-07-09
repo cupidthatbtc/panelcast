@@ -67,11 +67,33 @@ class TestH1Reconciliation:
         expected = np.asarray(transform.transform_mu(jnp.asarray(eff + lin + ar)))
         np.testing.assert_allclose(np.asarray(out["mu"])[:, 0, :], expected, rtol=1e-5)
 
-    def test_h1_draws_reconcile_with_predictive_one_step(self):
+    @pytest.mark.parametrize("target_transform", ["identity", "offset_logit"])
+    def test_h1_draws_reconcile_with_predictive_one_step(self, target_transform):
         """The issue's sanity anchor: h=1 rollout matches the model's own
-        Predictive one-step path (fresh rw_raw, observed lag) in distribution."""
+        Predictive one-step path (fresh rw_raw, observed lag) in distribution,
+        under the legacy transform and the production offset_logit default."""
         S, T = 4000, 4
-        post = _posterior(n_samples=S, n_artists=1, sigma_rw=0.3, rho=0.5, seed=3)
+        logit = target_transform == "offset_logit"
+        transform = get_transform(target_transform, (0.0, 100.0), 0.5)
+        # offset_logit models live on the logit scale: O(1) effects, not O(70).
+        post = _posterior(
+            n_samples=S,
+            n_artists=1,
+            sigma_rw=0.05 if logit else 0.3,
+            rho=0.5,
+            sigma_obs=0.3 if logit else 1.0,
+            seed=3,
+        )
+        if logit:
+            level = float(np.asarray(transform.forward(70.0)))
+            post["user_mu_artist"] = jnp.full((S,), level)
+            post["user_sigma_artist"] = jnp.full((S,), 0.1)
+            post["user_init_artist_effect"] = post["user_mu_artist"][:, None] + 0.1 * jnp.asarray(
+                post["user_init_artist_effect_decentered"]
+            )
+            post["user_beta"] = post["user_beta"] * 0.2
+        y0 = float(np.asarray(transform.forward(72.0)))
+        center = float(np.asarray(transform.forward(70.0)))
         X = np.asarray(np.random.default_rng(2).normal(size=(1, 1, 2)), dtype=np.float32)
 
         out = _rollout(
@@ -79,8 +101,11 @@ class TestH1Reconciliation:
             jnp.asarray(X),
             artist_idx=jnp.asarray([0]),
             n_train_events=jnp.asarray([T]),
+            y_last=jnp.asarray([y0]),
+            ar_center=center,
             likelihood_family="studentt",
             likelihood_df=4.0,
+            target_transform=target_transform,
         )
         roll_draws = np.asarray(out["y"])[:, 0, 0]
 
@@ -89,19 +114,24 @@ class TestH1Reconciliation:
             random.key(5),
             artist_idx=np.array([0], dtype=np.int32),
             album_seq=np.array([T + 1], dtype=np.int32),
-            prev_score=np.array([72.0], dtype=np.float32),
+            prev_score=np.array([y0], dtype=np.float32),
             X=X[0].astype(np.float32),
             y=None,
             n_artists=1,
             max_seq=T + 1,
-            priors=PriorConfig(),
+            priors=PriorConfig(target_transform=target_transform),
             likelihood_df=4.0,
             target_bounds=(0.0, 100.0),
-            ar_center=70.0,
+            ar_center=center,
         )
         ref_draws = np.asarray(preds["user_y"])[:, 0]
+        if logit:
+            # Predictive emits model-scale draws; evaluate inverse-transforms.
+            ref_draws = np.asarray(transform.inverse(ref_draws))
 
-        assert abs(roll_draws.mean() - ref_draws.mean()) < 0.15
+        # Tolerance ~2 MC standard errors of the mean difference at S=4000.
+        mc_tol = 2.0 * np.sqrt(roll_draws.var() + ref_draws.var()) / np.sqrt(S)
+        assert abs(roll_draws.mean() - ref_draws.mean()) < max(0.15, mc_tol)
         assert 0.9 < roll_draws.std() / ref_draws.std() < 1.1
 
 
@@ -163,6 +193,24 @@ class TestARFeedback:
             got = np.asarray(out["mu"])[:, h, 0]
             np.testing.assert_allclose(got, mu_expected, atol=5e-3)
             m = mu_expected
+
+
+class TestEivPosterior:
+    def test_eiv_fit_rolls_out_with_lag_treated_as_exact(self):
+        """A gate-on errors-in-variables posterior carries prev_latent_raw;
+        the rollout ignores it by design (a self-generated lag has no
+        measurement error) and the location matches the analytic predictor."""
+        post = _posterior(sigma_rw=0.0, rho=0.5)
+        post["user_prev_latent_raw"] = jnp.zeros((200, 50))  # (S, n_obs) EIV site
+        X = np.asarray(np.random.default_rng(4).normal(size=(1, 1, 2)), dtype=np.float32)
+        out = _rollout(post, jnp.asarray(X), artist_idx=jnp.asarray([0]))
+        transform = get_transform("identity", (0.0, 100.0), 0.5)
+        eff = np.asarray(post["user_init_artist_effect"])[:, 0]
+        lin = np.einsum("sf,f->s", np.asarray(post["user_beta"]), X[0, 0])
+        expected = np.asarray(
+            transform.transform_mu(jnp.asarray(eff + lin + 0.5 * (72.0 - 70.0)))
+        )
+        np.testing.assert_allclose(np.asarray(out["mu"])[:, 0, 0], expected, rtol=1e-5)
 
 
 class TestValidation:
