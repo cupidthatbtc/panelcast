@@ -28,6 +28,10 @@ class DecisionRules:
     coverage_tolerance: float = 0.03
     require_convergence: bool = True
     confirmation_seeds: tuple[int, ...] = (42, 43, 44)
+    # Rung-ladder rescue margin (#164): an arm whose screening z lands within
+    # this of promote_z is promoted regardless of the keep fraction — never
+    # drop a near-threshold arm on screening noise.
+    screen_margin: float = 0.5
 
     @classmethod
     def load(cls, path: Path | None = None) -> DecisionRules:
@@ -56,6 +60,7 @@ class DecisionRules:
             "coverage_tolerance": float,
             "require_convergence": bool,
             "confirmation_seeds": lambda v: tuple(int(s) for s in v),
+            "screen_margin": float,
         }
         kwargs: dict[str, Any] = {}
         for key, cast in known.items():

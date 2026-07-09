@@ -88,11 +88,35 @@ def build_plan(
         for name in space
         if len(space[name]) < len(full_space[name])
     }
-    n_stage1 = 1 + len(ofat_arms(descriptor))
+    n_ofat = len(ofat_arms(descriptor))
+    n_stage1_arms = 1 + n_ofat
 
-    # Priority-ordered stage sizing: stage 1 is exact; stage 2 is bounded by
-    # the runner's winner cap, stage 3 and confirmation are fixed by the tier.
+    # Priority-ordered stage sizing: stage 1 is exact (per-rung expected under
+    # the ladder); stage 2 is bounded by the runner's winner cap, stage 3 and
+    # confirmation are fixed by the tier.
     notes: list[str] = []
+    rung_fit_counts: list[int] = []  # expected (reference + arms) per rung
+    if tier.rungs:
+        expected = n_ofat
+        for i, rung in enumerate(tier.rungs):
+            rung_fit_counts.append(1 + expected)
+            if rung.keep_fraction is not None:
+                expected = max(1, math.ceil(rung.keep_fraction * expected))
+        n_stage1 = sum(rung_fit_counts)
+        stage1_upper = len(tier.rungs) * (1 + n_ofat)
+        ladder = " → ".join(
+            f"{r.num_chains}x{r.num_samples}"
+            + (f" keep {r.keep_fraction:g}" if r.keep_fraction is not None else "")
+            for r in tier.rungs
+        )
+        notes.append(
+            f"stage-1 rung ladder: {ladder}; expected fits per rung "
+            f"{rung_fit_counts} (margin rescues can raise later rungs up to "
+            f"{1 + n_ofat} each)"
+        )
+    else:
+        n_stage1 = 1 + n_ofat
+        stage1_upper = n_stage1
     stage2_upper = 0
     if tier.include_stage2:
         stage2_upper = 1 + math.comb(STAGE2_MAX_WINNERS, 2)
@@ -106,7 +130,7 @@ def build_plan(
     confirm_fits = (2 * n_confirmation_seeds) if tier.confirm else 0
     min_fits = n_stage1 + confirm_fits
     stage3 = tier.stage3_fits if 3 in tier.stages else 0
-    max_fits_planned = n_stage1 + stage2_upper + stage3 + confirm_fits
+    max_fits_planned = stage1_upper + stage2_upper + stage3 + confirm_fits
     if cfg.max_fits is not None:
         max_fits_planned = min(max_fits_planned, cfg.max_fits)
         # A cap below the baseline truncates the sweep mid-stage-1; the floor
@@ -118,9 +142,18 @@ def build_plan(
     cost_source = "no prepared data — run splits+features first for a GPU cost estimate"
     if dims is not None:
         n_confirm_priced = min(confirm_fits, max_fits_planned)
+        if tier.rungs:
+            # Prices the full ladder even under a max_fits cap (the legacy branch
+            # is cap-aware): which rung the cap truncates isn't knowable up front,
+            # so the estimate stays an upper bound.
+            rung_plan = list(zip(tier.rungs, rung_fit_counts))
+            n_tier_scale = stage2_upper + stage3
+        else:
+            rung_plan = None
+            n_tier_scale = max_fits_planned - n_confirm_priced
         predicted_hours, predicted_peak, cost_source = _predict_cost(
-            dims, tier, max_fits_planned - n_confirm_priced, n_confirm_priced,
-            calibration_store_path,
+            dims, tier, n_tier_scale, n_confirm_priced,
+            calibration_store_path, rung_plan=rung_plan,
         )
     if cfg.budget_hours is not None:
         notes.append(
@@ -135,7 +168,7 @@ def build_plan(
     return SelectPlan(
         dataset=dataset_label,
         effort=tier.name,
-        n_stage1_arms=n_stage1,
+        n_stage1_arms=n_stage1_arms,
         min_fits=min_fits,
         max_fits_planned=max_fits_planned,
         predicted_gpu_hours=predicted_hours,
@@ -153,9 +186,11 @@ def _predict_cost(
     n_screen_fits: int,
     n_confirm_fits: int,
     store_path: Path | None,
+    rung_plan: list | None = None,
 ) -> tuple[float, float, str]:
-    """Screening fits priced at tier scale; confirmation fits at the tier's
-    publication_confirm scale when set (run_confirmation applies it to all)."""
+    """Screening fits priced at tier scale (each ladder rung at its own scale
+    via ``rung_plan``); confirmation fits at the tier's publication_confirm
+    scale when set (run_confirmation applies it to all)."""
     from panelcast.gpu_memory.calibration_store import estimate_with_calibration
     from panelcast.gpu_memory.runtime_predictor import predict_fit_seconds
 
@@ -164,6 +199,14 @@ def _predict_cost(
         transform="offset_logit", store_path=store_path,
     )
     total_seconds = diag.seconds * n_screen_fits
+    for rung, n_fits in rung_plan or []:
+        total_seconds += (
+            predict_fit_seconds(
+                rung.num_chains, rung.num_samples, rung.num_warmup,
+                dims["n_observations"], transform="offset_logit", store_path=store_path,
+            ).seconds
+            * n_fits
+        )
     if n_confirm_fits:
         if tier.publication_confirm:
             pub = predict_fit_seconds(
@@ -239,6 +282,10 @@ def run_select(
     report_dir = audit_root / f"select_{descriptor.name}"
     report_dir.mkdir(parents=True, exist_ok=True)
 
+    # The rescue margin is pre-registered next to the other rules; the runner
+    # consumes it through its config.
+    cfg.screen_margin = rules.screen_margin
+
     prior_block = ""
     if train_df is not None and feature_cols is not None:
         from panelcast.select.prior_screen import render_prior_block, screen_transforms
@@ -254,13 +301,17 @@ def run_select(
         scorer=_snapshot_scorer, dims=dims,
     )
 
+    # Only top-rung fits carry report-grade evidence (#164): the ranking,
+    # verdicts, and confirmation candidate all come from final-rung records;
+    # screening rungs land in a clearly-labeled appendix below.
+    final_rung = len(cfg.rungs) - 1 if cfg.rungs else 0
     reference_nc: Path | None = None
     for record in ledger.records.values():
-        if not record.knobs and record.run_dir:
+        if not record.knobs and record.run_dir and record.rung == final_rung:
             reference_nc = Path(record.run_dir) / "evaluation" / "log_likelihood.nc"
     scores = []
     for record in ledger.records.values():
-        if record.status != "completed" or not record.run_dir:
+        if record.status != "completed" or not record.run_dir or record.rung != final_rung:
             continue
         scores.append(
             score_arm(
@@ -298,6 +349,30 @@ def run_select(
         }
         for r in not_evaluated
     ]
+
+    # Screening-rung appendix (#164): ledger snapshots from below the final
+    # rung, labeled screening-scale — never mixed into the ranking above.
+    if final_rung > 0:
+        screening = sorted(
+            (r for r in ledger.records.values() if r.rung < final_rung),
+            key=lambda r: (r.rung, -(float((r.score or {}).get("z") or -1e9)), r.arm_id),
+        )
+        promoted_ids = {
+            r.arm_id for r in ledger.records.values() if r.rung == final_rung and r.knobs
+        }
+        if screening:
+            report_md += "\n" + _render_screening_appendix(screening, promoted_ids, cfg)
+        report_json["screening_rungs"] = [
+            {
+                "arm": r.arm_id,
+                "knobs": r.knobs,
+                "rung": r.rung,
+                "status": r.status,
+                "z": (r.score or {}).get("z"),
+                "promoted": r.arm_id in promoted_ids,
+            }
+            for r in screening
+        ]
 
     # The confirmation candidate is the highest-z arm that clears the promotion
     # bar at SCREENING scale (z + coverage) — convergence is NOT required here,
@@ -352,6 +427,29 @@ def _snapshot_scorer(run_dir: Path, reference_run: Path | None) -> dict:
     ref_nc = (reference_run / "evaluation" / "log_likelihood.nc") if reference_run else None
     score = score_arm(run_dir, arm="_probe", reference_nc=ref_nc)
     return {"z": score.elpd_z, "elpd_diff": score.elpd_diff}
+
+
+def _render_screening_appendix(records, promoted_ids: set, cfg: SweepConfig) -> str:
+    lines = [
+        "## Screening rungs (appendix)",
+        "",
+        "Reduced-scale screening evidence from the stage-1 rung ladder. These "
+        "z's are SCREENING-SCALE — noisier than, and not comparable to, the "
+        "top-rung ranking above; they exist to document what was eliminated "
+        f"(keep rule: top fraction by z, plus z ≥ promote_z − {cfg.screen_margin:g}).",
+        "",
+        "| arm | rung | status | z | promoted | knobs |",
+        "| --- | --- | --- | --- | --- | --- |",
+    ]
+    for r in records:
+        z = (r.score or {}).get("z")
+        z_str = f"{float(z):+.2f}" if z is not None else "-"
+        label = "reference" if not r.knobs else json.dumps(
+            r.knobs, sort_keys=True, default=str
+        ).replace("|", "\\|")
+        promoted = "yes" if r.arm_id in promoted_ids and r.knobs else "-"
+        lines.append(f"| {r.arm_id} | {r.rung} | {r.status} | {z_str} | {promoted} | {label} |")
+    return "\n".join(lines) + "\n"
 
 
 def _render_not_evaluated(records) -> str:

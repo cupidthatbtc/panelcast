@@ -669,7 +669,7 @@ class TestBudgetLookahead:
     def _expensive_ar1(self, monkeypatch):
         import panelcast.select.runner as runner_mod
 
-        def fake_predict(cfg, merged, dims):
+        def fake_predict(cfg, merged, dims, sampler=None):
             if dims is None:
                 return None
             return _FakePrediction(7200.0 if merged.get("latent_process") == "ar1" else 60.0)
