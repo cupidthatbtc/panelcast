@@ -47,6 +47,15 @@ class TestGpuAdmission:
         adm.release(2.0)
         assert adm.try_admit(2.0)
 
+    def test_single_oversized_arm_admits_alone(self):
+        # An arm priced above the whole headroom budget still runs (alone);
+        # admit() must never spin forever on it.
+        adm = GpuAdmission(headroom=0.8, free_bytes_fn=lambda: 12 * _GIB)
+        assert adm.try_admit(20.0)
+        assert not adm.try_admit(0.5)
+        adm.release(20.0)
+        assert adm.try_admit(0.5)
+
 
 def _env(tmp_path, parallel_arms=2, fail_first_oom=None):
     """Fake launcher tracking concurrency; optional one-shot OOM per arm id."""
@@ -100,6 +109,33 @@ class TestParallelBuckets:
         ar1 = next(r for r in ledger.records.values() if r.knobs == {"latent_process": "ar1"})
         assert ar1.status == "completed"
         assert "serialized after OOM" in (ar1.note or "")
+
+    def test_failed_head_falls_back_to_serial(self, tmp_path, monkeypatch):
+        """A non-OOM head failure leaves the flat cache untrusted — the tail
+        must serialize rather than race N feature rebuilds into it."""
+        import panelcast.select.runner as runner_mod
+
+        monkeypatch.setattr(
+            runner_mod, "ofat_arms",
+            lambda d, available_columns=None: [
+                ({"ar_center": "none"}, None),
+                ({"latent_process": "ar1"}, None),
+                ({"debut_prev_score_source": "dataset_stats"}, None),
+            ],
+        )
+        cfg, launch, state = _env(tmp_path, parallel_arms=2)
+        calls = {"n": 0}
+
+        def failing_launch(config_path, panelcast_bin, timeout_seconds=None, env_overrides=None):
+            calls["n"] += 1
+            if calls["n"] == 2:  # the bucket head, right after the reference
+                return 1, "RuntimeError: boom"
+            return launch(config_path, panelcast_bin, timeout_seconds, env_overrides)
+
+        ledger = run_sweep(cfg, AOTY, launch=failing_launch)
+        assert state["max_live"] == 1
+        assert len([r for r in ledger.records.values() if r.status == "failed"]) == 1
+        assert len([r for r in ledger.records.values() if r.knobs and r.status == "completed"]) == 2
 
     def test_default_serial_uses_three_arg_launch(self, tmp_path):
         """--parallel-arms 1 keeps the legacy launch protocol byte-identical:

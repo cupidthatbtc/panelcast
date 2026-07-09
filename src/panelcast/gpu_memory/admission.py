@@ -63,7 +63,9 @@ class GpuAdmission:
                     return True
                 return False
             budget_gb = free / _GIB * self._headroom
-            if self._reserved_gb + estimate_gb <= budget_gb:
+            # The first reservation always admits: an arm priced above the whole
+            # headroom budget must still run (alone), never spin admit() forever.
+            if self._reserved_gb == 0.0 or self._reserved_gb + estimate_gb <= budget_gb:
                 self._reserved_gb += estimate_gb
                 return True
             return False

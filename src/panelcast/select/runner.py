@@ -457,15 +457,18 @@ class SweepLedger:
 
     def completed_ids(self) -> set[str]:
         # Bare arm ids, not the rung-suffixed record keys.
-        return {r.arm_id for r in self.records.values() if r.status == "completed"}
+        with self._lock:
+            return {r.arm_id for r in self.records.values() if r.status == "completed"}
 
     def fits_done(self) -> int:
-        return sum(
-            1 for r in self.records.values() if r.status in ("completed", "failed", "timeout")
-        )
+        with self._lock:
+            return sum(
+                1 for r in self.records.values() if r.status in ("completed", "failed", "timeout")
+            )
 
     def hours_spent(self) -> float:
-        return sum(r.wall_clock_seconds or 0.0 for r in self.records.values()) / 3600.0
+        with self._lock:
+            return sum(r.wall_clock_seconds or 0.0 for r in self.records.values()) / 3600.0
 
 
 def _default_panelcast_bin() -> str:
@@ -1052,16 +1055,30 @@ def run_sweep(  # noqa: C901  # tracked complexity debt: the _execute/_run_bucke
                     break
                 runnable.append((arm, note))
             if runnable:
-                with ThreadPoolExecutor(max_workers=cfg.parallel_arms) as pool:
-                    futures = [
-                        pool.submit(_execute, stage, arm, note, rung, True)
-                        for arm, note in runnable
-                    ]
-                    for future in futures:
-                        future.result()
+                with state_lock:
+                    cache_ready = cache_signature == feature_signature({**base, **head[0]})
+                if not cache_ready:
+                    # The head didn't leave a trusted flat cache (failed, or was
+                    # budget-skipped): a concurrent tail would race N feature
+                    # rebuilds into the shared cache — run this bucket serially.
+                    log.warning("bucket_head_unready_serialized", stage=stage, rung=rung)
+                    for arm, note in runnable:
+                        if _max_fits_reached():
+                            break
+                        _execute(stage, arm, note, rung)
+                else:
+                    with ThreadPoolExecutor(max_workers=cfg.parallel_arms) as pool:
+                        futures = [
+                            pool.submit(_execute, stage, arm, note, rung, True)
+                            for arm, note in runnable
+                        ]
+                        for future in futures:
+                            future.result()
             # Kill-and-serialize: an OOM under concurrency retries alone with
             # the full pool rather than failing the sweep.
             for arm, note in runnable:
+                if _max_fits_reached():
+                    break
                 r = ledger.records.get(record_key(arm_id(arm), rung))
                 if r and r.status == "failed" and _looks_oom(r.error):
                     log.warning("arm_oom_serialized", arm_id=r.arm_id, rung=rung)
