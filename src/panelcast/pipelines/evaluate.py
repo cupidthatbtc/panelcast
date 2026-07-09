@@ -206,6 +206,9 @@ def _resolve_eval_horizon(
     n_horizon_clamped: int,
     strict: bool,
 ) -> tuple[np.ndarray, int]:
+    # Unrelated to the eval_horizon CONFIG (#157 multi-step rollout depth):
+    # this resolves how far album_seq may extend past the TRAINING horizon
+    # in the one-step evaluation.
     if propagate_rw:
         # The variant the strict-mode guard advertises: keep the deep-horizon
         # album_seq and grow the trajectory so re-sampled rw_raw accumulates the
