@@ -195,6 +195,19 @@ class TestLedgerV2:
         assert ledger.records["abc123"].rung == 0
         assert ledger.completed_ids() == {"abc123"}
 
+    def test_completed_ids_are_bare_arm_ids(self, tmp_path):
+        ledger = SweepLedger(tmp_path / "ledger.json")
+        ledger.upsert(_rec({"a": 1}, z=1.0, rung=1))
+        assert ledger.completed_ids() == {arm_id({"a": 1})}
+
+    def test_ladder_requires_reference_first(self):
+        with pytest.raises(ValueError, match="reference_first"):
+            SweepConfig(
+                sweep_id="p",
+                reference_first=False,
+                rungs=[{"num_chains": 2, "num_samples": 500, "keep_fraction": 0.4}],
+            )
+
 
 # --- plan arithmetic ---------------------------------------------------------
 

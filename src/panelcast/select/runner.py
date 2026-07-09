@@ -27,6 +27,7 @@ from __future__ import annotations
 import hashlib
 import itertools
 import json
+import math
 import random as _random
 import subprocess
 import sys
@@ -119,6 +120,14 @@ class SweepConfig:
     # on transferred adaptation.
     warmup_transfer: bool = False
     warmup_transfer_num_warmup: int = 200
+
+    def __post_init__(self) -> None:
+        if self.rungs and not self.reference_first:
+            raise ValueError(
+                "a rung ladder requires reference_first=True: rung-0 arms score "
+                "against the rung-0 reference, so without it nothing promotes and "
+                "the ladder silently collapses."
+            )
 
     @property
     def sweep_dir(self) -> Path:
@@ -338,8 +347,6 @@ def rung_survivors(
     within ``screen_margin`` of ``promote_z`` — screening noise must never
     eliminate a near-threshold arm. Unscored arms carry no evidence and are
     never promoted (the stage2_winners convention)."""
-    import math
-
     scored: list[tuple[float, str, dict[str, Any]]] = []
     for r in records:
         if r.stage != 1 or not r.knobs or r.status != "completed" or r.rung != rung:
@@ -433,7 +440,8 @@ class SweepLedger:
         tmp.replace(self.path)
 
     def completed_ids(self) -> set[str]:
-        return {aid for aid, r in self.records.items() if r.status == "completed"}
+        # Bare arm ids, not the rung-suffixed record keys.
+        return {r.arm_id for r in self.records.values() if r.status == "completed"}
 
     def fits_done(self) -> int:
         return sum(

@@ -143,6 +143,9 @@ def build_plan(
     if dims is not None:
         n_confirm_priced = min(confirm_fits, max_fits_planned)
         if tier.rungs:
+            # Prices the full ladder even under a max_fits cap (the legacy branch
+            # is cap-aware): which rung the cap truncates isn't knowable up front,
+            # so the estimate stays an upper bound.
             rung_plan = list(zip(tier.rungs, rung_fit_counts))
             n_tier_scale = stage2_upper + stage3
         else:
