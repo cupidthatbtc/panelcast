@@ -51,6 +51,7 @@ from panelcast.models.bayes.io import load_manifest, load_model
 from panelcast.models.bayes.model import make_score_model
 from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_entity
 from panelcast.models.bayes.priors import PriorConfig
+from panelcast.models.bayes.rollout import predict_horizon
 from panelcast.models.bayes.transforms import get_transform
 from panelcast.paths import ArtifactPaths
 from panelcast.pipelines.stamps import DATA_STAGE_ROOTS, read_stamp
@@ -336,6 +337,208 @@ def _row_identities(
     if group_col and group_col in df.columns:
         ids["group"] = df[group_col].fillna("(missing)").astype(str).to_numpy()
     return ids
+
+
+def _build_horizon_panel(
+    test_df: pd.DataFrame,
+    test_features: pd.DataFrame,
+    summary: dict,
+    horizon: int,
+    *,
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame | None,
+) -> dict:
+    """Per-entity step-indexed arrays for the ancestral-rollout evaluation.
+
+    Entities are the test entities in evaluation frame order; step h of an
+    entity is its h-th held-out event with realized covariates (the documented
+    evaluation convention). An entity is masked out at step h when it has
+    fewer than h test events or the event's observation count is invalid.
+    """
+    ds = _summary_dataset(summary)
+    entity_col, target_col, n_obs_col = ds["entity_col"], ds["target_col"], ds["n_obs_col"]
+
+    test_df = join_splits_with_features(test_df, test_features, name="horizon_eval")
+    sort_cols = [entity_col]
+    if "Release_Date_Parsed" in test_df.columns:
+        sort_cols.append("Release_Date_Parsed")
+    if "Album" in test_df.columns:
+        sort_cols.append("Album")
+    test_df = test_df.sort_values(sort_cols, na_position="first").copy()
+
+    artist_to_idx = summary["artist_to_idx"]
+    entity_ids = pd.unique(test_df[entity_col])
+    unknown = [e for e in entity_ids if e not in artist_to_idx]
+    if unknown:
+        raise ValueError(
+            f"Unknown entities in horizon-rollout test data: {sorted(map(str, unknown))[:5]}"
+        )
+
+    feature_cols = summary["feature_cols"]
+    scaler = summary["feature_scaler"]
+    test_df = apply_imputation(test_df, feature_cols, scaler.get("imputation"))
+    X = test_df[feature_cols].values.astype(np.float32)
+    X = (X - np.array(scaler["mean"], dtype=np.float32)) / np.array(
+        scaler["std"], dtype=np.float32
+    )
+
+    if "n_reviews" in test_df.columns:
+        nrev_raw = test_df["n_reviews"].to_numpy(dtype=float)
+    elif n_obs_col in test_df.columns:
+        nrev_raw = test_df[n_obs_col].to_numpy(dtype=float)
+    else:
+        raise ValueError(f"No n_reviews or {n_obs_col} column found in test data")
+    row_valid = ~(np.isnan(nrev_raw) | (nrev_raw <= 0))
+
+    n_entities = len(entity_ids)
+    entity_pos = {e: i for i, e in enumerate(entity_ids)}
+    h_index = test_df.groupby(entity_col).cumcount().to_numpy()
+
+    X_panel = np.zeros((horizon, n_entities, X.shape[1]), dtype=np.float32)
+    nrev_panel = np.ones((horizon, n_entities), dtype=np.float32)
+    y_panel = np.full((horizon, n_entities), np.nan, dtype=np.float32)
+    valid = np.zeros((horizon, n_entities), dtype=bool)
+    y_true_all = test_df[target_col].to_numpy(dtype=np.float32)
+    cols = test_df[entity_col].to_numpy()
+    for row in range(len(test_df)):
+        h = int(h_index[row])
+        if h >= horizon:
+            continue
+        e = entity_pos[cols[row]]
+        X_panel[h, e] = X[row]
+        nrev_panel[h, e] = nrev_raw[row] if row_valid[row] else 1.0
+        y_panel[h, e] = y_true_all[row]
+        valid[h, e] = bool(row_valid[row])
+
+    global_mean = summary["global_mean_score"]
+    train_last = train_df.groupby(entity_col)[target_col].last()
+    base_prev = pd.Series(entity_ids).map(train_last)
+    if val_df is not None and not val_df.empty:
+        val_last = pd.Series(entity_ids).map(val_df.groupby(entity_col)[target_col].last())
+        base_prev = val_last.fillna(base_prev)
+    y_last = base_prev.fillna(global_mean).to_numpy(dtype=np.float32)
+    transform = _transform_from_summary(summary)
+    if transform.name != "identity":
+        y_last = np.asarray(transform.forward(y_last), dtype=np.float32)
+
+    train_counts = pd.Series(entity_ids).map(train_df.groupby(entity_col).size()).fillna(0)
+    max_seq_train = int(summary["max_seq"])
+    min_albums_filter = int(summary.get("min_albums_filter", 2))
+    n_train_events = np.minimum(train_counts.to_numpy(dtype=int), max_seq_train)
+    dynamic_mask = (train_counts >= min_albums_filter).to_numpy()
+
+    return {
+        "entities": [str(e) for e in entity_ids],
+        "artist_idx": np.array([artist_to_idx[e] for e in entity_ids], dtype=np.int32),
+        "n_train_events": n_train_events,
+        "dynamic_mask": dynamic_mask,
+        "y_last": y_last,
+        "X_panel": X_panel,
+        "nrev_panel": nrev_panel,
+        "y_panel": y_panel,
+        "valid": valid,
+    }
+
+
+def _evaluate_horizon_rollout(
+    *,
+    summary: dict,
+    prefix: str,
+    ctx: "StageContext",
+    posterior_samples: dict[str, Any],
+    test_df: pd.DataFrame,
+    test_features: pd.DataFrame,
+    train_df: pd.DataFrame,
+    val_df: pd.DataFrame | None,
+) -> dict:
+    """Score h-step ancestral-rollout forecasts per horizon (#157).
+
+    Emitted as its own clearly-labeled artifact (horizon_rollout.json) so the
+    horizon-decay curves never mix into the flagship one-step metrics.
+    """
+    horizon = int(getattr(ctx, "eval_horizon", 0))
+    panel = _build_horizon_panel(
+        test_df, test_features, summary, horizon, train_df=train_df, val_df=val_df
+    )
+    priors_obj = PriorConfig(**summary["priors"])
+    ds = _summary_dataset(summary)
+    fixed_n_exp = None
+    if not summary.get("learn_n_exponent", False):
+        n_exponent = float(summary.get("n_exponent", 0.0) or 0.0)
+        fixed_n_exp = n_exponent if n_exponent != 0.0 else None
+
+    rollout_kwargs = dict(
+        artist_idx=panel["artist_idx"],
+        n_train_events=panel["n_train_events"],
+        y_last=panel["y_last"],
+        X_future=panel["X_panel"],
+        n_reviews_future=panel["nrev_panel"],
+        dynamic_mask=panel["dynamic_mask"],
+        prefix=f"{prefix}_",
+        ar_center=_ar_center_from_summary(summary),
+        target_bounds=ds["target_bounds"],
+        likelihood_df=float(summary.get("likelihood_df", 4.0)),
+        target_transform=summary.get("target_transform") or "identity",
+        logit_offset=float(summary.get("logit_offset") or 0.5),
+        likelihood_family=priors_obj.likelihood_family,
+        skew_tailweight=priors_obj.skew_tailweight,
+        discretize_observation=priors_obj.discretize_observation,
+        latent_process=priors_obj.latent_process,
+        fixed_n_exponent=fixed_n_exp,
+    )
+
+    n_total = next(iter(posterior_samples.values())).shape[0]
+    batch_size = int(getattr(ctx, "predictive_batch_size", 500))
+    y_chunks: list[np.ndarray] = []
+    cpu_device = jax.devices("cpu")[0]
+    with jax.default_device(cpu_device):
+        for start in range(0, n_total, batch_size):
+            end = min(start + batch_size, n_total)
+            chunk = {k: v[start:end] for k, v in posterior_samples.items()}
+            result = predict_horizon(chunk, seed=ctx.seed + start, **rollout_kwargs)
+            y_chunks.append(np.asarray(result["y"]))
+    y_out = np.concatenate(y_chunks, axis=0)  # (n_draws, H, n_entities)
+
+    interval = float(ctx.prediction_interval)
+    lo_q = 100.0 * (1.0 - interval) / 2.0
+    per_horizon: list[dict] = []
+    for h in range(horizon):
+        mask = panel["valid"][h] & np.isfinite(panel["y_panel"][h])
+        n = int(mask.sum())
+        if n == 0:
+            per_horizon.append({"h": h + 1, "n": 0})
+            continue
+        y_true_h = panel["y_panel"][h][mask].astype(np.float64)
+        samples_h = y_out[:, h, mask].astype(np.float64)
+        lo = np.percentile(samples_h, lo_q, axis=0)
+        hi = np.percentile(samples_h, 100.0 - lo_q, axis=0)
+        residuals = y_true_h - samples_h.mean(axis=0)
+        per_horizon.append(
+            {
+                "h": h + 1,
+                "n": n,
+                "crps": float(compute_crps(y_true_h, samples_h).mean_crps),
+                "coverage": float(np.mean((y_true_h >= lo) & (y_true_h <= hi))),
+                "mean_interval_width": float(np.mean(hi - lo)),
+                "rmse": float(np.sqrt(np.mean(residuals**2))),
+                "mae": float(np.mean(np.abs(residuals))),
+            }
+        )
+
+    return {
+        "horizon": horizon,
+        "prediction_interval": interval,
+        "n_entities": len(panel["entities"]),
+        "convention": (
+            "Ancestral rollout: per posterior draw, sampled scores feed back "
+            "as the AR lag and latent innovations compound per step. Step-h "
+            "covariates are the REALIZED held-out values (production callers "
+            "must supply futures). Horizon-decay numbers live only in this "
+            "artifact — they are not comparable to, and never mix into, the "
+            "flagship one-step metrics."
+        ),
+        "per_horizon": per_horizon,
+    }
 
 
 def _prepare_test_model_args(
@@ -1424,6 +1627,31 @@ def _evaluate_primary_split(
             error=str(e)[:500],
         )
 
+    # Multi-step ancestral rollout (#157): horizon-decay curves as a separate
+    # artifact, gated by eval_horizon. Informational — never fail the stage.
+    horizon_rollout: dict | None = None
+    if int(getattr(ctx, "eval_horizon", 0) or 0) > 0:
+        try:
+            horizon_rollout = _evaluate_horizon_rollout(
+                summary=summary,
+                prefix=prefix,
+                ctx=ctx,
+                posterior_samples=posterior_samples,
+                test_df=primary_test_df,
+                test_features=primary_test_features,
+                train_df=primary_train_df,
+                val_df=primary_val_df,
+            )
+        except Exception as e:
+            if ctx.strict:
+                raise
+            log.warning(
+                "horizon_rollout_failed",
+                error_type=type(e).__name__,
+                error=str(e)[:500],
+                exc_info=True,
+            )
+
     primary_split_result = {
         **primary_metrics,
         "n_test": int(len(primary_y_true)),
@@ -1436,6 +1664,7 @@ def _evaluate_primary_split(
         "predictions": primary_predictions,
         "calibration": primary_calibration,
         "ranked_slate": ranked_slate,
+        "horizon_rollout": horizon_rollout,
     }
     return primary_split_result, primary_split_artifact
 
@@ -1679,6 +1908,9 @@ def evaluate_models(ctx: StageContext) -> dict:
     if PRIMARY_SPLIT in split_artifacts:
         _write_json(output_dir / "predictions.json", split_artifacts[PRIMARY_SPLIT]["predictions"])
         _write_json(output_dir / "calibration.json", split_artifacts[PRIMARY_SPLIT]["calibration"])
+        horizon_rollout = split_artifacts[PRIMARY_SPLIT].get("horizon_rollout")
+        if horizon_rollout is not None:
+            _write_json(output_dir / "horizon_rollout.json", horizon_rollout, indent=2)
 
     primary = split_results[PRIMARY_SPLIT]
     metrics_full = {

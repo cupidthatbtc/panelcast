@@ -256,6 +256,10 @@ class PipelineConfig:
     origin_offset: int = 0
     # Conformal calibration wrapper on the predictive (#156; needs val_albums >= 1)
     conformal_calibration: bool = False
+    # Multi-step ancestral rollout depth for evaluation (#157). 0 = off (the
+    # default; byte-identical). H > 0 scores h=1..H forecasts into the
+    # separate horizon_rollout.json artifact. No CLI flag.
+    eval_horizon: int = 0
     # Evaluation configuration
     calibration_intervals: tuple[float, ...] = (0.80, 0.95)
     coverage_tolerance: float = 0.03
@@ -330,6 +334,8 @@ class PipelineConfig:
             raise ValueError("coverage_tolerance must be >= 0.")
         if not 0.0 < self.prediction_interval < 1.0:
             raise ValueError("prediction_interval must be in (0, 1).")
+        if self.eval_horizon < 0:
+            raise ValueError(f"eval_horizon must be >= 0, got {self.eval_horizon}.")
         if self.num_chains < 1:
             raise ValueError("num_chains must be >= 1.")
         if self.num_samples < 1:
@@ -674,6 +680,7 @@ class PipelineOrchestrator:
                 "val_albums": self.config.val_albums,
                 "origin_offset": self.config.origin_offset,
                 "conformal_calibration": self.config.conformal_calibration,
+                "eval_horizon": self.config.eval_horizon,
                 "min_train_albums": self.config.min_train_albums,
                 # Evaluation
                 "calibration_intervals": list(self.config.calibration_intervals),
@@ -760,6 +767,7 @@ class PipelineOrchestrator:
         "prediction_interval",
         "evaluate_secondary_split",
         "conformal_calibration",
+        "eval_horizon",
         "enforce_lockfile",
         "dataset",
     )
@@ -1311,6 +1319,7 @@ class PipelineOrchestrator:
             val_albums=self.config.val_albums,
             origin_offset=self.config.origin_offset,
             conformal_calibration=self.config.conformal_calibration,
+            eval_horizon=self.config.eval_horizon,
             min_train_albums=self.config.min_train_albums,
             calibration_intervals=self.config.calibration_intervals,
             coverage_tolerance=self.config.coverage_tolerance,

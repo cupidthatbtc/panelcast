@@ -152,6 +152,8 @@ class StageContext:
     val_albums: int = 0
     origin_offset: int = 0
     conformal_calibration: bool = False
+    # Multi-step ancestral rollout depth for evaluation (#157); 0 = off
+    eval_horizon: int = 0
     min_train_albums: int = 1
     # Evaluation configuration
     calibration_intervals: tuple[float, ...] = (0.80, 0.95)
