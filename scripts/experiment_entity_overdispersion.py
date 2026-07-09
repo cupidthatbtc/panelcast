@@ -135,7 +135,7 @@ def main() -> None:
     # --- Training data (mirrors train_models prep at defaults) ---
     split_dir = resolve_split_dir(data_root / "data/splits", SplitType.WITHIN_ENTITY_TEMPORAL)
     feature_dir = resolve_split_dir(data_root / "data/features", SplitType.WITHIN_ENTITY_TEMPORAL)
-    model_args, feature_cols, train_df = load_training_data(
+    model_args, feature_cols, train_df, _imputation = load_training_data(
         features_path=data_root / "data/features/train_features.parquet",
         splits_path=split_dir / "train.parquet",
         descriptor=descriptor,

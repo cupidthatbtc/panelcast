@@ -67,7 +67,7 @@ def main() -> None:
 
     import pandas as pd
 
-    model_args, feature_cols, train_df = load_training_data(
+    model_args, feature_cols, train_df, _imputation = load_training_data(
         features_path=Path("data/features/train_features.parquet"),
         splits_path=Path("data/splits/within_entity_temporal/train.parquet"),
         descriptor=descriptor,

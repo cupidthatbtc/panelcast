@@ -58,7 +58,7 @@ def watch_sites(prefix: str) -> list[str]:
 
 def prepare_args(descriptor: DatasetDescriptor) -> tuple[dict, float]:
     """Replicate train_models data prep at defaults (identity, centered)."""
-    model_args, feature_cols, _train_df = load_training_data(
+    model_args, feature_cols, _train_df, _imputation = load_training_data(
         features_path=Path("data/features/train_features.parquet"),
         splits_path=resolve_split_dir(Path("data/splits"), SplitType.WITHIN_ENTITY_TEMPORAL)
         / "train.parquet",
