@@ -97,6 +97,12 @@ class TestRungParsing:
         assert tiers["standard"].rungs[0].keep_fraction == 0.4
         assert tiers["standard"].rungs[-1].keep_fraction is None
 
+    def test_rung_instances_pass_through(self):
+        from panelcast.select.tiers import _parse_rungs
+
+        rungs = (Rung(2, 500, 500, 0.4), Rung(4, 1000, 1000, None))
+        assert _parse_rungs("t", rungs) == rungs
+
     def test_tier_to_sweep_config_carries_rungs(self, tmp_path):
         tiers = load_tiers()
         cfg = tier_to_sweep_config(tiers["standard"], "s1")
@@ -145,6 +151,10 @@ class TestRungSurvivors:
         records = [_rec({"a": 1}, z=None), _rec({"a": 2}, z=0.1)]
         out = rung_survivors(records, 0, 1.0, promote_z=2.0, screen_margin=0.5)
         assert [knobs["a"] for knobs, _ in out] == [2]
+
+    def test_nothing_scored_promotes_nothing(self):
+        records = [_rec({"a": 1}, z=None), _rec({"a": 2}, z=None)]
+        assert rung_survivors(records, 0, 0.5, promote_z=2.0, screen_margin=0.5) == []
 
     def test_keep_fraction_floor_is_one(self):
         records = [_rec({"a": 1}, z=-3.0)]
@@ -343,3 +353,9 @@ class TestLadderSweep:
         assert len(launches) == 1 + len(ofat_arms(AOTY))
         assert all(r.rung == 0 for r in ledger.records.values())
         assert all("@r" not in key for key in ledger.records)
+
+    def test_ladder_halts_when_nothing_scores(self, tmp_path, monkeypatch):
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        ledger = run_sweep(cfg, AOTY, launch=launch, scorer=lambda run_dir, ref: {"z": None})
+        assert not [r for r in ledger.records.values() if r.rung == 1]
+        assert len(launches) == 1 + len(ofat_arms(AOTY))
