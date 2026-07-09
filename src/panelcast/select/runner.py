@@ -850,6 +850,13 @@ def _run_stage1_ladder(
             # The reference always runs alone: every same-rung score pairs
             # against its snapshot, so it must exist before any arm launches.
             execute(1, {}, label, rung_idx)
+            ref = ledger.records.get(record_key(arm_id({}), rung_idx))
+            if rungs[0] is not None and not (ref and ref.status == "completed"):
+                # On a ladder, a dead reference means nothing at this rung can
+                # score, nothing promotes, and stage 3 would burn unscoreable
+                # fits — stop instead of spending the whole screening budget.
+                log.warning("rung_reference_failed", rung=rung_idx)
+                return False
         if not run_bucketed(1, survivors, rung_idx):
             return False
         if rung_idx < final_rung:
@@ -943,6 +950,11 @@ def run_sweep(  # noqa: C901  # tracked complexity debt: the _execute/_run_bucke
         stage: int, arm: dict[str, Any], note: str | None, rung: int, concurrent: bool = False
     ) -> None:
         nonlocal cache_signature
+        # The serial path gates on max_fits between launches; a concurrent tail
+        # is submitted all at once, so the gate must live here or the whole
+        # bucket runs past the consented cap.
+        if concurrent and _max_fits_reached():
+            return
         aid = arm_id(arm)
         existing = ledger.records.get(record_key(aid, rung))
         if existing and existing.status in ("completed", "timeout"):
@@ -1019,7 +1031,11 @@ def run_sweep(  # noqa: C901  # tracked complexity debt: the _execute/_run_bucke
             reference_runs[rung] = run_dir
         if scorer is not None and run_dir is not None:
             try:
-                record.score = scorer(run_dir, reference_runs.get(rung))
+                # Serialized: concurrent netCDF opens of the shared reference
+                # snapshot are only as thread-safe as the installed HDF5 build,
+                # and scoring is milliseconds against multi-minute fits.
+                with state_lock:
+                    record.score = scorer(run_dir, reference_runs.get(rung))
             except Exception as exc:  # scoring must never kill the sweep
                 record.note = f"{record.note or ''}; scoring failed: {exc}".strip("; ")
         record.status = "completed"
@@ -1051,7 +1067,10 @@ def run_sweep(  # noqa: C901  # tracked complexity debt: the _execute/_run_bucke
             _execute(stage, head[0], head[1], rung)
             runnable = []
             for arm, note in tail_arms:
-                if _max_fits_reached():
+                # Reserve a slot per submission: fits_done() can't see arms that
+                # are merely queued, so the prospective count must include them
+                # or the whole tail runs past the consented cap.
+                if cfg.max_fits is not None and ledger.fits_done() + len(runnable) >= cfg.max_fits:
                     break
                 runnable.append((arm, note))
             if runnable:

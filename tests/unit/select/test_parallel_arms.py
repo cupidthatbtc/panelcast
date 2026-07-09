@@ -137,6 +137,14 @@ class TestParallelBuckets:
         assert len([r for r in ledger.records.values() if r.status == "failed"]) == 1
         assert len([r for r in ledger.records.values() if r.knobs and r.status == "completed"]) == 2
 
+    def test_max_fits_enforced_under_concurrency(self, tmp_path):
+        # The consent printout clamps to max_fits; the concurrent tail must
+        # honor the same ceiling (release-audit O1: a cap of 3 launched 24).
+        cfg, launch, state = _env(tmp_path, parallel_arms=2)
+        cfg.max_fits = 3
+        ledger = run_sweep(cfg, AOTY, launch=launch)
+        assert ledger.fits_done() == 3
+
     def test_default_serial_uses_three_arg_launch(self, tmp_path):
         """--parallel-arms 1 keeps the legacy launch protocol byte-identical:
         a fake WITHOUT env_overrides support must still work."""
