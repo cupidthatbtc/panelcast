@@ -271,6 +271,22 @@ class PriorConfig:
     # occupied range instead of the sparse span up to the theoretical bound.
     # None for every other family.
     effective_ceiling: float | None = None
+    # Covariate-block prior type: "normal" (legacy i.i.d. Normal(beta_loc,
+    # beta_scale), bit-identical RNG path) or "horseshoe" (regularized
+    # horseshoe, Piironen & Vehtari 2017). Global-local shrinkage kills the
+    # redundant covariate columns hard while letting real signals escape to
+    # the slab — the #76 coefficient-dilution response. Gate-on replaces the
+    # {prefix}beta sample with beta_z/beta_lambda/beta_tau/beta_c2 mid-sequence
+    # (beta becomes a deterministic, so every downstream reader is untouched);
+    # like entity_group_pooling, that legitimately reshuffles downstream RNG.
+    beta_prior_type: str = "normal"
+    # HalfCauchy scale for the global shrinkage tau. Default 0.1 expects few
+    # of the ~32 standardized columns to carry real signal.
+    hs_global_scale: float = 0.1
+    # Slab: c^2 ~ InvGamma(df/2, df*scale^2/2); the slab bounds how far a
+    # coefficient can escape shrinkage (Student-t(df, 0, scale) marginal).
+    hs_slab_scale: float = 2.0
+    hs_slab_df: float = 4.0
     # Genre/group pooling level between the global mean and the entity effects
     # (default off => legacy path, no new sites, bit-identical RNG). When True
     # the model adds a ZeroSumNormal group offset so each entity's init-effect

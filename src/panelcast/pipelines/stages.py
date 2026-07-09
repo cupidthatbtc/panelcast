@@ -120,6 +120,9 @@ class StageContext:
     latent_process: str = "rw"
     # sigma_obs prior family gate: "halfnormal" (legacy) | "lognormal"
     sigma_obs_prior_type: str = "halfnormal"
+    # Covariate-block prior gate (#155): "normal" (legacy) | "horseshoe"
+    beta_prior_type: str = "normal"
+    hs_global_scale: float = 0.1
     # Entity-level observation overdispersion gate (default off => legacy path)
     heteroscedastic_entity_obs: bool = False
     tau_entity_scale: float = 0.25

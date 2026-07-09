@@ -38,6 +38,7 @@ from panelcast import __version__ as panelcast_version
 from panelcast.config.descriptor import load_descriptor, resolve_descriptor_path
 from panelcast.config.gates import (
     ArCenter,
+    BetaPriorType,
     ChainMethod,
     DebutPrevScoreSource,
     LatentProcess,
@@ -203,6 +204,13 @@ class PipelineConfig:
     # sigma_obs prior family gate: "halfnormal" (legacy default) | "lognormal"
     # (removes the zero-boundary pile-up behind the econ variance-collapse).
     sigma_obs_prior_type: SigmaObsPriorType = "halfnormal"
+    # Covariate-block prior gate (#155): "normal" (legacy default, bit-identical
+    # RNG path) | "horseshoe" (regularized horseshoe; global-local shrinkage
+    # against the #76 coefficient dilution). No CLI flag; via run_config.yaml.
+    beta_prior_type: BetaPriorType = "normal"
+    # Horseshoe global scale (tau_0), the sparsity knob a bake-off sweeps.
+    # Read only when beta_prior_type="horseshoe".
+    hs_global_scale: float = 0.1
     # Entity-level observation overdispersion gate: False (legacy default,
     # bit-identical RNG path) | True (per-entity multiplicative noise inflation
     # widening intervals for noisy series). tau_entity_scale sets the prior
@@ -305,6 +313,13 @@ class PipelineConfig:
                 f"Invalid sigma_obs_prior_type: '{self.sigma_obs_prior_type}'. "
                 "Must be 'halfnormal' or 'lognormal'."
             )
+        if self.beta_prior_type not in ("normal", "horseshoe"):
+            raise ValueError(
+                f"Invalid beta_prior_type: '{self.beta_prior_type}'. "
+                "Must be 'normal' or 'horseshoe'."
+            )
+        if self.hs_global_scale <= 0.0:
+            raise ValueError(f"Invalid hs_global_scale: {self.hs_global_scale}. Must be > 0.")
         if self.tau_entity_scale <= 0.0:
             raise ValueError(f"Invalid tau_entity_scale: {self.tau_entity_scale}. Must be > 0.")
         if self.coverage_tolerance < 0.0:
@@ -642,6 +657,8 @@ class PipelineOrchestrator:
                 "ar_center": self.config.ar_center,
                 "latent_process": self.config.latent_process,
                 "sigma_obs_prior_type": self.config.sigma_obs_prior_type,
+                "beta_prior_type": self.config.beta_prior_type,
+                "hs_global_scale": self.config.hs_global_scale,
                 "heteroscedastic_entity_obs": self.config.heteroscedastic_entity_obs,
                 "tau_entity_scale": self.config.tau_entity_scale,
                 "errors_in_variables": self.config.errors_in_variables,
@@ -715,6 +732,8 @@ class PipelineOrchestrator:
         "ar_center",
         "latent_process",
         "sigma_obs_prior_type",
+        "beta_prior_type",
+        "hs_global_scale",
         "heteroscedastic_entity_obs",
         "tau_entity_scale",
         "errors_in_variables",
@@ -951,6 +970,10 @@ class PipelineOrchestrator:
             parts.append(f"--debut-prev-score-source {self.config.debut_prev_score_source}")
         if self.config.sigma_obs_prior_type != defaults.sigma_obs_prior_type:
             parts.append(f"--sigma-obs-prior-type {self.config.sigma_obs_prior_type}")
+        if self.config.beta_prior_type != defaults.beta_prior_type:
+            parts.append(f"--beta-prior-type {self.config.beta_prior_type}")
+        if self.config.hs_global_scale != defaults.hs_global_scale:
+            parts.append(f"--hs-global-scale {self.config.hs_global_scale}")
         if self.config.heteroscedastic_entity_obs:
             parts.append("--heteroscedastic-entity-obs")
         if self.config.tau_entity_scale != defaults.tau_entity_scale:
@@ -1265,6 +1288,8 @@ class PipelineOrchestrator:
             ar_center=self.config.ar_center,
             latent_process=self.config.latent_process,
             sigma_obs_prior_type=self.config.sigma_obs_prior_type,
+            beta_prior_type=self.config.beta_prior_type,
+            hs_global_scale=self.config.hs_global_scale,
             heteroscedastic_entity_obs=self.config.heteroscedastic_entity_obs,
             tau_entity_scale=self.config.tau_entity_scale,
             errors_in_variables=self.config.errors_in_variables,
