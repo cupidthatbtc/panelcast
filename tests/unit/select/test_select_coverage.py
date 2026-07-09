@@ -81,30 +81,23 @@ class TestWriteArmConfig:
 def _fake_env(tmp_path, monkeypatch):
     from datetime import datetime
 
-    counter = {"n": 0}
+    import yaml as _yaml
 
     def launch(config_path, panelcast_bin, timeout_seconds=None):
-        counter["n"] += 1
-        run_dir = tmp_path / "outputs" / f"run_{counter['n']:03d}"
+        payload = _yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+        run_dir = tmp_path / "outputs" / payload["run_id"]
         run_dir.mkdir(parents=True)
         (run_dir / "manifest.json").write_text(
             json.dumps({"created_at": datetime.now().isoformat()}), encoding="utf-8"
         )
-        (tmp_path / "outputs" / "latest.json").write_text(
-            json.dumps({"run_dir": run_dir.name}), encoding="utf-8"
-        )
         return 0, "ok"
 
-    import panelcast.paths as paths_mod
-
-    monkeypatch.setattr(
-        paths_mod,
-        "resolve_latest",
-        lambda output_base=Path("outputs"): tmp_path
-        / "outputs"
-        / json.loads((tmp_path / "outputs" / "latest.json").read_text())["run_dir"],
+    cfg = SweepConfig(
+        sweep_id="s",
+        output_root=tmp_path / "select",
+        pipeline_output_base=tmp_path / "outputs",
     )
-    return SweepConfig(sweep_id="s", output_root=tmp_path / "select"), launch
+    return cfg, launch
 
 
 class TestSweepEdges:

@@ -36,8 +36,9 @@ def _write_ll(path: Path, ll: np.ndarray) -> None:
 
 
 def _fake_env(tmp_path, monkeypatch, winner_ll_for_seed=None, winner_passed_for_seed=None):
-    """Fake launcher that writes per-run log-lik snapshots; patches resolve_latest."""
-    counter = {"n": 0}
+    """Fake launcher that writes per-run log-lik snapshots into the named run dir."""
+    import yaml as _yaml
+
     winner_ll_for_seed = winner_ll_for_seed or (lambda seed: _WINNER_GOOD_LL)
     winner_passed_for_seed = winner_passed_for_seed or (lambda seed: True)
 
@@ -45,27 +46,22 @@ def _fake_env(tmp_path, monkeypatch, winner_ll_for_seed=None, winner_passed_for_
         name = Path(config_path).stem  # confirm_<label>_seed<seed>
         label = "winner" if "winner" in name else "reference"
         seed = int(name.split("seed")[-1])
-        counter["n"] += 1
-        run_dir = tmp_path / "outputs" / f"run_{counter['n']:03d}"
+        payload = _yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+        run_dir = tmp_path / "outputs" / payload["run_id"]
         ll = winner_ll_for_seed(seed) if label == "winner" else _REF_LL
         _write_ll(run_dir / "evaluation" / "log_likelihood.nc", ll)
         if label == "winner":
             (run_dir / "evaluation" / "diagnostics.json").write_text(
                 json.dumps({"passed": winner_passed_for_seed(seed)}), encoding="utf-8"
             )
-        (tmp_path / "outputs" / "latest.json").write_text(
-            json.dumps({"run_dir": run_dir.name}), encoding="utf-8"
-        )
         return 0, "ok"
 
-    import panelcast.paths as paths_mod
-
-    def _latest(output_base=Path("outputs")):
-        data = json.loads((tmp_path / "outputs" / "latest.json").read_text(encoding="utf-8"))
-        return tmp_path / "outputs" / data["run_dir"]
-
-    monkeypatch.setattr(paths_mod, "resolve_latest", _latest)
-    cfg = SweepConfig(sweep_id="c", output_root=tmp_path / "select", panelcast_bin="pc")
+    cfg = SweepConfig(
+        sweep_id="c",
+        output_root=tmp_path / "select",
+        panelcast_bin="pc",
+        pipeline_output_base=tmp_path / "outputs",
+    )
     return cfg, launch
 
 
@@ -232,22 +228,22 @@ class TestConfirmationAutoTimeout:
         assert timeouts == [1800.0, 1800.0]
 
 
-class TestSelfPairGuard:
-    def test_winner_resolving_to_reference_run_is_an_error(self, tmp_path, monkeypatch):
-        # A failed latest-pointer write after the winner fit leaves the pointer
-        # on the reference run: pairing it against itself would fake a z=0 seed.
+class TestHandshakeGuard:
+    def test_winner_fit_without_named_run_dir_is_an_error(self, tmp_path, monkeypatch):
+        # A winner child that exits 0 without creating its NAMED run dir must
+        # fail the seed, never silently pair against something else (#167).
         cfg, launch = _fake_env(tmp_path, monkeypatch)
 
-        def sticky_pointer(config_path, panelcast_bin, timeout_seconds=None):
+        def no_dir_winner(config_path, panelcast_bin, timeout_seconds=None):
             if "winner" in Path(config_path).stem:
-                return 0, "ok"  # succeeds but never re-points latest.json
+                return 0, "ok"  # succeeds but never creates its run dir
             return launch(config_path, panelcast_bin, timeout_seconds)
 
         result = run_confirmation(
-            {"latent_process": "ar1"}, cfg, seeds=(42,), launch=sticky_pointer
+            {"latent_process": "ar1"}, cfg, seeds=(42,), launch=no_dir_winner
         )
         assert not result.confirmed
-        assert "self-pair" in result.seeds[0].error
+        assert "not resolved" in result.seeds[0].error
 
 
 class TestConfirmationResult:
