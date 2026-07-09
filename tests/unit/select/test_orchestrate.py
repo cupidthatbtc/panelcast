@@ -69,6 +69,21 @@ class TestBuildPlan:
         plan = build_plan(AOTY, STANDARD, _cfg(tmp_path, max_fits=5), dataset_label="aoty")
         assert plan.max_fits_planned == 5
 
+    def test_cost_predicted_with_rung_ladder(self, tmp_path):
+        from panelcast.select.tiers import Rung
+
+        tier = EffortTier(
+            "standard", (1, 2), 4, 1000, 1000, confirm=True,
+            rungs=(Rung(2, 500, 500, 0.4), Rung(4, 1000, 1000, None)),
+        )
+        dims = {"n_observations": 5000, "n_features": 40, "n_artists": 900, "max_seq": 30}
+        plan = build_plan(
+            AOTY, tier, _cfg(tmp_path), dataset_label="aoty", dims=dims,
+            calibration_store_path=tmp_path / "cal.json",
+        )
+        assert plan.predicted_gpu_hours > 0
+        assert any("rung ladder" in n for n in plan.notes)
+
     def test_cap_below_baseline_keeps_floor_le_ceiling(self, tmp_path):
         # --max-fits below the stage-1 count truncates mid-stage-1; the range
         # must not render backwards (floor > ceiling).
@@ -327,6 +342,32 @@ class TestRunSelect:
         result = run_select(None, NOCONFIRM, DecisionRules(), cfg, launch=launch, audit_root=tmp_path / ".audit")
         payload = json.loads((Path(result["report_dir"]) / "report.json").read_text())
         assert len(payload["arms"]) == 3
+
+    def test_ladder_run_writes_screening_appendix(self, tmp_path, monkeypatch):
+        import panelcast.select.runner as runner_mod
+
+        launch = _fake_env(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            runner_mod, "ofat_arms",
+            lambda d, available_columns=None: [
+                ({"latent_process": "ar1"}, None),
+                ({"ar_center": "none"}, None),
+            ],
+        )
+        cfg = _cfg(tmp_path, max_fits=8)
+        cfg.include_stage2 = False
+        cfg.rungs = [
+            {"num_chains": 2, "num_samples": 500, "num_warmup": 500, "keep_fraction": 0.5},
+            {"num_chains": 4, "num_samples": 1000, "num_warmup": 1000},
+        ]
+        result = run_select(
+            None, NOCONFIRM, DecisionRules(), cfg, launch=launch, audit_root=tmp_path / ".audit"
+        )
+        text = (Path(result["report_dir"]) / "report.md").read_text(encoding="utf-8")
+        assert "Screening rungs (appendix)" in text
+        payload = json.loads((Path(result["report_dir"]) / "report.json").read_text())
+        assert payload["screening_rungs"]
+        assert all(r["rung"] == 0 for r in payload["screening_rungs"])
 
     def test_prior_screen_block_when_frame_given(self, tmp_path, monkeypatch):
         import pandas as pd
