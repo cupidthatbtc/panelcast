@@ -336,6 +336,10 @@ class PipelineConfig:
             raise ValueError("prediction_interval must be in (0, 1).")
         if self.eval_horizon < 0:
             raise ValueError(f"eval_horizon must be >= 0, got {self.eval_horizon}.")
+        self._validate_sampling()
+
+    def _validate_sampling(self) -> None:
+        """Validate sampler settings and strict-mode requirements."""
         if self.num_chains < 1:
             raise ValueError("num_chains must be >= 1.")
         if self.num_samples < 1:
