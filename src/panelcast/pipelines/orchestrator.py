@@ -283,13 +283,7 @@ class PipelineConfig:
                 f"Invalid n_exponent_prior: '{self.n_exponent_prior}'. "
                 f"Must be one of {valid_priors}."
             )
-        if self.run_id is not None and (
-            not self.run_id or Path(self.run_id).name != self.run_id or self.run_id in (".", "..")
-        ):
-            raise ValueError(
-                f"Invalid run_id: {self.run_id!r}. Must be a bare directory name "
-                "(no path separators)."
-            )
+        self._validate_run_id()
         if not 5 <= self.max_tree_depth <= 15:
             raise ValueError(
                 f"Invalid max_tree_depth: {self.max_tree_depth}. Must be between 5 and 15."
@@ -354,6 +348,21 @@ class PipelineConfig:
             raise ValueError(
                 "strict mode requires num_samples >= ess_threshold per chain for ESS checks. "
                 f"Got num_samples={self.num_samples}, ess_threshold={self.ess_threshold}."
+            )
+
+    def _validate_run_id(self) -> None:
+        """A caller-supplied run_id must be a bare directory name (#167)."""
+        if self.run_id is None:
+            return
+        if (
+            not self.run_id
+            or "/" in self.run_id
+            or "\\" in self.run_id
+            or self.run_id in (".", "..")
+        ):
+            raise ValueError(
+                f"Invalid run_id: {self.run_id!r}. Must be a bare directory name "
+                "(no path separators)."
             )
 
     def _validate_likelihood(self) -> None:
