@@ -58,6 +58,21 @@ Conformal calibration wrapper (`conformal_calibration: true`, default off)
   (recalibrated quantiles) alongside the posterior quantile columns; with it
   off, outputs are byte-identical to before.
 
+Multi-step rollout evaluation (`eval_horizon: H`, default 0 = off)
+- Every flagship number above is ONE-step-ahead: each test event conditions on
+  the observed previous score (teacher forcing). With `eval_horizon: H` the
+  evaluate stage additionally scores genuine h-step forecasts for h = 1..H by
+  ancestral rollout: per posterior draw the sampled score feeds back as the AR
+  lag and a fresh latent innovation compounds per step, so uncertainty grows
+  through both channels.
+- Step-h covariates are the REALIZED held-out values — the curves isolate the
+  model's dynamic honesty, not covariate forecasting. Production callers must
+  supply their own future covariates (or hold at last-known).
+- CRPS/coverage/RMSE per horizon land in `horizon_rollout.json`, a separate,
+  clearly-labeled artifact. Horizon-decay numbers are NOT comparable to and
+  never mix into the flagship one-step metrics; h=1 reconciles with the
+  one-step evaluation in distribution (the sanity anchor).
+
 History cap (`max_albums`)
 - `--max-albums` (default 50 for AOTY) caps the length of the time-varying
   trajectory per entity. It is a max-EVENTS cap, not a row filter: an entity's
