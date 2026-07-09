@@ -24,6 +24,13 @@ jobs:
         with:
           persist-credentials: false
 
+      # The reviewer can execute targeted tests (pixi run pytest ...) to verify
+      # findings instead of reasoning from the diff alone.
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@ba3bb36eb2066252b2363392b7739741bb777659  # v0.8.1
+        with:
+          cache: true
+
       - name: Claude review
         uses: anthropics/claude-code-action@ba0aafd4308cbba7165f9f2cdb0cfbed5a3c99ce  # v1
         with:
@@ -31,7 +38,10 @@ jobs:
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
           prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
-          claude_args: "--model claude-opus-4-8"
+          claude_args: |
+            --model claude-opus-4-8
+            --effort xhigh
+            --allowedTools "Bash(pixi run *),Read,Grep,Glob"
           # display_report only surfaces the report on the Actions job
           # summary; track_progress is what posts a visible PR comment
           # (progress + final report), so a clean review still responds.
