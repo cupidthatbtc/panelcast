@@ -1150,6 +1150,7 @@ def train_models(
         latent_process=str(getattr(ctx, "latent_process", "rw")),
         sigma_obs_prior_type=str(getattr(ctx, "sigma_obs_prior_type", "halfnormal")),
         beta_prior_type=str(getattr(ctx, "beta_prior_type", "normal")),
+        hs_global_scale=float(getattr(ctx, "hs_global_scale", 0.1)),
         heteroscedastic_entity_obs=bool(getattr(ctx, "heteroscedastic_entity_obs", False)),
         tau_entity_scale=float(getattr(ctx, "tau_entity_scale", 0.25)),
         likelihood_family=str(getattr(ctx, "likelihood_family", "studentt")),
@@ -1379,6 +1380,7 @@ def train_models(
         "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
         "sigma_obs_prior_type": getattr(ctx, "sigma_obs_prior_type", "halfnormal"),
         "beta_prior_type": getattr(ctx, "beta_prior_type", "normal"),
+        "hs_global_scale": float(getattr(ctx, "hs_global_scale", 0.1)),
         "heteroscedastic_entity_obs": entity_obs_on,
         "tau_entity_scale": float(getattr(ctx, "tau_entity_scale", 0.25)),
         "diagnostics": {

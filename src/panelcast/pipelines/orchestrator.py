@@ -208,6 +208,9 @@ class PipelineConfig:
     # RNG path) | "horseshoe" (regularized horseshoe; global-local shrinkage
     # against the #76 coefficient dilution). No CLI flag; via run_config.yaml.
     beta_prior_type: BetaPriorType = "normal"
+    # Horseshoe global scale (tau_0), the sparsity knob a bake-off sweeps.
+    # Read only when beta_prior_type="horseshoe".
+    hs_global_scale: float = 0.1
     # Entity-level observation overdispersion gate: False (legacy default,
     # bit-identical RNG path) | True (per-entity multiplicative noise inflation
     # widening intervals for noisy series). tau_entity_scale sets the prior
@@ -315,6 +318,8 @@ class PipelineConfig:
                 f"Invalid beta_prior_type: '{self.beta_prior_type}'. "
                 "Must be 'normal' or 'horseshoe'."
             )
+        if self.hs_global_scale <= 0.0:
+            raise ValueError(f"Invalid hs_global_scale: {self.hs_global_scale}. Must be > 0.")
         if self.tau_entity_scale <= 0.0:
             raise ValueError(f"Invalid tau_entity_scale: {self.tau_entity_scale}. Must be > 0.")
         if self.coverage_tolerance < 0.0:
@@ -653,6 +658,7 @@ class PipelineOrchestrator:
                 "latent_process": self.config.latent_process,
                 "sigma_obs_prior_type": self.config.sigma_obs_prior_type,
                 "beta_prior_type": self.config.beta_prior_type,
+                "hs_global_scale": self.config.hs_global_scale,
                 "heteroscedastic_entity_obs": self.config.heteroscedastic_entity_obs,
                 "tau_entity_scale": self.config.tau_entity_scale,
                 "errors_in_variables": self.config.errors_in_variables,
@@ -727,6 +733,7 @@ class PipelineOrchestrator:
         "latent_process",
         "sigma_obs_prior_type",
         "beta_prior_type",
+        "hs_global_scale",
         "heteroscedastic_entity_obs",
         "tau_entity_scale",
         "errors_in_variables",
@@ -965,6 +972,8 @@ class PipelineOrchestrator:
             parts.append(f"--sigma-obs-prior-type {self.config.sigma_obs_prior_type}")
         if self.config.beta_prior_type != defaults.beta_prior_type:
             parts.append(f"--beta-prior-type {self.config.beta_prior_type}")
+        if self.config.hs_global_scale != defaults.hs_global_scale:
+            parts.append(f"--hs-global-scale {self.config.hs_global_scale}")
         if self.config.heteroscedastic_entity_obs:
             parts.append("--heteroscedastic-entity-obs")
         if self.config.tau_entity_scale != defaults.tau_entity_scale:
@@ -1280,6 +1289,7 @@ class PipelineOrchestrator:
             latent_process=self.config.latent_process,
             sigma_obs_prior_type=self.config.sigma_obs_prior_type,
             beta_prior_type=self.config.beta_prior_type,
+            hs_global_scale=self.config.hs_global_scale,
             heteroscedastic_entity_obs=self.config.heteroscedastic_entity_obs,
             tau_entity_scale=self.config.tau_entity_scale,
             errors_in_variables=self.config.errors_in_variables,
