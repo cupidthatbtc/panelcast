@@ -107,6 +107,9 @@ def predict_fit_seconds(
         and _record_draws(r)
         and _record_n_obs(r)
         and (r.get("context", {}).get("chain_method") or "sequential") == chain_method
+        # Concurrent arms (#167) contend for SM time; only serial wall-clocks
+        # feed the rate history.
+        and int(r.get("context", {}).get("concurrent") or 1) == 1
     ]
     units = [float(_record_draws(r) * _record_n_obs(r)) for r in records]
     seconds = [float(r["wall_clock_seconds"]) for r in records]

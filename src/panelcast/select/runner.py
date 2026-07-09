@@ -28,8 +28,10 @@ import hashlib
 import itertools
 import json
 import random as _random
+import re
 import subprocess
 import sys
+import threading
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
@@ -103,6 +105,12 @@ class SweepConfig:
     # named up front (run_id in its config), so attribution never depends on
     # the mutable `outputs/latest.json` pointer — the concurrency prerequisite.
     pipeline_output_base: Path = Path("outputs")
+    # Concurrent arms per feature-signature bucket (#167). 1 (default) is the
+    # strictly-serial legacy path, byte-identical. N>1 runs same-signature
+    # stage-1 arms concurrently, GPU-memory admission permitting.
+    parallel_arms: int = 1
+    # Fraction of measured free VRAM the admission controller may commit.
+    admission_headroom: float = 0.8
     extra_config: dict[str, Any] = field(default_factory=dict)
     panelcast_bin: str | None = None
     # Per-arm kill threshold: seconds, or "auto" to size each arm's timeout from
@@ -415,6 +423,9 @@ class SweepLedger:
     def __init__(self, path: Path):
         self.path = path
         self.records: dict[str, ArmRecord] = {}
+        # Concurrent arms (#167) upsert from worker threads; the checkpoint
+        # write must never interleave.
+        self._lock = threading.Lock()
         if path.exists():
             data = json.loads(path.read_text(encoding="utf-8"))
             for entry in data.get("arms", []):
@@ -422,10 +433,15 @@ class SweepLedger:
                 self.records[record_key(record.arm_id, record.rung)] = record
 
     def upsert(self, record: ArmRecord) -> None:
-        self.records[record_key(record.arm_id, record.rung)] = record
-        self.checkpoint()
+        with self._lock:
+            self.records[record_key(record.arm_id, record.rung)] = record
+            self._checkpoint_locked()
 
     def checkpoint(self) -> None:
+        with self._lock:
+            self._checkpoint_locked()
+
+    def _checkpoint_locked(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {"version": 2, "arms": [asdict(r) for r in self.records.values()]}
         tmp = self.path.with_suffix(".tmp")
@@ -735,6 +751,58 @@ def _maybe_skip_for_budget(
     return True
 
 
+_OOM_SIGNATURE = re.compile(
+    r"RESOURCE_EXHAUSTED|OUT_OF_MEMORY|Out of memory|CUDA_ERROR_OUT_OF_MEMORY|CUDA out of memory",
+    re.IGNORECASE,
+)
+
+
+def _looks_oom(error: str | None) -> bool:
+    return bool(error and _OOM_SIGNATURE.search(error))
+
+
+def _admission_env(
+    cfg: SweepConfig, sampler: dict[str, Any] | None, dims: dict[str, int] | None
+) -> tuple[float | None, dict[str, str]]:
+    """(estimate_gb to reserve, child env) for one concurrently-launched arm.
+
+    With dims, the fit is priced by the calibrated estimator and the child's
+    JAX pool is capped at its own footprint. Without dims (or without NVML for
+    the total), children get equal shares of the headroom — the estimator has
+    nothing to ration with, and the pool cap alone still prevents the default
+    75%-preallocation pileup.
+    """
+    env = {"PANELCAST_CONCURRENT_ARMS": str(cfg.parallel_arms)}
+    equal_share = round(cfg.admission_headroom / max(cfg.parallel_arms, 1), 2)
+    if dims is None:
+        env["XLA_PYTHON_CLIENT_MEM_FRACTION"] = f"{equal_share:.2f}"
+        return None, env
+    from panelcast.gpu_memory.calibration_store import estimate_with_calibration
+    from panelcast.gpu_memory.query import GpuMemoryError, query_gpu_memory
+    from panelcast.pipelines.orchestrator import PipelineConfig
+
+    defaults = PipelineConfig()
+    s = sampler or {}
+    estimate, _source = estimate_with_calibration(
+        None,
+        n_observations=int(dims.get("n_observations") or 0),
+        n_features=int(dims.get("n_features") or 1),
+        n_artists=int(dims.get("n_artists") or 1),
+        max_seq=int(dims.get("max_seq") or 1),
+        num_chains=s.get("num_chains") or cfg.num_chains or defaults.num_chains,
+        num_samples=s.get("num_samples") or cfg.num_samples or defaults.num_samples,
+        num_warmup=s.get("num_warmup") or cfg.num_warmup or defaults.num_warmup,
+    )
+    estimate_gb = float(estimate.total_gb)
+    try:
+        total_bytes = query_gpu_memory().total_bytes
+        fraction = min(0.9, max(0.05, estimate_gb * (1024**3) / total_bytes))
+    except GpuMemoryError:
+        fraction = equal_share
+    env["XLA_PYTHON_CLIENT_MEM_FRACTION"] = f"{fraction:.2f}"
+    return estimate_gb, env
+
+
 def _record_launch_failure(record: ArmRecord, code: int, tail: str) -> None:
     if code == ARM_TIMEOUT_RETURNCODE:
         record.status = "timeout"
@@ -752,26 +820,27 @@ def _run_stage1_ladder(
     rungs: list[dict[str, Any] | None],
     execute: Callable[..., None],
     max_fits_reached: Callable[[], str | None],
+    run_bucketed: Callable[[int, list, int], bool],
 ) -> bool:
     """Stage 1 across the ladder rungs; False when truncated by max_fits."""
     final_rung = len(rungs) - 1
     survivors: list[tuple[dict[str, Any], str | None]] = list(stage1)
     for rung_idx in range(len(rungs)):
-        plan: list[tuple[dict[str, Any], str | None]] = []
         if cfg.reference_first or rung_idx > 0:
+            reason = max_fits_reached()
+            if reason:
+                log.warning("sweep_truncated", stage=1, rung=rung_idx, reason=reason)
+                return False
             label = (
                 "reference (shipped defaults)"
                 if rung_idx == 0
                 else f"reference refit at rung {rung_idx}"
             )
-            plan.append(({}, label))
-        plan.extend(survivors)
-        for arm, note in plan:
-            reason = max_fits_reached()
-            if reason:
-                log.warning("sweep_truncated", stage=1, rung=rung_idx, reason=reason)
-                return False
-            execute(1, arm, note, rung_idx)
+            # The reference always runs alone: every same-rung score pairs
+            # against its snapshot, so it must exist before any arm launches.
+            execute(1, {}, label, rung_idx)
+        if not run_bucketed(1, survivors, rung_idx):
+            return False
         if rung_idx < final_rung:
             keep = float((rungs[rung_idx] or {}).get("keep_fraction") or 1.0)
             survivors = rung_survivors(
@@ -790,7 +859,7 @@ def _run_stage1_ladder(
     return True
 
 
-def run_sweep(
+def run_sweep(  # noqa: C901  # tracked complexity debt: the _execute/_run_bucketed closures
     cfg: SweepConfig,
     descriptor: DatasetDescriptor,
     train_df=None,
@@ -845,13 +914,23 @@ def run_sweep(
     reference_runs: dict[int, Path] = {}
     cache_signature: str | None = None
     claimed_runs = {str(r.run_dir) for r in ledger.records.values() if r.run_dir}
+    # Guards the closure state (cache_signature, claimed_runs, reference_runs)
+    # when parallel_arms > 1; the ledger carries its own lock.
+    state_lock = threading.Lock()
+    admission = None
+    if cfg.parallel_arms > 1:
+        from panelcast.gpu_memory.admission import GpuAdmission
+
+        admission = GpuAdmission(headroom=cfg.admission_headroom)
 
     def _max_fits_reached() -> str | None:
         if cfg.max_fits is not None and ledger.fits_done() >= cfg.max_fits:
             return f"max_fits={cfg.max_fits} reached"
         return None
 
-    def _execute(stage: int, arm: dict[str, Any], note: str | None, rung: int) -> None:
+    def _execute(
+        stage: int, arm: dict[str, Any], note: str | None, rung: int, concurrent: bool = False
+    ) -> None:
         nonlocal cache_signature
         aid = arm_id(arm)
         existing = ledger.records.get(record_key(aid, rung))
@@ -867,8 +946,9 @@ def run_sweep(
         sampler = _sampler(rung)
         if _maybe_skip_for_budget(cfg, ledger, dims, stage, arm, aid, note, rung, sampler):
             return
-        signature = feature_signature(merged)
-        stages = _FEATURE_STAGES if signature != cache_signature else _MODEL_STAGES
+        with state_lock:
+            signature = feature_signature(merged)
+            stages = _FEATURE_STAGES if signature != cache_signature else _MODEL_STAGES
         record = ArmRecord(arm_id=aid, knobs=arm, stage=stage, note=note, rung=rung)
         config_path = cfg.sweep_dir / f"arm_{record_key(aid, rung)}.yaml"
         launched_at = datetime.now()
@@ -883,26 +963,46 @@ def run_sweep(
         timeout_seconds = _apply_arm_timeout(cfg, merged, dims, record, sampler)
         log.info("arm_start", arm_id=aid, stage=stage, rung=rung, knobs=arm, stages=stages)
         started = time.monotonic()
-        code, tail = launch(config_path, panelcast_bin, timeout_seconds)
+        admitted_gb: float | None = None
+        if concurrent and admission is not None:
+            admitted_gb, env_overrides = _admission_env(cfg, sampler, dims)
+            if admitted_gb is not None:
+                admission.admit(admitted_gb)
+            try:
+                code, tail = launch(
+                    config_path, panelcast_bin, timeout_seconds, env_overrides=env_overrides
+                )
+            finally:
+                if admitted_gb is not None:
+                    admission.release(admitted_gb)
+        else:
+            code, tail = launch(config_path, panelcast_bin, timeout_seconds)
         record.wall_clock_seconds = time.monotonic() - started
         if code != 0:
             _record_launch_failure(record, code, tail)
-            # The killed/failed run may have half-rebuilt the flat caches; force
-            # the next arm to rebuild rather than trust an unknown state.
-            cache_signature = None
+            with state_lock:
+                # The killed/failed run may have half-rebuilt the flat caches; force
+                # the next arm to rebuild rather than trust an unknown state. A
+                # concurrent (model-only) failure cannot have touched them.
+                if not concurrent:
+                    cache_signature = None
             ledger.upsert(record)
             return
-        run_dir, problem = _claim_named_run(
-            run_id, cfg.pipeline_output_base, merged, launched_at, claimed_runs
-        )
+        with state_lock:
+            run_dir, problem = _claim_named_run(
+                run_id, cfg.pipeline_output_base, merged, launched_at, claimed_runs
+            )
+            if problem is None:
+                cache_signature = signature
         if problem:
             record.status = "failed"
             record.error = problem
             log.warning("arm_attribution_failed", arm_id=aid, error=problem)
-            cache_signature = None
+            with state_lock:
+                if not concurrent:
+                    cache_signature = None
             ledger.upsert(record)
             return
-        cache_signature = signature
         record.run_dir = str(run_dir) if run_dir else None
         if not arm and run_dir is not None:
             reference_runs[rung] = run_dir
@@ -914,7 +1014,55 @@ def run_sweep(
         record.status = "completed"
         ledger.upsert(record)
 
-    if not _run_stage1_ladder(cfg, ledger, stage1, rungs, _execute, _max_fits_reached):
+    def _run_bucketed(stage: int, arms: list, rung: int) -> bool:
+        """Stage-1 arms: serial by default; N>1 runs each feature-signature
+        bucket's tail concurrently after its head builds the shared cache.
+        Returns False when truncated by max_fits."""
+        if cfg.parallel_arms <= 1:
+            for arm, note in arms:
+                reason = _max_fits_reached()
+                if reason:
+                    log.warning("sweep_truncated", stage=stage, rung=rung, reason=reason)
+                    return False
+                _execute(stage, arm, note, rung)
+            return True
+        from concurrent.futures import ThreadPoolExecutor
+
+        buckets: dict[str, list] = {}
+        for arm, note in arms:
+            buckets.setdefault(feature_signature({**base, **arm}), []).append((arm, note))
+        for bucket in buckets.values():
+            reason = _max_fits_reached()
+            if reason:
+                log.warning("sweep_truncated", stage=stage, rung=rung, reason=reason)
+                return False
+            head, tail_arms = bucket[0], bucket[1:]
+            _execute(stage, head[0], head[1], rung)
+            runnable = []
+            for arm, note in tail_arms:
+                if _max_fits_reached():
+                    break
+                runnable.append((arm, note))
+            if runnable:
+                with ThreadPoolExecutor(max_workers=cfg.parallel_arms) as pool:
+                    futures = [
+                        pool.submit(_execute, stage, arm, note, rung, True)
+                        for arm, note in runnable
+                    ]
+                    for future in futures:
+                        future.result()
+            # Kill-and-serialize: an OOM under concurrency retries alone with
+            # the full pool rather than failing the sweep.
+            for arm, note in runnable:
+                r = ledger.records.get(record_key(arm_id(arm), rung))
+                if r and r.status == "failed" and _looks_oom(r.error):
+                    log.warning("arm_oom_serialized", arm_id=r.arm_id, rung=rung)
+                    _execute(stage, arm, f"{note or ''}; serialized after OOM".strip("; "), rung)
+        return True
+
+    if not _run_stage1_ladder(
+        cfg, ledger, stage1, rungs, _execute, _max_fits_reached, _run_bucketed
+    ):
         return ledger
 
     if cfg.include_stage2:
