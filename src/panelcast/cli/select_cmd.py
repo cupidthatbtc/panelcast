@@ -57,6 +57,15 @@ def select(
             "warmup (exact model-signature match only); confirmation always runs cold."
         ),
     ),
+    parallel_arms: int = typer.Option(
+        1,
+        "--parallel-arms",
+        min=1,
+        help=(
+            "Concurrent stage-1 arms per feature-signature bucket, GPU-memory "
+            "admission permitting. 1 (default) is the strictly-serial legacy path."
+        ),
+    ),
     sweep_id: str = typer.Option(
         "sweep", "--sweep-id", help="Sweep directory name under outputs/select/ (enables --resume)."
     ),
@@ -104,6 +113,7 @@ def select(
         promote_z=rules.promote_z,
         arm_timeout_seconds=_parse_arm_timeout(arm_timeout),
         warmup_transfer=warmup_transfer,
+        parallel_arms=parallel_arms,
     )
 
     dims = resolve_dims(_prepared_paths(descriptor))

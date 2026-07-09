@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -1291,6 +1292,9 @@ def train_models(
             "dataset": str(getattr(ctx, "dataset", None) or "aoty"),
             # Vectorized wall-clocks must not corrupt sequential rate history.
             "chain_method": mcmc_config.chain_method,
+            # Concurrent arms (#167) contend for SM time: their wall-clocks are
+            # tagged so the runtime predictor can keep its serial history clean.
+            "concurrent": int(os.environ.get("PANELCAST_CONCURRENT_ARMS", "1") or 1),
         },
     )
     if prediction is not None:
