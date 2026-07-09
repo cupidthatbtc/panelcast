@@ -103,7 +103,7 @@ def prepare_mini_run_args(descriptor) -> tuple[dict, list[str]]:
         pq.read_schema(features_path).names
     )
     pooling = resolve_entity_group_pooling(None, descriptor, train_columns)
-    model_args, feature_cols, _train_df = load_training_data(
+    model_args, feature_cols, _train_df, _imputation = load_training_data(
         features_path=features_path,
         splits_path=splits_path,
         descriptor=descriptor,
