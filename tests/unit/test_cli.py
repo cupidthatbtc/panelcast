@@ -1068,6 +1068,7 @@ class TestPreflightFull:
                 dict(fake_model_args),
                 MagicMock(),
                 MagicMock(),
+                None,
             ),
         )
 

@@ -21,6 +21,7 @@ from jax import random
 from numpyro.infer import Predictive
 
 from panelcast.data.alignment import join_splits_with_features
+from panelcast.data.imputation import apply_imputation
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.models.bayes.io import load_manifest, load_model
 from panelcast.models.bayes.model import make_score_model
@@ -655,7 +656,9 @@ def predict_next_events(ctx: StageContext) -> dict:
     train_df = join_splits_with_features(train_df, train_features, name="predict_train")
 
     feature_cols = summary["feature_cols"]
-    train_df[feature_cols] = train_df[feature_cols].fillna(0)
+    train_df = apply_imputation(
+        train_df, feature_cols, (summary.get("feature_scaler") or {}).get("imputation")
+    )
 
     # Compute album sequence within artist
     train_df = train_df.copy()
@@ -863,7 +866,9 @@ def predict_entity_next(
         )
 
     feature_cols = summary["feature_cols"]
-    train_df[feature_cols] = train_df[feature_cols].fillna(0)
+    train_df = apply_imputation(
+        train_df, feature_cols, (summary.get("feature_scaler") or {}).get("imputation")
+    )
     train_df["album_seq"] = train_df.groupby(entity_col).cumcount() + 1
     train_df = train_df.sort_values([entity_col, "album_seq"])
 

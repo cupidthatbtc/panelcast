@@ -21,6 +21,7 @@ import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
+from panelcast.data.imputation import apply_imputation, fit_imputation
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.gpu_memory import estimate_memory_gb
 from panelcast.models.bayes.diagnostics import check_convergence
@@ -136,7 +137,9 @@ def load_training_data(
     logit_offset: float = 0.5,
     ar_center: str = "global",
     entity_group_pooling: bool = False,
-) -> tuple[dict, list[str], pd.DataFrame]:
+    impute_missing: bool = False,
+    imputation_record: dict | None = None,
+) -> tuple[dict, list[str], pd.DataFrame, dict | None]:
     """Load training data and prepare model arguments.
 
     Loads feature and split parquet files, merges them, fills NaN values,
@@ -147,9 +150,16 @@ def load_training_data(
         splits_path: Path to train.parquet (splits).
         min_albums_filter: Minimum albums for dynamic effects.
         descriptor: Dataset descriptor (None = AOTY defaults).
+        impute_missing: Gate (#158): median imputation + missingness
+            indicators instead of the legacy fillna(0).
+        imputation_record: A recorded ``feature_scaler["imputation"]`` block
+            to REPLAY instead of re-fitting medians — callers reconstructing a
+            fitted model's inputs (sensitivity) must impute exactly what the
+            fit saw, not a re-derived statistic.
 
     Returns:
-        Tuple of (model_args dict, feature_cols list, merged train_df).
+        Tuple of (model_args dict, feature_cols list, merged train_df,
+        imputation record or None when the gate is off).
     """
     train_features = pd.read_parquet(features_path)
     train_df = pd.read_parquet(splits_path)
@@ -173,8 +183,27 @@ def load_training_data(
             "Feature parquet must include at least one predictor column."
         )
 
-    # Handle NaN values in predictor features (fill with 0 for numeric stability)
-    train_df[feature_cols] = train_df[feature_cols].fillna(0)
+    # Handle NaN values in predictor features: legacy fill-with-0, or the
+    # gated train-median + missingness-indicator treatment (#158). Medians are
+    # deliberately fit BEFORE the n_reviews valid_mask below: imputation is a
+    # feature-side statistic over every observed training row, not coupled to
+    # response-side validity.
+    imputation: dict | None = None
+    if impute_missing:
+        if imputation_record is not None:
+            imputation = imputation_record
+            feature_cols = feature_cols + list(imputation.get("indicator_cols", []))
+            train_df = apply_imputation(train_df, feature_cols, imputation)
+        else:
+            feature_cols, imputation = fit_imputation(train_df, feature_cols)
+        log.info(
+            "features_imputed",
+            n_indicator_cols=len(imputation["indicator_cols"]),
+            indicator_cols=imputation["indicator_cols"],
+            replayed=imputation_record is not None,
+        )
+    else:
+        train_df[feature_cols] = train_df[feature_cols].fillna(0)
 
     # Prepare model data
     model_args, valid_mask = prepare_model_data(
@@ -192,7 +221,7 @@ def load_training_data(
     # Apply valid_mask to train_df so it matches the filtered model arrays
     train_df = train_df[valid_mask].copy()
 
-    return model_args, feature_cols, train_df
+    return model_args, feature_cols, train_df, imputation
 
 
 def resolve_entity_group_pooling(
@@ -982,7 +1011,7 @@ def train_models(
     entity_group_pooling = resolve_entity_group_pooling(
         getattr(ctx, "entity_group_pooling", None), descriptor, train_columns
     )
-    model_args, feature_cols, train_df = load_training_data(
+    model_args, feature_cols, train_df, imputation = load_training_data(
         features_path=features_path,
         splits_path=splits_path,
         min_albums_filter=ctx.min_albums_filter,
@@ -992,6 +1021,7 @@ def train_models(
         logit_offset=logit_offset,
         ar_center=ar_center,
         entity_group_pooling=entity_group_pooling,
+        impute_missing=bool(getattr(ctx, "impute_missing", False)),
     )
 
     # Compute artists below threshold for metadata
@@ -1058,12 +1088,16 @@ def train_models(
         n_constant=int((X_std == 0.0).sum()),
         std_range=std_range_val,
     )
-    # Store scaler params for prediction-time use
+    # Store scaler params for prediction-time use; the imputation record
+    # (#158) rides along so evaluate/predict impute from the same train
+    # medians rather than a statistic of their own frame.
     feature_scaler = {
         "mean": X_mean.tolist(),
         "std": X_std_safe.tolist(),
         "feature_cols": feature_cols,
     }
+    if imputation is not None:
+        feature_scaler["imputation"] = imputation
 
     log.info(
         "model_data_prepared",

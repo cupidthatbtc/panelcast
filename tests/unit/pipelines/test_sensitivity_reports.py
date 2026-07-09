@@ -481,7 +481,7 @@ class TestRunSensitivitySuite:
         feature_cols = ["genre_pc1", "user_prior_mean", "album_sequence"]
         train_df = pd.DataFrame({"Artist": [f"A{i}" for i in range(n)], "Score": np.zeros(n)})
         import panelcast.pipelines.train_bayes as _tb_mod
-        monkeypatch.setattr(_tb_mod, "load_training_data", lambda **kw: (dict(model_args_base), feature_cols, train_df))
+        monkeypatch.setattr(_tb_mod, "load_training_data", lambda **kw: (dict(model_args_base), feature_cols, train_df, None))
         monkeypatch.setattr(_tb_mod, "_apply_max_albums_cap", lambda args, max_albums, counts: args)
         monkeypatch.setattr(_tb_mod, "locate_level_prior", lambda config, **kw: config)
 

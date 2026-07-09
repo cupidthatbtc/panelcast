@@ -256,6 +256,18 @@ KNOBS: tuple[Knob, ...] = (
         ),
     ),
     Knob(
+        "impute_missing",
+        "bool",
+        (False, True),
+        False,
+        affects_features=True,
+        history=(
+            "added #158: train-median imputation + missingness indicators vs "
+            "the legacy fillna(0); untested on AOTY as of 0.11.0 (features "
+            "there are mostly complete)"
+        ),
+    ),
+    Knob(
         "enable_genre",
         "bool",
         (True, False),

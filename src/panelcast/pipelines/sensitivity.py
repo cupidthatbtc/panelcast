@@ -1195,7 +1195,7 @@ def run_sensitivity_suite(ctx) -> dict:
     # The pooling gate reuses the EFFECTIVE value the train stage resolved and
     # recorded, not the configured tri-state.
     entity_group_pooling = bool(summary.get("entity_group_pooling", False))
-    model_args, feature_cols, _train_df = load_training_data(
+    model_args, feature_cols, _train_df, _imputation = load_training_data(
         features_path=paths.features / "train_features.parquet",
         splits_path=resolve_split_dir(paths.splits, SplitType.WITHIN_ENTITY_TEMPORAL)
         / "train.parquet",
@@ -1206,6 +1206,10 @@ def run_sensitivity_suite(ctx) -> dict:
         logit_offset=float(summary.get("logit_offset", 0.5)),
         ar_center=(summary.get("priors") or {}).get("ar_center", "global"),
         entity_group_pooling=entity_group_pooling,
+        # Replay the fitted model's recorded imputation — never a re-fit
+        # median; sensitivity must see exactly the X the model saw.
+        impute_missing=bool((summary.get("feature_scaler") or {}).get("imputation")),
+        imputation_record=(summary.get("feature_scaler") or {}).get("imputation"),
     )
     artist_album_counts = model_args.pop("artist_album_counts")
     ar_center_value = float(model_args.pop("ar_center_value", 0.0))

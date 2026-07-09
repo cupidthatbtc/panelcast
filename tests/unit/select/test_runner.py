@@ -105,6 +105,7 @@ def _expected_variations() -> list[tuple[str, int]]:
         ("propagate_rw_horizon", 1),
         ("entity_group_pooling", 2),
         ("gbm_offset", 1),
+        ("impute_missing", 1),
         ("enable_genre", 1),
         ("enable_artist", 1),
         ("enable_temporal", 1),

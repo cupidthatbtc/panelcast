@@ -616,6 +616,7 @@ class TestBuildCommandStringExtended:
             errors_in_variables=True,
             propagate_rw_horizon=True,
             entity_group_pooling=True,
+            impute_missing=True,
             gbm_offset=False,
             val_albums=100,
         )
@@ -633,6 +634,7 @@ class TestBuildCommandStringExtended:
         assert "--errors-in-variables" in cmd
         assert "--propagate-rw-horizon" in cmd
         assert "--entity-group-pooling" in cmd
+        assert "--impute-missing" in cmd
         assert "--no-gbm-offset" in cmd
         assert "--val-albums 100" in cmd
 

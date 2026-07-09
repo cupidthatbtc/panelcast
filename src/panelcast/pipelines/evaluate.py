@@ -23,6 +23,7 @@ from numpyro.infer import Predictive, log_likelihood
 from scipy.special import logsumexp
 
 from panelcast.data.alignment import join_splits_with_features
+from panelcast.data.imputation import apply_imputation
 from panelcast.data.split_types import (
     SplitType,
     legacy_split_name,
@@ -499,15 +500,14 @@ def _prepare_test_model_args(
         prev_score = np.asarray(transform.forward(prev_score), dtype=np.float32)
 
     feature_cols = summary["feature_cols"]
-    test_df[feature_cols] = test_df[feature_cols].fillna(0)
-    X = test_df[feature_cols].values.astype(np.float32)
-
     scaler = summary.get("feature_scaler")
     if scaler is None:
         raise ValueError(
             "Training summary missing 'feature_scaler' key. "
             "Re-run the train stage to regenerate training_summary.json."
         )
+    test_df = apply_imputation(test_df, feature_cols, scaler.get("imputation"))
+    X = test_df[feature_cols].values.astype(np.float32)
     X_mean = np.array(scaler["mean"], dtype=np.float32)
     X_std = np.array(scaler["std"], dtype=np.float32)
     X = (X - X_mean) / X_std
@@ -673,9 +673,9 @@ def _prepare_disjoint_inputs(
         )
 
     feature_cols = summary["feature_cols"]
-    df[feature_cols] = df[feature_cols].fillna(0)
-    X = df[feature_cols].values.astype(np.float32)
     scaler = summary["feature_scaler"]
+    df = apply_imputation(df, feature_cols, scaler.get("imputation"))
+    X = df[feature_cols].values.astype(np.float32)
     X_mean = np.array(scaler["mean"], dtype=np.float32)
     X_std = np.array(scaler["std"], dtype=np.float32)
     X = (X - X_mean) / X_std
@@ -1048,9 +1048,9 @@ def _run_training_prior_predictive(
         )
 
         feature_cols = summary["feature_cols"]
-        train_df_pp[feature_cols] = train_df_pp[feature_cols].fillna(0)
-        X_train = train_df_pp[feature_cols].values.astype(np.float32)
         scaler = summary.get("feature_scaler", {})
+        train_df_pp = apply_imputation(train_df_pp, feature_cols, scaler.get("imputation"))
+        X_train = train_df_pp[feature_cols].values.astype(np.float32)
         if scaler:
             X_mean = np.array(scaler["mean"], dtype=np.float32)
             X_std = np.array(scaler["std"], dtype=np.float32)

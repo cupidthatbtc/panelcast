@@ -50,7 +50,13 @@ class TestTable:
 
     def test_feature_affecting_knobs(self):
         flagged = {k.name for k in KNOBS if k.affects_features}
-        assert flagged == {"gbm_offset", "enable_genre", "enable_artist", "enable_temporal"}
+        assert flagged == {
+            "gbm_offset",
+            "enable_genre",
+            "enable_artist",
+            "enable_temporal",
+            "impute_missing",
+        }
 
 
 class TestEnumerate:
