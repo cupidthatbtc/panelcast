@@ -4,6 +4,72 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] — 2026-07-09
+
+Statistical headroom. The sweep learns to ensemble instead of just select,
+the covariate block gets a sparsity-aware prior, missingness is imputed from
+stated assumptions instead of a silent zero-fill, and multi-step claims come
+from genuine rollouts rather than teacher forcing.
+
+### Added
+
+- **`panelcast stack`** (#154): predictive stacking (Yao et al. 2018) over the
+  select arm ledger — a convex mixture of arms can strictly beat the best
+  single arm even when no individual challenger does (the 0.7.0 "no arm beats
+  shipped" outcome). Weights maximize the stacked log score over the simplex
+  from the persisted per-arm ELPD snapshots; pseudo-BMA+ (Bayesian bootstrap)
+  is reported alongside. Arms without a snapshot are excluded, never scored
+  another way.
+- **Regularized horseshoe prior** (#155): gated `beta_prior_type` on the
+  covariate block — `normal` keeps the exact legacy Normal(0,1) sample
+  (bit-identical RNG), `horseshoe` is Piironen & Vehtari 2017 with
+  `hs_global_scale` threaded through the config chain and the select arm
+  space, as the #76 coefficient-dilution response. Default `normal`; AOTY
+  outputs byte-identical.
+- **Principled missingness** (#158): gate-on `impute_missing` replaces the
+  legacy `fillna(0)` with train-median imputation plus `<col>__missing`
+  indicator columns; the imputation record travels with the feature scaler so
+  train, evaluate, predict_next, and sensitivity all impute from the same
+  train statistics. MAR assumption documented; informative missingness
+  surfaces through the indicators, not modeled away. Default off;
+  byte-identical.
+- **Multi-step-ahead forecasting** (#157): `predict_horizon` produces genuine
+  h-step forecasts by ancestral rollout — per posterior draw, the entity
+  effect propagates with fresh random-walk innovations (phi-damped under
+  AR(1)) and the sampled previous score feeds back as the AR lag, drawing
+  through the shared likelihood registry. The `eval_horizon: H` gate scores
+  the rollout on realized held-out covariates and writes CRPS/coverage/RMSE
+  per horizon to `horizon_rollout.json` — a separate artifact; one-step
+  metrics.json is untouched. Default 0 (off); byte-identical.
+
+### Changed
+
+- The PR review workflow installs the pixi environment and can run targeted
+  tests during review.
+- AOTY defaults are unchanged: the 0.11 GPU bake-off screened horseshoe and
+  impute_missing against the shipped reference on the subset and neither
+  cleared the pre-registered z ≥ 2 promotion bar (impute_missing z +1.13,
+  horseshoe z −0.17; report and ledger in `.audit/select_aoty_011/`). All
+  three arms failed the convergence gate at the 4×1000 screening scale
+  (R-hat 1.01; the horseshoe arm had 53 divergences), so the z-scores are
+  diagnostic-scale — promotion on this evidence was never on the table.
+  Both gates ship default-off as statistical headroom, the 0.7.0 freeze
+  precedent.
+
+### Fixed
+
+- **`impute_missing` was unreachable from run-config YAML**: the #158 gate
+  was never added to the pipeline YAML mapping table, so run configs —
+  including the arm configs `panelcast select` writes — silently dropped it.
+  Found on GPU when the bake-off's impute arm fit as a mislabeled reference
+  and was rejected by run attribution. A new invariant test pins every
+  select knob to a YAML mapping entry.
+- The four `scripts/experiment_*.py` helpers unpacked the pre-#158 3-tuple
+  from `load_training_data` and crashed on the widened return (release
+  audit).
+- `_validate` outgrew ruff's C901 ceiling once the #217/#218 merges landed
+  together; sampler checks split into `_validate_sampling`.
+
 ## [0.10.0] — 2026-07-08
 
 Honest evaluation. The headline numbers become distributions with error

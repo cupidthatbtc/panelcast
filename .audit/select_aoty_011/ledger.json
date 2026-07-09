@@ -1,0 +1,59 @@
+{
+  "arms": [
+    {
+      "arm_id": "750f957a8c71",
+      "knobs": {},
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_083735_268905_b406",
+      "wall_clock_seconds": 5398.306069450002,
+      "error": null,
+      "score": {
+        "z": 0.0,
+        "elpd_diff": 0.0
+      },
+      "note": "reference (shipped defaults)",
+      "predicted_seconds": 5910.2,
+      "timeout_seconds_used": 17730.48153078,
+      "warm_started": null
+    },
+    {
+      "arm_id": "d68348ed63f3",
+      "knobs": {
+        "beta_prior_type": "horseshoe"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_101252_433578_c801",
+      "wall_clock_seconds": 1998.5893159690022,
+      "error": null,
+      "score": {
+        "z": -0.1710311794024821,
+        "elpd_diff": -0.2641735076904297
+      },
+      "note": "0.11 bake-off (#155)",
+      "predicted_seconds": null,
+      "timeout_seconds_used": null,
+      "warm_started": null
+    },
+    {
+      "arm_id": "79853b4bcf64",
+      "knobs": {
+        "impute_missing": true
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_124015_326916_b2bc",
+      "wall_clock_seconds": 5203.246751741986,
+      "error": null,
+      "score": {
+        "z": 1.1309178216968296,
+        "elpd_diff": 0.043416738510131836
+      },
+      "note": "0.11 bake-off (#158)",
+      "predicted_seconds": null,
+      "timeout_seconds_used": null,
+      "warm_started": null
+    }
+  ]
+}
