@@ -95,6 +95,15 @@ class TestApplyYamlOverrides:
         for key, spec in PIPELINE_YAML_MAPPING.items():
             assert spec.config_field in config_fields, (key, spec.config_field)
 
+    def test_select_knobs_are_yaml_mapped(self):
+        # select writes every knob into arm run-configs; an unmapped knob is
+        # silently dropped and the arm fits as a mislabeled reference (#158's
+        # impute_missing did exactly this on GPU).
+        from panelcast.select.space import KNOBS
+
+        unmapped = [k.name for k in KNOBS if k.name not in PIPELINE_YAML_MAPPING]
+        assert unmapped == [], f"select knobs missing from PIPELINE_YAML_MAPPING: {unmapped}"
+
 
 # ============================================================================
 # Repository config files load cleanly

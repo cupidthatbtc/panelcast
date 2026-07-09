@@ -134,6 +134,8 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "entity_group_pooling": _spec("entity_group_pooling", None),
     # Stacked-GBM offset feature block (#86; no CLI flag).
     "gbm_offset": _spec("gbm_offset", None),
+    # Train-median imputation gate (#158; no CLI flag).
+    "impute_missing": _spec("impute_missing", None),
     "exclude_rw_raw_from_collection": _spec(
         "exclude_rw_raw_from_collection", "exclude_rw_raw_from_collection"
     ),
