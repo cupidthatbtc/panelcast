@@ -238,7 +238,7 @@ def _run_full_preflight(
         min_albums_filter=config.min_albums_filter,
         descriptor=preflight_descriptor,
         entity_group_pooling=effective_group_pooling,
-        impute_missing=config.impute_missing,
+        impute_missing=bool(getattr(config, "impute_missing", False)),
     )
 
     # Remove artist_album_counts (not needed for preflight)
