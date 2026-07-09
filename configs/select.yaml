@@ -30,6 +30,12 @@ tiers:
     num_warmup: 1000
     stage3_fits: 0
     confirm: true
+    # Successive-halving rung ladder for stage 1 (#164): screen every OFAT arm
+    # at 2x500, promote the pre-registered keep fraction (plus margin rescues)
+    # to the tier scale; only tier-scale fits feed the report.
+    rungs:
+      - {num_chains: 2, num_samples: 500, num_warmup: 500, keep_fraction: 0.4}
+      - {num_chains: 4, num_samples: 1000, num_warmup: 1000}
     # Screen the arms cheaply at 1000, then confirm the candidate at publication
     # scale, where the convergence gate is enforced (1000 rarely clears rhat/ess).
     publication_confirm:
@@ -43,6 +49,9 @@ tiers:
     num_warmup: 1000
     stage3_fits: 8
     confirm: true
+    rungs:
+      - {num_chains: 2, num_samples: 500, num_warmup: 500, keep_fraction: 0.4}
+      - {num_chains: 4, num_samples: 1000, num_warmup: 1000}
     publication_confirm:
       num_chains: 4
       num_samples: 5000
@@ -58,3 +67,7 @@ rules:
   require_convergence: true
   # Seeds the winner is re-fit on before `select` recommends it (#40 recipe).
   confirmation_seeds: [42, 43, 44]
+  # Rung-ladder rescue margin (#164): an arm whose screening z lands within
+  # this of promote_z is promoted past the keep fraction — screening noise
+  # must never eliminate a near-threshold arm.
+  screen_margin: 0.5

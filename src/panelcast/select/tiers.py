@@ -19,6 +19,21 @@ from panelcast.select.runner import SweepConfig
 
 
 @dataclass(frozen=True)
+class Rung:
+    """One pre-registered sampler scale in a successive-halving ladder (#164).
+
+    ``keep_fraction`` is the fraction of scored arms promoted to the next rung
+    (None on the final rung — nothing follows it). The ladder is committed in
+    YAML before the sweep runs, like every other selection rule.
+    """
+
+    num_chains: int
+    num_samples: int
+    num_warmup: int
+    keep_fraction: float | None = None
+
+
+@dataclass(frozen=True)
 class EffortTier:
     """One effort level: search depth, sampler settings, confirmation policy."""
 
@@ -30,6 +45,8 @@ class EffortTier:
     stage3_fits: int = 0
     confirm: bool = False
     publication_confirm: dict[str, int] | None = None
+    # Successive-halving ladder for stage 1 (#164); empty = single-scale legacy.
+    rungs: tuple[Rung, ...] = ()
 
     @property
     def include_stage2(self) -> bool:
@@ -96,9 +113,41 @@ def load_tiers(path: Path | None = None) -> dict[str, EffortTier]:
             "publication_confirm": spec.get(
                 "publication_confirm", base.publication_confirm if base else None
             ),
+            "rungs": _parse_rungs(name, spec.get("rungs", base.rungs if base else ())),
         }
         tiers[name] = EffortTier(**merged)
     return tiers
+
+
+def _parse_rungs(tier_name: str, raw) -> tuple[Rung, ...]:
+    """Validate a tier's pre-registered ladder; () = single-scale legacy."""
+    if not raw:
+        return ()
+    if all(isinstance(r, Rung) for r in raw):
+        return tuple(raw)
+    rungs: list[Rung] = []
+    for i, entry in enumerate(raw):
+        try:
+            keep = entry.get("keep_fraction")
+            rung = Rung(
+                num_chains=int(entry["num_chains"]),
+                num_samples=int(entry["num_samples"]),
+                num_warmup=int(entry["num_warmup"]),
+                keep_fraction=float(keep) if keep is not None else None,
+            )
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                f"tier '{tier_name}' rung {i}: each rung needs num_chains/"
+                f"num_samples/num_warmup (+ keep_fraction except the last): {exc}"
+            ) from exc
+        final = i == len(raw) - 1
+        if not final and (rung.keep_fraction is None or not 0.0 < rung.keep_fraction <= 1.0):
+            raise ValueError(
+                f"tier '{tier_name}' rung {i}: keep_fraction must be in (0, 1] "
+                "on every rung except the last"
+            )
+        rungs.append(rung)
+    return tuple(rungs)
 
 
 def resolve_tier(effort: str, path: Path | None = None) -> EffortTier:
@@ -133,6 +182,16 @@ def tier_to_sweep_config(
         num_chains=tier.num_chains,
         num_samples=tier.num_samples,
         num_warmup=tier.num_warmup,
+        rungs=[
+            {
+                "num_chains": r.num_chains,
+                "num_samples": r.num_samples,
+                "num_warmup": r.num_warmup,
+                "keep_fraction": r.keep_fraction,
+            }
+            for r in tier.rungs
+        ]
+        or None,
         panelcast_bin=panelcast_bin,
         arm_timeout_seconds=arm_timeout_seconds,
         warmup_transfer=warmup_transfer,
@@ -141,6 +200,7 @@ def tier_to_sweep_config(
 
 __all__ = [
     "EffortTier",
+    "Rung",
     "load_tiers",
     "resolve_tier",
     "tier_to_sweep_config",

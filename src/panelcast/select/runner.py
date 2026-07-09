@@ -12,6 +12,14 @@ sample of untried combinations. Cheap data diagnostics REORDER the search —
 they never prune. Stage order is the budget-priority order; an arm whose
 predicted cost exceeds the remaining budget is recorded as ``skipped_budget``
 (retryable under a bigger budget) rather than truncating the stage.
+
+Stage 1 optionally runs as a successive-halving rung ladder (#164): every OFAT
+arm screens at a cheap pre-registered sampler scale, the top keep-fraction by
+paired-ELPD z (plus near-threshold margin rescues) promotes to the next rung,
+and only final-rung fits feed the report. True ASHA — early-stopping a fit on
+intermediate ELPD — is not possible here: fits run to completion inside their
+subprocess and no intermediate pointwise log-likelihood exists, so rung =
+sampler scale is the version of early stopping this architecture supports.
 """
 
 from __future__ import annotations
@@ -80,6 +88,17 @@ class SweepConfig:
     num_chains: int | None = None
     num_samples: int | None = None
     num_warmup: int | None = None
+    # Successive-halving ladder for stage 1 (#164): a pre-registered list of
+    # sampler-scale dicts (num_chains/num_samples/num_warmup + keep_fraction on
+    # every rung but the last). None = single-scale legacy sweep. True ASHA
+    # (early-stopping a fit on intermediate ELPD) is out of reach here — fits
+    # run to completion inside their subprocess and no intermediate pointwise
+    # log-likelihood exists; rung = sampler scale is the version of early
+    # stopping this architecture supports.
+    rungs: list[dict[str, Any]] | None = None
+    # Rescue margin: arms with z >= winner_z - screen_margin promote regardless
+    # of keep_fraction (pre-registered in configs/select.yaml rules).
+    screen_margin: float = 0.5
     extra_config: dict[str, Any] = field(default_factory=dict)
     panelcast_bin: str | None = None
     # Per-arm kill threshold: seconds, or "auto" to size each arm's timeout from
@@ -119,6 +138,8 @@ class ArmRecord:
     predicted_seconds: float | None = None
     timeout_seconds_used: float | None = None
     warm_started: bool | None = None
+    # Ladder rung the record was fit at (#164); v1 ledgers load as rung 0.
+    rung: int = 0
 
 
 def arm_id(knobs: dict[str, Any]) -> str:
@@ -126,6 +147,12 @@ def arm_id(knobs: dict[str, Any]) -> str:
     merged = {**default_arm(), **knobs}
     payload = json.dumps(merged, sort_keys=True, default=str)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def record_key(aid: str, rung: int) -> str:
+    """Ledger key: the knob hash, rung-suffixed above rung 0 so a refit at a
+    higher rung never collides with its screening record (v1 keys unchanged)."""
+    return f"{aid}@r{rung}" if rung else aid
 
 
 def complete_arm(
@@ -275,22 +302,61 @@ def stage2_winners(
     records: Iterable[ArmRecord],
     winner_z: float,
     cap: int = STAGE2_MAX_WINNERS,
+    rung: int = 0,
 ) -> list[dict[str, Any]]:
     """Stage-1 winners for stage 2: top-``cap`` by z, tie-broken by arm id.
 
     A None z (unscored — missing/failed reference snapshot) is never a winner.
     The cap keeps the composed+pairwise stage-2 count within the plan's
-    ``1 + C(cap, 2)`` ceiling.
+    ``1 + C(cap, 2)`` ceiling. Only records fit at ``rung`` (the ladder's final
+    rung) count — screening-scale z's never feed stage 2.
     """
     scored: list[tuple[float, str, dict[str, Any]]] = []
     for r in records:
-        if r.stage != 1 or not r.knobs or r.status != "completed":
+        if r.stage != 1 or not r.knobs or r.status != "completed" or r.rung != rung:
             continue
         z = (r.score or {}).get("z")
         if z is not None and z >= winner_z:
             scored.append((float(z), r.arm_id, r.knobs))
     scored.sort(key=lambda t: (-t[0], t[1]))
     return [knobs for _, _, knobs in scored[:cap]]
+
+
+def rung_survivors(
+    records: Iterable[ArmRecord],
+    rung: int,
+    keep_fraction: float,
+    promote_z: float,
+    screen_margin: float,
+) -> list[tuple[dict[str, Any], str | None]]:
+    """Arms promoted from a screening rung (#164), pre-registered rule:
+    the top ``keep_fraction`` of scored arms by z, PLUS any arm whose z lands
+    within ``screen_margin`` of ``promote_z`` — screening noise must never
+    eliminate a near-threshold arm. Unscored arms carry no evidence and are
+    never promoted (the stage2_winners convention)."""
+    import math
+
+    scored: list[tuple[float, str, dict[str, Any]]] = []
+    for r in records:
+        if r.stage != 1 or not r.knobs or r.status != "completed" or r.rung != rung:
+            continue
+        z = (r.score or {}).get("z")
+        if z is not None:
+            scored.append((float(z), r.arm_id, r.knobs))
+    if not scored:
+        return []
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    n_keep = max(1, math.ceil(keep_fraction * len(scored)))
+    rescue_bar = promote_z - screen_margin
+    survivors = []
+    for i, (z, _aid, knobs) in enumerate(scored):
+        if i < n_keep:
+            survivors.append((knobs, f"promoted from rung {rung} (z={z:+.2f})"))
+        elif z >= rescue_bar:
+            survivors.append(
+                (knobs, f"margin-rescued from rung {rung} (z={z:+.2f} ≥ {rescue_bar:+.2f})")
+            )
+    return survivors
 
 
 def stage3_arms(
@@ -335,7 +401,12 @@ def feature_signature(merged: dict[str, Any]) -> str:
 
 
 class SweepLedger:
-    """Checkpointed arm records; identity by knob-dict hash enables --resume."""
+    """Checkpointed arm records; identity by knob-dict hash enables --resume.
+
+    Payload v2 (#164) adds a version field and rung-suffixed keys; v1 ledgers
+    (no version, no ``rung`` on records) load as rung-0 records with their
+    original keys, so old sweeps still resume.
+    """
 
     def __init__(self, path: Path):
         self.path = path
@@ -344,15 +415,15 @@ class SweepLedger:
             data = json.loads(path.read_text(encoding="utf-8"))
             for entry in data.get("arms", []):
                 record = ArmRecord(**entry)
-                self.records[record.arm_id] = record
+                self.records[record_key(record.arm_id, record.rung)] = record
 
     def upsert(self, record: ArmRecord) -> None:
-        self.records[record.arm_id] = record
+        self.records[record_key(record.arm_id, record.rung)] = record
         self.checkpoint()
 
     def checkpoint(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"arms": [asdict(r) for r in self.records.values()]}
+        payload = {"version": 2, "arms": [asdict(r) for r in self.records.values()]}
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         tmp.replace(self.path)
@@ -380,6 +451,7 @@ def _write_arm_config(
     stages: list[str],
     path: Path,
     extra: dict[str, Any] | None = None,
+    sampler_overrides: dict[str, int] | None = None,
 ) -> None:
     payload: dict[str, Any] = {**cfg.extra_config, **merged, "stages": stages}
     if cfg.dataset is not None:
@@ -391,6 +463,9 @@ def _write_arm_config(
     ):
         if value is not None:
             payload[key] = value
+    # Rung scale (the confirmation._write_config pattern); warmup-transfer's
+    # reduced num_warmup in `extra` still wins, as before.
+    payload.update(sampler_overrides or {})
     payload.update(extra or {})
     import yaml  # type: ignore[import-untyped]
 
@@ -419,40 +494,52 @@ def _warmup_transfer_extra(cfg: SweepConfig, arm: dict[str, Any], record: ArmRec
 
 
 def _predict_arm_seconds(
-    cfg: SweepConfig, merged: dict[str, Any], dims: dict[str, int] | None
+    cfg: SweepConfig,
+    merged: dict[str, Any],
+    dims: dict[str, int] | None,
+    sampler: dict[str, Any] | None = None,
 ) -> Any:
-    """RuntimePrediction for one arm at the scale its subprocess will run, or None."""
+    """RuntimePrediction for one arm at the scale its subprocess will run, or None.
+
+    ``sampler`` carries a rung's overrides so cheap-rung arms are predicted
+    (and therefore auto-timed-out) at their own scale, not the tier's.
+    """
     if dims is None:
         return None
     from panelcast.gpu_memory.runtime_predictor import predict_fit_seconds
     from panelcast.pipelines.orchestrator import PipelineConfig
 
     defaults = PipelineConfig()
+    s = sampler or {}
     return predict_fit_seconds(
-        cfg.num_chains or defaults.num_chains,
-        cfg.num_samples or defaults.num_samples,
-        cfg.num_warmup or defaults.num_warmup,
+        s.get("num_chains") or cfg.num_chains or defaults.num_chains,
+        s.get("num_samples") or cfg.num_samples or defaults.num_samples,
+        s.get("num_warmup") or cfg.num_warmup or defaults.num_warmup,
         int(dims.get("n_observations") or 0),
         transform=merged.get("target_transform") or defaults.target_transform,
     )
 
 
 def resolve_arm_timeout(
-    cfg: SweepConfig, merged: dict[str, Any], dims: dict[str, int] | None = None
+    cfg: SweepConfig,
+    merged: dict[str, Any],
+    dims: dict[str, int] | None = None,
+    sampler: dict[str, Any] | None = None,
 ) -> tuple[float | None, Any]:
     """One arm's kill threshold; returns (timeout_seconds, RuntimePrediction | None).
 
     An explicit numeric ``arm_timeout_seconds`` passes through untouched
     (reproducibility: a number the user typed always wins). ``"auto"`` predicts
     the arm's own runtime — transform-aware, at the sampler scale the arm
-    subprocess will actually run — and uses max(floor, multiplier * predicted).
-    Without data dims to predict from, auto falls back to the floor.
+    subprocess will actually run (a rung's ``sampler`` overrides included) —
+    and uses max(floor, multiplier * predicted). Without data dims to predict
+    from, auto falls back to the floor.
     """
     if cfg.arm_timeout_seconds is None:
         return None, None
     if cfg.arm_timeout_seconds != "auto":
         return float(cfg.arm_timeout_seconds), None
-    prediction = _predict_arm_seconds(cfg, merged, dims)
+    prediction = _predict_arm_seconds(cfg, merged, dims, sampler)
     if prediction is None:
         return cfg.arm_timeout_floor_seconds, None
     timeout = max(cfg.arm_timeout_floor_seconds, cfg.arm_timeout_multiplier * prediction.seconds)
@@ -550,10 +637,14 @@ def _resolve_attributed_run(
 
 
 def _apply_arm_timeout(
-    cfg: SweepConfig, merged: dict[str, Any], dims: dict[str, int] | None, record: ArmRecord
+    cfg: SweepConfig,
+    merged: dict[str, Any],
+    dims: dict[str, int] | None,
+    record: ArmRecord,
+    sampler: dict[str, Any] | None = None,
 ) -> float | None:
     """Resolve one arm's timeout onto its record; auto predictions are logged."""
-    timeout_seconds, prediction = resolve_arm_timeout(cfg, merged, dims)
+    timeout_seconds, prediction = resolve_arm_timeout(cfg, merged, dims, sampler)
     record.timeout_seconds_used = timeout_seconds
     if prediction is not None:
         record.predicted_seconds = round(prediction.seconds, 1)
@@ -568,14 +659,17 @@ def _apply_arm_timeout(
 
 
 def _cost_fn(
-    cfg: SweepConfig, base: dict[str, Any], dims: dict[str, int] | None
+    cfg: SweepConfig,
+    base: dict[str, Any],
+    dims: dict[str, int] | None,
+    sampler: dict[str, Any] | None = None,
 ) -> Callable[[dict[str, Any]], float] | None:
     """Predicted-seconds tiebreak for ``reorder_arms``; None without data dims."""
     if dims is None:
         return None
 
     def cost(arm: dict[str, Any]) -> float:
-        prediction = _predict_arm_seconds(cfg, {**base, **arm}, dims)
+        prediction = _predict_arm_seconds(cfg, {**base, **arm}, dims, sampler)
         return prediction.seconds if prediction is not None else 0.0
 
     return cost
@@ -602,6 +696,8 @@ def _maybe_skip_for_budget(
     arm: dict[str, Any],
     aid: str,
     note: str | None,
+    rung: int = 0,
+    sampler: dict[str, Any] | None = None,
 ) -> bool:
     """Record a retryable ``skipped_budget`` when the arm can't fit the remaining budget.
 
@@ -610,17 +706,17 @@ def _maybe_skip_for_budget(
     """
     if cfg.budget_hours is None:
         return False
-    prediction = _predict_arm_seconds(cfg, {**default_arm(), **arm}, dims)
+    prediction = _predict_arm_seconds(cfg, {**default_arm(), **arm}, dims, sampler)
     reason = _budget_skip_reason(cfg, ledger, prediction)
     if reason is None:
         return False
     log.warning("arm_skipped_budget", arm_id=aid, stage=stage, reason=reason)
-    existing = ledger.records.get(aid)
+    existing = ledger.records.get(record_key(aid, rung))
     if existing is None or existing.status in ("pending", "skipped_budget"):
         ledger.upsert(
             ArmRecord(
                 arm_id=aid, knobs=arm, stage=stage, status="skipped_budget", note=note,
-                error=reason,
+                error=reason, rung=rung,
                 predicted_seconds=round(prediction.seconds, 1) if prediction is not None else None,
             )
         )
@@ -635,6 +731,51 @@ def _record_launch_failure(record: ArmRecord, code: int, tail: str) -> None:
         record.status = "failed"
         log.warning("arm_failed", arm_id=record.arm_id, returncode=code)
     record.error = tail[-1500:]
+
+
+def _run_stage1_ladder(
+    cfg: SweepConfig,
+    ledger: SweepLedger,
+    stage1: list[tuple[dict[str, Any], str | None]],
+    rungs: list[dict[str, Any] | None],
+    execute: Callable[..., None],
+    max_fits_reached: Callable[[], str | None],
+) -> bool:
+    """Stage 1 across the ladder rungs; False when truncated by max_fits."""
+    final_rung = len(rungs) - 1
+    survivors: list[tuple[dict[str, Any], str | None]] = list(stage1)
+    for rung_idx in range(len(rungs)):
+        plan: list[tuple[dict[str, Any], str | None]] = []
+        if cfg.reference_first or rung_idx > 0:
+            label = (
+                "reference (shipped defaults)"
+                if rung_idx == 0
+                else f"reference refit at rung {rung_idx}"
+            )
+            plan.append(({}, label))
+        plan.extend(survivors)
+        for arm, note in plan:
+            reason = max_fits_reached()
+            if reason:
+                log.warning("sweep_truncated", stage=1, rung=rung_idx, reason=reason)
+                return False
+            execute(1, arm, note, rung_idx)
+        if rung_idx < final_rung:
+            keep = float((rungs[rung_idx] or {}).get("keep_fraction") or 1.0)
+            survivors = rung_survivors(
+                ledger.records.values(), rung_idx, keep, cfg.winner_z, cfg.screen_margin
+            )
+            log.info(
+                "rung_promotion",
+                rung=rung_idx,
+                n_promoted=len(survivors),
+                keep_fraction=keep,
+                screen_margin=cfg.screen_margin,
+            )
+            if not survivors:
+                log.warning("rung_ladder_empty", rung=rung_idx)
+                break
+    return True
 
 
 def run_sweep(
@@ -671,15 +812,25 @@ def run_sweep(
             json.dumps(diagnostics, indent=2), encoding="utf-8"
         )
 
-    stage1 = reorder_arms(
-        ofat_arms(descriptor, available_columns), diagnostics, _cost_fn(cfg, base, dims)
-    )
-    plan: list[tuple[int, dict[str, Any], str | None]] = []
-    if cfg.reference_first:
-        plan.append((1, {}, "reference (shipped defaults)"))
-    plan.extend((1, arm, note) for arm, note in stage1)
+    # The stage-1 ladder (#164): rung 0 screens every OFAT arm cheap, later
+    # rungs refit the pre-registered survivors (+ the reference, so pairing
+    # always compares same-scale fits). [None] = single-scale legacy.
+    rungs: list[dict[str, Any] | None] = list(cfg.rungs) if cfg.rungs else [None]
+    final_rung = len(rungs) - 1
 
-    reference_run: Path | None = None
+    def _sampler(rung_idx: int) -> dict[str, Any] | None:
+        r = rungs[rung_idx]
+        if r is None:
+            return None
+        return {k: r[k] for k in ("num_chains", "num_samples", "num_warmup") if k in r}
+
+    stage1 = reorder_arms(
+        ofat_arms(descriptor, available_columns),
+        diagnostics,
+        _cost_fn(cfg, base, dims, _sampler(0)),
+    )
+
+    reference_runs: dict[int, Path] = {}
     cache_signature: str | None = None
     claimed_runs = {str(r.run_dir) for r in ledger.records.values() if r.run_dir}
 
@@ -688,30 +839,33 @@ def run_sweep(
             return f"max_fits={cfg.max_fits} reached"
         return None
 
-    def _execute(stage: int, arm: dict[str, Any], note: str | None) -> None:
-        nonlocal reference_run, cache_signature
+    def _execute(stage: int, arm: dict[str, Any], note: str | None, rung: int) -> None:
+        nonlocal cache_signature
         aid = arm_id(arm)
-        existing = ledger.records.get(aid)
+        existing = ledger.records.get(record_key(aid, rung))
         if existing and existing.status in ("completed", "timeout"):
             # A timed-out arm is terminal too: skip it instead of re-running an arm
             # that will just time out again. It carries no run_dir, so the reference
             # bookkeeping below passes it by; the status field keeps the skip visible.
             if not arm and existing.run_dir:
-                reference_run = Path(existing.run_dir)
-            log.info("arm_skipped_resume", arm_id=aid, status=existing.status)
+                reference_runs[rung] = Path(existing.run_dir)
+            log.info("arm_skipped_resume", arm_id=aid, rung=rung, status=existing.status)
             return
         merged = {**base, **arm}
-        if _maybe_skip_for_budget(cfg, ledger, dims, stage, arm, aid, note):
+        sampler = _sampler(rung)
+        if _maybe_skip_for_budget(cfg, ledger, dims, stage, arm, aid, note, rung, sampler):
             return
         signature = feature_signature(merged)
         stages = _FEATURE_STAGES if signature != cache_signature else _MODEL_STAGES
-        record = ArmRecord(arm_id=aid, knobs=arm, stage=stage, note=note)
-        config_path = cfg.sweep_dir / f"arm_{aid}.yaml"
+        record = ArmRecord(arm_id=aid, knobs=arm, stage=stage, note=note, rung=rung)
+        config_path = cfg.sweep_dir / f"arm_{record_key(aid, rung)}.yaml"
         _write_arm_config(
-            cfg, merged, stages, config_path, extra=_warmup_transfer_extra(cfg, arm, record)
+            cfg, merged, stages, config_path,
+            extra=_warmup_transfer_extra(cfg, arm, record),
+            sampler_overrides=sampler,
         )
-        timeout_seconds = _apply_arm_timeout(cfg, merged, dims, record)
-        log.info("arm_start", arm_id=aid, stage=stage, knobs=arm, stages=stages)
+        timeout_seconds = _apply_arm_timeout(cfg, merged, dims, record, sampler)
+        log.info("arm_start", arm_id=aid, stage=stage, rung=rung, knobs=arm, stages=stages)
         started = time.monotonic()
         launched_at = datetime.now()
         code, tail = launch(config_path, panelcast_bin, timeout_seconds)
@@ -734,34 +888,30 @@ def run_sweep(
         cache_signature = signature
         record.run_dir = str(run_dir) if run_dir else None
         if not arm and run_dir is not None:
-            reference_run = run_dir
+            reference_runs[rung] = run_dir
         if scorer is not None and run_dir is not None:
             try:
-                record.score = scorer(run_dir, reference_run)
+                record.score = scorer(run_dir, reference_runs.get(rung))
             except Exception as exc:  # scoring must never kill the sweep
                 record.note = f"{record.note or ''}; scoring failed: {exc}".strip("; ")
         record.status = "completed"
         ledger.upsert(record)
 
-    for stage, arm, note in plan:
-        reason = _max_fits_reached()
-        if reason:
-            log.warning("sweep_truncated", stage=stage, reason=reason)
-            return ledger
-        _execute(stage, arm, note)
+    if not _run_stage1_ladder(cfg, ledger, stage1, rungs, _execute, _max_fits_reached):
+        return ledger
 
     if cfg.include_stage2:
-        winners = stage2_winners(ledger.records.values(), cfg.winner_z)
-        seen = set(ledger.records)
+        winners = stage2_winners(ledger.records.values(), cfg.winner_z, rung=final_rung)
+        seen = {r.arm_id for r in ledger.records.values()}
         for arm, note in stage2_arms(winners, descriptor, available_columns, seen):
             reason = _max_fits_reached()
             if reason:
                 log.warning("sweep_truncated", stage=2, reason=reason)
                 return ledger
-            _execute(2, arm, note)
+            _execute(2, arm, note, final_rung)
 
     if cfg.stage3_fits > 0:
-        seen = set(ledger.records)
+        seen = {r.arm_id for r in ledger.records.values()}
         for arm, note in stage3_arms(
             descriptor, cfg.stage3_fits, cfg.sweep_id, available_columns, seen
         ):
@@ -769,6 +919,6 @@ def run_sweep(
             if reason:
                 log.warning("sweep_truncated", stage=3, reason=reason)
                 return ledger
-            _execute(3, arm, note)
+            _execute(3, arm, note, final_rung)
 
     return ledger
