@@ -359,3 +359,16 @@ class TestLadderSweep:
         ledger = run_sweep(cfg, AOTY, launch=launch, scorer=lambda run_dir, ref: {"z": None})
         assert not [r for r in ledger.records.values() if r.rung == 1]
         assert len(launches) == 1 + len(ofat_arms(AOTY))
+
+    def test_failed_reference_stops_the_ladder(self, tmp_path, monkeypatch):
+        # A dead rung-0 reference means nothing can score or promote; the
+        # ladder must stop rather than spend the whole screening budget
+        # (release-audit Y1).
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+
+        def failing_launch(config_path, panelcast_bin, timeout_seconds=None):
+            return 1, "CUDA error: device-side assert triggered"
+
+        ledger = run_sweep(cfg, AOTY, launch=failing_launch, scorer=_z_scorer())
+        assert len(ledger.records) == 1
+        assert next(iter(ledger.records.values())).status == "failed"
