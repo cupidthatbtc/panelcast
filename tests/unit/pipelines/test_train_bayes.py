@@ -1131,6 +1131,21 @@ class TestImputeMissingGate:
         # The indicator is a real predictor: X carries the extra column.
         assert model_args["X"].shape[1] == 3
 
+    def test_recorded_record_is_replayed_not_refit(self, tmp_path):
+        """Sensitivity replays the fitted record — a deliberately wrong median
+        must land in X verbatim, proving no re-fit happened."""
+        features_path, splits_path = self._write(tmp_path)
+        record = {"medians": {"feature_1": 99.0, "feature_2": 5.5},
+                  "indicator_cols": ["feature_1__missing"]}
+        _model_args, feature_cols, train_df, imputation = load_training_data(
+            features_path, splits_path, min_albums_filter=1,
+            impute_missing=True, imputation_record=record,
+        )
+        assert imputation is record
+        assert feature_cols == ["feature_1", "feature_2", "feature_1__missing"]
+        assert train_df["feature_1"].tolist() == [1.0, 99.0, 3.0, 5.0]
+        assert train_df["feature_1__missing"].tolist() == [0.0, 1.0, 0.0, 0.0]
+
 
 # --- from unit/pipelines/test_train_bayes_coverage.py ---
 

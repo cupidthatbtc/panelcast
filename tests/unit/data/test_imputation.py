@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from panelcast.data.imputation import INDICATOR_SUFFIX, apply_imputation, fit_imputation
 
@@ -41,6 +42,13 @@ class TestFitImputation:
         _, record = fit_imputation(df, ["a"])
         assert record["medians"]["a"] == 0.0
         assert df["a"].tolist() == [0.0, 0.0]
+
+
+class TestCollisionGuard:
+    def test_reserved_suffix_in_feature_cols_rejected(self):
+        df = pd.DataFrame({"a": [1.0], f"a{INDICATOR_SUFFIX}": [0.0]})
+        with pytest.raises(ValueError, match="reserved"):
+            fit_imputation(df, ["a", f"a{INDICATOR_SUFFIX}"])
 
 
 class TestApplyImputation:

@@ -31,6 +31,12 @@ def fit_imputation(
     only for columns with train missingness, so fully-observed blocks keep
     their legacy width.
     """
+    collisions = [c for c in feature_cols if c.endswith(INDICATOR_SUFFIX)]
+    if collisions:
+        raise ValueError(
+            f"Feature columns already carry the reserved '{INDICATOR_SUFFIX}' "
+            f"suffix: {collisions}. Rename them — generated indicators would collide."
+        )
     medians: dict[str, float] = {}
     indicator_cols: list[str] = []
     for col in feature_cols:
@@ -51,8 +57,10 @@ def fit_imputation(
 def apply_imputation(
     df: pd.DataFrame, feature_cols: list[str], imputation: dict[str, Any] | None
 ) -> pd.DataFrame:
-    """Impute a transform-time frame in place under the recorded train state.
+    """Impute a transform-time frame under the recorded train state.
 
+    Mutates ``df`` (fills and adds indicator columns) AND returns it — the
+    legacy in-place ``fillna`` contract; no copy is taken.
     ``imputation`` None/empty is the exact legacy path (``fillna(0)``), so
     gate-off outputs stay byte-identical. Gate-on materializes each recorded
     indicator from its base column's NaN mask BEFORE filling, then fills with

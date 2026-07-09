@@ -21,7 +21,7 @@ import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
-from panelcast.data.imputation import fit_imputation
+from panelcast.data.imputation import apply_imputation, fit_imputation
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.gpu_memory import estimate_memory_gb
 from panelcast.models.bayes.diagnostics import check_convergence
@@ -138,6 +138,7 @@ def load_training_data(
     ar_center: str = "global",
     entity_group_pooling: bool = False,
     impute_missing: bool = False,
+    imputation_record: dict | None = None,
 ) -> tuple[dict, list[str], pd.DataFrame, dict | None]:
     """Load training data and prepare model arguments.
 
@@ -151,6 +152,10 @@ def load_training_data(
         descriptor: Dataset descriptor (None = AOTY defaults).
         impute_missing: Gate (#158): median imputation + missingness
             indicators instead of the legacy fillna(0).
+        imputation_record: A recorded ``feature_scaler["imputation"]`` block
+            to REPLAY instead of re-fitting medians — callers reconstructing a
+            fitted model's inputs (sensitivity) must impute exactly what the
+            fit saw, not a re-derived statistic.
 
     Returns:
         Tuple of (model_args dict, feature_cols list, merged train_df,
@@ -179,14 +184,23 @@ def load_training_data(
         )
 
     # Handle NaN values in predictor features: legacy fill-with-0, or the
-    # gated train-median + missingness-indicator treatment (#158).
+    # gated train-median + missingness-indicator treatment (#158). Medians are
+    # deliberately fit BEFORE the n_reviews valid_mask below: imputation is a
+    # feature-side statistic over every observed training row, not coupled to
+    # response-side validity.
     imputation: dict | None = None
     if impute_missing:
-        feature_cols, imputation = fit_imputation(train_df, feature_cols)
+        if imputation_record is not None:
+            imputation = imputation_record
+            feature_cols = feature_cols + list(imputation.get("indicator_cols", []))
+            train_df = apply_imputation(train_df, feature_cols, imputation)
+        else:
+            feature_cols, imputation = fit_imputation(train_df, feature_cols)
         log.info(
             "features_imputed",
             n_indicator_cols=len(imputation["indicator_cols"]),
             indicator_cols=imputation["indicator_cols"],
+            replayed=imputation_record is not None,
         )
     else:
         train_df[feature_cols] = train_df[feature_cols].fillna(0)

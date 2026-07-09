@@ -1206,8 +1206,10 @@ def run_sensitivity_suite(ctx) -> dict:
         logit_offset=float(summary.get("logit_offset", 0.5)),
         ar_center=(summary.get("priors") or {}).get("ar_center", "global"),
         entity_group_pooling=entity_group_pooling,
-        # Replicate the fitted model's imputation gate from its recorded state.
+        # Replay the fitted model's recorded imputation — never a re-fit
+        # median; sensitivity must see exactly the X the model saw.
         impute_missing=bool((summary.get("feature_scaler") or {}).get("imputation")),
+        imputation_record=(summary.get("feature_scaler") or {}).get("imputation"),
     )
     artist_album_counts = model_args.pop("artist_album_counts")
     ar_center_value = float(model_args.pop("ar_center_value", 0.0))
