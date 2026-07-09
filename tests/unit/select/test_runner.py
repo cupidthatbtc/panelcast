@@ -208,35 +208,24 @@ def _write_manifest(run_dir: Path, created_at: str | None = None, **extra) -> No
 
 
 def _fake_env(tmp_path, monkeypatch):
-    """Fake launcher + latest-run plumbing; returns (cfg, launches list)."""
+    """Fake launcher honoring the run-id handshake; returns (cfg, launches list)."""
+    import yaml as _yaml
+
     launches: list[Path] = []
-    run_dirs = iter(f"run_{i:03d}" for i in range(999))
 
     def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
         launches.append(Path(config_path))
-        (tmp_path / "outputs").mkdir(exist_ok=True)
-        current = next(run_dirs)
-        _write_manifest(tmp_path / "outputs" / current)
-        (tmp_path / "outputs" / "latest.json").write_text(
-            json.dumps({"run_dir": current}), encoding="utf-8"
-        )
+        payload = _yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+        _write_manifest(tmp_path / "outputs" / payload["run_id"])
         return 0, "ok"
 
-    import panelcast.paths as paths_mod
-
-    monkeypatch.setattr(
-        paths_mod, "resolve_latest", lambda output_base=Path("outputs"): _latest(tmp_path)
+    cfg = SweepConfig(
+        sweep_id="t",
+        output_root=tmp_path / "select",
+        panelcast_bin="pc",
+        pipeline_output_base=tmp_path / "outputs",
     )
-    cfg = SweepConfig(sweep_id="t", output_root=tmp_path / "select", panelcast_bin="pc")
     return cfg, launches, launch
-
-
-def _latest(tmp_path: Path) -> Path | None:
-    try:
-        data = json.loads((tmp_path / "outputs" / "latest.json").read_text(encoding="utf-8"))
-        return tmp_path / "outputs" / data["run_dir"]
-    except OSError:
-        return None
 
 
 class TestRunSweep:
@@ -572,91 +561,77 @@ class TestStage2Winners:
 
 
 class TestAttribution:
-    def test_run_dir_is_dereferenced(self, tmp_path, monkeypatch):
+    def test_run_dir_comes_from_the_named_handshake(self, tmp_path, monkeypatch):
+        """The record's run_dir is the arm's own named dir, dereferenced —
+        no dependence on the mutable latest pointer (which here is poisoned)."""
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.include_stage2 = False
+        cfg.max_fits = 1
+        (tmp_path / "outputs").mkdir(exist_ok=True)
+        (tmp_path / "outputs" / "latest.json").write_text(
+            json.dumps({"run_dir": "some_foreign_run"}), encoding="utf-8"
+        )
+        cfg.pipeline_output_base = tmp_path / "outputs" / ".." / "outputs"
+        ledger = run_sweep(cfg, AOTY, launch=launch)
+        (record,) = ledger.records.values()
+        assert "some_foreign_run" not in record.run_dir
+        assert record.run_dir == str(Path(record.run_dir).resolve())
+        assert f"sel_{cfg.sweep_id}_" in record.run_dir
+
+    def test_missing_named_run_dir_fails_the_arm(self, tmp_path, monkeypatch):
+        """A child that exits 0 without creating its named dir cannot score."""
         cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
         cfg.include_stage2 = False
         cfg.max_fits = 1
 
-        import panelcast.paths as paths_mod
-
-        real = tmp_path / "outputs" / "run_000"
-
-        def launch_indirect(config_path, panelcast_bin, timeout_seconds=None):
-            _write_manifest(real)
+        def launch_no_dir(config_path, panelcast_bin, timeout_seconds=None):
             return 0, "ok"
 
-        monkeypatch.setattr(
-            paths_mod,
-            "resolve_latest",
-            lambda output_base=Path("outputs"): tmp_path / "outputs" / ".." / "outputs" / "run_000",
-        )
-        ledger = run_sweep(cfg, AOTY, launch=launch_indirect)
-        (record,) = ledger.records.values()
-        assert record.run_dir == str(real.resolve())
-
-    def test_stale_run_is_not_scored(self, tmp_path, monkeypatch):
-        # latest.json still points at a run created BEFORE this arm launched
-        # (failed pointer write / foreign run): the arm must fail, not score it.
-        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
-        cfg.include_stage2 = False
-        cfg.max_fits = 1
-        stale = tmp_path / "outputs" / "stale_run"
-        _write_manifest(stale, created_at=(datetime.now() - timedelta(hours=2)).isoformat())
-        (tmp_path / "outputs" / "latest.json").write_text(
-            json.dumps({"run_dir": "stale_run"}), encoding="utf-8"
-        )
-
-        def launch_no_pointer(config_path, panelcast_bin, timeout_seconds=None):
-            return 0, "ok"  # succeeds but never re-points latest.json
-
-        ledger = run_sweep(cfg, AOTY, launch=launch_no_pointer)
+        ledger = run_sweep(cfg, AOTY, launch=launch_no_dir)
         (record,) = ledger.records.values()
         assert record.status == "failed"
-        assert "attribution failed" in record.error
+        assert "handshake failed" in record.error
         assert record.run_dir is None
 
     def test_config_mismatch_is_not_scored(self, tmp_path, monkeypatch):
         cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
         cfg.include_stage2 = False
         cfg.max_fits = 2
+        import yaml as _yaml
 
         def launch_foreign(config_path, panelcast_bin, timeout_seconds=None):
-            code, tail = launch(config_path, panelcast_bin, timeout_seconds)
-            run_dir = tmp_path / "outputs" / json.loads(
-                (tmp_path / "outputs" / "latest.json").read_text()
-            )["run_dir"]
+            payload = _yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
             # A foreign run's manifest records different knob values.
-            _write_manifest(run_dir, flags={"likelihood_family": "not-a-real-family"})
-            return code, tail
+            _write_manifest(
+                tmp_path / "outputs" / payload["run_id"],
+                flags={"likelihood_family": "not-a-real-family"},
+            )
+            return 0, "ok"
 
         ledger = run_sweep(cfg, AOTY, launch=launch_foreign)
         assert all(r.status == "failed" for r in ledger.records.values())
         assert all("disagrees with the arm" in r.error for r in ledger.records.values())
 
-    def test_two_arms_resolving_to_same_run_fail_the_second(self, tmp_path, monkeypatch):
+    def test_stale_manifest_in_named_dir_fails_the_arm(self, tmp_path, monkeypatch):
+        """A named dir whose manifest predates the launch (leftover from a
+        crashed attempt with the same id) must not be scored."""
         cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
         cfg.include_stage2 = False
-        cfg.max_fits = 2
-        state = {"n": 0}
+        cfg.max_fits = 1
+        import yaml as _yaml
 
-        def launch_once(config_path, panelcast_bin, timeout_seconds=None):
-            state["n"] += 1
-            if state["n"] == 1:
-                return launch(config_path, panelcast_bin, timeout_seconds)
-            # Second arm: pointer write fails silently, latest still points at
-            # arm 1's run — but a fresh manifest timestamp alone must not pass.
-            run_dir = tmp_path / "outputs" / json.loads(
-                (tmp_path / "outputs" / "latest.json").read_text()
-            )["run_dir"]
-            _write_manifest(run_dir)
+        def launch_stale(config_path, panelcast_bin, timeout_seconds=None):
+            payload = _yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+            _write_manifest(
+                tmp_path / "outputs" / payload["run_id"],
+                created_at=(datetime.now() - timedelta(hours=2)).isoformat(),
+            )
             return 0, "ok"
 
-        ledger = run_sweep(cfg, AOTY, launch=launch_once)
-        statuses = [r.status for r in ledger.records.values()]
-        assert statuses.count("completed") == 1
-        assert statuses.count("failed") == 1
-        failed = next(r for r in ledger.records.values() if r.status == "failed")
-        assert "already belongs to another arm" in failed.error
+        ledger = run_sweep(cfg, AOTY, launch=launch_stale)
+        (record,) = ledger.records.values()
+        assert record.status == "failed"
+        assert "attribution failed" in record.error
 
 
 class _FakePrediction:

@@ -14,6 +14,7 @@ import json
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -165,6 +166,7 @@ def _write_config(
     seed: int,
     path: Path,
     sampler_overrides: dict[str, int] | None = None,
+    run_id: str | None = None,
 ) -> None:
     payload: dict[str, Any] = {
         **cfg.extra_config,
@@ -182,6 +184,8 @@ def _write_config(
         if value is not None:
             payload[key] = value
     payload.update(sampler_overrides or {})
+    if run_id is not None:
+        payload["run_id"] = run_id
     path.write_text(yaml.safe_dump(payload, sort_keys=True), encoding="utf-8")
 
 
@@ -238,7 +242,6 @@ def run_confirmation(
     (re-pairing is cheap; only missing seeds refit).
     """
     from panelcast import __version__
-    from panelcast.paths import resolve_latest
 
     launch = launch or launch_arm
     panelcast_bin = cfg.panelcast_bin or _default_panelcast_bin()
@@ -264,7 +267,10 @@ def run_confirmation(
 
     def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:
         config_path = cfg.sweep_dir / f"confirm_{label}_seed{seed}.yaml"
-        _write_config(cfg, merged, seed, config_path, sampler_overrides)
+        # Named up front (#167 handshake) — no dependence on the mutable
+        # `latest` pointer; unique per attempt so retries never collide.
+        run_id = f"sel_{cfg.sweep_id}_confirm_{label}_seed{seed}_{datetime.now():%Y%m%dT%H%M%S%f}"
+        _write_config(cfg, merged, seed, config_path, sampler_overrides, run_id=run_id)
         log.info("confirmation_fit_start", label=label, seed=seed, timeout=timeout)
         started = time.monotonic()
         code, tail = launch(config_path, panelcast_bin, timeout)
@@ -277,9 +283,8 @@ def run_confirmation(
         )
         if code != 0:
             raise RuntimeError(f"{label} fit failed on seed {seed}: {tail[-500:]}")
-        run_dir = resolve_latest()
-        # Dereference so the pairing survives the mutable `latest` link moving.
-        return run_dir.resolve() if run_dir is not None else None
+        run_dir = (cfg.pipeline_output_base / run_id).resolve()
+        return run_dir if run_dir.exists() else None
 
     for seed in seeds:
         cached = _score_cached_seed(prior[seed]) if seed in prior else None

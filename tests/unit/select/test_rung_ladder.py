@@ -272,33 +272,19 @@ def _write_manifest(run_dir: Path) -> None:
 
 def _fake_env(tmp_path, monkeypatch):
     launches: list[Path] = []
-    run_dirs = iter(f"run_{i:03d}" for i in range(999))
 
     def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None) -> tuple[int, str]:
         launches.append(Path(config_path))
-        (tmp_path / "outputs").mkdir(exist_ok=True)
-        current = next(run_dirs)
-        _write_manifest(tmp_path / "outputs" / current)
-        (tmp_path / "outputs" / "latest.json").write_text(
-            json.dumps({"run_dir": current}), encoding="utf-8"
-        )
+        payload = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+        _write_manifest(tmp_path / "outputs" / payload["run_id"])
         return 0, "ok"
 
-    def _latest(output_base=Path("outputs")):
-        try:
-            data = json.loads((tmp_path / "outputs" / "latest.json").read_text(encoding="utf-8"))
-            return tmp_path / "outputs" / data["run_dir"]
-        except OSError:
-            return None
-
-    import panelcast.paths as paths_mod
-
-    monkeypatch.setattr(paths_mod, "resolve_latest", _latest)
     cfg = SweepConfig(
         sweep_id="t",
         output_root=tmp_path / "select",
         panelcast_bin="pc",
         include_stage2=False,
+        pipeline_output_base=tmp_path / "outputs",
         rungs=[
             {"num_chains": 2, "num_samples": 500, "num_warmup": 500, "keep_fraction": 0.25},
             {"num_chains": 4, "num_samples": 1000, "num_warmup": 1000},

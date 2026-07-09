@@ -151,6 +151,10 @@ class PipelineConfig:
     # Free-form run label recorded in the manifest (surfaced by `runs history`).
     # Provenance only — never affects outputs or skip detection.
     tag: str | None = None
+    # Caller-supplied run directory name (#167): lets the select runner name
+    # each arm's run up front instead of racing the mutable `latest` pointer.
+    # None (default) keeps the generated timestamp ids. No CLI flag.
+    run_id: str | None = None
     max_albums: int = 50
     # MCMC configuration
     num_chains: int = 4
@@ -287,6 +291,7 @@ class PipelineConfig:
                 f"Invalid n_exponent_prior: '{self.n_exponent_prior}'. "
                 f"Must be one of {valid_priors}."
             )
+        self._validate_run_id()
         if not 5 <= self.max_tree_depth <= 15:
             raise ValueError(
                 f"Invalid max_tree_depth: {self.max_tree_depth}. Must be between 5 and 15."
@@ -357,6 +362,21 @@ class PipelineConfig:
             raise ValueError(
                 "strict mode requires num_samples >= ess_threshold per chain for ESS checks. "
                 f"Got num_samples={self.num_samples}, ess_threshold={self.ess_threshold}."
+            )
+
+    def _validate_run_id(self) -> None:
+        """A caller-supplied run_id must be a bare directory name (#167)."""
+        if self.run_id is None:
+            return
+        if (
+            not self.run_id
+            or "/" in self.run_id
+            or "\\" in self.run_id
+            or self.run_id in (".", "..")
+        ):
+            raise ValueError(
+                f"Invalid run_id: {self.run_id!r}. Must be a bare directory name "
+                "(no path separators)."
             )
 
     def _validate_likelihood(self) -> None:
@@ -597,21 +617,36 @@ class PipelineOrchestrator:
         # Generate new run ID and create its directory EXCLUSIVELY: a second
         # run minting the same id must retry with a fresh one instead of
         # silently sharing (and, on failure, rmtree'ing) this run's dir.
-        run_id = ""
-        for _ in range(10):
-            run_id = generate_run_id()
+        if self.config.run_id is not None:
+            # Caller-supplied id (#167): the select runner names each arm's run
+            # up front so it never has to race the mutable `latest` pointer.
+            # A collision is a hard error — the caller promised uniqueness.
+            run_id = self.config.run_id
             self.run_dir = self.output_base / run_id
             try:
                 self.run_dir.mkdir(parents=True, exist_ok=False)
-                break
             except FileExistsError:
-                continue
+                raise PipelineError(
+                    f"run_id '{run_id}' already exists under {self.output_base}; "
+                    "caller-supplied run ids must be unique.",
+                    stage="setup",
+                ) from None
         else:
-            raise PipelineError(
-                f"Could not create a unique run directory under {self.output_base} "
-                f"after 10 attempts (last id: {run_id}).",
-                stage="setup",
-            )
+            run_id = ""
+            for _ in range(10):
+                run_id = generate_run_id()
+                self.run_dir = self.output_base / run_id
+                try:
+                    self.run_dir.mkdir(parents=True, exist_ok=False)
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise PipelineError(
+                    f"Could not create a unique run directory under {self.output_base} "
+                    f"after 10 attempts (last id: {run_id}).",
+                    stage="setup",
+                )
 
         # Capture git state and environment
         git_state = capture_git_state()

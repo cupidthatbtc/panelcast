@@ -100,6 +100,10 @@ class SweepConfig:
     # Rescue margin: arms with z >= winner_z - screen_margin promote regardless
     # of keep_fraction (pre-registered in configs/select.yaml rules).
     screen_margin: float = 0.5
+    # Where arm subprocesses write their runs (#167): each arm's run dir is
+    # named up front (run_id in its config), so attribution never depends on
+    # the mutable `outputs/latest.json` pointer — the concurrency prerequisite.
+    pipeline_output_base: Path = Path("outputs")
     extra_config: dict[str, Any] = field(default_factory=dict)
     panelcast_bin: str | None = None
     # Per-arm kill threshold: seconds, or "auto" to size each arm's timeout from
@@ -555,17 +559,23 @@ def resolve_arm_timeout(
 
 
 def launch_arm(
-    config_path: Path, panelcast_bin: str, timeout_seconds: float | None = None
+    config_path: Path,
+    panelcast_bin: str,
+    timeout_seconds: float | None = None,
+    env_overrides: dict[str, str] | None = None,
 ) -> tuple[int, str]:
     """Run one arm as a subprocess; returns (returncode, combined output tail).
 
     A fit that exceeds ``timeout_seconds`` is killed (subprocess.run reaps the
     child before raising) and reported as a failure, so one pathological arm
-    can't stall the whole serial sweep.
+    can't stall the whole serial sweep. ``env_overrides`` lets a concurrent
+    caller bound each child's JAX pool (XLA_PYTHON_CLIENT_MEM_FRACTION, #167);
+    None keeps the legacy child environment exactly.
     """
     import os
 
     env = {**os.environ, "PANELCAST_SAVE_LOG_LIKELIHOOD": "1", "PANELCAST_SAVE_PREDICTIVE": "1"}
+    env.update(env_overrides or {})
     try:
         proc = subprocess.run(
             [panelcast_bin, "run", "--config", str(config_path)],
@@ -623,23 +633,25 @@ def _attribution_error(
     return None
 
 
-def _resolve_attributed_run(
+def _claim_named_run(
+    run_id: str,
+    output_base: Path,
     merged: dict[str, Any],
     launched_at: datetime,
     claimed_runs: set[str],
 ) -> tuple[Path | None, str | None]:
-    """Resolve the just-finished run, verify it belongs to this arm, claim it.
+    """Claim the run dir this arm NAMED up front (#167 handshake).
 
-    The run_dir is dereferenced (Path.resolve) so the record survives the
-    mutable ``latest`` link re-pointing at later runs.
+    The arm's config carries its run_id, so the run dir is known before the
+    subprocess starts — no dependence on the mutable ``outputs/latest.json``
+    pointer that races under concurrency. The manifest sanity checks
+    (creation time, knob agreement, prior claim) still apply.
     """
-    from panelcast.paths import resolve_latest
-
-    run_dir = resolve_latest()
-    if run_dir is not None:
-        run_dir = Path(run_dir).resolve()
+    run_dir = (output_base / run_id).resolve()
+    if not run_dir.exists():
+        return None, f"handshake failed: expected run dir {run_dir} was never created"
     problem = _attribution_error(run_dir, merged, launched_at, claimed_runs)
-    if problem is None and run_dir is not None:
+    if problem is None:
         claimed_runs.add(str(run_dir))
     return run_dir, problem
 
@@ -867,15 +879,18 @@ def run_sweep(
         stages = _FEATURE_STAGES if signature != cache_signature else _MODEL_STAGES
         record = ArmRecord(arm_id=aid, knobs=arm, stage=stage, note=note, rung=rung)
         config_path = cfg.sweep_dir / f"arm_{record_key(aid, rung)}.yaml"
+        launched_at = datetime.now()
+        # Name the run up front (#167): unique per launch attempt, so a
+        # re-run of a failed arm never collides with its earlier dir.
+        run_id = f"sel_{cfg.sweep_id}_{record_key(aid, rung)}_{launched_at:%Y%m%dT%H%M%S%f}"
         _write_arm_config(
             cfg, merged, stages, config_path,
-            extra=_warmup_transfer_extra(cfg, arm, record),
+            extra={**_warmup_transfer_extra(cfg, arm, record), "run_id": run_id},
             sampler_overrides=sampler,
         )
         timeout_seconds = _apply_arm_timeout(cfg, merged, dims, record, sampler)
         log.info("arm_start", arm_id=aid, stage=stage, rung=rung, knobs=arm, stages=stages)
         started = time.monotonic()
-        launched_at = datetime.now()
         code, tail = launch(config_path, panelcast_bin, timeout_seconds)
         record.wall_clock_seconds = time.monotonic() - started
         if code != 0:
@@ -885,7 +900,9 @@ def run_sweep(
             cache_signature = None
             ledger.upsert(record)
             return
-        run_dir, problem = _resolve_attributed_run(merged, launched_at, claimed_runs)
+        run_dir, problem = _claim_named_run(
+            run_id, cfg.pipeline_output_base, merged, launched_at, claimed_runs
+        )
         if problem:
             record.status = "failed"
             record.error = problem
