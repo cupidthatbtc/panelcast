@@ -950,11 +950,6 @@ def run_sweep(  # noqa: C901  # tracked complexity debt: the _execute/_run_bucke
         stage: int, arm: dict[str, Any], note: str | None, rung: int, concurrent: bool = False
     ) -> None:
         nonlocal cache_signature
-        # The serial path gates on max_fits between launches; a concurrent tail
-        # is submitted all at once, so the gate must live here or the whole
-        # bucket runs past the consented cap.
-        if concurrent and _max_fits_reached():
-            return
         aid = arm_id(arm)
         existing = ledger.records.get(record_key(aid, rung))
         if existing and existing.status in ("completed", "timeout"):

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
+import pytest
 import yaml
 
 from panelcast.config.descriptor import DatasetDescriptor
@@ -55,6 +57,41 @@ class TestGpuAdmission:
         assert not adm.try_admit(0.5)
         adm.release(20.0)
         assert adm.try_admit(0.5)
+
+    def test_headroom_validated(self):
+        with pytest.raises(ValueError, match="headroom"):
+            GpuAdmission(headroom=0.0)
+        with pytest.raises(ValueError, match="headroom"):
+            GpuAdmission(headroom=1.5)
+
+    def test_reserved_gb_tracks_reservations(self):
+        adm = GpuAdmission(headroom=1.0, free_bytes_fn=lambda: 10 * _GIB)
+        assert adm.reserved_gb == 0.0
+        adm.try_admit(3.0)
+        assert adm.reserved_gb == 3.0
+
+    def test_admit_blocks_until_release(self):
+        adm = GpuAdmission(headroom=1.0, free_bytes_fn=lambda: 10 * _GIB)
+        assert adm.try_admit(8.0)
+        done = []
+
+        def blocked():
+            adm.admit(8.0, poll_seconds=0.01)
+            done.append(True)
+
+        t = threading.Thread(target=blocked)
+        t.start()
+        time.sleep(0.05)
+        assert not done
+        adm.release(8.0)
+        t.join(timeout=5)
+        assert done
+
+    def test_nvml_free_bytes_degrades_without_gpu(self):
+        from panelcast.gpu_memory.admission import nvml_free_bytes
+
+        free = nvml_free_bytes()
+        assert free is None or isinstance(free, int)
 
 
 def _env(tmp_path, parallel_arms=2, fail_first_oom=None):
@@ -145,6 +182,47 @@ class TestParallelBuckets:
         ledger = run_sweep(cfg, AOTY, launch=launch)
         assert ledger.fits_done() == 3
 
+    def test_serial_fallback_respects_max_fits(self, tmp_path, monkeypatch):
+        import panelcast.select.runner as runner_mod
+
+        monkeypatch.setattr(
+            runner_mod, "ofat_arms",
+            lambda d, available_columns=None: [
+                ({"ar_center": "none"}, None),
+                ({"latent_process": "ar1"}, None),
+                ({"debut_prev_score_source": "dataset_stats"}, None),
+            ],
+        )
+        cfg, launch, state = _env(tmp_path, parallel_arms=2)
+        cfg.max_fits = 3
+        calls = {"n": 0}
+
+        def failing_launch(config_path, panelcast_bin, timeout_seconds=None, env_overrides=None):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                return 1, "RuntimeError: boom"
+            return launch(config_path, panelcast_bin, timeout_seconds, env_overrides)
+
+        ledger = run_sweep(cfg, AOTY, launch=failing_launch)
+        assert ledger.fits_done() == 3
+
+    def test_concurrent_arms_reserve_and_release(self, tmp_path, monkeypatch):
+        # With dims, each concurrent launch prices its fit, admits, and
+        # releases; no reservation may leak.
+        import panelcast.select.runner as runner_mod
+
+        monkeypatch.setattr(
+            runner_mod, "ofat_arms",
+            lambda d, available_columns=None: [
+                ({"ar_center": "none"}, None),
+                ({"latent_process": "ar1"}, None),
+            ],
+        )
+        cfg, launch, state = _env(tmp_path, parallel_arms=2)
+        dims = {"n_observations": 500, "n_features": 10, "n_artists": 100, "max_seq": 10}
+        ledger = run_sweep(cfg, AOTY, launch=launch, dims=dims)
+        assert all(r.status == "completed" for r in ledger.records.values())
+
     def test_default_serial_uses_three_arg_launch(self, tmp_path):
         """--parallel-arms 1 keeps the legacy launch protocol byte-identical:
         a fake WITHOUT env_overrides support must still work."""
@@ -171,3 +249,37 @@ class TestParallelBuckets:
         ledger = run_sweep(cfg, AOTY, launch=legacy_launch)
         assert len(calls) == 3
         assert all(r.status == "completed" for r in ledger.records.values())
+
+
+class TestAdmissionEnv:
+    def test_without_dims_children_get_equal_shares(self, tmp_path):
+        from panelcast.select.runner import _admission_env
+
+        cfg, _, _ = _env(tmp_path, parallel_arms=2)
+        estimate, env = _admission_env(cfg, None, None)
+        assert estimate is None
+        assert env["PANELCAST_CONCURRENT_ARMS"] == "2"
+        assert 0.0 < float(env["XLA_PYTHON_CLIENT_MEM_FRACTION"]) <= 1.0
+
+    def test_with_dims_prices_the_fit(self, tmp_path):
+        from panelcast.select.runner import _admission_env
+
+        cfg, _, _ = _env(tmp_path, parallel_arms=2)
+        dims = {"n_observations": 5000, "n_features": 40, "n_artists": 900, "max_seq": 30}
+        sampler = {"num_chains": 2, "num_samples": 500, "num_warmup": 500}
+        estimate, env = _admission_env(cfg, sampler, dims)
+        assert estimate is not None and estimate > 0
+        assert "XLA_PYTHON_CLIENT_MEM_FRACTION" in env
+
+    def test_with_dims_caps_pool_by_total_vram(self, tmp_path, monkeypatch):
+        import panelcast.gpu_memory.query as query_mod
+        from panelcast.select.runner import _admission_env
+
+        class _Mem:
+            total_bytes = 24 * _GIB
+
+        monkeypatch.setattr(query_mod, "query_gpu_memory", lambda *a, **k: _Mem())
+        cfg, _, _ = _env(tmp_path, parallel_arms=2)
+        dims = {"n_observations": 5000, "n_features": 40, "n_artists": 900, "max_seq": 30}
+        estimate, env = _admission_env(cfg, None, dims)
+        assert 0.05 <= float(env["XLA_PYTHON_CLIENT_MEM_FRACTION"]) <= 0.9

@@ -210,6 +210,14 @@ class TestLedgerV2:
         ledger.upsert(_rec({"a": 1}, z=1.0, rung=1))
         assert ledger.completed_ids() == {arm_id({"a": 1})}
 
+    def test_checkpoint_writes_current_state(self, tmp_path):
+        path = tmp_path / "ledger.json"
+        ledger = SweepLedger(path)
+        rec = _rec({"a": 1}, z=None)
+        ledger.records[arm_id({"a": 1})] = rec
+        ledger.checkpoint()
+        assert json.loads(path.read_text(encoding="utf-8"))["arms"]
+
     def test_ladder_requires_reference_first(self):
         with pytest.raises(ValueError, match="reference_first"):
             SweepConfig(
@@ -359,6 +367,22 @@ class TestLadderSweep:
         ledger = run_sweep(cfg, AOTY, launch=launch, scorer=lambda run_dir, ref: {"z": None})
         assert not [r for r in ledger.records.values() if r.rung == 1]
         assert len(launches) == 1 + len(ofat_arms(AOTY))
+
+    def test_ladder_truncates_at_rung_boundary(self, tmp_path, monkeypatch):
+        import panelcast.select.runner as runner_mod
+
+        monkeypatch.setattr(
+            runner_mod, "ofat_arms",
+            lambda d, available_columns=None: [
+                ({"ar_center": "none"}, None),
+                ({"latent_process": "ar1"}, None),
+            ],
+        )
+        cfg, launches, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.max_fits = 3  # rung 0 exactly (ref + 2 arms); the rung-1 refit hits the cap
+        ledger = run_sweep(cfg, AOTY, launch=launch, scorer=_z_scorer())
+        assert ledger.fits_done() == 3
+        assert not [r for r in ledger.records.values() if r.rung == 1]
 
     def test_failed_reference_stops_the_ladder(self, tmp_path, monkeypatch):
         # A dead rung-0 reference means nothing can score or promote; the
