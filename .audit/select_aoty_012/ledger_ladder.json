@@ -1,0 +1,690 @@
+{
+  "version": 2,
+  "arms": [
+    {
+      "arm_id": "750f957a8c71",
+      "knobs": {},
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_155059_199999_b386",
+      "wall_clock_seconds": 1366.479110589993,
+      "error": null,
+      "score": {
+        "z": 0.0,
+        "elpd_diff": 0.0
+      },
+      "note": "reference (shipped defaults)",
+      "predicted_seconds": 1362.7,
+      "timeout_seconds_used": 4088.213342928372,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "174a04916d12",
+      "knobs": {
+        "target_transform": "identity"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_161503_473178_0196",
+      "wall_clock_seconds": 168.5150993749994,
+      "error": null,
+      "score": {
+        "z": -3.2916436898964934,
+        "elpd_diff": -14.977799415588379
+      },
+      "note": null,
+      "predicted_seconds": 168.9,
+      "timeout_seconds_used": 1800.0,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "f1624dcf2f63",
+      "knobs": {
+        "likelihood_family": "beta",
+        "target_transform": "identity"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_161800_750608_c094",
+      "wall_clock_seconds": 183.8136016070057,
+      "error": null,
+      "score": {
+        "z": -3.6155013438172117,
+        "elpd_diff": -84.97313046455383
+      },
+      "note": "completed with target_transform=identity (structural)",
+      "predicted_seconds": 168.2,
+      "timeout_seconds_used": 1800.0,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "c1dc39413e6c",
+      "knobs": {
+        "likelihood_family": "beta_binomial",
+        "target_transform": "identity"
+      },
+      "stage": 1,
+      "status": "timeout",
+      "run_dir": null,
+      "wall_clock_seconds": 1800.2760205960076,
+      "error": "arm exceeded timeout of 1800.0s and was killed",
+      "score": null,
+      "note": "completed with target_transform=identity (structural)",
+      "predicted_seconds": 168.9,
+      "timeout_seconds_used": 1800.0,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "4496e6225c0f",
+      "knobs": {
+        "likelihood_family": "beta_ceiling",
+        "target_transform": "identity"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_165257_220470_cf38",
+      "wall_clock_seconds": 209.8360254119907,
+      "error": null,
+      "score": {
+        "z": -3.5215887918000863,
+        "elpd_diff": -70.85747647285461
+      },
+      "note": "completed with target_transform=identity (structural)",
+      "predicted_seconds": 169.0,
+      "timeout_seconds_used": 1800.0,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "2d7917d1d69f",
+      "knobs": {
+        "discretize_observation": true,
+        "target_transform": "identity"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_165639_809840_75cf",
+      "wall_clock_seconds": 166.5038412809954,
+      "error": null,
+      "score": {
+        "z": -3.3327981415411596,
+        "elpd_diff": -15.301033973693848
+      },
+      "note": "completed with target_transform=identity (structural)",
+      "predicted_seconds": 169.2,
+      "timeout_seconds_used": 1800.0,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "0b17d1d16c1e",
+      "knobs": {
+        "likelihood_family": "normal"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_165935_938229_0afe",
+      "wall_clock_seconds": 1412.3443317319907,
+      "error": null,
+      "score": {
+        "z": -3.5588250864106197,
+        "elpd_diff": -71.75408029556274
+      },
+      "note": null,
+      "predicted_seconds": 1334.8,
+      "timeout_seconds_used": 4004.469409536745,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "dc8213aab69d",
+      "knobs": {
+        "likelihood_family": "skew_studentt"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_172429_376300_bfcf",
+      "wall_clock_seconds": 1565.3006822860043,
+      "error": null,
+      "score": {
+        "z": 1.3358048510089326,
+        "elpd_diff": 4.466362237930298
+      },
+      "note": null,
+      "predicted_seconds": 1362.7,
+      "timeout_seconds_used": 4088.213342928372,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "e09f383de387",
+      "knobs": {
+        "likelihood_family": "skew_normal"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_175212_113864_0ec6",
+      "wall_clock_seconds": 1597.2477575560042,
+      "error": null,
+      "score": {
+        "z": -4.767280191803084,
+        "elpd_diff": -49.98120832443237
+      },
+      "note": null,
+      "predicted_seconds": 1390.7,
+      "timeout_seconds_used": 4171.95727632,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "b89c4f80168b",
+      "knobs": {
+        "likelihood_family": "split_normal"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_182026_753461_7be4",
+      "wall_clock_seconds": 1594.775005435993,
+      "error": null,
+      "score": {
+        "z": -4.204838816879079,
+        "elpd_diff": -51.68471002578735
+      },
+      "note": null,
+      "predicted_seconds": 1392.2,
+      "timeout_seconds_used": 4176.731343934489,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "cec576dc4d1b",
+      "knobs": {
+        "likelihood_family": "mixture"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_184839_199789_440c",
+      "wall_clock_seconds": 1710.683841170001,
+      "error": null,
+      "score": {
+        "z": -1.7813431848009953,
+        "elpd_diff": -3.175243854522705
+      },
+      "note": null,
+      "predicted_seconds": 1393.8,
+      "timeout_seconds_used": 4181.505411548977,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "2fee043e3e62",
+      "knobs": {
+        "heteroscedastic_entity_obs": true
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_191903_281573_3f46",
+      "wall_clock_seconds": 1641.7577174990001,
+      "error": null,
+      "score": {
+        "z": 4.221346202890059,
+        "elpd_diff": 29.743746757507324
+      },
+      "note": null,
+      "predicted_seconds": 1420.5,
+      "timeout_seconds_used": 4261.519326140237,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "a784392cbf61",
+      "knobs": {
+        "learn_n_exponent": true,
+        "n_exponent_prior": "beta"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_194810_876713_93dc",
+      "wall_clock_seconds": 1531.9461583119992,
+      "error": null,
+      "score": {
+        "z": 0.26696817438260656,
+        "elpd_diff": 0.05513906478881836
+      },
+      "note": "paired with learn_n_exponent=True (inert alone)",
+      "predicted_seconds": 1447.2,
+      "timeout_seconds_used": 4341.5332407315,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "8b32b10449b2",
+      "knobs": {
+        "learn_n_exponent": true
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_201515_576123_0cef",
+      "wall_clock_seconds": 1615.8743961090076,
+      "error": null,
+      "score": {
+        "z": -0.3595484737567717,
+        "elpd_diff": -0.10194945335388184
+      },
+      "note": null,
+      "predicted_seconds": 1462.4,
+      "timeout_seconds_used": 4387.07681171325,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "6ab9cf3ec5d4",
+      "knobs": {
+        "latent_process": "ar1"
+      },
+      "stage": 1,
+      "status": "timeout",
+      "run_dir": null,
+      "wall_clock_seconds": 4432.952345195998,
+      "error": "arm exceeded timeout of 4432.620382695s and was killed",
+      "score": null,
+      "note": null,
+      "predicted_seconds": 1477.5,
+      "timeout_seconds_used": 4432.620382695,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "c842673de515",
+      "knobs": {
+        "sigma_obs_prior_type": "lognormal"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_220036_459014_be8b",
+      "wall_clock_seconds": 1519.4825849490007,
+      "error": null,
+      "score": {
+        "z": 0.6868741837046975,
+        "elpd_diff": 0.048258304595947266
+      },
+      "note": null,
+      "predicted_seconds": 1477.5,
+      "timeout_seconds_used": 4432.620382695,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "d68348ed63f3",
+      "knobs": {
+        "beta_prior_type": "horseshoe"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_222555_390552_8ff9",
+      "wall_clock_seconds": 566.7947891280055,
+      "error": null,
+      "score": {
+        "z": -0.5228831668782625,
+        "elpd_diff": -0.7924435138702393
+      },
+      "note": null,
+      "predicted_seconds": 1478.2,
+      "timeout_seconds_used": 4434.594323298039,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "273f7e3af972",
+      "knobs": {
+        "ar_center": "none"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_223522_243631_bb94",
+      "wall_clock_seconds": 1472.2654461300117,
+      "error": null,
+      "score": {
+        "z": 1.3837338426669468,
+        "elpd_diff": 0.08433413505554199
+      },
+      "note": null,
+      "predicted_seconds": 1477.5,
+      "timeout_seconds_used": 4432.620382695,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "469d69a08bf8",
+      "knobs": {
+        "ar_center": "artist_running"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_225954_575398_5707",
+      "wall_clock_seconds": 1459.6227582889842,
+      "error": null,
+      "score": {
+        "z": -0.571978875247022,
+        "elpd_diff": -1.763709545135498
+      },
+      "note": null,
+      "predicted_seconds": 1465.4,
+      "timeout_seconds_used": 4396.281305909975,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "265046debd89",
+      "knobs": {
+        "debut_prev_score_source": "dataset_stats"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/2026-07-09_232414_188245_b609",
+      "wall_clock_seconds": 1446.5044389420073,
+      "error": null,
+      "score": {
+        "z": 0.9380848198351162,
+        "elpd_diff": 0.056278228759765625
+      },
+      "note": null,
+      "predicted_seconds": 1453.3,
+      "timeout_seconds_used": 4359.94222912495,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "4402bafbd295",
+      "knobs": {
+        "errors_in_variables": true
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 0.40h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": null,
+      "predicted_seconds": 1457.9,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "a4b1fcc5199e",
+      "knobs": {
+        "propagate_rw_horizon": true
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 0.40h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": null,
+      "predicted_seconds": 1457.9,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "3de51516eed3",
+      "knobs": {
+        "entity_group_pooling": true
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 0.40h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": null,
+      "predicted_seconds": 1457.9,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "8093951d5c68",
+      "knobs": {
+        "entity_group_pooling": false
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 0.40h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": null,
+      "predicted_seconds": 1457.9,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "896034447afe",
+      "knobs": {
+        "gbm_offset": false
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 0.40h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": null,
+      "predicted_seconds": 1457.9,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "79853b4bcf64",
+      "knobs": {
+        "impute_missing": true
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 0.40h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": null,
+      "predicted_seconds": 1457.9,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "f529011c1271",
+      "knobs": {
+        "enable_genre": false
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 0.40h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": null,
+      "predicted_seconds": 1457.9,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "b214d6d112ed",
+      "knobs": {
+        "enable_artist": false
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 0.40h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": null,
+      "predicted_seconds": 1457.9,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "ede607263091",
+      "knobs": {
+        "enable_temporal": false
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 0.40h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": null,
+      "predicted_seconds": 1457.9,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "750f957a8c71",
+      "knobs": {},
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 1.60h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": "reference refit at rung 1",
+      "predicted_seconds": 5770.3,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 1
+    },
+    {
+      "arm_id": "2fee043e3e62",
+      "knobs": {
+        "heteroscedastic_entity_obs": true
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 1.60h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": "promoted from rung 0 (z=+4.22)",
+      "predicted_seconds": 5770.3,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 1
+    },
+    {
+      "arm_id": "273f7e3af972",
+      "knobs": {
+        "ar_center": "none"
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 1.60h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": "promoted from rung 0 (z=+1.38)",
+      "predicted_seconds": 5770.3,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 1
+    },
+    {
+      "arm_id": "dc8213aab69d",
+      "knobs": {
+        "likelihood_family": "skew_studentt"
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 1.60h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": "promoted from rung 0 (z=+1.34)",
+      "predicted_seconds": 5770.3,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 1
+    },
+    {
+      "arm_id": "265046debd89",
+      "knobs": {
+        "debut_prev_score_source": "dataset_stats"
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 1.60h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": "promoted from rung 0 (z=+0.94)",
+      "predicted_seconds": 5770.3,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 1
+    },
+    {
+      "arm_id": "c842673de515",
+      "knobs": {
+        "sigma_obs_prior_type": "lognormal"
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 1.60h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": "promoted from rung 0 (z=+0.69)",
+      "predicted_seconds": 5770.3,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 1
+    },
+    {
+      "arm_id": "a784392cbf61",
+      "knobs": {
+        "learn_n_exponent": true,
+        "n_exponent_prior": "beta"
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 1.60h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": "promoted from rung 0 (z=+0.27)",
+      "predicted_seconds": 5770.3,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 1
+    },
+    {
+      "arm_id": "8b32b10449b2",
+      "knobs": {
+        "learn_n_exponent": true
+      },
+      "stage": 1,
+      "status": "skipped_budget",
+      "run_dir": null,
+      "wall_clock_seconds": null,
+      "error": "predicted 1.60h exceeds remaining budget 0.37h",
+      "score": null,
+      "note": "promoted from rung 0 (z=-0.36)",
+      "predicted_seconds": 5770.3,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 1
+    }
+  ]
+}
