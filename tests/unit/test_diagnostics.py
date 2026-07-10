@@ -290,6 +290,55 @@ class TestCheckConvergenceCustomThresholds:
         assert {"alpha", "beta", "sigma"} <= set(diags.failing_params)
 
 
+class TestCheckConvergenceNaNDiagnostics:
+    """NaN r-hat/ESS must fail the gate for non-constant sites: pandas skips
+    NaN in max/min and NaN compares False in the threshold filters, so a
+    numerically blown-up parameter would otherwise pass the publication gate."""
+
+    def _idata_with(self, extra: dict) -> az.InferenceData:
+        idata = make_mock_idata(n_chains=4, n_draws=1000, param_names=["alpha", "beta"])
+        for name, values in extra.items():
+            idata.posterior[name] = xr.DataArray(values, dims=["chain", "draw"])
+        return idata
+
+    def test_all_nan_parameter_fails(self):
+        idata = self._idata_with({"blown_up": np.full((4, 1000), np.nan)})
+        diags = check_convergence(idata)
+        assert diags.passed is False
+        assert "blown_up" in diags.failing_params
+
+    def test_constant_deterministic_site_stays_exempt(self):
+        # e.g. beta_ceiling's effective_ceiling: every draw identical, so NaN
+        # diagnostics are legitimate and must not fail the fit.
+        idata = self._idata_with({"effective_ceiling": np.full((4, 1000), 95.5)})
+        diags = check_convergence(idata)
+        assert diags.passed is True
+        assert diags.failing_params == []
+
+    def test_nan_alongside_constant_still_fails(self):
+        idata = self._idata_with(
+            {
+                "effective_ceiling": np.full((4, 1000), 95.5),
+                "blown_up": np.full((4, 1000), np.nan),
+            }
+        )
+        diags = check_convergence(idata)
+        assert diags.passed is False
+        assert diags.failing_params == ["blown_up"]
+
+    def test_all_nan_ess_reports_zero_instead_of_raising(self):
+        posterior = xr.Dataset(
+            {"blown_up": xr.DataArray(np.full((4, 1000), np.nan), dims=["chain", "draw"])}
+        )
+        sample_stats = xr.Dataset(
+            {"diverging": xr.DataArray(np.zeros((4, 1000), dtype=bool), dims=["chain", "draw"])}
+        )
+        idata = az.InferenceData(posterior=posterior, sample_stats=sample_stats)
+        diags = check_convergence(idata)
+        assert diags.passed is False
+        assert diags.ess_bulk_min == 0
+
+
 class TestCheckConvergenceEdgeCases:
     """Tests for edge cases and error handling."""
 

@@ -187,19 +187,38 @@ def load_predictive_snapshot(run_dir: Path) -> dict[str, tuple[np.ndarray, np.nd
     return out
 
 
+def _final_rung(sweep_dir: Path, entries: list[dict]) -> int:
+    """Only final-rung fits carry report-grade evidence (#164) — mirror
+    run_select. The sweep config is authoritative; a ledger written without
+    one falls back to the highest rung any record reached."""
+    config_path = sweep_dir / "sweep_config.json"
+    if config_path.exists():
+        try:
+            rungs = json.loads(config_path.read_text(encoding="utf-8")).get("rungs")
+        except (OSError, ValueError, AttributeError):
+            rungs = None
+        if rungs:
+            return len(rungs) - 1
+    return max((int(e.get("rung") or 0) for e in entries), default=0)
+
+
 def load_stack_arms(sweep_dir: Path) -> tuple[list[StackArm], list[tuple[str, str]]]:
     """Ledger arms with usable elpd snapshots, plus (arm_id, reason) exclusions.
 
     The same "no substitute estimator" discipline as scoring.py: an arm
-    without a pointwise snapshot is excluded, never scored another way. Arms
-    whose obs dimension disagrees with the first admitted arm evaluated
-    different test rows and cannot be stacked with it.
+    without a pointwise snapshot is excluded, never scored another way.
+    Screening-rung records are excluded — a ladder sweep persists one record
+    per (arm, rung), and mixing screening-scale fits into the stack would
+    duplicate every promoted arm at low fidelity. Arms whose obs dimension
+    disagrees with the first admitted arm evaluated different test rows and
+    cannot be stacked with it.
     """
     sweep_dir = Path(sweep_dir)
     ledger_path = sweep_dir / "ledger.json"
     if not ledger_path.exists():
         raise FileNotFoundError(f"no ledger.json in {sweep_dir}")
     entries = json.loads(ledger_path.read_text(encoding="utf-8")).get("arms", [])
+    final_rung = _final_rung(sweep_dir, entries)
     arms: list[StackArm] = []
     excluded: list[tuple[str, str]] = []
     n_obs: int | None = None
@@ -209,6 +228,10 @@ def load_stack_arms(sweep_dir: Path) -> tuple[list[StackArm], list[tuple[str, st
         run_dir = entry.get("run_dir")
         if status != "completed" or not run_dir:
             excluded.append((aid, f"status {status}"))
+            continue
+        rung = int(entry.get("rung") or 0)
+        if rung != final_rung:
+            excluded.append((aid, f"screening rung {rung} (final is {final_rung})"))
             continue
         nc_path = Path(run_dir) / "evaluation" / "log_likelihood.nc"
         if not nc_path.exists():

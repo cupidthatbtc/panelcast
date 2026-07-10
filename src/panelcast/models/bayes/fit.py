@@ -17,7 +17,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
 
 import arviz as az
@@ -326,12 +326,27 @@ def _block_sizes(num_samples: int, block: int) -> list[int]:
 
 
 def _checkpoint_identity(config: MCMCConfig, run_args: dict) -> dict:
-    """What must match for a checkpoint to belong to this fit."""
+    """What must match for a checkpoint to belong to this fit.
+
+    Covers every model input, not just y/X: priors, likelihood knobs, and the
+    other arrays all define the posterior, and a resume that ignores them would
+    silently concatenate draws from two different models.
+    """
     import numpyro
 
     digest = hashlib.sha256()
-    digest.update(np.ascontiguousarray(np.asarray(run_args["y"])).tobytes())
-    digest.update(np.ascontiguousarray(np.asarray(run_args["X"])).tobytes())
+    scalars: dict[str, object] = {}
+    for key in sorted(run_args):
+        value = run_args[key]
+        if is_dataclass(value) and not isinstance(value, type):
+            scalars[key] = asdict(value)
+        elif hasattr(value, "__array__"):
+            arr = np.asarray(value)
+            digest.update(f"{key}:{arr.dtype}:{arr.shape}".encode())
+            digest.update(np.ascontiguousarray(arr).tobytes())
+        else:
+            scalars[key] = value
+    digest.update(json.dumps(scalars, sort_keys=True, default=str).encode())
     return {
         "config": config.to_dict(),
         "data_hash": digest.hexdigest()[:16],
