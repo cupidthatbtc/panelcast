@@ -123,3 +123,15 @@ class TestRunIdConfigKnob:
     def test_path_like_run_id_rejected(self, bad):
         with pytest.raises(ValueError, match="run_id"):
             PipelineConfig(run_id=bad)
+
+    def test_duplicate_run_id_hard_errors(self, tmp_path):
+        from panelcast.pipelines.orchestrator import PipelineError, PipelineOrchestrator
+
+        first = PipelineOrchestrator(
+            PipelineConfig(dry_run=True, run_id="sel_x_1"), output_base=tmp_path
+        )
+        first._setup_run()
+        with pytest.raises(PipelineError, match="unique"):
+            PipelineOrchestrator(
+                PipelineConfig(dry_run=True, run_id="sel_x_1"), output_base=tmp_path
+            )._setup_run()
