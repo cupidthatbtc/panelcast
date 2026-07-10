@@ -7,12 +7,15 @@ semantics of the cursor.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 import pytest
 
 import panelcast.models.bayes.fit as fit_mod
-from panelcast.models.bayes.fit import MCMCConfig, _block_sizes, fit_model
+from panelcast.models.bayes.fit import MCMCConfig, _block_sizes, _checkpoint_identity, fit_model
 from panelcast.models.bayes.model import make_score_model
+from panelcast.models.bayes.priors import priors_for_transform
 
 
 def _tiny_model_args(seed: int = 0) -> dict:
@@ -132,3 +135,53 @@ class TestCheckpointGuards:
     def test_checkpoint_requires_dir(self):
         with pytest.raises(ValueError, match="checkpoint_dir"):
             _fit(checkpoint_every=10, checkpoint_dir=None)
+
+
+class TestCheckpointIdentity:
+    """The identity must cover every model input, not just y/X: a resume that
+    ignores priors, likelihood knobs, or the other arrays would concatenate
+    draws from two different models."""
+
+    def _run_args(self, **overrides) -> dict:
+        args = {
+            **_tiny_model_args(),
+            "priors": priors_for_transform(),
+            "likelihood_df": 4.0,
+            "n_exponent": 0.0,
+            "learn_n_exponent": False,
+            "n_ref": None,
+            "target_bounds": (0.0, 100.0),
+        }
+        args.update(overrides)
+        return args
+
+    def test_same_inputs_same_identity(self):
+        config = MCMCConfig(num_samples=20, checkpoint_every_draws=10)
+        assert _checkpoint_identity(config, self._run_args()) == _checkpoint_identity(
+            config, self._run_args()
+        )
+
+    def test_non_yx_array_change_changes_identity(self):
+        config = MCMCConfig(num_samples=20, checkpoint_every_draws=10)
+        base = _checkpoint_identity(config, self._run_args())
+        shifted = self._run_args()
+        shifted["prev_score"] = shifted["prev_score"] + 20.0
+        assert _checkpoint_identity(config, shifted) != base
+
+    def test_scalar_arg_change_changes_identity(self):
+        config = MCMCConfig(num_samples=20, checkpoint_every_draws=10)
+        base = _checkpoint_identity(config, self._run_args())
+        assert _checkpoint_identity(config, self._run_args(likelihood_df=30.0)) != base
+
+    def test_priors_change_changes_identity(self):
+        config = MCMCConfig(num_samples=20, checkpoint_every_draws=10)
+        base = _checkpoint_identity(config, self._run_args())
+        loose = self._run_args(priors=priors_for_transform(sigma_obs_scale=99.0))
+        assert _checkpoint_identity(config, loose) != base
+
+    def test_identity_survives_json_round_trip(self):
+        # The cursor compares identities after a json round trip; a non-JSON-
+        # stable identity would refuse every legitimate resume.
+        config = MCMCConfig(num_samples=20, checkpoint_every_draws=10)
+        identity = _checkpoint_identity(config, self._run_args())
+        assert json.loads(json.dumps(identity)) == identity

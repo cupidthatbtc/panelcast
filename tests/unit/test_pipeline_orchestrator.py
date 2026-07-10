@@ -670,6 +670,15 @@ class TestResumeConfigRestoration:
         orch._restore_config_from_manifest()
         assert config.chain_method == "parallel"
 
+    def test_resume_restores_checkpoint_every_from_manifest(self):
+        """Resume adopts the manifest's checkpoint cadence instead of reverting to None."""
+        config = PipelineConfig(resume="some-run")
+        orch = PipelineOrchestrator(config)
+        assert config.checkpoint_every_draws is None  # CLI default
+        orch.manifest = MagicMock(flags={"checkpoint_every_draws": 250})
+        orch._restore_config_from_manifest()
+        assert config.checkpoint_every_draws == 250
+
     def test_seed_in_resume_config_keys(self):
         """The RNG seed governs the whole MCMC draw, so a resumed run must restore
         it rather than silently re-fit under the CLI default (#seed-resume)."""
@@ -1314,6 +1323,7 @@ class TestStageContextCreation:
             num_chains=8,
             n_exponent=0.3,
             enable_genre=False,
+            checkpoint_every_draws=200,
             warmup_export_path="outputs/select/x/warmup_reference.pkl",
             warmup_import_path="outputs/select/y/warmup_reference.pkl",
         )
@@ -1336,6 +1346,10 @@ class TestStageContextCreation:
         # (exactly the 0.8.0 bug the #138 GPU validation exposed).
         assert ctx.warmup_export_path == "outputs/select/x/warmup_reference.pkl"
         assert ctx.warmup_import_path == "outputs/select/y/warmup_reference.pkl"
+        # Same getattr pattern: a dropped checkpoint_every_draws silently turns
+        # a --checkpoint-every run into a single-shot fit with no resume point.
+        assert ctx.checkpoint_every_draws == 200
+        assert orchestrator.manifest.flags["checkpoint_every_draws"] == 200
 
 
 class TestCloseLogHandlers:

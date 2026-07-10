@@ -85,6 +85,9 @@ class StageContext:
     target_accept: float = 0.90
     max_tree_depth: int = 10
     chain_method: str = "sequential"
+    # Blocked-sampling checkpoint cadence; None = single-shot. train_bayes reads
+    # this via getattr, so a dropped field silently disables checkpointing.
+    checkpoint_every_draws: int | None = None
     # Convergence thresholds
     rhat_threshold: float = 1.01
     ess_threshold: int = 400

@@ -680,6 +680,7 @@ class PipelineOrchestrator:
                 "target_accept": self.config.target_accept,
                 "max_tree_depth": self.config.max_tree_depth,
                 "chain_method": self.config.chain_method,
+                "checkpoint_every_draws": self.config.checkpoint_every_draws,
                 # Convergence thresholds
                 "rhat_threshold": self.config.rhat_threshold,
                 "ess_threshold": self.config.ess_threshold,
@@ -1317,6 +1318,7 @@ class PipelineOrchestrator:
             target_accept=self.config.target_accept,
             max_tree_depth=self.config.max_tree_depth,
             chain_method=self.config.chain_method,
+            checkpoint_every_draws=self.config.checkpoint_every_draws,
             # Convergence thresholds
             rhat_threshold=self.config.rhat_threshold,
             ess_threshold=self.config.ess_threshold,

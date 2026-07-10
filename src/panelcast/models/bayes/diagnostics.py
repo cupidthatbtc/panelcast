@@ -152,14 +152,32 @@ def check_convergence(
     # Extract R-hat (max across all parameters)
     rhat_max = float(summary["r_hat"].max())
 
-    # Extract ESS (min across all parameters); ArviZ reports total ESS
-    ess_bulk_min = int(summary["ess_bulk"].min())
-    ess_tail_min = int(summary["ess_tail"].min())
+    # Extract ESS (min across all parameters); ArviZ reports total ESS.
+    # All-NaN columns would make int() raise; report 0 (the gate fails anyway).
+    ess_bulk_min = int(summary["ess_bulk"].min()) if summary["ess_bulk"].notna().any() else 0
+    ess_tail_min = int(summary["ess_tail"].min()) if summary["ess_tail"].notna().any() else 0
+
+    # NaN diagnostics must fail, not pass: pandas skips NaN in max/min and NaN
+    # compares False in the threshold filters, so a numerically blown-up
+    # parameter would otherwise sail through the gate. Sites whose draws are
+    # exactly constant (deterministics like beta_ceiling's effective_ceiling)
+    # legitimately yield NaN and stay exempt.
+    posterior = idata.posterior
+
+    def _constant_site(label: str) -> bool:
+        name = label.split("[")[0]
+        if name not in posterior:
+            return False
+        values = np.asarray(posterior[name].values)
+        return bool(np.all(values == values[:1, :1]))
+
+    nan_labels = summary.index[summary["r_hat"].isna() | summary["ess_bulk"].isna()]
+    nan_failing = [label for label in nan_labels if not _constant_site(label)]
 
     # Identify failing parameters
     failing_rhat = summary[summary["r_hat"] >= rhat_threshold].index.tolist()
     failing_ess = summary[summary["ess_bulk"] < ess_threshold].index.tolist()
-    failing_params = list(set(failing_rhat + failing_ess))
+    failing_params = list(set(failing_rhat + failing_ess + nan_failing))
 
     # Extract divergences from sample_stats
     if "diverging" in idata.sample_stats:
@@ -174,7 +192,7 @@ def check_convergence(
     ess_ok = ess_bulk_min >= ess_threshold
     divergences_ok = (divergences == 0) or allow_divergences
 
-    passed = rhat_ok and ess_ok and divergences_ok
+    passed = rhat_ok and ess_ok and divergences_ok and not nan_failing
 
     return ConvergenceDiagnostics(
         rhat_max=rhat_max,

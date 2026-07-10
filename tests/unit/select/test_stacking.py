@@ -166,6 +166,29 @@ def _make_sweep(tmp_path: Path, predictive: bool = True) -> Path:
     )
 
 
+def _make_ladder_sweep(tmp_path: Path) -> Path:
+    """A 2-rung ladder (#164): reference + one promoted arm, each with a
+    completed record per rung — screening records must never reach the stack."""
+    runs = tmp_path / "runs"
+    _write_run(runs / "ref_r0", elpd_value=-3.0, center=69.0)
+    _write_run(runs / "armb_r0", elpd_value=-2.5, center=72.0)
+    _write_run(runs / "ref_r1", elpd_value=-2.0, center=70.0)
+    _write_run(runs / "armb_r1", elpd_value=-1.5, center=71.0)
+    return _write_sweep(
+        tmp_path,
+        [
+            {"arm_id": "ref", "knobs": {}, "stage": 1, "status": "completed",
+             "run_dir": str(runs / "ref_r0"), "rung": 0},
+            {"arm_id": "armb", "knobs": {"target_transform": "logit"}, "stage": 1,
+             "status": "completed", "run_dir": str(runs / "armb_r0"), "rung": 0},
+            {"arm_id": "ref", "knobs": {}, "stage": 1, "status": "completed",
+             "run_dir": str(runs / "ref_r1"), "rung": 1},
+            {"arm_id": "armb", "knobs": {"target_transform": "logit"}, "stage": 1,
+             "status": "completed", "run_dir": str(runs / "armb_r1"), "rung": 1},
+        ],
+    )
+
+
 class TestLoadStackArms:
     def test_loads_completed_arms_and_excludes_the_rest(self, tmp_path):
         sweep_dir = _make_sweep(tmp_path)
@@ -201,6 +224,38 @@ class TestLoadStackArms:
         arms, excluded = load_stack_arms(sweep_dir)
         assert [a.arm_id for a in arms] == ["ref", "armb"]
         assert any(aid == "odd" and "differs" in reason for aid, reason in excluded)
+
+    def test_ladder_sweep_stacks_only_final_rung(self, tmp_path):
+        sweep_dir = _make_ladder_sweep(tmp_path)
+        arms, excluded = load_stack_arms(sweep_dir)
+        assert [a.arm_id for a in arms] == ["ref", "armb"]
+        assert {a.run_dir.name for a in arms} == {"ref_r1", "armb_r1"}
+        reasons = [reason for _, reason in excluded]
+        assert sum("screening rung 0" in r for r in reasons) == 2
+
+    def test_sweep_config_rungs_is_authoritative(self, tmp_path):
+        """An interrupted ladder with no completed final-rung records must not
+        silently fall back to stacking screening fits."""
+        sweep_dir = _make_ladder_sweep(tmp_path)
+        arms_json = [
+            e for e in json.loads((sweep_dir / "ledger.json").read_text())["arms"]
+            if e.get("rung", 0) == 0
+        ]
+        _write_sweep(tmp_path, arms_json)
+        (sweep_dir / "sweep_config.json").write_text(
+            json.dumps({"rungs": [{"num_samples": 500}, {"num_samples": 1000}]}),
+            encoding="utf-8",
+        )
+        arms, excluded = load_stack_arms(sweep_dir)
+        assert arms == []
+        assert all("screening rung 0 (final is 1)" in reason for _, reason in excluded)
+
+    def test_malformed_sweep_config_falls_back_to_ledger_rungs(self, tmp_path):
+        sweep_dir = _make_ladder_sweep(tmp_path)
+        (sweep_dir / "sweep_config.json").write_text("{not json", encoding="utf-8")
+        arms, _ = load_stack_arms(sweep_dir)
+        assert [a.arm_id for a in arms] == ["ref", "armb"]
+        assert {a.run_dir.name for a in arms} == {"ref_r1", "armb_r1"}
 
     def test_missing_ledger_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
@@ -289,6 +344,15 @@ class TestRunStack:
         labels = set(payload["splits"]["secondary"])
         assert "champion (reference)" in labels
         assert "reference (reference)" not in labels
+
+    def test_ladder_sweep_has_single_reference_row(self, tmp_path):
+        """Rung-blind loading listed the reference once per rung and split its
+        weight across screening-scale duplicates of the same model."""
+        sweep_dir = _make_ladder_sweep(tmp_path)
+        result = run_stack(sweep_dir)
+        assert result["n_arms_stacked"] == 2
+        report = (sweep_dir / "stacking.md").read_text(encoding="utf-8")
+        assert report.count("| reference |") == 1
 
     def test_fewer_than_two_arms_raises(self, tmp_path):
         run_dir = tmp_path / "runs" / "only"
