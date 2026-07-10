@@ -4,6 +4,76 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] — 2026-07-10
+
+Sweep throughput at scale. Stage 1 learns to screen cheap and spend deep,
+arms share the GPU under admission control, and a whole-codebase preflight
+audit hardened the release — including fixing crash-protection that had
+been silently broken. Together this is the enabler for full-corpus
+selection (#15).
+
+### Added
+
+- **Successive-halving rung ladder for select stage 1** (#164): every OFAT
+  arm screens at a cheap pre-registered sampler scale (2×500 for the shipped
+  standard/thorough tiers), the top keep-fraction by paired-ELPD z plus
+  near-threshold margin rescues promotes to the full scale, and only
+  final-rung fits feed the ranking and verdicts. Screening evidence lives in
+  a clearly-labeled appendix and never mixes into promotion decisions —
+  validated on GPU under budget exhaustion: an arm that screened at z +4.22
+  whose final-rung fit never ran produced no promotion claim
+  (`.audit/select_aoty_012/`). Ledger v2 with rung-suffixed keys; v1 ledgers
+  still load and resume. A ladder without `reference_first` is rejected at
+  config time.
+- **Parallel arm execution with GPU-memory admission control** (#167):
+  `select --parallel-arms N` runs each feature-signature bucket's tail
+  concurrently after its head builds the shared cache serially. Each arm's
+  fit is priced by the calibrated estimator, admitted against measured free
+  VRAM under a headroom budget (reservations held from admission to release;
+  the first reservation always admits so an oversized arm runs alone), and
+  its child JAX pool is capped to its own footprint. OOM under concurrency
+  kills-and-serializes instead of failing the sweep; a failed bucket head
+  serializes its tail rather than racing feature rebuilds. Default 1 is
+  byte-identical to the serial path (3-arg launch protocol preserved). GPU
+  validation: 1.65× fit-time overlap (39% wall-clock saving) at
+  `--parallel-arms 2` with zero OOM; `concurrent=N` telemetry keeps the
+  runtime predictor's serial history clean.
+- **Run-dir handshake** (#167 prerequisite): the select runner names every
+  arm's run directory up front (`PipelineConfig.run_id`), so attribution
+  never depends on the mutable `latest` pointer; collisions are a hard
+  error, and per-child env overrides thread through `launch_arm`.
+
+### Fixed
+
+- **`--checkpoint-every` was silently inert end-to-end** (preflight audit,
+  red): validated, documented, and echoed into the manifest — but never
+  threaded into the training stage, so no long fit ever wrote a checkpoint.
+  Now threaded and restored on `--resume`.
+- **Checkpoint resume could splice two different posteriors**: the identity
+  hash covered only y/X and MCMC config; it now covers every model input
+  array plus priors and scalar settings, so any config change after a crash
+  refuses loudly instead of concatenating draws from different models.
+- **The convergence gate passed NaN fits**: an all-NaN parameter skipped the
+  R-hat/ESS reductions, letting a numerically blown-up fit publish as
+  passed. NaN diagnostics now fail (with an exemption for legitimately
+  constant deterministic sites), and the all-NaN ESS crash is gone.
+- **`panelcast stack` was rung-blind**: on ladder sweeps it stacked
+  screening-scale fits and duplicates of every promoted arm; it now uses
+  final-rung records only, mirroring the report's discipline.
+- **`--max-fits` was not enforced inside a concurrent bucket tail** (release
+  audit; reproduced at 8× overrun): submission now reserves a slot per
+  queued arm, so the consented cap binds exactly under `--parallel-arms`.
+- A ladder whose rung reference fails now stops instead of spending the
+  whole screening budget on unscoreable fits; concurrent per-arm scoring is
+  serialized so netCDF thread-safety no longer depends on the installed
+  HDF5 build.
+
+### Changed
+
+- The whole-codebase preflight audit report is committed at
+  `.audit/preflight_audit_2026-07-09.md`; the remaining non-blocking
+  findings are tracked as the hardening backlog in #230.
+
 ## [0.11.0] — 2026-07-09
 
 Statistical headroom. The sweep learns to ensemble instead of just select,

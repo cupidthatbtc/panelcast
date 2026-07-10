@@ -1,0 +1,164 @@
+{
+  "version": 2,
+  "arms": [
+    {
+      "arm_id": "750f957a8c71",
+      "knobs": {},
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/sel_aoty-012-parallel_750f957a8c71_20260709T235038026370",
+      "wall_clock_seconds": 1498.2740972960019,
+      "error": null,
+      "score": {
+        "z": 0.0,
+        "elpd_diff": 0.0
+      },
+      "note": "reference (shipped defaults)",
+      "predicted_seconds": 1457.9,
+      "timeout_seconds_used": 4373.7247987255605,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "174a04916d12",
+      "knobs": {
+        "target_transform": "identity"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/sel_aoty-012-parallel_174a04916d12_20260710T001536696085",
+      "wall_clock_seconds": 181.0276940310141,
+      "error": null,
+      "score": {
+        "z": -3.3012332201480925,
+        "elpd_diff": -15.048008680343628
+      },
+      "note": null,
+      "predicted_seconds": 172.8,
+      "timeout_seconds_used": 1800.0,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "f1624dcf2f63",
+      "knobs": {
+        "likelihood_family": "beta",
+        "target_transform": "identity"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/sel_aoty-012-parallel_f1624dcf2f63_20260710T001837786746",
+      "wall_clock_seconds": 314.981015576981,
+      "error": null,
+      "score": {
+        "z": -3.625344320169348,
+        "elpd_diff": -85.0615439414978
+      },
+      "note": "completed with target_transform=identity (structural)",
+      "predicted_seconds": 168.9,
+      "timeout_seconds_used": 1800.0,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "c1dc39413e6c",
+      "knobs": {
+        "likelihood_family": "beta_binomial",
+        "target_transform": "identity"
+      },
+      "stage": 1,
+      "status": "failed",
+      "run_dir": null,
+      "wall_clock_seconds": 415.3888036389835,
+      "error": "                                         \u001b[34m\u2502\u001b[0m \u001b[31m\u2502\u001b[0m\n\u001b[31m\u2502\u001b[0m \u001b[34m\u2502\u001b[0m                 \u001b[2;32m\u2502   \u001b[0m\u001b[33mdepends_on\u001b[0m=\u001b[1m[\u001b[0m\u001b[32m'train'\u001b[0m\u001b[1m]\u001b[0m                                 \u001b[34m\u2502\u001b[0m \u001b[31m\u2502\u001b[0m\n\u001b[31m\u2502\u001b[0m \u001b[34m\u2502\u001b[0m                 \u001b[1m)\u001b[0m                                                        \u001b[34m\u2502\u001b[0m \u001b[31m\u2502\u001b[0m\n\u001b[31m\u2502\u001b[0m \u001b[34m\u2502\u001b[0m \u001b[3;33mstage_started\u001b[0m\u001b[31m =\u001b[0m \u001b[1;36m1783657513.54211\u001b[0m                                         \u001b[34m\u2502\u001b[0m \u001b[31m\u2502\u001b[0m\n\u001b[31m\u2502\u001b[0m \u001b[34m\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\u001b[0m \u001b[31m\u2502\u001b[0m\n\u001b[31m\u2570\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u256f\u001b[0m\n\u001b[1;91mPipelineError: \u001b[0m\u001b[1m[\u001b[0mevaluate\u001b[1m]\u001b[0m beta_binomial cold-start prediction requires \nn_reviews_new \u001b[1m(\u001b[0mthe new event's aggregation count\u001b[1m)\u001b[0m; none was provided.\n\n\u001b[2m2026-07-10T04:25:31.825253Z\u001b[0m [\u001b[32m\u001b[1minfo     \u001b[0m] \u001b[1mrun_moved_to_failed           \u001b[0m \u001b[36mpath\u001b[0m=\u001b[35moutputs/failed/sel_aoty-012-parallel_c1dc39413e6c_20260710T001837787827\u001b[0m\n\nevaluate failed: PipelineError:  beta_binomial cold-start prediction requires \nn_reviews_new (the new event's aggregation count); none was provided.\nrun moved to: \noutputs/failed/sel_aoty-012-parallel_c1dc39413e6c_20260710T001837787827\nresume with:  panelcast run --resume \nsel_aoty-012-parallel_c1dc39413e6c_20260710T001837787827\ndetails:      panelcast runs why \nsel_aoty-012-parallel_c1dc39413e6c_20260710T001837787827\n",
+      "score": null,
+      "note": "completed with target_transform=identity (structural)",
+      "predicted_seconds": 168.9,
+      "timeout_seconds_used": 1800.0,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "4496e6225c0f",
+      "knobs": {
+        "likelihood_family": "beta_ceiling",
+        "target_transform": "identity"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/sel_aoty-012-parallel_4496e6225c0f_20260710T002352841589",
+      "wall_clock_seconds": 330.97886765401927,
+      "error": null,
+      "score": {
+        "z": -3.5274950143291486,
+        "elpd_diff": -70.98268747329712
+      },
+      "note": "completed with target_transform=identity (structural)",
+      "predicted_seconds": 168.9,
+      "timeout_seconds_used": 1800.0,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "2d7917d1d69f",
+      "knobs": {
+        "discretize_observation": true,
+        "target_transform": "identity"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/sel_aoty-012-parallel_2d7917d1d69f_20260710T002533180150",
+      "wall_clock_seconds": 284.3704630630091,
+      "error": null,
+      "score": {
+        "z": -3.3507050172511788,
+        "elpd_diff": -15.364182472229004
+      },
+      "note": "completed with target_transform=identity (structural)",
+      "predicted_seconds": 168.9,
+      "timeout_seconds_used": 1800.0,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "0b17d1d16c1e",
+      "knobs": {
+        "likelihood_family": "normal"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/sel_aoty-012-parallel_0b17d1d16c1e_20260710T002923896089",
+      "wall_clock_seconds": 2583.708912328002,
+      "error": null,
+      "score": {
+        "z": -3.602066541111606,
+        "elpd_diff": -72.36466264724731
+      },
+      "note": null,
+      "predicted_seconds": 1453.3,
+      "timeout_seconds_used": 4359.94222912495,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "dc8213aab69d",
+      "knobs": {
+        "likelihood_family": "skew_studentt"
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/sel_aoty-012-parallel_dc8213aab69d_20260710T003017620355",
+      "wall_clock_seconds": 2605.291270599002,
+      "error": null,
+      "score": {
+        "z": 1.2793839522911628,
+        "elpd_diff": 4.270601511001587
+      },
+      "note": null,
+      "predicted_seconds": 1453.3,
+      "timeout_seconds_used": 4359.94222912495,
+      "warm_started": null,
+      "rung": 0
+    }
+  ]
+}
