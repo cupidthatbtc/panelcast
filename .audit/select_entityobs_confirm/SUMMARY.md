@@ -17,7 +17,7 @@ Reference `750f957a8c71` = shipped default (paired diff identically zero).
 | 42 | +29.77 | 7.00 | +4.254 | **+0.0300153** | +0.0178 | 2 | PASS (1.00 / 1119 / 0) |
 | 43 | +29.79 | 7.01 | +4.246 | +0.0284839 | +0.0194 | 2 | PASS (1.00 / 1235 / 0) |
 | 44 | +29.81 | 7.01 | +4.251 | **+0.0300153** | +0.0178 | 2 | PASS (1.00 / 1383 / 0) |
-| ref | 0.00 | 0.00 | 0.00 | +0.0530 | +0.0132 | 4 | PASS (1.00 / 3085 / 0) |
+| ref (s42) | 0.00 | 0.00 | 0.00 | +0.0530 | +0.0132 | 4 | PASS (1.00 / 3085 / 0) |
 
 **Headline vs the shipped default:** ELPD **+29.8 ± 7.0** (z +4.25), a clean
 distributional + calibration win. Point accuracy is a wash — MAE 5.276 vs 5.300,

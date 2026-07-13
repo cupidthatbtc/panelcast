@@ -163,7 +163,7 @@ pre-registered confirmation (5000+5000, seeds 42/43/44). Arm = shipped default
 | 42 | +29.77 | +4.254 | **+0.0300153** | +0.0178 | 2 | PASS |
 | 43 | +29.79 | +4.246 | +0.0284839 | +0.0194 | 2 | PASS |
 | 44 | +29.81 | +4.251 | **+0.0300153** | +0.0178 | 2 | PASS |
-| ref | 0.00 | 0.00 | +0.0530 | +0.0132 | 4 | PASS |
+| ref (s42) | 0.00 | 0.00 | +0.0530 | +0.0132 | 4 | PASS |
 
 Held-out ELPD **+29.8 ± 7.0** (z +4.25); point accuracy a wash (MAE 5.276 vs
 5.300, RMSE 7.672 vs 7.649). The win is distributional + calibration, and — unlike
