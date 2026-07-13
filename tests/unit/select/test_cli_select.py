@@ -18,6 +18,8 @@ class TestDryRun:
         result = runner.invoke(app, ["select", "--dry-run", "--config", CONFIG])
         assert result.exit_code == 0
         out = result.stdout
+        # Pins the 0.12.1 default flip: no --arm-timeout means auto, not 1800.
+        assert "per-arm timeout: auto" in out
         # The frozen options must appear — proof they are re-tried, not pruned.
         assert "ar1" in out
         assert "beta_ceiling" in out

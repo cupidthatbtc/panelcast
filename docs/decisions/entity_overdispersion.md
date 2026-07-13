@@ -10,6 +10,14 @@ trade — better 95% coverage, worse LOO). Physics control bake-off still pendin
 (confirm no regression). The gates remain in the codebase, default-off and
 reversible, for a future calibration-priority adoption or domain.
 
+**Update (2026-07-13, AOTY):** the `panelcast select` rung ladder later surfaced
+C1 (`heteroscedastic_entity_obs`) as the strongest candidate the project has
+produced on *any* domain — a clean dual win on AOTY (ELPD **+29.8 ± 7.0**, resolves
+the q10/q90 PPC pins), three-seed confirmed but **held** on a 1.5e-5 80%-coverage
+miss and deferred to the full-corpus run (#15). Still nothing adopted, still
+bit-identical. Details in the AOTY results section below; evidence in
+`.audit/select_entityobs_confirm/`.
+
 ## Why this experiment exists
 
 Two real fits failed their diagnostics under the published model:
@@ -141,6 +149,43 @@ unambiguous regardless of sample count.)
 | c2_lognormal | | | | |
 | c1c2 | | | | |
 
+### AOTY (2026-07-13): strongest candidate to date, held
+
+Different apparatus from the cross-domain bake-off above. C1 was **never in that
+bake-off** — it surfaced from the 0.12 `panelcast select` rung ladder, which
+screened `heteroscedastic_entity_obs` at z +4.22 over the shipped AOTY default.
+The signal replicated at four sampler scales, then cleared a full three-seed
+pre-registered confirmation (5000+5000, seeds 42/43/44). Arm = shipped default
+**+** the gate; reference = shipped default (paired diff identically zero).
+
+| seed | ELPD Δ | z | cov80 Δ | cov95 Δ | PPC pins | conv |
+|---|---:|---:|---:|---:|:--:|:--|
+| 42 | +29.77 | +4.254 | **+0.0300153** | +0.0178 | 2 | PASS |
+| 43 | +29.79 | +4.246 | +0.0284839 | +0.0194 | 2 | PASS |
+| 44 | +29.81 | +4.251 | **+0.0300153** | +0.0178 | 2 | PASS |
+| ref (s42) | 0.00 | 0.00 | +0.0530 | +0.0132 | 4 | PASS |
+
+Held-out ELPD **+29.8 ± 7.0** (z +4.25); point accuracy a wash (MAE 5.276 vs
+5.300, RMSE 7.672 vs 7.649). The win is distributional + calibration, and — unlike
+every other domain — it **resolves two of the four structural PPC pins**: the
+reference stays pinned on `skewness, max, q10, q90`, the arm on `skewness, max`
+only, clearing **q10 and q90**. That is the first movement on the bounded-skew
+tail misfit that six likelihood families never touched.
+
+**Verdict: HELD, deferred to full corpus (#15).** The pre-registered 80% coverage
+tolerance is |cov80 Δ| ≤ 0.03; on 2 of 3 seeds the arm lands at 0.0300153 — over
+by **1.53e-5**, one album out of 653 (coverage is quantized at 1/653 ≈ 1.53e-3, so
+the 0.03 threshold sits between 541/653 and 542/653 and the subset cannot resolve
+which side is true). `panelcast select`'s renderer holds it; consistent with the
+0.11/0.12 freeze discipline we **do not promote on an overridden pre-registration.**
+0.12.1 adopts nothing — the AOTY default keeps the gate off, all numbers stay
+bit-identical, and promotion is gated on #15 where n ≫ 653 resolves the coverage
+grid. Evidence: `.audit/select_entityobs_confirm/`.
+
+The finding itself is that **the same gate earns opposite verdicts per domain**:
+a clean dual win on AOTY, a calibration-vs-sharpness reject on IMDb, a deeper-
+than-reach reject on econ. The IMDb and econ rows below stand unchanged.
+
 ## Per-domain verdict
 
 - **IMDb episodes:** **REJECT under the locked LOO gate (robust).** Confirmed on
@@ -157,6 +202,11 @@ unambiguous regardless of sample count.)
   cross-field verdict stays inconclusive.
 - **Physics:** default-off retained (control); bake-off pending to confirm no
   regression.
+- **AOTY:** **HELD** — strongest candidate to date (select-ladder discovery,
+  three-seed confirmed: ELPD +29.8 ± 7.0, resolves the q10/q90 PPC pins), but the
+  80% coverage tolerance misses by 1.53e-5 on 2 of 3 seeds. Default-off retained;
+  promotion deferred to the full-corpus run (#15). Nothing adopted, numbers
+  bit-identical.
 
 ## Parity guarantee
 

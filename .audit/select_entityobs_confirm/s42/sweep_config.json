@@ -1,0 +1,29 @@
+{
+  "sweep_id": "aoty-entityobs-s42",
+  "dataset": null,
+  "output_root": "outputs/select",
+  "reference_first": true,
+  "max_fits": null,
+  "budget_hours": null,
+  "include_stage2": false,
+  "stage3_fits": 0,
+  "winner_z": 2.0,
+  "num_chains": 4,
+  "num_samples": 5000,
+  "num_warmup": 5000,
+  "rungs": null,
+  "screen_margin": 0.5,
+  "pipeline_output_base": "outputs",
+  "parallel_arms": 1,
+  "admission_headroom": 0.8,
+  "extra_config": {
+    "seed": 42,
+    "checkpoint_every": 1000
+  },
+  "panelcast_bin": "panelcast",
+  "arm_timeout_seconds": null,
+  "arm_timeout_multiplier": 3.0,
+  "arm_timeout_floor_seconds": 1800.0,
+  "warmup_transfer": false,
+  "warmup_transfer_num_warmup": 200
+}

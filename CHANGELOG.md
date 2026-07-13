@@ -4,6 +4,43 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] — 2026-07-13
+
+Sweep-default hardening plus a documented model candidate. The one behavioral
+change flips the `select` per-arm timeout to `auto`; the rest is committed
+evidence and documentation for the strongest promotion candidate the project
+has produced, held short of promotion by the freeze discipline. No model
+outputs change — every published number stays bit-identical.
+
+### Changed
+
+- **`panelcast select --arm-timeout` now defaults to `auto`** (was `1800`;
+  closes #138): each arm's wall-clock timeout is sized from its predicted
+  runtime — the max of the 1800 s floor and 3× the transform-aware prediction —
+  instead of a flat 1800 s that structurally killed the offset_logit-retaining
+  arms. Across this cycle's ~50 auto-sized fits (the 0.11 bake-off, ladder e2e,
+  parallel arms, and the entity-obs confirmation) every such arm completed or
+  screened, and the only kills were policy-correct: a pathological family at the
+  floor, and one 3×-prediction miss. That is the re-sweep evidence #138 required
+  before flipping. `auto` was already first-class downstream; explicit numeric
+  timeouts are unchanged.
+
+### Notes
+
+- **`heteroscedastic_entity_obs` documented as the leading promotion candidate,
+  held for full-corpus confirmation.** Surfaced by the 0.12 select rung ladder
+  (it was never in the original cross-domain model-v2 bake-off), the gate
+  replicated at four sampler scales and cleared a three-seed pre-registered
+  confirmation on AOTY: held-out ELPD **+29.8 ± 7.0** (z +4.25), and it resolves
+  two of the four structural PPC pins — clearing q10 and q90, the first movement
+  on the bounded-skew misfit that six likelihood families never touched. Point
+  accuracy is a wash. It is **not promoted**: the 80% coverage tolerance misses
+  by 1.53e-5 (one album out of 653) on 2 of 3 seeds, below what the subset can
+  resolve, so promotion is deferred to the full-corpus run (#15). The AOTY
+  default keeps the gate off and every number stays bit-identical. Evidence in
+  `.audit/select_entityobs_confirm/`; rationale in
+  `docs/decisions/entity_overdispersion.md`.
+
 ## [0.12.0] — 2026-07-10
 
 Sweep throughput at scale. Stage 1 learns to screen cheap and spend deep,

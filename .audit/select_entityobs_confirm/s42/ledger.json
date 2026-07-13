@@ -1,0 +1,43 @@
+{
+  "version": 2,
+  "arms": [
+    {
+      "arm_id": "750f957a8c71",
+      "knobs": {},
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/sel_aoty-entityobs-s42_750f957a8c71_20260711T061249536771",
+      "wall_clock_seconds": 25010.32985047801,
+      "error": null,
+      "score": {
+        "z": 0.0,
+        "elpd_diff": 0.0
+      },
+      "note": "reference (shipped defaults)",
+      "predicted_seconds": null,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    },
+    {
+      "arm_id": "2fee043e3e62",
+      "knobs": {
+        "heteroscedastic_entity_obs": true
+      },
+      "stage": 1,
+      "status": "completed",
+      "run_dir": "outputs/sel_aoty-entityobs-s42_2fee043e3e62_20260711T132510220130",
+      "wall_clock_seconds": 28648.274770075048,
+      "error": null,
+      "score": {
+        "z": 4.253706968718716,
+        "elpd_diff": 29.769975900650024
+      },
+      "note": "entity-obs publication-scale confirmation, stage A",
+      "predicted_seconds": null,
+      "timeout_seconds_used": null,
+      "warm_started": null,
+      "rung": 0
+    }
+  ]
+}

@@ -62,7 +62,7 @@ Observation noise
 - `n_exponent_prior`: `logit-normal` | `beta`
 - `n_exponent_alpha`, `n_exponent_beta`: float (legacy beta-prior parameters)
 - `sigma_obs_prior_type`: `halfnormal` | `lognormal`
-- `heteroscedastic_entity_obs`: bool (default false)
+- `heteroscedastic_entity_obs`: bool (default false; per-entity multiplicative noise — leading promotion candidate held for full-corpus confirmation, see [`decisions/entity_overdispersion.md`](decisions/entity_overdispersion.md))
 - `tau_entity_scale`: float (default 0.25)
 
 Likelihood and model gates

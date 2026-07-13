@@ -41,7 +41,7 @@ def select(
         help="GPU-hour budget; arms that don't fit the remaining budget are skipped (retryable).",
     ),
     arm_timeout: str = typer.Option(
-        "1800",
+        "auto",
         "--arm-timeout",
         help=(
             "Per-arm wall-clock timeout in seconds, or 'auto' to size each "
