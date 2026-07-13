@@ -432,7 +432,7 @@ panelcast select [OPTIONS]
 | `--effort` | `standard` | Effort tier: `quick` (screen), `standard`, `thorough` (+random +publication) |
 | `--max-fits` | tier-defined | Hard cap on diagnostic fits (overrides the tier) |
 | `--budget-hours` | | GPU-hour budget; stages truncate in priority order |
-| `--arm-timeout` | `1800` | Per-arm wall-clock timeout in seconds, or `auto` to size each arm's timeout from its predicted runtime (max of an 1800s floor and 3x the transform-aware prediction); a fit exceeding it is killed and marked failed |
+| `--arm-timeout` | `auto` | Per-arm wall-clock timeout in seconds, or `auto` to size each arm's timeout from its predicted runtime (max of an 1800s floor and 3x the transform-aware prediction); a fit exceeding it is killed and marked failed |
 | `--warmup-transfer` | `false` | The reference arm exports its adapted warmup state (mass matrix); screening arms whose model signature matches exactly re-import it and run at reduced warmup. Confirmation fits always run cold |
 | `--sweep-id` | `sweep` | Sweep directory name under `outputs/select/` (enables resume) |
 | `--config` | `configs/select.yaml` | YAML with the rules and effort tiers |

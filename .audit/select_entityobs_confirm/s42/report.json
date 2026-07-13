@@ -1,0 +1,66 @@
+{
+  "title": "panelcast \u2014 entity-obs publication-scale confirmation (stage A)",
+  "reference": "shipped defaults (reference arm)",
+  "arms": [
+    {
+      "arm": "2fee043e3e62",
+      "knobs": {
+        "heteroscedastic_entity_obs": true
+      },
+      "elpd_diff": 29.769975900650024,
+      "elpd_dse": 6.9985958411275355,
+      "elpd_z": 4.253706968718716,
+      "pit_dev": 0.029555895865237367,
+      "cov80": 0.8300153139356815,
+      "cov80_delta": 0.030015313935681465,
+      "cov95": 0.9678407350689127,
+      "cov95_delta": 0.017840735068912705,
+      "ppc_pinned": 2,
+      "ppc_pinned_names": [
+        "skewness",
+        "max"
+      ],
+      "converged": true,
+      "rhat_max": 1.0,
+      "ess_bulk_min": 1119.0,
+      "divergences": 0,
+      "wall_clock_seconds": 28517.40052308602,
+      "expected_gb": 9.177,
+      "actual_peak_gb": 7.589,
+      "resource_ratio": 0.827,
+      "notes": []
+    },
+    {
+      "arm": "750f957a8c71",
+      "knobs": {},
+      "elpd_diff": 0.0,
+      "elpd_dse": 0.0,
+      "elpd_z": 0.0,
+      "pit_dev": 0.03415007656967842,
+      "cov80": 0.8529862174578867,
+      "cov80_delta": 0.052986217457886675,
+      "cov95": 0.9632465543644717,
+      "cov95_delta": 0.013246554364471752,
+      "ppc_pinned": 4,
+      "ppc_pinned_names": [
+        "skewness",
+        "max",
+        "q10",
+        "q90"
+      ],
+      "converged": true,
+      "rhat_max": 1.0,
+      "ess_bulk_min": 3085.0,
+      "divergences": 0,
+      "wall_clock_seconds": 24886.935056950984,
+      "expected_gb": 9.177,
+      "actual_peak_gb": 7.393,
+      "resource_ratio": 0.806,
+      "notes": [
+        "paired diff identically zero (arm matches the reference)"
+      ]
+    }
+  ],
+  "verdict": "**Verdict:** 2fee043e3e62 leads: +29.8 +/- 7.0 held-out ELPD (z +4.25) vs shipped defaults (reference arm).",
+  "baseline_floor": null
+}
