@@ -374,7 +374,8 @@ def arm_conflicts(
     by_name = {knob.name: knob for knob in KNOBS}
 
     conflicts = [f"unknown knob: {name}" for name in arm if name not in by_name]
-    merged = {**default_arm(), **{k: v for k, v in arm.items() if k in by_name}}
+    base = default_arm()
+    merged = {**base, **{k: v for k, v in arm.items() if k in by_name}}
 
     for name, value in merged.items():
         knob = by_name[name]
@@ -404,9 +405,11 @@ def arm_conflicts(
         if not spec.uses_sigma:
             # Sigma-side knobs are inert for families that never read sigma;
             # such arms would score identically to the base arm while labeled
-            # as different models.
+            # as different models. Only an arm that MOVES one off its default
+            # is mislabeled that way — if a knob is inert at its default value,
+            # every arm for this family inherits it and none of them conflict.
             for knob_name in ("learn_n_exponent", "heteroscedastic_entity_obs"):
-                if merged[knob_name]:
+                if merged[knob_name] != base[knob_name]:
                     conflicts.append(
                         f"{knob_name} has no effect with likelihood_family='{family}' "
                         "(the family ignores sigma)"

@@ -1128,6 +1128,39 @@ class TestPipelineConfigValidation:
     def test_sigma_knobs_still_valid_for_sigma_using_families(self):
         config = PipelineConfig(likelihood_family="studentt", learn_n_exponent=True)
         assert config.learn_n_exponent is True
+
+    def test_sigma_knob_at_its_default_does_not_block_a_beta_family(self, monkeypatch):
+        """A promoted-on sigma knob must not make the Beta families
+        unconstructible: inheriting a default is not a request to use it."""
+        from panelcast.pipelines import orchestrator as orch
+
+        flipped = dict(orch._field_defaults())
+        flipped["heteroscedastic_entity_obs"] = True
+        monkeypatch.setattr(orch, "_field_defaults", lambda: flipped)
+
+        config = PipelineConfig(
+            likelihood_family="beta",
+            target_transform="identity",
+            heteroscedastic_entity_obs=True,
+        )
+        assert config.likelihood_family == "beta"
+
+    def test_sigma_knob_moved_off_a_flipped_default_still_raises(self, monkeypatch):
+        import pytest
+
+        from panelcast.pipelines import orchestrator as orch
+
+        flipped = dict(orch._field_defaults())
+        flipped["heteroscedastic_entity_obs"] = True
+        monkeypatch.setattr(orch, "_field_defaults", lambda: flipped)
+
+        with pytest.raises(ValueError, match="learn_n_exponent"):
+            PipelineConfig(
+                likelihood_family="beta",
+                target_transform="identity",
+                heteroscedastic_entity_obs=True,
+                learn_n_exponent=True,
+            )
         config = PipelineConfig(likelihood_family="normal", heteroscedastic_entity_obs=True)
         assert config.heteroscedastic_entity_obs is True
 

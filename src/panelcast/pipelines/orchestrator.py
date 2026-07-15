@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from dataclasses import fields as dataclass_fields
 from dataclasses import replace as dataclass_replace
 from datetime import datetime
 from pathlib import Path
@@ -95,6 +96,14 @@ def _reset_default_config() -> None:
     """Reset cached default config (for testing only)."""
     global _DEFAULT_CONFIG
     _DEFAULT_CONFIG = None
+
+
+def _field_defaults() -> dict[str, Any]:
+    """Shipped defaults, read off the fields rather than an instance.
+
+    `__post_init__` needs these, and `_get_default_config()` would re-enter it.
+    """
+    return {f.name: f.default for f in dataclass_fields(PipelineConfig)}
 
 
 @dataclass
@@ -409,14 +418,20 @@ class PipelineConfig:
                 "the bounded likelihood assumes mu is on the score scale."
             )
         if not spec.uses_sigma:
+            # Fire only on knobs moved OFF their shipped default: the point is to
+            # catch a request the family would silently ignore, and inheriting a
+            # default is not a request. Comparing to the default rather than to
+            # truthiness keeps that true if one of these is ever promoted on —
+            # the model already no-ops them here (model.py, family_uses_sigma).
+            defaults = _field_defaults()
             inert = [
-                knob
-                for knob, enabled in (
+                name
+                for name, value in (
                     ("learn_n_exponent", self.learn_n_exponent),
                     ("heteroscedastic_entity_obs", self.heteroscedastic_entity_obs),
-                    ("n_exponent", self.n_exponent != 0.0),
+                    ("n_exponent", self.n_exponent),
                 )
-                if enabled
+                if value != defaults[name]
             ]
             if inert:
                 raise ValueError(
