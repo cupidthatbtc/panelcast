@@ -19,7 +19,7 @@ from typing import Any
 import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor, load_descriptor
-from panelcast.select.rules import DecisionRules, promotable, screenable
+from panelcast.select.rules import DecisionRules, promotable, reference_arm, screenable
 from panelcast.select.runner import STAGE2_MAX_WINNERS, SweepConfig, ofat_arms
 from panelcast.select.space import KNOBS, enumerate_space
 from panelcast.select.tiers import EffortTier
@@ -322,6 +322,7 @@ def run_select(
             )
         )
     ranked = rank_arms(scores)
+    reference = reference_arm(scores)
     verdicts = promotable(scores, rules)
 
     report_md, report_json = render_report(
@@ -380,7 +381,7 @@ def run_select(
     # confirmation. Convergence is enforced at the publication-scale confirmation
     # fits below; a single-seed z is one draw from the selection lottery.
     winner = max(
-        (s for s in scores if screenable(s, rules)),
+        (s for s in scores if screenable(s, rules, reference)),
         key=lambda s: s.elpd_z,
         default=None,
     )
@@ -471,9 +472,11 @@ def _render_not_evaluated(records) -> str:
 
 def _render_verdicts(verdicts, rules: DecisionRules) -> str:
     lines = ["## Promotion verdicts (pre-registered rules)", ""]
+    coverage_bar = f"coverage within ±{rules.coverage_tolerance:g} of nominal"
+    if rules.coverage_non_inferiority:
+        coverage_bar += " (or no further from it than the reference)"
     lines.append(
-        f"Bar: paired-ELPD z ≥ {rules.promote_z:g}, coverage within "
-        f"±{rules.coverage_tolerance:g}, convergence "
+        f"Bar: paired-ELPD z ≥ {rules.promote_z:g}, {coverage_bar}, convergence "
         f"{'required' if rules.require_convergence else 'not required'}. "
         "`select` recommends; a default flip is a manual PR."
     )

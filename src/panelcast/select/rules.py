@@ -32,6 +32,14 @@ class DecisionRules:
     # this of promote_z is promoted regardless of the keep fraction — never
     # drop a near-threshold arm on screening noise.
     screen_margin: float = 0.5
+    # Coverage non-inferiority (#236): an arm outside coverage_tolerance still
+    # clears the axis when it lands at least as close to nominal as the
+    # reference. The tolerance alone is an absolute bar the shipped default
+    # does not itself meet on AOTY (cov80 off nominal by +0.053), so applying
+    # it to challengers only would hold an arm for a miss the incumbent makes
+    # by more. The gate exists to block a calibration regression; an arm nearer
+    # nominal than what it replaces is not one.
+    coverage_non_inferiority: bool = True
 
     @classmethod
     def load(cls, path: Path | None = None) -> DecisionRules:
@@ -61,6 +69,7 @@ class DecisionRules:
             "require_convergence": bool,
             "confirmation_seeds": lambda v: tuple(int(s) for s in v),
             "screen_margin": float,
+            "coverage_non_inferiority": bool,
         }
         kwargs: dict[str, Any] = {}
         for key, cast in known.items():
@@ -78,11 +87,54 @@ class CandidateVerdict:
     reasons: list[str] = field(default_factory=list)
 
 
-def evaluate_candidate(score: ArmScore, rules: DecisionRules) -> CandidateVerdict:
+def _coverage_reasons(
+    score: ArmScore, rules: DecisionRules, reference: ArmScore | None
+) -> list[str]:
+    """Why each coverage axis fails the bar; empty when both clear it.
+
+    An axis clears on either the absolute tolerance or — when a reference is in
+    hand — non-inferiority to it. The two clauses are OR'd per axis, not
+    across axes: an arm may ride the tolerance at 95% and non-inferiority at
+    80%, but a regression past both on either axis still holds it.
+    """
+    reasons: list[str] = []
+    for label, delta, ref_delta in (
+        ("80%", score.cov80_delta, reference.cov80_delta if reference else None),
+        ("95%", score.cov95_delta, reference.cov95_delta if reference else None),
+    ):
+        if delta is None:
+            reasons.append(f"no {label} coverage evidence")
+            continue
+        if abs(delta) <= rules.coverage_tolerance:
+            continue
+        non_inferior = (
+            rules.coverage_non_inferiority
+            and ref_delta is not None
+            and abs(delta) <= abs(ref_delta)
+        )
+        if non_inferior:
+            continue
+        reason = (
+            f"{label} coverage off nominal by {delta:+.3f} "
+            f"(tolerance ±{rules.coverage_tolerance:.3f})"
+        )
+        if rules.coverage_non_inferiority and ref_delta is not None:
+            reason += f" and no closer than the reference's {ref_delta:+.3f}"
+        reasons.append(reason)
+    return reasons
+
+
+def evaluate_candidate(
+    score: ArmScore,
+    rules: DecisionRules,
+    reference: ArmScore | None = None,
+) -> CandidateVerdict:
     """Apply the pre-registered rules to one arm's scorecard.
 
     Absent evidence fails the bar — an arm without a paired-ELPD snapshot or
-    calibration numbers cannot be promoted, only re-run.
+    calibration numbers cannot be promoted, only re-run. ``reference`` is the
+    incumbent the arm would replace; without it the coverage axes fall back to
+    the absolute tolerance alone.
     """
     reasons: list[str] = []
 
@@ -94,14 +146,7 @@ def evaluate_candidate(score: ArmScore, rules: DecisionRules) -> CandidateVerdic
             f"threshold {rules.promote_z:+.2f}"
         )
 
-    for label, delta in (("80%", score.cov80_delta), ("95%", score.cov95_delta)):
-        if delta is None:
-            reasons.append(f"no {label} coverage evidence")
-        elif abs(delta) > rules.coverage_tolerance:
-            reasons.append(
-                f"{label} coverage off nominal by {delta:+.3f} "
-                f"(tolerance ±{rules.coverage_tolerance:.3f})"
-            )
+    reasons.extend(_coverage_reasons(score, rules, reference))
 
     if rules.require_convergence:
         if score.converged is None:
@@ -115,13 +160,23 @@ def evaluate_candidate(score: ArmScore, rules: DecisionRules) -> CandidateVerdic
     return CandidateVerdict(arm=score.arm, promote=not reasons, reasons=reasons)
 
 
+def reference_arm(scores: list[ArmScore]) -> ArmScore | None:
+    """The incumbent among scored arms — the one turning no knobs."""
+    return next((s for s in scores if not s.knobs), None)
+
+
 def promotable(scores: list[ArmScore], rules: DecisionRules) -> list[CandidateVerdict]:
     """Verdicts for every scored arm, promotable first."""
-    verdicts = [evaluate_candidate(s, rules) for s in scores]
+    reference = reference_arm(scores)
+    verdicts = [evaluate_candidate(s, rules, reference) for s in scores]
     return sorted(verdicts, key=lambda v: (not v.promote, v.arm))
 
 
-def screenable(score: ArmScore, rules: DecisionRules) -> bool:
+def screenable(
+    score: ArmScore,
+    rules: DecisionRules,
+    reference: ArmScore | None = None,
+) -> bool:
     """Promotion criteria EXCLUDING convergence — the bar to become a candidate.
 
     Screening fits (reduced samples) rarely clear the rhat/ess gate, so nothing
@@ -131,10 +186,7 @@ def screenable(score: ArmScore, rules: DecisionRules) -> bool:
     """
     if score.elpd_z is None or score.elpd_z < rules.promote_z:
         return False
-    for delta in (score.cov80_delta, score.cov95_delta):
-        if delta is None or abs(delta) > rules.coverage_tolerance:
-            return False
-    return True
+    return not _coverage_reasons(score, rules, reference)
 
 
 __all__ = [
@@ -143,5 +195,6 @@ __all__ = [
     "DecisionRules",
     "evaluate_candidate",
     "promotable",
+    "reference_arm",
     "screenable",
 ]

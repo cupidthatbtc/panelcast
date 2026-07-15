@@ -63,6 +63,16 @@ rules:
   promote_z: 2.0
   # Empirical coverage must land within this of nominal at 80% and 95%.
   coverage_tolerance: 0.03
+  # Amended 2026-07-15 (#236). An arm outside coverage_tolerance still clears
+  # the axis when it lands at least as close to nominal as the reference.
+  # Rationale, independent of any candidate: coverage_tolerance was written as
+  # an absolute bar, but the shipped AOTY default does not meet it either
+  # (cov80 off nominal by +0.053). Enforcing it on challengers alone would hold
+  # an arm for a miss the incumbent makes by more — the gate would ratchet
+  # nothing and block strict improvements. The gate's purpose is to block a
+  # calibration REGRESSION; an arm nearer nominal than the model it replaces is
+  # not one. Set false to restore the absolute-only bar.
+  coverage_non_inferiority: true
   # A candidate that fails the convergence gate cannot be promoted.
   require_convergence: true
   # Seeds the winner is re-fit on before `select` recommends it (#40 recipe).

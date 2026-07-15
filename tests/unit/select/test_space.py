@@ -124,6 +124,39 @@ class TestArmConflicts:
             {"likelihood_family": "beta_binomial", "target_transform": "identity"}, AOTY
         ) == []
 
+    def test_sigma_knob_at_its_default_does_not_conflict_with_a_beta_family(
+        self, monkeypatch
+    ):
+        """A promoted-on sigma knob must not prune the Beta families out of the
+        space: every arm inherits it, so no arm is mislabeled by it."""
+        from panelcast.select import space as space_mod
+
+        flipped = dict(space_mod.default_arm())
+        flipped["heteroscedastic_entity_obs"] = True
+        monkeypatch.setattr(space_mod, "default_arm", lambda: flipped)
+
+        conflicts = arm_conflicts(
+            {"likelihood_family": "beta", "target_transform": "identity"}, AOTY
+        )
+        assert [c for c in conflicts if "heteroscedastic_entity_obs" in c] == []
+
+    def test_sigma_knob_moved_off_a_flipped_default_still_conflicts(self, monkeypatch):
+        from panelcast.select import space as space_mod
+
+        flipped = dict(space_mod.default_arm())
+        flipped["heteroscedastic_entity_obs"] = True
+        monkeypatch.setattr(space_mod, "default_arm", lambda: flipped)
+
+        conflicts = arm_conflicts(
+            {
+                "likelihood_family": "beta",
+                "target_transform": "identity",
+                "heteroscedastic_entity_obs": False,
+            },
+            AOTY,
+        )
+        assert [c for c in conflicts if "heteroscedastic_entity_obs" in c] != []
+
     def test_unknown_knob_and_value_flagged(self):
         assert arm_conflicts({"no_such_gate": True}, AOTY) == ["unknown knob: no_such_gate"]
         conflicts = arm_conflicts({"latent_process": "arma"}, AOTY)
