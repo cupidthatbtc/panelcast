@@ -70,7 +70,12 @@ the domain's `.audit` entry. Per arm: paired held-out ELPD ± SE vs the referenc
 pointwise snapshot show `-` — no other estimator is substituted. A **baseline
 floor** section says whether the structured model beats the GBM at all, and the
 **promotion verdicts** apply the pre-registered rules (`configs/select.yaml`):
-paired-ELPD z ≥ threshold, coverage within tolerance, convergence pass.
+paired-ELPD z ≥ threshold, coverage within tolerance, convergence pass. A
+coverage axis outside the tolerance still clears it when the arm lands no
+further from nominal than the reference (`coverage_non_inferiority`) — the
+tolerance is an absolute bar a domain's shipped default need not itself meet,
+and the gate is there to block a calibration regression, not to hold an arm for
+a miss the incumbent makes by more.
 
 Diagnostic-scale fits can mislead on slow-mixing candidates (ESS below the gate at
 the diagnostic tier) — the report carries per-arm convergence caveats. That is what
