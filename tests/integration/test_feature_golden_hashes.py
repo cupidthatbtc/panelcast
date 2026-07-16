@@ -45,9 +45,15 @@ def _stable_feature_hash(df: pd.DataFrame) -> str:
 # shipped default blocks; every parquet gains its column). Hashes are over the
 # rounded feature matrices (see _stable_feature_hash); the pre-0.6.0 values
 # were frozen on the pre-descriptor implementation (2026-06-10).
+#
+# The two ``/train`` digests were regenerated again (#230) when gbm_offset's
+# out-of-fold pass moved from an entity-blind random KFold to entity-grouped
+# GroupKFold: only train rows carry OOF offsets, so their offset column shifts
+# while every held-out (validation/test) offset — produced by the full-train
+# model — is byte-identical, which is why those four digests are unchanged.
 GOLDEN_FEATURE_HASHES = {
     "within_entity_temporal/train": (
-        "46844c6459cb74324df2be1b981bcd22453a8c8242d0eecbfdcc9fe6c81a439d"
+        "47de5b4b13e20b6a3dc5e031659df08268896a625f4e3329f78aae12479006e3"
     ),
     "within_entity_temporal/validation": (
         "6cd73a3fb0ce81ab75630ddd8ddcee40471554a98c48eee4a496ed3881dbee7d"
@@ -55,7 +61,7 @@ GOLDEN_FEATURE_HASHES = {
     "within_entity_temporal/test": (
         "59ad6ec23443101aaf4da9f33e7bb651a0b83bbb64793e6a0af5e7493beac539"
     ),
-    "entity_disjoint/train": ("75220b7b4091b4475b1584701bc55817a6e655095059d41f9bdb6a65404b1831"),
+    "entity_disjoint/train": ("dff499004404ef4c1217780bcf5f1cc1be493c571c9243df72780d2ad237ed12"),
     "entity_disjoint/validation": (
         "6981f543faaa714f1d4c8e389cdba2034aa26cf76f7323ecd56cf732591d9ae5"
     ),

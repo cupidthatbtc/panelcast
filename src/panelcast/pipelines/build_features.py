@@ -87,7 +87,13 @@ def get_feature_blocks(
     if gbm_offset:
         from panelcast.features.gbm_offset import GbmOffsetBlock
 
-        blocks.append(GbmOffsetBlock(list(blocks), target_col=descriptor.target_col))
+        blocks.append(
+            GbmOffsetBlock(
+                list(blocks),
+                target_col=descriptor.target_col,
+                entity_col=descriptor.entity_col,
+            )
+        )
     return blocks
 
 

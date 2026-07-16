@@ -111,6 +111,64 @@ class TestGbmOffsetBlock:
         block = _block()
         assert block.requires == ["core_numeric"]
 
+    def test_group_kfold_engages_with_entity_col(self, monkeypatch):
+        """When an entity column is supplied, the OOF pass groups by it (no
+        entity may land in both a fold's train and held partitions)."""
+        import panelcast.features.gbm_offset as gbm_mod
+
+        train_df = _synthetic(200)
+        train_df["entity"] = np.repeat(np.arange(20), 10)  # 20 entities x 10 rows
+
+        seen = {}
+        real_group, real_kfold = gbm_mod.GroupKFold, gbm_mod.KFold
+
+        class _SpyGroup(real_group):
+            def split(self, X, y=None, groups=None):
+                seen["groups"] = None if groups is None else list(groups)
+                return super().split(X, y, groups)
+
+        class _SpyKFold(real_kfold):
+            def split(self, X, y=None, groups=None):
+                seen["kfold_used"] = True
+                return super().split(X, y, groups)
+
+        monkeypatch.setattr(gbm_mod, "GroupKFold", _SpyGroup)
+        monkeypatch.setattr(gbm_mod, "KFold", _SpyKFold)
+
+        block = GbmOffsetBlock(
+            [CoreNumericBlock({"columns": ["x1", "x2"]})],
+            target_col="y_score",
+            entity_col="entity",
+        )
+        FeaturePipeline([*block.base_blocks, block]).fit(train_df, _CTX)
+
+        assert seen.get("groups") == train_df["entity"].tolist()
+        assert "kfold_used" not in seen
+
+    def test_kfold_fallback_without_entity_col(self, monkeypatch):
+        """No entity column (e.g. non-panel data) keeps the shuffled-KFold path."""
+        import panelcast.features.gbm_offset as gbm_mod
+
+        seen = {}
+        real_group, real_kfold = gbm_mod.GroupKFold, gbm_mod.KFold
+
+        class _SpyGroup(real_group):
+            def split(self, X, y=None, groups=None):
+                seen["group_used"] = True
+                return super().split(X, y, groups)
+
+        class _SpyKFold(real_kfold):
+            def split(self, X, y=None, groups=None):
+                seen["kfold_used"] = True
+                return super().split(X, y, groups)
+
+        monkeypatch.setattr(gbm_mod, "GroupKFold", _SpyGroup)
+        monkeypatch.setattr(gbm_mod, "KFold", _SpyKFold)
+
+        _fitted_pipeline(_synthetic(200))
+        assert seen.get("kfold_used") is True
+        assert "group_used" not in seen
+
 
 class TestBlockEnablement:
     def test_default_roster_has_no_gbm_block(self):

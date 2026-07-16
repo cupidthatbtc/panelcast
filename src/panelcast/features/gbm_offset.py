@@ -13,7 +13,7 @@ from typing import ClassVar
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import HistGradientBoostingRegressor
-from sklearn.model_selection import KFold
+from sklearn.model_selection import GroupKFold, KFold
 
 from panelcast.data.alignment import ROW_ID_COL
 
@@ -40,6 +40,7 @@ class GbmOffsetBlock(BaseFeatureBlock):
         base_blocks: list[BaseFeatureBlock],
         *,
         target_col: str,
+        entity_col: str | None = None,
         n_splits: int = 5,
         random_state: int = 0,
     ) -> None:
@@ -49,6 +50,7 @@ class GbmOffsetBlock(BaseFeatureBlock):
         self.base_blocks = list(base_blocks)
         self.requires = [b.name for b in self.base_blocks]
         self.target_col = target_col
+        self.entity_col = entity_col
         self.n_splits = n_splits
         self.random_state = random_state
         self.required_columns = [ROW_ID_COL, target_col]
@@ -76,16 +78,29 @@ class GbmOffsetBlock(BaseFeatureBlock):
                 "non-finite values; the block must fit on fully labeled train rows."
             )
 
-        self._full_model_ = HistGradientBoostingRegressor(
-            random_state=self.random_state
-        ).fit(X, y)
+        seed = int(getattr(ctx, "random_state", self.random_state))
+        self._full_model_ = HistGradientBoostingRegressor(random_state=seed).fit(X, y)
 
         oof = self._full_model_.predict(X)
+        # Group out-of-fold folds by entity so a train row's offset never
+        # conditions on the same entity's other (chronologically later) targets;
+        # held-out rows only ever see the past-only full-train model, so the
+        # covariate would otherwise carry more information in train than in test.
+        groups = None
+        if self.entity_col is not None and self.entity_col in df.columns:
+            groups = df[self.entity_col].to_numpy()
         n_splits = min(self.n_splits, len(df))
+        if groups is not None:
+            n_splits = min(n_splits, int(pd.unique(groups).size))
         if n_splits >= 2:
-            kfold = KFold(n_splits=n_splits, shuffle=True, random_state=self.random_state)
-            for fit_idx, held_idx in kfold.split(X):
-                fold_model = HistGradientBoostingRegressor(random_state=self.random_state)
+            if groups is not None:
+                splits = GroupKFold(n_splits=n_splits).split(X, y, groups)
+            else:
+                splits = KFold(
+                    n_splits=n_splits, shuffle=True, random_state=seed
+                ).split(X)
+            for fit_idx, held_idx in splits:
+                fold_model = HistGradientBoostingRegressor(random_state=seed)
                 fold_model.fit(X.iloc[fit_idx], y[fit_idx])
                 oof[held_idx] = fold_model.predict(X.iloc[held_idx])
         self._oof_by_row_id_ = dict(
