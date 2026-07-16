@@ -204,12 +204,14 @@ KNOBS: tuple[Knob, ...] = (
     Knob(
         "heteroscedastic_entity_obs",
         "bool",
-        (False, True),
-        False,
+        (True, False),
+        True,
         history=(
-            "rejected (C1): calibration-vs-sharpness trade on IMDb, "
-            "non-convergent on econ — the IMDb LOO figure is pre-#63 evidence, "
-            "see .audit/verdict_ledger/ (docs/decisions/entity_overdispersion.md)"
+            "promoted to the AOTY default 0.13.0 (#238): held-out ELPD "
+            "+29.8±7.0 (z+4.25), resolves the q10/q90 PPC pins, cleared under "
+            "#237's coverage non-inferiority rule; three-seed subset confirmed "
+            "(.audit/select_entityobs_confirm/). Rejected on IMDb/econ — a "
+            "per-domain verdict (docs/decisions/entity_overdispersion.md)"
         ),
     ),
     Knob(

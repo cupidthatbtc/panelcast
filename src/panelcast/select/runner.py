@@ -71,7 +71,9 @@ _DIAGNOSTIC_PRIORITIES = {
     "target_skewed": ("target_transform", "likelihood_family"),
     "integer_heaped": ("discretize_observation",),
     "sparse_histories": ("errors_in_variables", "entity_group_pooling"),
-    "obs_count_spread": ("heteroscedastic_entity_obs", "learn_n_exponent"),
+    # heteroscedastic_entity_obs is the AOTY default since 0.13.0 (#238), so
+    # spread no longer argues for trying it — its OFAT arm now turns it off.
+    "obs_count_spread": ("learn_n_exponent",),
 }
 
 

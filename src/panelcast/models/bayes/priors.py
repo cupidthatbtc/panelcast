@@ -230,18 +230,19 @@ class PriorConfig:
     # comparable mass to HalfNormal(1.0) without the zero-boundary pile-up.
     sigma_obs_lognormal_loc: float = -0.4
     sigma_obs_lognormal_sigma: float = 0.6
-    # Entity-level observation overdispersion gate (default off => legacy
-    # behavior, bit-identical RNG path). When True, the model adds a
-    # per-entity multiplicative noise inflation on top of sigma_scaled:
+    # Entity-level observation overdispersion gate. AOTY default since 0.13.0
+    # (#238): promoted on the three-seed subset confirmation (held-out ELPD
+    # +29.8 +/- 7.0, z +4.25; resolves the q10/q90 PPC pins) under #237's
+    # coverage non-inferiority rule. Domains whose own bake-offs rejected it
+    # (IMDb, econ) pin it False in their run configs. When True, the model adds
+    # a per-entity multiplicative noise inflation on top of sigma_scaled:
     #     sigma_scaled_i *= exp((tau_entity * entity_obs_raw)[artist_idx])
     # with entity_obs_raw ~ Normal(0, 1) (non-centered plate over n_artists)
-    # and tau_entity ~ HalfNormal(tau_entity_scale). Noisy series (e.g. IMDb
-    # episodes) get wider, better-calibrated intervals; zero-inflated targets
-    # (econ) get an entity-noise home so sigma_obs stops collapsing. The new
-    # sample sites ({prefix}tau_entity, {prefix}entity_obs_raw) are created
-    # ONLY on this branch and AFTER every existing site, so the gate-off draw
-    # sequence -- and every published number -- stays bit-identical.
-    heteroscedastic_entity_obs: bool = False
+    # and tau_entity ~ HalfNormal(tau_entity_scale). The new sample sites
+    # ({prefix}tau_entity, {prefix}entity_obs_raw) are created ONLY on this
+    # branch and AFTER every existing site, so pinning the gate False
+    # reproduces the pre-0.13.0 draw sequence bit-identically.
+    heteroscedastic_entity_obs: bool = True
     # HalfNormal scale for tau_entity (the entity-noise dispersion). Default
     # 0.25 keeps exp(tau * z) close to 1 a priori (a 1-sigma entity inflates
     # noise by ~28%), so the gate widens intervals without overwhelming the

@@ -73,7 +73,7 @@ Both match the values recorded in `.audit/transform_latent_bakeoff/MULTISEED.md`
 | 13 | `learn_n_exponent` (+ `n_exponent=0`) | null result, default-off | **verified-solid** | posterior concentration against the prior: #44 re-run 2026-07-02, mean 0.0099 ± 0.0048, HDI [0.0027, 0.0212], ESS 6224; no LOO involved. |
 | 14 | `n_exponent_prior=logit-normal` | adopted (secondary knob) | **verified-solid** | prior-parameterization change with #44; conclusion (≈0) unchanged under either prior. |
 | 15 | `artist_effect_param=noncentered`, `sigma_artist_prior_type=halfnormal` | adopted | **verified-solid** | won the 4-variant mixing bake-off (mixing metrics, estimator-independent). Artifact lives at `outputs/experiments/sigma_artist_mixing.json` — outside `.audit/`; gap noted below. |
-| 16 | `heteroscedastic_entity_obs` (C1) | rejected | **unverified (pre-#63 evidence)** | the IMDb half of the reject rests on a "LOO ELPD −435 ± ~75" regression in exactly the pre-#63 formulation, undated, no post-#63 note, no snapshots (`docs/decisions/entity_overdispersion.md`). The econ half (no variant converges, ESS 4-5) is estimator-independent and stands. Composite classification: unverified — the calibration-vs-sharpness trade needs re-measurement under the corrected estimator. The select sweep re-tries C1 on AOTY. |
+| 16 | `heteroscedastic_entity_obs` (C1) | **AOTY: adopted (0.13.0, #238)**; IMDb/econ: rejected | **verified-solid (AOTY)** | the AOTY promotion rests on the post-#63 three-seed `select` confirmation (held-out ELPD +29.8 ± 7.0, z +4.25; resolves the q10/q90 PPC pins; `.audit/select_entityobs_confirm/`), cleared under #237's coverage non-inferiority rule and flipped in #238. The IMDb reject's "LOO ELPD −435" figure is pre-#63 but the AOTY verdict no longer depends on it; the econ reject (no variant converges, ESS 4-5) is estimator-independent and stands. Same gate, opposite verdict per domain. |
 | 17 | `sigma_obs_prior_type=lognormal` (C2) | rejected | **verified-solid** | econ: lognormal alone leaves ESS at 4 (convergence failure, estimator-independent); c1c2 pathological (172 divergences). The overflowed-LOO detail is moot given the convergence evidence. |
 
 ## D. Model-v2 gates
@@ -122,8 +122,9 @@ this class of gap.
 
 ## Bottom line
 
-24 of 26 recorded verdicts are **verified-solid** or **recomputed** under the corrected
-estimator. Two are **unverified (pre-#63 evidence)**: `heteroscedastic_entity_obs` (the
-only genuinely suspect number — its IMDb LOO regression) and `errors_in_variables`
-(self-flagged, almost certainly robust). Both options remain live candidates in
-`panelcast select`, so the AOTY reproduction sweep re-adjudicates them from scratch.
+25 of 26 recorded verdicts are **verified-solid** or **recomputed** under the corrected
+estimator. `heteroscedastic_entity_obs` was re-adjudicated by the AOTY `select` sweep
+and **promoted to the AOTY default in 0.13.0** on post-#63 evidence (#238); its IMDb/econ
+rejects stand (the econ half estimator-independent). One remains **unverified (pre-#63
+evidence)**: `errors_in_variables` (self-flagged, almost certainly robust), still a live
+`select` candidate the AOTY sweep re-adjudicates from scratch.

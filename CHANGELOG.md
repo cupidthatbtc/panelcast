@@ -4,6 +4,27 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **`heteroscedastic_entity_obs` promoted to the AOTY default** (#238). Per-entity
+  multiplicative observation overdispersion — the strongest promotion candidate the
+  project has produced — is now on by default: held-out ELPD **+29.8 ± 7.0** (z +4.25)
+  on the three-seed subset confirmation, resolving two of the four structural PPC pins
+  (q10, q90 — the first movement on the bounded-skew misfit that six likelihood families
+  never touched). Held at 0.12.1 on a 1.53e-5 80%-coverage miss; promoted once #237
+  amended the coverage gate to clear an axis on non-inferiority to the reference (the
+  incumbent misses the same tolerance by ~1500× the candidate's margin). This is a
+  distributional + calibration win, not a point-accuracy one (MAE/RMSE a wash). The
+  default is flipped at the four declaration sites and `configs/base.yaml`; domains
+  whose own bake-offs rejected the gate (IMDb, econ) pin `heteroscedastic_entity_obs:
+  false` in their run configs, and other external-config domains (physics, games, BGG,
+  Pitchfork, IMDb directors) must add the same explicit pin to retain their published
+  parity. Published-number re-baseline lands in the release fit. Rationale in
+  `docs/decisions/entity_overdispersion.md`; evidence in
+  `.audit/select_entityobs_confirm/`.
+
 ## [0.12.1] — 2026-07-13
 
 Sweep-default hardening plus a documented model candidate. The one behavioral

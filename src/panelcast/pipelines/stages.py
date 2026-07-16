@@ -126,8 +126,9 @@ class StageContext:
     # Covariate-block prior gate (#155): "normal" (legacy) | "horseshoe"
     beta_prior_type: str = "normal"
     hs_global_scale: float = 0.1
-    # Entity-level observation overdispersion gate (default off => legacy path)
-    heteroscedastic_entity_obs: bool = False
+    # Entity-level observation overdispersion gate (AOTY default since 0.13.0,
+    # #238; False reproduces the legacy bit-identical path)
+    heteroscedastic_entity_obs: bool = True
     tau_entity_scale: float = 0.25
     # Errors-in-variables on the AR(1) regressor (model-v2; default off)
     errors_in_variables: bool = False
