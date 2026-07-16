@@ -385,8 +385,7 @@ class PipelineConfig:
             not self.run_id
             or "/" in self.run_id
             or "\\" in self.run_id
-            or self.run_id in (".", "..")
-            or self.run_id.startswith(".")
+            or self.run_id.startswith(".")  # covers "." and ".."
             or self.run_id in ("latest", "failed")
         ):
             raise ValueError(

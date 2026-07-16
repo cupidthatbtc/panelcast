@@ -317,8 +317,11 @@ def create_diagnostics_table(
     # Build result DataFrame
     result = pd.DataFrame(index=summary.index)
 
-    # R-hat: 4 decimal places
-    result["R-hat"] = summary["r_hat"].apply(lambda x: f"{x:.4f}")
+    # R-hat: 4 decimal places; single-chain runs yield NaN, shown as "n/a" to
+    # match the Status column rather than a bare "nan".
+    result["R-hat"] = summary["r_hat"].apply(
+        lambda x: f"{x:.4f}" if np.isfinite(x) else "n/a"
+    )
 
     # ESS: integers
     result["ESS Bulk"] = summary["ess_bulk"].astype(int)
