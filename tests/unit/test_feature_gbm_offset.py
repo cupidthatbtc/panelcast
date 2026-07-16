@@ -169,6 +169,19 @@ class TestGbmOffsetBlock:
         assert seen.get("kfold_used") is True
         assert "group_used" not in seen
 
+    def test_configured_entity_col_absent_raises(self):
+        """A configured entity_col missing from the fit frame must fail loudly
+        rather than silently degrading to entity-blind KFold (leakage)."""
+        train_df = _synthetic(200)  # no 'entity' column
+        block = GbmOffsetBlock(
+            [CoreNumericBlock({"columns": ["x1", "x2"]})],
+            target_col="y_score",
+            entity_col="entity",
+        )
+        pipeline = FeaturePipeline([*block.base_blocks, block])
+        with pytest.raises(ValueError, match="entity_col 'entity' is absent"):
+            pipeline.fit(train_df, _CTX)
+
 
 class TestBlockEnablement:
     def test_default_roster_has_no_gbm_block(self):

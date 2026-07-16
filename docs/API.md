@@ -38,7 +38,8 @@ import jax or build the model graph. The cost is paid only when you touch a name
 ## Example
 
 Build (or load) a descriptor, run the pipeline, and read the resulting run
-directory:
+directory. Note this example runs a short but real MCMC pipeline (it fits the
+model, not a mock), so expect it to take a little while and to require jax:
 
 ```python
 from pathlib import Path

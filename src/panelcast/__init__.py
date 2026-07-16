@@ -54,7 +54,9 @@ def __getattr__(name: str) -> Any:
 
 
 def __dir__() -> list[str]:
-    return sorted([*_LAZY_EXPORTS, "__version__"])
+    # Keep the default module surface (dunders, __all__, eager imports,
+    # submodules) discoverable alongside the lazily exported public names.
+    return sorted({*globals(), *_LAZY_EXPORTS})
 
 
 __all__ = [
