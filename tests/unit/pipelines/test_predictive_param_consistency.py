@@ -95,7 +95,13 @@ def test_path_forwards_all_distribution_params(name):
 
 
 def test_all_predictive_paths_agree_on_distribution_params():
-    """Every registered path must forward the same distribution roster."""
+    """Every registered path must forward the same distribution roster.
+
+    Redundant with the per-path test while that one demands the full roster;
+    kept as the guard that survives if the per-path check is ever loosened to a
+    subset, at which point cross-path disagreement becomes independently
+    reachable.
+    """
     rosters = {
         name: _forwarded_param_names(func) & OBS_DISTRIBUTION_PARAMS
         for name, func in PREDICTIVE_PATHS.items()

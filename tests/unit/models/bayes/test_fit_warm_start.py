@@ -120,12 +120,8 @@ def test_maybe_export_warmup_warns_and_skips_without_sampler(tmp_path, caplog):
 
     path = tmp_path / "warmup.pkl"
     with caplog.at_level(logging.WARNING, logger="panelcast.models.bayes.fit"):
-        _maybe_export_warmup(
-            mcmc=None,
-            model=make_score_model("user"),
-            run_args={},
-            config=None,
-            path=path,
-        )
+        # model/run_args/config are untouched on the no-sampler branch (it
+        # returns before the export), so None documents that intent.
+        _maybe_export_warmup(mcmc=None, model=None, run_args={}, config=None, path=path)
     assert not path.exists()
     assert any("skipped" in record.getMessage() for record in caplog.records)
