@@ -276,7 +276,7 @@ def run_select(
     prepared feature matrix) feed the "auto" per-arm timeout prediction.
     """
     from panelcast.select.runner import run_sweep
-    from panelcast.select.scoring import rank_arms, render_report, score_arm
+    from panelcast.select.scoring import ArmScore, rank_arms, render_report, score_arm
 
     descriptor = load_descriptor(dataset)
     report_dir = audit_root / f"select_{descriptor.name}"
@@ -313,14 +313,22 @@ def run_select(
     for record in ledger.records.values():
         if record.status != "completed" or not record.run_dir or record.rung != final_rung:
             continue
-        scores.append(
-            score_arm(
-                Path(record.run_dir),
-                arm=record.arm_id,
-                knobs=record.knobs,
-                reference_nc=reference_nc,
+        try:
+            scores.append(
+                score_arm(
+                    Path(record.run_dir),
+                    arm=record.arm_id,
+                    knobs=record.knobs,
+                    reference_nc=reference_nc,
+                )
             )
-        )
+        except (OSError, ValueError) as exc:
+            # A single bad snapshot must not crash the report after the whole
+            # sweep has been paid for: record it unscored, like the scorer's
+            # own no-substitute discipline for missing snapshots.
+            unscored = ArmScore(arm=record.arm_id, knobs=record.knobs)
+            unscored.notes.append(f"scoring failed: {exc}")
+            scores.append(unscored)
     ranked = rank_arms(scores)
     reference = reference_arm(scores)
     verdicts = promotable(scores, rules)
@@ -354,9 +362,13 @@ def run_select(
     # Screening-rung appendix (#164): ledger snapshots from below the final
     # rung, labeled screening-scale — never mixed into the ranking above.
     if final_rung > 0:
+        def _screening_z(r) -> float:
+            z = (r.score or {}).get("z")
+            return -1e9 if z is None else float(z)
+
         screening = sorted(
             (r for r in ledger.records.values() if r.rung < final_rung),
-            key=lambda r: (r.rung, -(float((r.score or {}).get("z") or -1e9)), r.arm_id),
+            key=lambda r: (r.rung, -_screening_z(r), r.arm_id),
         )
         promoted_ids = {
             r.arm_id for r in ledger.records.values() if r.rung == final_rung and r.knobs
