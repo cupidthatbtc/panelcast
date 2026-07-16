@@ -124,6 +124,11 @@ class TestRunIdConfigKnob:
         with pytest.raises(ValueError, match="run_id"):
             PipelineConfig(run_id=bad)
 
+    @pytest.mark.parametrize("bad", ["latest", "failed", ".hidden"])
+    def test_reserved_run_id_rejected(self, bad):
+        with pytest.raises(ValueError, match="run_id"):
+            PipelineConfig(run_id=bad)
+
     def test_duplicate_run_id_hard_errors(self, tmp_path):
         from panelcast.pipelines.orchestrator import PipelineError, PipelineOrchestrator
 

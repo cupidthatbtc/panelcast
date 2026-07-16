@@ -337,9 +337,13 @@ def create_diagnostics_table(
         rhat = float(summary.at[row_name, "r_hat"])
         ess_bulk = float(summary.at[row_name, "ess_bulk"])
 
-        rhat_ok = rhat <= rhat_threshold
         ess_ok = ess_bulk >= ess_threshold
+        # Single-chain runs yield NaN r_hat; treat it as unavailable rather than
+        # failing, mirroring check_convergence's single-chain semantics.
+        if not np.isfinite(rhat):
+            return "n/a (single chain)" if ess_ok else "Fail (ESS)"
 
+        rhat_ok = rhat <= rhat_threshold
         if rhat_ok and ess_ok:
             return "Pass"
         elif not rhat_ok and not ess_ok:
@@ -647,7 +651,7 @@ def export_table(
         )
 
         # Write to file
-        tex_path.write_text(latex_str)
+        tex_path.write_text(latex_str, encoding="utf-8")
         created_files.append(tex_path)
 
     return created_files

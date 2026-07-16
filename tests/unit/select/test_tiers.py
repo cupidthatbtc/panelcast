@@ -65,6 +65,18 @@ class TestLoad:
         with pytest.raises(ValueError, match="expected a mapping"):
             load_tiers(path)
 
+    def test_non_mapping_tiers_block_raises_valueerror(self, tmp_path):
+        path = tmp_path / "select.yaml"
+        path.write_text("tiers:\n  - 2\n  - 500\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="'tiers' must be a mapping"):
+            load_tiers(path)
+
+    def test_non_mapping_tier_entry_raises_valueerror(self, tmp_path):
+        path = tmp_path / "select.yaml"
+        path.write_text("tiers:\n  quick: [2, 500]\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="tier 'quick' must be a mapping"):
+            load_tiers(path)
+
 
 class TestResolve:
     def test_unknown_tier_raises(self, tmp_path):

@@ -286,7 +286,12 @@ def runs_diff(
     if a.git.commit != b.git.commit:
         typer.echo(f"\ngit: {a.git.commit[:7]} vs {b.git.commit[:7]}")
 
-    changed = flag_differences(a.flags, b.flags, PipelineConfig())
+    changed = flag_differences(
+        a.flags,
+        b.flags,
+        PipelineConfig(),
+        ignore=frozenset({"verbose", "progress_bar", "resume", "skip_existing", "dry_run"}),
+    )
     typer.echo("\nconfig delta (output-affecting, defaults-aware):")
     if not changed:
         typer.echo("  none")

@@ -345,6 +345,22 @@ class TestCreateDiagnosticsTable:
         # Should have failing status
         assert "Fail" in result.loc["bad_param", "Status"]
 
+    def test_single_chain_rhat_not_failed(self):
+        """Single-chain runs yield NaN R-hat; status must not read 'Fail (R-hat)'."""
+        np.random.seed(7)
+        n_chains, n_draws = 1, 800
+        posterior = xr.Dataset(
+            {"p": xr.DataArray(np.random.randn(n_chains, n_draws), dims=["chain", "draw"])}
+        )
+        sample_stats = xr.Dataset(
+            {"diverging": xr.DataArray(np.zeros((n_chains, n_draws), dtype=bool), dims=["chain", "draw"])}
+        )
+        idata = az.InferenceData(posterior=posterior, sample_stats=sample_stats)
+
+        status = create_diagnostics_table(idata).loc["p", "Status"]
+        assert "R-hat" not in status
+        assert status == "n/a (single chain)"
+
     def test_ess_as_integers(self, mock_idata):
         """ESS values should be formatted as integers."""
         result = create_diagnostics_table(mock_idata)

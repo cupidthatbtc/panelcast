@@ -1030,6 +1030,20 @@ class TestPipelineConfigValidation:
         with pytest.raises(ValueError, match="ess_threshold"):
             PipelineConfig(ess_threshold=0)
 
+    def test_negative_num_warmup_raises(self):
+        """num_warmup < 0 raises ValueError (YAML path bypasses CLI bounds)."""
+        import pytest
+
+        with pytest.raises(ValueError, match="num_warmup"):
+            PipelineConfig(num_warmup=-1)
+
+    def test_out_of_range_target_accept_raises(self):
+        """target_accept outside (0, 1) raises ValueError."""
+        import pytest
+
+        with pytest.raises(ValueError, match="target_accept"):
+            PipelineConfig(target_accept=1.2)
+
     def test_valid_prior_accepted(self):
         """Valid prior names are accepted."""
         PipelineConfig(n_exponent_prior="logit-normal")

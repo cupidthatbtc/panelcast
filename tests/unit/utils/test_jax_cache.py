@@ -58,6 +58,16 @@ class TestEnableJaxCompilationCache:
         assert jax.config.jax_persistent_cache_min_compile_time_secs == 1.0
         assert jax.config.jax_persistent_cache_min_entry_size_bytes == 0
 
+    def test_unwritable_cache_dir_returns_none(self, monkeypatch, tmp_path):
+        """An unmakeable cache dir warns and returns None instead of crashing."""
+        monkeypatch.delenv("PANELCAST_JAX_CACHE", raising=False)
+        blocker = tmp_path / "blocker"
+        blocker.write_text("i am a file", encoding="utf-8")
+        # Parent is a regular file, so mkdir(parents=True) raises OSError.
+        monkeypatch.setenv("PANELCAST_JAX_CACHE_DIR", str(blocker / "jax"))
+
+        assert enable_jax_compilation_cache() is None
+
     def test_idempotent(self, monkeypatch, tmp_path):
         """Calling twice returns the same dir and leaves config consistent."""
         monkeypatch.delenv("PANELCAST_JAX_CACHE", raising=False)

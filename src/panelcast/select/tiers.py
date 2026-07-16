@@ -100,7 +100,17 @@ def load_tiers(path: Path | None = None) -> dict[str, EffortTier]:
             f"malformed select config {path}: expected a mapping, got {type(payload).__name__}"
         )
     block = payload.get("tiers") or {}
+    if not isinstance(block, dict):
+        raise ValueError(
+            f"malformed select config {path}: 'tiers' must be a mapping, "
+            f"got {type(block).__name__}"
+        )
     for name, spec in block.items():
+        if not isinstance(spec, dict):
+            raise ValueError(
+                f"malformed select config {path}: tier '{name}' must be a mapping, "
+                f"got {type(spec).__name__}"
+            )
         base = tiers.get(name)
         merged = {
             "name": name,

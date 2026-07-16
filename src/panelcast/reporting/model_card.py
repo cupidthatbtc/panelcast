@@ -457,7 +457,7 @@ def _generate_latex(data: ModelCardData) -> str:
         lines.append("Parameter & Value \\\\")
         lines.append("\\midrule")
         for param, value in data.hyperparameters.items():
-            lines.append(f"{_latex_escape(param)} & {value} \\\\")
+            lines.append(f"{_latex_escape(param)} & {_latex_escape(str(value))} \\\\")
         lines.append("\\bottomrule")
         lines.append("\\end{tabular}")
     else:

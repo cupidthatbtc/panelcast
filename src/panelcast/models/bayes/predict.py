@@ -481,7 +481,6 @@ def predict_new_entity(
         else:
             n_exponent_samples = None
         n_samples = n_predictions
-        seed = seed + 1  # Use different key for subsequent sampling
     else:
         rng_key = random.key(seed)
         # Handle exponent samples based on learned vs fixed mode

@@ -58,6 +58,10 @@ class ModelManifest:
         gpu_info: String describing GPU used.
         runtime_seconds: Wall-clock time for fitting.
         divergences: Number of divergent transitions.
+        warm_started: True when the fit imported an adapted mass matrix
+            (screening-grade evidence, never confirmation).
+        resumed_from_checkpoint: True when part of the draws were restored
+            from a checkpoint (wall clock is not runtime-calibration grade).
     """
 
     version: str
@@ -71,6 +75,8 @@ class ModelManifest:
     gpu_info: str
     runtime_seconds: float
     divergences: int
+    warm_started: bool = False
+    resumed_from_checkpoint: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -78,7 +84,7 @@ class ModelManifest:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ModelManifest:
-        """Create from dictionary."""
+        """Create from dictionary (old manifests without provenance flags default False)."""
         return cls(**d)
 
 
@@ -262,6 +268,8 @@ def save_model(
         gpu_info=fit_result.gpu_info,
         runtime_seconds=fit_result.runtime_seconds,
         divergences=fit_result.divergences,
+        warm_started=fit_result.warm_started,
+        resumed_from_checkpoint=fit_result.resumed_from_checkpoint,
     )
 
     # Update models manifest
