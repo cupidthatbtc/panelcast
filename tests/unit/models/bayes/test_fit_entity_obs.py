@@ -74,7 +74,7 @@ class TestEntityObsParityLock:
         """AOTY default since 0.13.0 (#238): a bare PriorConfig samples the C1
         sites. This replaces the old 'bare default is off' expectation."""
         tr = _get_trace(PriorConfig())
-        assert NEW_SAMPLE_SITES <= _sample_sites(tr)
+        assert _sample_sites(tr) >= NEW_SAMPLE_SITES
         assert NEW_DETERMINISTIC_SITE in _deterministic_sites(tr)
 
     def test_gate_off_adds_no_sites(self):
