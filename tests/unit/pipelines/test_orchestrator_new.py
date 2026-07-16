@@ -611,7 +611,7 @@ class TestBuildCommandStringExtended:
             debut_prev_score_source="dataset_stats",
             sigma_obs_prior_type="lognormal",
             beta_prior_type="horseshoe",
-            heteroscedastic_entity_obs=True,
+            heteroscedastic_entity_obs=False,
             tau_entity_scale=0.5,
             errors_in_variables=True,
             propagate_rw_horizon=True,
@@ -629,7 +629,8 @@ class TestBuildCommandStringExtended:
         assert "--debut-prev-score-source dataset_stats" in cmd
         assert "--sigma-obs-prior-type lognormal" in cmd
         assert "--beta-prior-type horseshoe" in cmd
-        assert "--heteroscedastic-entity-obs" in cmd
+        # default-True since 0.13.0, so the recorded flag is the --no- form
+        assert "--no-heteroscedastic-entity-obs" in cmd
         assert "--tau-entity-scale 0.5" in cmd
         assert "--errors-in-variables" in cmd
         assert "--propagate-rw-horizon" in cmd

@@ -1,4 +1,4 @@
-# Entity-obs three-seed confirmation — strongest candidate to date, held (#15)
+# Entity-obs three-seed confirmation — promoted to the AOTY default (0.13.0, #238)
 
 2026-07-13. `heteroscedastic_entity_obs` — per-entity multiplicative observation
 noise, the dormant model-v2 gate — is the strongest promotion candidate AOTY has
@@ -36,10 +36,16 @@ holds the arm on the overridden pre-registration, and — consistent with the
 0.11/0.12 freeze discipline — **we do not promote on an overridden
 pre-registration.**
 
-Promotion is deferred to the full-corpus run (**#15**), where n ≫ 653 makes the
-coverage grid fine enough to resolve the gate cleanly. Nothing is adopted in
-0.12.1; the AOTY default keeps the gate off and every published number stays
-bit-identical.
+Promotion was deferred at 0.12.1 to the full-corpus run (**#15**). The AOTY
+default kept the gate off and every published number stayed bit-identical.
+
+**Update (0.13.0, #238): PROMOTED.** #237 amended the coverage gate to clear an
+axis on the tolerance **or** on non-inferiority to the reference. The reference
+(shipped default) misses the same 80% tolerance by ~1500× the candidate's margin
+(cov80 0.0530 vs 0.0300), so under the amended rule this evidence re-scores
+**PROMOTABLE on all three seeds** — the 1.53e-5 subset-grid quantization no longer
+gates the decision. `heteroscedastic_entity_obs` is now the AOTY default; the
+full-corpus fit (#15) still resolves the grid and doubles as the re-baseline.
 
 **Cross-domain reconciliation.** The model-v2 bake-off rejected this same gate on
 two other domains — IMDb (a calibration-vs-sharpness trade with worse LOO) and

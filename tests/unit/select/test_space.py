@@ -164,21 +164,25 @@ class TestArmConflicts:
 
     def test_sigma_knobs_conflict_with_sigma_ignoring_families(self):
         """Arms pairing beta families with sigma-side knobs score identically
-        to the base arm while labeled as different models — pruned."""
+        to the base arm while labeled as different models — pruned. The
+        conflicting value is whichever moves the knob off its shipped default:
+        True for the default-off learn_n_exponent, False for the default-on
+        (since 0.13.0) heteroscedastic_entity_obs."""
+        moved_off_default = {"learn_n_exponent": True, "heteroscedastic_entity_obs": False}
         for family in ("beta", "beta_ceiling", "beta_binomial"):
-            for knob in ("learn_n_exponent", "heteroscedastic_entity_obs"):
+            for knob, value in moved_off_default.items():
                 conflicts = arm_conflicts(
                     {
                         "likelihood_family": family,
                         "target_transform": "identity",
-                        knob: True,
+                        knob: value,
                     },
                     AOTY,
                 )
                 assert any("ignores sigma" in c for c in conflicts), (family, knob)
         # sigma-using families keep those knobs as real arms.
         assert arm_conflicts({"learn_n_exponent": True}, AOTY) == []
-        assert arm_conflicts({"heteroscedastic_entity_obs": True}, AOTY) == []
+        assert arm_conflicts({"heteroscedastic_entity_obs": False}, AOTY) == []
 
 
 class TestActivation:

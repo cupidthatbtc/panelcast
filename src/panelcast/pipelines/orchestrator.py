@@ -224,11 +224,11 @@ class PipelineConfig:
     # Horseshoe global scale (tau_0), the sparsity knob a bake-off sweeps.
     # Read only when beta_prior_type="horseshoe".
     hs_global_scale: float = 0.1
-    # Entity-level observation overdispersion gate: False (legacy default,
-    # bit-identical RNG path) | True (per-entity multiplicative noise inflation
-    # widening intervals for noisy series). tau_entity_scale sets the prior
-    # HalfNormal scale on the entity-noise dispersion.
-    heteroscedastic_entity_obs: bool = False
+    # Entity-level observation overdispersion gate: True (AOTY default since
+    # 0.13.0, #238 — per-entity multiplicative noise inflation, held-out ELPD
+    # +29.8+/-7.0) | False (legacy bit-identical RNG path, pinned by IMDb/econ).
+    # tau_entity_scale sets the prior HalfNormal scale on the entity dispersion.
+    heteroscedastic_entity_obs: bool = True
     tau_entity_scale: float = 0.25
     # Errors-in-variables gate (model-v2): de-noise the AR(1) lagged regressor
     # with a measurement-error latent so rho de-attenuates. Default off => legacy
@@ -1048,8 +1048,12 @@ class PipelineOrchestrator:
             parts.append(f"--beta-prior-type {self.config.beta_prior_type}")
         if self.config.hs_global_scale != defaults.hs_global_scale:
             parts.append(f"--hs-global-scale {self.config.hs_global_scale}")
-        if self.config.heteroscedastic_entity_obs:
-            parts.append("--heteroscedastic-entity-obs")
+        if self.config.heteroscedastic_entity_obs != defaults.heteroscedastic_entity_obs:
+            parts.append(
+                "--heteroscedastic-entity-obs"
+                if self.config.heteroscedastic_entity_obs
+                else "--no-heteroscedastic-entity-obs"
+            )
         if self.config.tau_entity_scale != defaults.tau_entity_scale:
             parts.append(f"--tau-entity-scale {self.config.tau_entity_scale}")
         if self.config.errors_in_variables:

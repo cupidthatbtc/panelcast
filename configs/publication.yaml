@@ -70,6 +70,12 @@ likelihood_df: 4.0
 # auto-resolve to on anyway).
 entity_group_pooling: true
 gbm_offset: true
+# Promoted to the AOTY default in 0.13.0 (#238): per-entity observation
+# overdispersion, held-out ELPD +29.8 ± 7.0 (z +4.25) on the three-seed subset
+# confirmation, resolving the q10/q90 PPC pins, cleared under #237's coverage
+# non-inferiority rule. Pinned true here so the publication run is reproducible
+# even if defaults drift.
+heteroscedastic_entity_obs: true
 
 # Likelihood family. The symmetric Student-t pins a few bounded/skew PPC
 # statistics (skewness, max, q50, q90), so the bounded mean-precision `beta`

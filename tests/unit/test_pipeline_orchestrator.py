@@ -1126,11 +1126,13 @@ class TestPipelineConfigValidation:
                 target_transform="identity",
                 learn_n_exponent=True,
             )
+        # heteroscedastic_entity_obs is default-True since 0.13.0, so the value
+        # that "moves it off the default" (and thus flags the mislabel) is False.
         with pytest.raises(ValueError, match="heteroscedastic_entity_obs"):
             PipelineConfig(
                 likelihood_family="beta_ceiling",
                 target_transform="identity",
-                heteroscedastic_entity_obs=True,
+                heteroscedastic_entity_obs=False,
             )
         with pytest.raises(ValueError, match="n_exponent"):
             PipelineConfig(

@@ -55,14 +55,18 @@ ar_center: global
 latent_process: rw
 debut_prev_score_source: train_mean
 
-# Observation-noise gates (default off => bit-identical to published fits).
+# Observation-noise gates.
 # sigma_obs_prior_type: "lognormal" removes the HalfNormal zero-boundary
-#   pile-up (use on heavily zero-inflated targets where sigma_obs collapses).
-# heteroscedastic_entity_obs: True adds a per-entity multiplicative noise
-#   inflation (wider, better-calibrated intervals for noisy series);
-#   tau_entity_scale is the HalfNormal scale on that entity dispersion.
+#   pile-up (use on heavily zero-inflated targets where sigma_obs collapses);
+#   stays off for AOTY (bit-identical to published fits).
+# heteroscedastic_entity_obs: per-entity multiplicative noise inflation (wider,
+#   better-calibrated intervals for noisy series). Promoted to the AOTY default
+#   in 0.13.0 (#238) on the three-seed subset confirmation (held-out ELPD
+#   +29.8 +/- 7.0, resolves the q10/q90 PPC pins) under #237's coverage
+#   non-inferiority rule. Domains whose bake-offs rejected it (IMDb, econ) pin
+#   false. tau_entity_scale is the HalfNormal scale on that entity dispersion.
 sigma_obs_prior_type: halfnormal
-heteroscedastic_entity_obs: false
+heteroscedastic_entity_obs: true
 tau_entity_scale: 0.25
 
 # Genre/group pooling gate (#41; promoted to auto-on in 0.6.0 on the #85

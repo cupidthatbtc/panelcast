@@ -1,10 +1,13 @@
 """Parity-lock + behavior tests for the entity-overdispersion gate (C1) and
 the lognormal sigma_obs prior (C2).
 
-The load-bearing invariant for both upgrades: with the gates OFF (the default
-PriorConfig), the model executes the *exact* legacy code path, so every
-existing fitted number is bit-reproducible. The C1 sites are created only on
-the gate-ON branch and only AFTER every existing site; because NumPyro's
+The load-bearing invariant: with the C1 gate OFF, the model executes the
+*exact* legacy code path, so every pre-0.13.0 fitted number is bit-reproducible.
+C1 is the AOTY default since 0.13.0 (#238), so the off arm is pinned explicitly
+(``PriorConfig(heteroscedastic_entity_obs=False)``) rather than read off the
+bare default — a bare ``PriorConfig()`` now has the gate ON. The C1 sites are
+created only on the gate-ON branch and only AFTER every existing site; because
+NumPyro's
 ``seed`` handler splits PRNG keys in site-execution order, appending sites at
 the end cannot perturb any earlier site's draw. These tests prove that
 property directly at the forward-trace level (cheap, no MCMC), which is why
@@ -67,14 +70,21 @@ def _get_trace(priors: PriorConfig, rng_seed: int = 0) -> dict:
 class TestEntityObsParityLock:
     """C1 gate-off bit-identity and gate-on append-only contract."""
 
-    def test_gate_off_adds_no_sites(self):
-        """Default PriorConfig: none of the C1 sites exist anywhere in the trace."""
+    def test_default_config_is_gate_on(self):
+        """AOTY default since 0.13.0 (#238): a bare PriorConfig samples the C1
+        sites. This replaces the old 'bare default is off' expectation."""
         tr = _get_trace(PriorConfig())
+        assert _sample_sites(tr) >= NEW_SAMPLE_SITES
+        assert NEW_DETERMINISTIC_SITE in _deterministic_sites(tr)
+
+    def test_gate_off_adds_no_sites(self):
+        """Gate pinned off: none of the C1 sites exist anywhere in the trace."""
+        tr = _get_trace(PriorConfig(heteroscedastic_entity_obs=False))
         assert NEW_SAMPLE_SITES.isdisjoint(set(tr))
         assert NEW_DETERMINISTIC_SITE not in tr
 
     def test_gate_on_adds_exactly_the_two_sample_sites(self):
-        off = _sample_sites(_get_trace(PriorConfig()))
+        off = _sample_sites(_get_trace(PriorConfig(heteroscedastic_entity_obs=False)))
         on = _sample_sites(_get_trace(PriorConfig(heteroscedastic_entity_obs=True)))
         assert on - off == NEW_SAMPLE_SITES
         # And nothing the off path had disappeared.
@@ -93,7 +103,7 @@ class TestEntityObsParityLock:
     def test_shared_sites_bit_identical_off_vs_on(self):
         """RNG-order proof: appending the C1 sites at the end leaves every
         earlier site's forward draw bit-identical (same seed, observed y)."""
-        off = _get_trace(PriorConfig())
+        off = _get_trace(PriorConfig(heteroscedastic_entity_obs=False))
         on = _get_trace(PriorConfig(heteroscedastic_entity_obs=True))
         shared = (_sample_sites(off) | _deterministic_sites(off)) & set(on)
         # The shared set must be the entire off-path latent/deterministic set.
@@ -214,7 +224,7 @@ class TestEntityObsWidensIntervals:
     """
 
     def test_on_widens_observation_scale(self):
-        off = _get_trace(PriorConfig())
+        off = _get_trace(PriorConfig(heteroscedastic_entity_obs=False))
         base_scale = _y_scale(off)  # scalar (homoscedastic gate-off)
         sigma_obs = np.asarray(off[f"{PREFIX}sigma_obs"]["value"])
         tau = np.float32(0.5)

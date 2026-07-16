@@ -14,9 +14,19 @@ reversible, for a future calibration-priority adoption or domain.
 C1 (`heteroscedastic_entity_obs`) as the strongest candidate the project has
 produced on *any* domain — a clean dual win on AOTY (ELPD **+29.8 ± 7.0**, resolves
 the q10/q90 PPC pins), three-seed confirmed but **held** on a 1.5e-5 80%-coverage
-miss and deferred to the full-corpus run (#15). Still nothing adopted, still
-bit-identical. Details in the AOTY results section below; evidence in
-`.audit/select_entityobs_confirm/`.
+miss and deferred to the full-corpus run (#15). Details in the AOTY results
+section below; evidence in `.audit/select_entityobs_confirm/`.
+
+**Update (0.13.0, #238): C1 adopted as the AOTY default.** #237 amended the
+coverage gate — an axis clears on the tolerance **or** on non-inferiority to the
+reference — after establishing that the shipped default misses the same 80%
+tolerance by ~1500× the candidate's margin (0.0530 vs 0.0300). Under that rule
+the three-seed subset evidence re-scores **PROMOTABLE on all of s42/s43/s44**,
+so the 0.12.1 hold is lifted **for AOTY**. The default is flipped on at the four
+declaration sites + `configs/base.yaml`; IMDb and econ pin it False in their run
+configs (their REJECTs stand). Published-number re-baseline follows in the
+release PR. The IMDb/econ verdicts below are unchanged — same gate, opposite
+verdict per domain.
 
 ## Why this experiment exists
 
@@ -172,15 +182,23 @@ reference stays pinned on `skewness, max, q10, q90`, the arm on `skewness, max`
 only, clearing **q10 and q90**. That is the first movement on the bounded-skew
 tail misfit that six likelihood families never touched.
 
-**Verdict: HELD, deferred to full corpus (#15).** The pre-registered 80% coverage
-tolerance is |cov80 Δ| ≤ 0.03; on 2 of 3 seeds the arm lands at 0.0300153 — over
-by **1.53e-5**, one album out of 653 (coverage is quantized at 1/653 ≈ 1.53e-3, so
-the 0.03 threshold sits between 541/653 and 542/653 and the subset cannot resolve
-which side is true). `panelcast select`'s renderer holds it; consistent with the
-0.11/0.12 freeze discipline we **do not promote on an overridden pre-registration.**
-0.12.1 adopts nothing — the AOTY default keeps the gate off, all numbers stay
-bit-identical, and promotion is gated on #15 where n ≫ 653 resolves the coverage
-grid. Evidence: `.audit/select_entityobs_confirm/`.
+**Verdict at 0.12.1: HELD.** The pre-registered 80% coverage tolerance is
+|cov80 Δ| ≤ 0.03; on 2 of 3 seeds the arm lands at 0.0300153 — over by **1.53e-5**,
+one album out of 653 (coverage is quantized at 1/653 ≈ 1.53e-3, so the 0.03
+threshold sits between 541/653 and 542/653 and the subset cannot resolve which
+side is true). `panelcast select`'s renderer held it under the absolute bar.
+
+**Verdict at 0.13.0 (#238): ADOPTED as the AOTY default.** #237 amended the
+coverage gate to clear an axis on the tolerance **or** on non-inferiority to the
+reference — the justification being the internal incoherence that the shipped
+default misses the same 80% tolerance by more (0.0530 vs the candidate's 0.0300),
+so an absolute bar on challengers alone blocks a strict calibration improvement.
+Under the non-inferiority clause the three-seed subset re-scores **PROMOTABLE on
+all of s42/s43/s44** (cov80 0.0300 ≤ reference 0.0530; cov95 clears the absolute
+tolerance), and Jack approved the flip. The 1.53e-5 subset-grid quantization no
+longer gates the *decision* — non-inferiority is unambiguous at any resolution —
+though the full-corpus fit (#15) still resolves the grid cleanly and doubles as
+the re-baseline. Evidence: `.audit/select_entityobs_confirm/`.
 
 The finding itself is that **the same gate earns opposite verdicts per domain**:
 a clean dual win on AOTY, a calibration-vs-sharpness reject on IMDb, a deeper-
@@ -202,17 +220,22 @@ than-reach reject on econ. The IMDb and econ rows below stand unchanged.
   cross-field verdict stays inconclusive.
 - **Physics:** default-off retained (control); bake-off pending to confirm no
   regression.
-- **AOTY:** **HELD** — strongest candidate to date (select-ladder discovery,
-  three-seed confirmed: ELPD +29.8 ± 7.0, resolves the q10/q90 PPC pins), but the
-  80% coverage tolerance misses by 1.53e-5 on 2 of 3 seeds. Default-off retained;
-  promotion deferred to the full-corpus run (#15). Nothing adopted, numbers
-  bit-identical.
+- **AOTY:** **ADOPTED as the default in 0.13.0 (#238)** — strongest candidate to
+  date (select-ladder discovery, three-seed confirmed: ELPD +29.8 ± 7.0, resolves
+  the q10/q90 PPC pins). Held at 0.12.1 on a 1.53e-5 80%-coverage miss; promoted
+  once #237 amended the gate to clear on non-inferiority to the reference (the
+  candidate's cov80 miss is ~1500× smaller than the incumbent's). Published
+  numbers re-baseline in the release PR.
 
 ## Parity guarantee
 
-Every domain not adopted here (physics, AOTY, games, BGG, Pitchfork,
-science-physics, IMDb directors) keeps `heteroscedastic_entity_obs=False` and
-`sigma_obs_prior_type=halfnormal`, so its fitted numbers are bit-identical to
-the published study — proven by the parity-lock test, which shows the gate-off
+As of 0.13.0 (#238), **AOTY** runs with `heteroscedastic_entity_obs=True` — its
+published numbers re-baseline in the release PR. Every other domain
+(IMDb, econ, physics, games, BGG, Pitchfork, science-physics, IMDb directors)
+keeps `heteroscedastic_entity_obs=False` and `sigma_obs_prior_type=halfnormal`,
+so its fitted numbers stay bit-identical to the published study. The gate is now
+the dataclass/base.yaml default, so those domains carry an **explicit `false`
+pin** in their run configs — the flip does not silently turn the gate on for a
+domain whose own bake-off rejected it. The parity-lock test proves the pinned-off
 forward-draw sequence is unchanged and the gate-on branch only appends sites
 after every existing one.

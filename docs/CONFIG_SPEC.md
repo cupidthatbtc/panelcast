@@ -62,7 +62,7 @@ Observation noise
 - `n_exponent_prior`: `logit-normal` | `beta`
 - `n_exponent_alpha`, `n_exponent_beta`: float (legacy beta-prior parameters)
 - `sigma_obs_prior_type`: `halfnormal` | `lognormal`
-- `heteroscedastic_entity_obs`: bool (default false; per-entity multiplicative noise — leading promotion candidate held for full-corpus confirmation, see [`decisions/entity_overdispersion.md`](decisions/entity_overdispersion.md))
+- `heteroscedastic_entity_obs`: bool (AOTY default true since 0.13.0, #238; per-entity multiplicative noise, promoted on the three-seed subset confirmation under #237's coverage non-inferiority rule — see [`decisions/entity_overdispersion.md`](decisions/entity_overdispersion.md). Domains that rejected it — IMDb, econ — pin false)
 - `tau_entity_scale`: float (default 0.25)
 
 Likelihood and model gates
