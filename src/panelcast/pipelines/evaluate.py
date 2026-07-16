@@ -950,6 +950,7 @@ def _run_new_artist_predictive(
         "target_bounds": _summary_dataset(summary)["target_bounds"],
         "likelihood_df": float(summary.get("likelihood_df", 4.0)),
         "likelihood_family": summary.get("likelihood_family") or "studentt",
+        "skew_tailweight": PriorConfig(**summary["priors"]).skew_tailweight,
         "discretize_observation": bool(summary.get("discretize_observation", False)),
         "target_transform": summary.get("target_transform") or "identity",
         "logit_offset": float(summary.get("logit_offset") or 0.5),
