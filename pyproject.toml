@@ -137,6 +137,7 @@ disable_error_code = ["arg-type", "assignment", "return-value", "var-annotated",
 # prediction-result schema are checked strictly (incl. arg-type).
 [[tool.mypy.overrides]]
 module = [
+  "panelcast",
   "panelcast.config.gates",
   "panelcast.data.manifests",
   "panelcast.models.bayes.predict",
@@ -149,6 +150,11 @@ enable_error_code = ["arg-type", "return-value", "assignment"]
 [[tool.mypy.overrides]]
 module = ["panelcast.pipelines.orchestrator"]
 enable_error_code = ["return-value", "assignment"]
+
+# Ship the PEP 561 marker so downstream type checkers trust panelcast's inline
+# types (see docs/API.md for the supported import surface).
+[tool.setuptools.package-data]
+panelcast = ["py.typed"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
