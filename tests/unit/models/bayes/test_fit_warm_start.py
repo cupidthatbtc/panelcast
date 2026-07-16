@@ -109,3 +109,23 @@ class TestWarmStart:
         assert warm.warm_started
         for site in warm.idata.posterior.data_vars:
             assert np.isfinite(np.asarray(warm.idata.posterior[site])).all()
+
+
+def test_maybe_export_warmup_warns_and_skips_without_sampler(tmp_path, caplog):
+    """A resume that finds every block already checkpointed has no live sampler;
+    a requested warmup export must warn and skip, not crash or write a file."""
+    import logging
+
+    from panelcast.models.bayes.fit import _maybe_export_warmup
+
+    path = tmp_path / "warmup.pkl"
+    with caplog.at_level(logging.WARNING, logger="panelcast.models.bayes.fit"):
+        _maybe_export_warmup(
+            mcmc=None,
+            model=make_score_model("user"),
+            run_args={},
+            config=None,
+            path=path,
+        )
+    assert not path.exists()
+    assert any("skipped" in record.getMessage() for record in caplog.records)

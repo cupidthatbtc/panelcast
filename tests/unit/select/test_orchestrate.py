@@ -343,6 +343,34 @@ class TestRunSelect:
         payload = json.loads((Path(result["report_dir"]) / "report.json").read_text())
         assert len(payload["arms"]) == 3
 
+    def test_scoring_failure_records_unscored_arm(self, tmp_path, monkeypatch):
+        """A bad snapshot in the post-sweep scoring loop must not crash the
+        report after the whole sweep is paid for: the arm is recorded unscored
+        with the failure note, and the report still renders."""
+        import panelcast.select.scoring as scoring_mod
+
+        launch = _fake_env(tmp_path, monkeypatch)
+        cfg = _cfg(tmp_path, max_fits=3)
+        cfg.include_stage2 = False
+
+        def _boom(*args, **kwargs):
+            raise ValueError("corrupt snapshot")
+
+        monkeypatch.setattr(scoring_mod, "score_arm", _boom)
+        result = run_select(
+            None, NOCONFIRM, DecisionRules(), cfg, launch=launch, audit_root=tmp_path / ".audit"
+        )
+
+        report_json = Path(result["report_dir"]) / "report.json"
+        assert report_json.exists()
+        payload = json.loads(report_json.read_text())
+        assert payload["arms"], "unscored arms must still be listed"
+        assert all(
+            any("scoring failed" in note for note in arm["notes"]) for arm in payload["arms"]
+        )
+        assert result["winner_arm"] is None
+        assert not result["promotable"]
+
     def test_ladder_run_writes_screening_appendix(self, tmp_path, monkeypatch):
         import panelcast.select.runner as runner_mod
 
