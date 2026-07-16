@@ -304,6 +304,13 @@ class TestGenerateModelCard:
         assert "\\%" in card  # percent
         assert "\\#" in card  # hash
 
+    def test_latex_escapes_hyperparameter_values(self, sample_model_card_data):
+        """Hyperparameter values are escaped so a default offset_logit run compiles."""
+        sample_model_card_data.hyperparameters = {"target_transform": "offset_logit"}
+        card = generate_model_card(sample_model_card_data, format="latex")
+        assert "offset\\_logit" in card
+        assert "offset_logit \\\\" not in card
+
 
 class TestWriteModelCard:
     """Tests for write_model_card function."""
