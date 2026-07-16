@@ -51,6 +51,11 @@ def _stable_feature_hash(df: pd.DataFrame) -> str:
 # GroupKFold: only train rows carry OOF offsets, so their offset column shifts
 # while every held-out (validation/test) offset — produced by the full-train
 # model — is byte-identical, which is why those four digests are unchanged.
+# The same change also moved the full-train model's seed 0->42; the held-out
+# digests stay stable only because HistGradientBoostingRegressor is
+# seed-invariant at this fixture size (early stopping off, no subsampling). If
+# the fixture grows past the early-stopping threshold, expect the held-out
+# digests to move too — that would be the seed change, not a regression.
 GOLDEN_FEATURE_HASHES = {
     "within_entity_temporal/train": (
         "47de5b4b13e20b6a3dc5e031659df08268896a625f4e3329f78aae12479006e3"

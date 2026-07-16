@@ -87,7 +87,14 @@ class GbmOffsetBlock(BaseFeatureBlock):
         # held-out rows only ever see the past-only full-train model, so the
         # covariate would otherwise carry more information in train than in test.
         groups = None
-        if self.entity_col is not None and self.entity_col in df.columns:
+        if self.entity_col is not None:
+            if self.entity_col not in df.columns:
+                raise ValueError(
+                    f"gbm_offset: configured entity_col '{self.entity_col}' is "
+                    "absent from the fit frame; refusing to silently fall back to "
+                    "entity-blind KFold, which would reintroduce within-entity "
+                    "leakage. Pass entity_col=None only for non-panel data."
+                )
             groups = df[self.entity_col].to_numpy()
         n_splits = min(self.n_splits, len(df))
         if groups is not None:

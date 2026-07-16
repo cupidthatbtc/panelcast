@@ -531,6 +531,7 @@ def _predict_new_entities(
                 # studentt default — otherwise a beta/skew/discretized model
                 # silently predicts new entities under Student-t.
                 "likelihood_family": summary.get("likelihood_family") or "studentt",
+                "skew_tailweight": PriorConfig(**summary["priors"]).skew_tailweight,
                 "discretize_observation": bool(summary.get("discretize_observation")),
             }
 

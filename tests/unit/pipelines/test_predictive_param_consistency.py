@@ -1,19 +1,21 @@
-"""Structural guard: the predictive paths must thread identical observation-
+"""Structural guard: every predictive path must thread identical observation-
 distribution parameters.
 
-The cold-start (``_run_new_artist_predictive`` -> ``predict_new_entity``) and
-horizon-rollout (``_evaluate_horizon_rollout`` -> ``predict_horizon``) paths
-describe the *same* fitted observation/innovation distribution. Any knob that
-shapes that distribution (likelihood family, tail weight, discretization, ...)
-must be forwarded by both, or the two evaluation surfaces silently score under
-different predictive distributions.
+The cold-start evaluation (``_run_new_artist_predictive`` -> ``predict_new_entity``),
+horizon-rollout (``_evaluate_horizon_rollout`` -> ``predict_horizon``), and
+production predict-next (``_predict_new_entities`` -> ``predict_new_entity``)
+paths all describe the *same* fitted observation/innovation distribution. Any
+knob that shapes that distribution (likelihood family, tail weight,
+discretization, ...) must be forwarded by all of them, or a surface silently
+predicts under a different distribution than the fit.
 
 The original defect (#230): ``skew_tailweight`` reached the rollout call but not
-the cold-start call, so a non-unit tail weight would have been dropped on the
-cold-start path with no error. This test is deliberately structural — it
-compares the *set* of distribution parameters each path forwards against a
-canonical roster, so it stays valid as new distribution knobs are added: extend
-``OBS_DISTRIBUTION_PARAMS`` and wire the knob into both call sites.
+the cold-start evaluation call; the follow-up found the same omission on the
+production predict-next path. This test is deliberately structural — it compares
+the *set* of distribution parameters each path forwards against a canonical
+roster, so it stays valid as new distribution knobs are added: extend
+``OBS_DISTRIBUTION_PARAMS``, wire the knob into every registered call site, and
+register any new predictive path in ``PREDICTIVE_PATHS``.
 """
 
 from __future__ import annotations
@@ -22,9 +24,11 @@ import ast
 import inspect
 from collections.abc import Callable
 
+import pytest
+
 from panelcast.models.bayes.predict import predict_new_entity
 from panelcast.models.bayes.rollout import predict_horizon
-from panelcast.pipelines import evaluate
+from panelcast.pipelines import evaluate, predict_next
 
 # Parameters that define the predictive observation/innovation distribution.
 # A new knob belongs here only if it changes the predictive distribution itself
@@ -41,6 +45,14 @@ OBS_DISTRIBUTION_PARAMS = frozenset(
         "fixed_n_exponent",
     }
 )
+
+# Every function that assembles a call into predict_new_entity / predict_horizon.
+# Add new predictive surfaces here so the guard covers them too.
+PREDICTIVE_PATHS: dict[str, Callable] = {
+    "cold_start_eval": evaluate._run_new_artist_predictive,
+    "horizon_rollout": evaluate._evaluate_horizon_rollout,
+    "predict_next": predict_next._predict_new_entities,
+}
 
 
 def _forwarded_param_names(func: Callable) -> set[str]:
@@ -75,26 +87,18 @@ def test_both_predictors_accept_the_distribution_params():
         assert not missing, f"{predictor.__name__} lacks distribution params: {missing}"
 
 
-def test_cold_start_path_forwards_all_distribution_params():
-    forwarded = _forwarded_param_names(evaluate._run_new_artist_predictive)
+@pytest.mark.parametrize("name", sorted(PREDICTIVE_PATHS))
+def test_path_forwards_all_distribution_params(name):
+    forwarded = _forwarded_param_names(PREDICTIVE_PATHS[name])
     missing = OBS_DISTRIBUTION_PARAMS - forwarded
-    assert not missing, f"cold-start predictive path drops: {missing}"
+    assert not missing, f"predictive path '{name}' drops distribution params: {missing}"
 
 
-def test_rollout_path_forwards_all_distribution_params():
-    forwarded = _forwarded_param_names(evaluate._evaluate_horizon_rollout)
-    missing = OBS_DISTRIBUTION_PARAMS - forwarded
-    assert not missing, f"rollout predictive path drops: {missing}"
-
-
-def test_predictive_paths_agree_on_distribution_params():
-    """The two paths must forward the same distribution roster as each other."""
-    cold = _forwarded_param_names(evaluate._run_new_artist_predictive)
-    rollout = _forwarded_param_names(evaluate._evaluate_horizon_rollout)
-    cold_dist = cold & OBS_DISTRIBUTION_PARAMS
-    rollout_dist = rollout & OBS_DISTRIBUTION_PARAMS
-    assert cold_dist == rollout_dist, (
-        "cold-start and rollout predictive paths disagree on distribution "
-        f"params: only-cold={cold_dist - rollout_dist}, "
-        f"only-rollout={rollout_dist - cold_dist}"
-    )
+def test_all_predictive_paths_agree_on_distribution_params():
+    """Every registered path must forward the same distribution roster."""
+    rosters = {
+        name: _forwarded_param_names(func) & OBS_DISTRIBUTION_PARAMS
+        for name, func in PREDICTIVE_PATHS.items()
+    }
+    distinct = set(map(frozenset, rosters.values()))
+    assert len(distinct) == 1, f"predictive paths disagree on distribution params: {rosters}"
