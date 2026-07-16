@@ -19,12 +19,11 @@ entries written by a different toolchain are never reused.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
-import structlog
-
-log = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 
 def enable_jax_compilation_cache() -> Path | None:
@@ -41,7 +40,11 @@ def enable_jax_compilation_cache() -> Path | None:
 
     env_dir = os.environ.get("PANELCAST_JAX_CACHE_DIR")
     cache_dir = Path(env_dir) if env_dir else Path.home() / ".cache" / "panelcast" / "jax"
-    cache_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        log.warning("jax_compilation_cache_unavailable dir=%s err=%s", cache_dir, exc)
+        return None
 
     # Imported here so the kill switch never touches jax.
     import jax
@@ -50,5 +53,5 @@ def enable_jax_compilation_cache() -> Path | None:
     jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)
     jax.config.update("jax_persistent_cache_min_entry_size_bytes", 0)
 
-    log.debug("jax_compilation_cache_enabled", cache_dir=str(cache_dir))
+    log.debug("jax_compilation_cache_enabled cache_dir=%s", cache_dir)
     return cache_dir

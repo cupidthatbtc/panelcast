@@ -119,7 +119,7 @@ def export_figures(
                 label_col=label_col,
             )
         else:
-            figures["coefficients"] = create_forest_plot(data.coefficients)
+            typer.echo("Skipping coefficients figure: no estimate/HDI columns in fallback CSV.")
 
     if data.reliability is not None:
         rel = data.reliability
@@ -502,13 +502,16 @@ def runs_list(
         typer.echo(f"No runs found: {base} does not exist.")
         raise typer.Exit(code=0)
 
-    # Resolve the `latest` symlink/junction to the run id it points at.
+    # Resolve latest via the authoritative latest.json pointer (falling back to
+    # the opportunistic `latest` link, which resolve_latest handles internally).
+    from panelcast.paths import resolve_latest
+
     latest_target: str | None = None
     try:
-        latest = base / "latest"
-        if latest.exists():
-            resolved = latest.resolve()
-            if resolved.name != "latest":
+        latest_run = resolve_latest(base)
+        if latest_run is not None:
+            resolved = latest_run.resolve()
+            if resolved.name not in ("latest", "failed"):
                 latest_target = resolved.name
     except OSError:
         latest_target = None
