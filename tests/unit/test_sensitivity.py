@@ -343,6 +343,12 @@ class TestAggregateSensitivityResults:
         elpd_values = df["elpd"].values
         assert elpd_values[0] >= elpd_values[1] >= elpd_values[2]
 
+    def test_records_serialization_preserves_variant_name(self, mock_sensitivity_results):
+        """The suite serializes with reset_index(); records must keep 'name'."""
+        df = aggregate_sensitivity_results(mock_sensitivity_results, metric="elpd")
+        records = df.reset_index().to_dict(orient="records")
+        assert {r["name"] for r in records} == {"default", "diffuse", "informative"}
+
     def test_aggregate_sensitivity_results_convergence_metric(self, mock_sensitivity_results):
         """Test aggregation with convergence metric."""
         df = aggregate_sensitivity_results(mock_sensitivity_results, metric="convergence")

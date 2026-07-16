@@ -358,6 +358,10 @@ class PipelineConfig:
             raise ValueError("num_chains must be >= 1.")
         if self.num_samples < 1:
             raise ValueError("num_samples must be >= 1.")
+        if self.num_warmup < 0:
+            raise ValueError("num_warmup must be >= 0.")
+        if not 0.0 < self.target_accept < 1.0:
+            raise ValueError("target_accept must be in (0, 1).")
         if self.checkpoint_every_draws is not None and self.checkpoint_every_draws < 1:
             raise ValueError("checkpoint_every_draws must be >= 1 when set.")
         if self.ess_threshold < 1:
@@ -382,10 +386,12 @@ class PipelineConfig:
             or "/" in self.run_id
             or "\\" in self.run_id
             or self.run_id in (".", "..")
+            or self.run_id.startswith(".")
+            or self.run_id in ("latest", "failed")
         ):
             raise ValueError(
                 f"Invalid run_id: {self.run_id!r}. Must be a bare directory name "
-                "(no path separators)."
+                "(no path separators, not a reserved name)."
             )
 
     def _validate_likelihood(self) -> None:

@@ -1270,7 +1270,9 @@ def run_sensitivity_suite(ctx) -> dict:
             obs_name=obs_name,
             progress_bar=progress_bar,
         )
-        payload["priors"] = aggregate_sensitivity_results(prior_results).to_dict(orient="records")
+        payload["priors"] = (
+            aggregate_sensitivity_results(prior_results).reset_index().to_dict(orient="records")
+        )
 
     if "ablation" in axes:
         feature_groups = _feature_groups_from_names(feature_cols, summary)
@@ -1285,8 +1287,8 @@ def run_sensitivity_suite(ctx) -> dict:
             # Same located config the "full" baseline was fitted under.
             priors=_locate(PRIOR_CONFIGS["default"]),
         )
-        payload["ablation"] = aggregate_sensitivity_results(ablation_results).to_dict(
-            orient="records"
+        payload["ablation"] = (
+            aggregate_sensitivity_results(ablation_results).reset_index().to_dict(orient="records")
         )
 
     if "split_seed" in axes:
