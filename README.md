@@ -195,6 +195,7 @@ See [`docs/CLI.md`](docs/CLI.md) for the complete command reference.
 - [`docs/PORTING.md`](docs/PORTING.md) — retarget to a new domain (the aerospace walkthrough)
 - [`docs/EXTENSIBILITY.md`](docs/EXTENSIBILITY.md) — adding features safely
 - [`docs/CLI.md`](docs/CLI.md) — complete CLI reference
+- [`docs/API.md`](docs/API.md) — supported Python import surface and its semver guarantee
 - [`docs/LEAKAGE_CONTROLS.md`](docs/LEAKAGE_CONTROLS.md) — guardrails and leakage prevention
 - [`docs/EVALUATION_PROTOCOL.md`](docs/EVALUATION_PROTOCOL.md) — metrics, diagnostics, and thresholds
 - [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) — directory and file layout

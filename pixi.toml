@@ -20,7 +20,7 @@ lint = "ruff check src/"
 bump = "python scripts/bump_version.py"
 # Type-check only the tightened boundary modules (per-module mypy overrides
 # in pyproject.toml re-enable a few codes there).
-typecheck = "mypy src/panelcast/config/gates.py src/panelcast/data/manifests.py src/panelcast/models/bayes/predict.py src/panelcast/pipelines/orchestrator.py"
+typecheck = "mypy src/panelcast/__init__.py src/panelcast/config/gates.py src/panelcast/data/manifests.py src/panelcast/models/bayes/predict.py src/panelcast/pipelines/orchestrator.py"
 
 [dependencies]
 python = ">=3.11"
