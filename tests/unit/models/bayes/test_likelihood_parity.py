@@ -62,7 +62,10 @@ def _model_kwargs(family: str) -> dict:
         y=y,
         n_artists=_N_ART,
         max_seq=int(album_seq.max()),
-        priors=PriorConfig(likelihood_family=family),
+        # Pin the entity-obs gate off: it is the AOTY default since 0.13.0, but
+        # the golden fixtures predate it and this guard is about the likelihood
+        # registry refactor, not the gate. Off = the parity-locked legacy path.
+        priors=PriorConfig(likelihood_family=family, heteroscedastic_entity_obs=False),
         target_bounds=(0.0, 100.0),
         likelihood_df=4.0,
         ar_center=70.0,
