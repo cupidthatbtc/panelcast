@@ -465,7 +465,14 @@ def _resolve_warm_start(
 def _maybe_export_warmup(
     mcmc: MCMC | None, model: Callable, run_args: dict, config, path: Path | None
 ) -> None:
-    if path is None or mcmc is None:
+    if path is None:
+        return
+    if mcmc is None:
+        logger.warning(
+            "warmup export requested (%s) skipped: no live sampler "
+            "(resume found all blocks already checkpointed)",
+            path,
+        )
         return
     try:
         _export_warmup_state(mcmc, model, run_args, config, path)

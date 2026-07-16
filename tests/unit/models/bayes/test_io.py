@@ -407,6 +407,8 @@ class TestSaveModel:
         mock_result.divergences = 2
         mock_result.runtime_seconds = 45.5
         mock_result.gpu_info = "Mock GPU"
+        mock_result.warm_started = False
+        mock_result.resumed_from_checkpoint = False
 
         return mock_result
 
@@ -622,6 +624,8 @@ class TestToPythonNative:
         mock_result.divergences = 0
         mock_result.runtime_seconds = 1.0
         mock_result.gpu_info = "CPU"
+        mock_result.warm_started = False
+        mock_result.resumed_from_checkpoint = False
 
         priors = PriorConfig()
         path, manifest = save_model(
@@ -656,6 +660,8 @@ def _minimal_fit_result():
     mock_result.divergences = 0
     mock_result.runtime_seconds = 1.0
     mock_result.gpu_info = "CPU"
+    mock_result.warm_started = False
+    mock_result.resumed_from_checkpoint = False
     return mock_result
 
 
