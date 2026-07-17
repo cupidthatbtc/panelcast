@@ -502,6 +502,8 @@ def _predict_new_entities(
     n_exponent = summary.get("n_exponent", 0.0)
     has_hetero = learn_n_exponent or n_exponent != 0.0
 
+    priors_obj = PriorConfig(**summary["priors"])
+
     results = []
 
     scenarios = [
@@ -529,10 +531,11 @@ def _predict_new_entities(
                 "ar_center": ar_center_on_model_scale(summary),
                 # Cold-start must use the trained likelihood family, not the
                 # studentt default — otherwise a beta/skew/discretized model
-                # silently predicts new entities under Student-t.
-                "likelihood_family": summary.get("likelihood_family") or "studentt",
-                "skew_tailweight": PriorConfig(**summary["priors"]).skew_tailweight,
-                "discretize_observation": bool(summary.get("discretize_observation")),
+                # silently predicts new entities under Student-t. All three from
+                # one PriorConfig, mirroring the rollout path.
+                "likelihood_family": priors_obj.likelihood_family,
+                "skew_tailweight": priors_obj.skew_tailweight,
+                "discretize_observation": priors_obj.discretize_observation,
             }
 
             if has_hetero:
