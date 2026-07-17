@@ -885,14 +885,18 @@ class TestEnsureOutputDir:
 class TestSaveDualFormatErrors:
     """Tests for _save_dual_format with I/O failures."""
 
-    def test_savefig_ioerror_propagates(self, tmp_path):
+    def test_savefig_ioerror_propagates(self, tmp_path, monkeypatch):
         """IOError from savefig should propagate to caller."""
         fig, ax = plt.subplots()
         ax.plot([1, 2, 3])
 
+        def _raise(*args, **kwargs):
+            raise OSError("simulated write failure")
+
+        monkeypatch.setattr(fig, "savefig", _raise)
+
         with pytest.raises(OSError):
-            # Use a path that can't be written to
-            _save_dual_format(fig, Path("/dev/null/impossible"), "test")
+            _save_dual_format(fig, tmp_path / "test", "test")
 
         plt.close(fig)
 

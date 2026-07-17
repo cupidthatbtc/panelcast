@@ -434,11 +434,12 @@ class TestCLIRunHelp:
 
     def test_run_help_shows_noise_options(self):
         """Run help shows heteroscedastic noise options."""
-        result = runner.invoke(app, ["run", "--help"])
+        # Force a wide terminal so Rich/typer doesn't wrap or truncate flag
+        # names — the wrap column is machine-dependent otherwise.
+        result = runner.invoke(app, ["run", "--help"], env={"COLUMNS": "200"})
         output = strip_ansi(result.output)
         assert "--n-exponent" in output
-        # --learn-n-exponent may be truncated in help, check prefix
-        assert "--learn-n-expone" in output
+        assert "--learn-n-exponent" in output
 
     def test_run_help_shows_preflight_options(self):
         """Run help shows preflight options."""
