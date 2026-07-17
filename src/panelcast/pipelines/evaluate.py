@@ -941,6 +941,7 @@ def _run_new_artist_predictive(
     group_idx_new: np.ndarray | None = None,
 ) -> np.ndarray:
     """Generate predictions for unseen artists via population distribution."""
+    priors_obj = PriorConfig(**summary["priors"])
     kwargs: dict[str, Any] = {
         "posterior_samples": {k: jnp.asarray(v) for k, v in posterior_samples.items()},
         "X_new": jnp.asarray(X, dtype=jnp.float32),
@@ -949,9 +950,11 @@ def _run_new_artist_predictive(
         "seed": seed,
         "target_bounds": _summary_dataset(summary)["target_bounds"],
         "likelihood_df": float(summary.get("likelihood_df", 4.0)),
-        "likelihood_family": summary.get("likelihood_family") or "studentt",
-        "skew_tailweight": PriorConfig(**summary["priors"]).skew_tailweight,
-        "discretize_observation": bool(summary.get("discretize_observation", False)),
+        # Distribution params from one PriorConfig, mirroring the rollout path —
+        # mixed summary/priors provenance is how the skew_tailweight drift hid.
+        "likelihood_family": priors_obj.likelihood_family,
+        "skew_tailweight": priors_obj.skew_tailweight,
+        "discretize_observation": priors_obj.discretize_observation,
         "target_transform": summary.get("target_transform") or "identity",
         "logit_offset": float(summary.get("logit_offset") or 0.5),
         "ar_center": _ar_center_from_summary(summary),

@@ -731,8 +731,15 @@ class TestPredictNewEntities:
         non-studentt) model silently predicted new entities under Student-t.
         """
         summary = dict(mock_summary)
+        # train_bayes writes the family both top-level and into priors; the
+        # cold-start path reads the priors copy (one PriorConfig, all params).
         summary["likelihood_family"] = "beta"
         summary["discretize_observation"] = True
+        summary["priors"] = {
+            **summary["priors"],
+            "likelihood_family": "beta",
+            "discretize_observation": True,
+        }
 
         _, mock_predict = self._run(mock_posterior_samples, summary)
 
