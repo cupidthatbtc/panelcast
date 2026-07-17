@@ -546,6 +546,16 @@ class PipelineOrchestrator:
             log.error("environment_verification_failed", error=str(e))
             return e.exit_code
 
+        # Resolve the learn_n_exponent/n_exponent conflict before _setup_run
+        # persists the manifest, so manifest.json and resolved_config.yaml record
+        # the value the run actually uses rather than the stale fixed exponent.
+        if self.config.learn_n_exponent and self.config.n_exponent != 0.0:
+            log.warning(
+                "config_conflict",
+                message="Both --n-exponent and --learn-n-exponent set; using learned mode",
+            )
+            self.config.n_exponent = 0.0
+
         # 2. Set up run directory and manifest
         self._setup_run()
 
@@ -555,15 +565,6 @@ class PipelineOrchestrator:
 
         # 4. Set random seeds
         set_seeds(self.config.seed)
-
-        # Check for config conflicts
-        if self.config.learn_n_exponent and self.config.n_exponent != 0.0:
-            log.warning(
-                "config_conflict",
-                message="Both --n-exponent and --learn-n-exponent set; using learned mode",
-            )
-            # Clear the fixed exponent to prevent manifest recording stale value
-            self.config.n_exponent = 0.0
 
         log.info(
             "pipeline_started",

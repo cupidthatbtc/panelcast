@@ -1912,3 +1912,22 @@ class TestAr1BarePhiConflict:
     def test_ar1_with_studentt_stays_valid(self):
         config = PipelineConfig(likelihood_family="studentt", latent_process="ar1")
         assert config.latent_process == "ar1"
+
+
+class TestConfigConflictManifest:
+    """The learn/fixed n_exponent conflict is resolved before the manifest is
+    persisted, so manifest flags record the value the run actually uses."""
+
+    @patch("panelcast.pipelines.orchestrator.ensure_environment_locked")
+    @patch("panelcast.pipelines.orchestrator.verify_environment")
+    def test_manifest_records_resolved_n_exponent(self, mock_verify, mock_ensure, tmp_path):
+        mock_verify.return_value = MagicMock(
+            is_reproducible=True, pixi_lock_hash="abc123", warnings=[]
+        )
+        config = PipelineConfig(n_exponent=0.5, learn_n_exponent=True)
+        orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
+        with patch("panelcast.pipelines.orchestrator.get_execution_order") as mock_order:
+            mock_order.return_value = []
+            orchestrator.run()
+        assert orchestrator.manifest is not None
+        assert orchestrator.manifest.flags["n_exponent"] == 0.0
