@@ -102,7 +102,13 @@ class TestSetupPipelineLogging:
             if isinstance(h, logging.StreamHandler) and not isinstance(h, logging.FileHandler)
         ]
         assert len(console_handlers) >= 1
-        assert console_handlers[0].stream is sys.stderr
+        # The handler targets the process stderr. On Windows, structlog's colored
+        # ConsoleRenderer triggers colorama.init(), which swaps sys.stderr for a
+        # wrapper after the handler captured the original — identity then fails
+        # even though both still point at the same stderr fd. Assert on that fd,
+        # with an identity fast-path for the common (unwrapped) case.
+        handler_stream = console_handlers[0].stream
+        assert handler_stream is sys.stderr or handler_stream.fileno() == sys.stderr.fileno()
 
 
 class TestIsInteractive:
