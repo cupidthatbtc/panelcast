@@ -1920,7 +1920,7 @@ class TestConfigConflictManifest:
 
     @patch("panelcast.pipelines.orchestrator.ensure_environment_locked")
     @patch("panelcast.pipelines.orchestrator.verify_environment")
-    def test_manifest_records_resolved_n_exponent(self, mock_verify, mock_ensure, tmp_path):
+    def test_manifest_records_resolved_n_exponent(self, mock_verify, _mock_ensure, tmp_path):
         mock_verify.return_value = MagicMock(
             is_reproducible=True, pixi_lock_hash="abc123", warnings=[]
         )
