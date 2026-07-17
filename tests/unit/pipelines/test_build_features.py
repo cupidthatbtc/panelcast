@@ -692,3 +692,15 @@ class TestGetFeatureBlocksNew:
         blocks = get_default_feature_blocks()
         assert isinstance(blocks, list)
         assert len(blocks) > 0
+
+
+def test_safe_split_stats_handles_empty_frame():
+    """An all-entities-excluded split reaches the stats builder as an empty
+    frame; it must produce stats rather than crashing on int(NaN)."""
+    from panelcast.pipelines.build_features import _safe_split_stats
+
+    stats = _safe_split_stats(pd.DataFrame(), Path("train_features.parquet"))
+    assert stats["rows"] == 0
+    assert set(stats) == {
+        "path", "rows", "cols", "n_reviews_min", "n_reviews_max", "n_reviews_median"
+    }

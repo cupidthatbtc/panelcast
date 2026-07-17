@@ -361,6 +361,21 @@ class TestCreateDiagnosticsTable:
         assert "R-hat" not in status
         assert status == "n/a (single chain)"
 
+    def test_multichain_zero_variance_labels_no_variance(self):
+        """A constant param in a multi-chain run yields NaN R-hat but finite ESS;
+        the label must distinguish it from a single-chain run."""
+        n_chains, n_draws = 2, 500
+        posterior = xr.Dataset(
+            {"c": xr.DataArray(np.zeros((n_chains, n_draws)), dims=["chain", "draw"])}
+        )
+        sample_stats = xr.Dataset(
+            {"diverging": xr.DataArray(np.zeros((n_chains, n_draws), dtype=bool), dims=["chain", "draw"])}
+        )
+        idata = az.InferenceData(posterior=posterior, sample_stats=sample_stats)
+
+        status = create_diagnostics_table(idata).loc["c", "Status"]
+        assert status == "n/a (no variance)"
+
     def test_ess_as_integers(self, mock_idata):
         """ESS values should be formatted as integers."""
         result = create_diagnostics_table(mock_idata)

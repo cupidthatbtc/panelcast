@@ -188,10 +188,16 @@ def flag_differences(
     def value(flags: dict, key: str):
         return flags.get(key, getattr(defaults, key, None))
 
+    def norm(v: Any) -> Any:
+        # A JSON-persisted list and a tuple dataclass default are the same
+        # sequence; compare structurally so e.g. [0.8, 0.95] does not read as a
+        # delta against (0.8, 0.95).
+        return tuple(v) if isinstance(v, (list, tuple)) else v
+
     return [
         (key, value(a_flags, key), value(b_flags, key))
         for key in keys
-        if value(a_flags, key) != value(b_flags, key)
+        if norm(value(a_flags, key)) != norm(value(b_flags, key))
     ]
 
 

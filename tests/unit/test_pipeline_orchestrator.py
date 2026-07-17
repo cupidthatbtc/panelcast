@@ -1886,3 +1886,48 @@ class TestStageWeights:
     def test_predicted_train_seconds_none_without_features(self, tmp_path, monkeypatch):
         orch = self._orch(tmp_path, monkeypatch)
         assert orch._predicted_train_seconds() is None
+
+
+class TestAr1BarePhiConflict:
+    """ar1 latent process and a bare-phi likelihood both sample '{prefix}phi';
+    NUTS requires unique site names, so validation must reject the combination."""
+
+    def test_ar1_with_bare_phi_family_raises(self):
+        import pytest
+
+        for family in ("beta", "beta_ceiling"):
+            with pytest.raises(ValueError, match="latent_process='ar1'"):
+                PipelineConfig(
+                    likelihood_family=family,
+                    target_transform="identity",
+                    latent_process="ar1",
+                )
+
+    def test_rw_with_beta_stays_valid(self):
+        config = PipelineConfig(
+            likelihood_family="beta", target_transform="identity", latent_process="rw"
+        )
+        assert config.latent_process == "rw"
+
+    def test_ar1_with_studentt_stays_valid(self):
+        config = PipelineConfig(likelihood_family="studentt", latent_process="ar1")
+        assert config.latent_process == "ar1"
+
+
+class TestConfigConflictManifest:
+    """The learn/fixed n_exponent conflict is resolved before the manifest is
+    persisted, so manifest flags record the value the run actually uses."""
+
+    @patch("panelcast.pipelines.orchestrator.ensure_environment_locked")
+    @patch("panelcast.pipelines.orchestrator.verify_environment")
+    def test_manifest_records_resolved_n_exponent(self, mock_verify, _mock_ensure, tmp_path):
+        mock_verify.return_value = MagicMock(
+            is_reproducible=True, pixi_lock_hash="abc123", warnings=[]
+        )
+        config = PipelineConfig(n_exponent=0.5, learn_n_exponent=True)
+        orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
+        with patch("panelcast.pipelines.orchestrator.get_execution_order") as mock_order:
+            mock_order.return_value = []
+            orchestrator.run()
+        assert orchestrator.manifest is not None
+        assert orchestrator.manifest.flags["n_exponent"] == 0.0

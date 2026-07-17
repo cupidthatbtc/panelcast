@@ -648,3 +648,19 @@ class TestEnvironmentFingerprint:
         )
         assert env.fingerprint is None
         assert env.jaxlib_version is None
+
+
+class TestFlagDifferencesSequenceNormalization:
+    """A JSON-persisted list and the tuple dataclass default are the same
+    sequence, so they must not read as a flag delta."""
+
+    def test_missing_key_vs_list_default_no_difference(self):
+        from panelcast.pipelines.manifest import flag_differences
+        from panelcast.pipelines.orchestrator import PipelineConfig
+
+        defaults = PipelineConfig()
+        # Current manifest stores the interval levels as a JSON list; a legacy
+        # manifest predates the flag and falls back to the tuple default.
+        current = {"calibration_intervals": list(defaults.calibration_intervals)}
+        legacy: dict = {}
+        assert flag_differences(current, legacy, defaults) == []

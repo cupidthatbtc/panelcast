@@ -327,23 +327,9 @@ def build_features(ctx: StageContext) -> dict:
         # Exclude the row-identity key: it is join metadata, not a feature.
         feature_names = [c for c in train_features.columns if c != ROW_ID_COL]
         split_manifests[split_name] = {
-            "train": {
-                "path": str(train_path),
-                "rows": int(train_features.shape[0]),
-                "cols": int(train_features.shape[1]),
-                "n_reviews_min": int(train_features["n_reviews"].min()),
-                "n_reviews_max": int(train_features["n_reviews"].max()),
-                "n_reviews_median": int(train_features["n_reviews"].median()),
-            },
+            "train": _safe_split_stats(train_features, train_path),
             "validation": _safe_split_stats(val_features, val_path),
-            "test": {
-                "path": str(test_path),
-                "rows": int(test_features.shape[0]),
-                "cols": int(test_features.shape[1]),
-                "n_reviews_min": int(test_features["n_reviews"].min()),
-                "n_reviews_max": int(test_features["n_reviews"].max()),
-                "n_reviews_median": int(test_features["n_reviews"].median()),
-            },
+            "test": _safe_split_stats(test_features, test_path),
         }
 
     # Save manifest

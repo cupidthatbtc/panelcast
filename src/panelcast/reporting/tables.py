@@ -335,16 +335,23 @@ def create_diagnostics_table(
     else:
         result["MCSE Mean"] = "N/A"
 
+    # ArviZ yields NaN r-hat both for single-chain runs and for zero-variance
+    # params in multi-chain runs; the chain count disambiguates the label.
+    n_chains = idata.posterior.sizes.get("chain", 1)
+
     # Convergence status
     def get_status(row_name: str) -> str:
         rhat = float(summary.at[row_name, "r_hat"])
         ess_bulk = float(summary.at[row_name, "ess_bulk"])
 
         ess_ok = ess_bulk >= ess_threshold
-        # Single-chain runs yield NaN r_hat; treat it as unavailable rather than
-        # failing, mirroring check_convergence's single-chain semantics.
+        # NaN r_hat is unavailable rather than failing (mirrors check_convergence);
+        # a single chain can't yield r-hat, while a multi-chain NaN means the
+        # param had zero posterior variance.
         if not np.isfinite(rhat):
-            return "n/a (single chain)" if ess_ok else "Fail (ESS)"
+            if not ess_ok:
+                return "Fail (ESS)"
+            return "n/a (single chain)" if n_chains == 1 else "n/a (no variance)"
 
         rhat_ok = rhat <= rhat_threshold
         if rhat_ok and ess_ok:

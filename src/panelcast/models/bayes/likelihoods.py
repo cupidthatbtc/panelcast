@@ -731,7 +731,10 @@ class LikelihoodSpec:
     without restating them. ``uses_sigma`` is False for families whose
     ``sample_obs`` draws its own precision and never reads ``sigma_scaled``
     (the Beta families); the model skips the sigma-side gated sites for them
-    and config validation rejects sigma-side knobs.
+    and config validation rejects sigma-side knobs. ``samples_bare_phi`` is
+    True for families that sample a ``{prefix}phi`` site, which collides with
+    the AR(1) latent process's own ``{prefix}phi`` coefficient (NUTS requires
+    unique site names); config and space validation reject that combination.
     """
 
     name: str
@@ -743,6 +746,7 @@ class LikelihoodSpec:
     requires_identity_transform: bool = False
     requires_aggregation_count: bool = False
     uses_sigma: bool = True
+    samples_bare_phi: bool = False
 
 
 REGISTRY: dict[str, LikelihoodSpec] = {
@@ -779,6 +783,7 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         cdf=None,
         requires_identity_transform=True,
         uses_sigma=False,
+        samples_bare_phi=True,
     ),
     "skew_normal": LikelihoodSpec(
         name="skew_normal",
@@ -825,5 +830,6 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         cdf=None,
         requires_identity_transform=True,
         uses_sigma=False,
+        samples_bare_phi=True,
     ),
 }

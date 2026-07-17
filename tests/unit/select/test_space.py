@@ -184,6 +184,29 @@ class TestArmConflicts:
         assert arm_conflicts({"learn_n_exponent": True}, AOTY) == []
         assert arm_conflicts({"heteroscedastic_entity_obs": False}, AOTY) == []
 
+    def test_bare_phi_family_conflicts_with_ar1(self):
+        """beta / beta_ceiling sample a 'phi' site that collides with the AR(1)
+        latent process's own phi; the arm is pruned. rw and studentt are fine."""
+        for family in ("beta", "beta_ceiling"):
+            conflicts = arm_conflicts(
+                {
+                    "likelihood_family": family,
+                    "target_transform": "identity",
+                    "latent_process": "ar1",
+                },
+                AOTY,
+            )
+            assert any("latent_process='ar1'" in c for c in conflicts), family
+            assert arm_conflicts(
+                {
+                    "likelihood_family": family,
+                    "target_transform": "identity",
+                    "latent_process": "rw",
+                },
+                AOTY,
+            ) == []
+        assert arm_conflicts({"latent_process": "ar1"}, AOTY) == []
+
 
 class TestActivation:
     def test_n_exponent_prior_inert_without_learning(self):
