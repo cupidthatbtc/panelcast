@@ -1886,3 +1886,29 @@ class TestStageWeights:
     def test_predicted_train_seconds_none_without_features(self, tmp_path, monkeypatch):
         orch = self._orch(tmp_path, monkeypatch)
         assert orch._predicted_train_seconds() is None
+
+
+class TestAr1BarePhiConflict:
+    """ar1 latent process and a bare-phi likelihood both sample '{prefix}phi';
+    NUTS requires unique site names, so validation must reject the combination."""
+
+    def test_ar1_with_bare_phi_family_raises(self):
+        import pytest
+
+        for family in ("beta", "beta_ceiling"):
+            with pytest.raises(ValueError, match="latent_process='ar1'"):
+                PipelineConfig(
+                    likelihood_family=family,
+                    target_transform="identity",
+                    latent_process="ar1",
+                )
+
+    def test_rw_with_beta_stays_valid(self):
+        config = PipelineConfig(
+            likelihood_family="beta", target_transform="identity", latent_process="rw"
+        )
+        assert config.latent_process == "rw"
+
+    def test_ar1_with_studentt_stays_valid(self):
+        config = PipelineConfig(likelihood_family="studentt", latent_process="ar1")
+        assert config.latent_process == "ar1"

@@ -400,6 +400,11 @@ def arm_conflicts(
                 f"likelihood_family='{family}' requires target_transform='identity' "
                 f"(got '{transform}')"
             )
+        if spec.samples_bare_phi and merged["latent_process"] == "ar1":
+            conflicts.append(
+                f"likelihood_family='{family}' conflicts with latent_process='ar1' "
+                "(both sample a 'phi' site; site names must be unique)"
+            )
         if merged["discretize_observation"] and not spec.supports_discretization:
             conflicts.append(
                 f"discretize_observation is unsupported for likelihood_family='{family}'"

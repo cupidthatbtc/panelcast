@@ -422,6 +422,13 @@ class PipelineConfig:
                 f"target_transform='identity' (got '{self.target_transform}'): "
                 "the bounded likelihood assumes mu is on the score scale."
             )
+        if spec.samples_bare_phi and self.latent_process == "ar1":
+            raise ValueError(
+                f"likelihood_family='{self.likelihood_family}' cannot be combined "
+                "with latent_process='ar1': both sample a 'phi' site and NUTS "
+                "requires unique site names. Use latent_process='rw', or a "
+                "different likelihood_family."
+            )
         if not spec.uses_sigma:
             # Fire only on knobs moved OFF their shipped default: the point is to
             # catch a request the family would silently ignore, and inheriting a
