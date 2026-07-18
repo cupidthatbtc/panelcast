@@ -132,8 +132,9 @@ class TestNumericEntityIdCoercion:
     def test_missing_entity_preserved_as_nan_not_string(self):
         raw = pd.DataFrame(
             {
-                # None among ints -> object dtype (no float ".0" upcast); the
-                # coercion must leave the gap as NaN, never the string "nan".
+                # None among ints -> pandas upcasts to float64; the coercion
+                # must render clean integers (no ".0") and leave the gap as
+                # NaN, never the string "nan".
                 "Airframe": [4295806720, None, 34361129088],
                 "Flight ID": [10001, 10002, 10003],
                 "Campaign Year": [2021, 2021, 2022],

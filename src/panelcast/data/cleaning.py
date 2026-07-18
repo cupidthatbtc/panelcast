@@ -112,6 +112,11 @@ def coerce_identifier_columns(
     so the downstream non-empty-identifier filter still drops those rows. AOTY
     entity/event columns are already strings, so this is a no-op for the
     default path.
+
+    Caveat: if a numeric ID column contains any missing value, pandas has
+    already parsed it as float64 before this runs, and IDs beyond 2**53 (e.g.
+    full-precision Gaia source_ids) were rounded at read time. Exactness for
+    such columns requires reading them as strings at CSV ingest.
     """
     df = df.copy()
     for col in (entity_col, event_col):
