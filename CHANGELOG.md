@@ -4,7 +4,12 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.13.0] — 2026-07-18
+
+The `heteroscedastic_entity_obs` per-entity overdispersion factor becomes the
+AOTY default, and every published number is re-baselined on a converged fit of
+it. The publication preset's sampler is amended to reach that convergence, and
+the release also carries provenance, portability, and bug-hunt hardening.
 
 ### Changed
 
@@ -24,6 +29,45 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   parity. Published-number re-baseline lands in the release fit. Rationale in
   `docs/decisions/entity_overdispersion.md`; evidence in
   `.audit/select_entityobs_confirm/`.
+- **Publication preset sampler amended** for the entity-obs default: `target_accept`
+  0.95 → 0.90 and `num_warmup` 3000 → 5000 (`configs/publication.yaml`). With
+  `heteroscedastic_entity_obs` on, 0.95 failed the convergence gate at both warmups
+  (`sigma_artist` R-hat ≥ 1.01, bulk ESS ~650–690); 0.90/5000 passed on all three
+  confirmation seeds (R-hat 1.00, bulk ESS ≥ 1119, 0 divergences). Evidence in
+  `.audit/select_entityobs_confirm/`.
+- **Published numbers re-baselined** on the seed-42 confirmation-arm fit of the new
+  default at the amended preset — bit-identical to the flipped default via the
+  likelihood-registry parity lock. Within-entity temporal: MAE 5.28, RMSE 7.67,
+  R² 0.498, CRPS 3.81, cov80 0.830, cov95 0.968; held-out ELPD **+29.8 ± 7.0**
+  (z +4.25) over the 0.6.0-default incumbent, clearing the q10/q90 PPC pins. The
+  model card, README, `docs/BASELINES.md`, and `.audit/baseline_metrics.json` are
+  regenerated, and the BASELINES narrative is corrected to what the numbers support
+  (leads MAE and CRPS, ties ridge on RMSE/R², 80% intervals closer to nominal).
+
+### Fixed
+
+- **Cold-start distribution parameters flow from one `PriorConfig`** (#245): the
+  new-entity prediction path drew its distribution parameters from scattered
+  literals; they now come from a single fitted `PriorConfig`, so cold-start draws
+  can no longer drift from the trained model.
+- **Three unit tests made portable to Windows** (#246).
+- **Five fixes from a verified bug hunt** (#248): the diagnostics R-hat check now
+  distinguishes a genuine zero-variance site from a single-chain fit; train/test
+  split stats route through the empty-safe helper; sequence-valued manifest flags
+  compare structurally; the `n_exponent` conflict resolves before the manifest is
+  persisted; and the `ar1` latent process is guarded against a bare-`phi`
+  likelihood collision.
+
+### Known issues
+
+- **Eval cap-offset mismatch past the 50-album cap** (#247, deferred to 0.13.1):
+  `_prepare_test_model_args` rebuilds the max-albums random-walk offset from
+  combined train+test counts while training uses train-only counts, so artists past
+  the cap land on earlier RW positions than training assigned and get systematically
+  too-narrow intervals (coverage/CRPS/interval width biased low; point predictions
+  ~unchanged). Left unfixed in 0.13.0 deliberately — the fix changes evaluation
+  outputs, and the 0.13.0 numbers must stay comparable to the incumbent they are
+  measured against — so it lands in 0.13.1 with its own re-baseline.
 
 ## [0.12.1] — 2026-07-13
 
