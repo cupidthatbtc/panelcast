@@ -2392,6 +2392,42 @@ class TestPrepareTestModelArgs:
                 test_df, test_features, summary, train_df=train_df, strict=True
             )
 
+    def test_capped_artist_offset_ignores_invalid_n_reviews_rows(self):
+        """Training counts albums after dropping invalid-n_reviews rows, so the
+        eval cap offset must count the same rows — a capped artist with a
+        dropped row would otherwise get a residual over-shift."""
+        summary = self._make_summary()
+        summary["max_albums"] = 3
+        summary["max_seq"] = 4
+        summary["priors"]["propagate_rw_horizon"] = True
+
+        # A: 5 train rows but one invalid (n_reviews=0) -> training counted 4,
+        # offset 1. Counting all 5 would give offset 2 and land the test albums
+        # one RW position early.
+        train_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "A", "A", "A", "B", "B"],
+                "User_Score": [70.0, 72.0, 74.0, 76.0, 77.0, 80.0, 82.0],
+                "n_reviews": [10, 10, 0, 10, 10, 10, 10],
+            }
+        )
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A"],
+                "User_Score": [78.0, 79.0],
+                "Album": ["a6", "a7"],
+            }
+        )
+        test_features = pd.DataFrame({"f1": [1.0, 2.0], "n_reviews": [10, 20]})
+
+        model_args, _, _ = _prepare_test_model_args(
+            test_df, test_features, summary, train_df=train_df, strict=False
+        )
+
+        np.testing.assert_array_equal(
+            model_args["album_seq"], np.array([5, 6], dtype=np.int32)
+        )
+
     def test_eiv_missing_global_std_zeros_sigma(self):
         """errors_in_variables against a legacy summary (no global_std_score) emits
         an all-zero measurement scale (EIV no-op) instead of failing."""
