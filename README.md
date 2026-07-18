@@ -77,17 +77,17 @@ On the ~5,000-album AOTY subset, against baselines fit on the same real splits
 
 | | MAE | R² | 80% cov | 95% cov |
 |---|---:|---:|---:|---:|
-| **panelcast** | **5.30** | **0.501** | 0.853 | 0.963 |
+| **panelcast** | **5.28** | **0.498** | 0.830 | 0.968 |
 | ridge | 5.38 | 0.498 | 0.879 | 0.965 |
 | gradient boosting | 5.58 | 0.471 | 0.763 | 0.888 |
 | entity mean | 6.11 | 0.322 | 0.818 | 0.925 |
 
-The model now **leads on point accuracy** — the best MAE and R² in the table —
-while carrying the only *modeled* intervals, near-nominal at 0.85/0.96. The margin
-over ridge is modest (5.30 vs 5.38 MAE); the decisive gaps are CRPS and calibration —
-the gradient-boosted regressor lands close on raw error but **under-covers** badly
+The model **leads on MAE** and ties ridge on R² (0.498 each), while carrying the
+only *modeled* intervals, near-nominal at 0.83/0.97. The MAE margin over ridge is
+modest (5.28 vs 5.38); the decisive gaps are CRPS and calibration — the
+gradient-boosted regressor lands close on raw error but **under-covers** badly
 (0.76/0.89), its intervals a bolt-on rather than a modeled quantity. On the cold-start
-(never-seen entity) split it leads outright (MAE 6.91, R² 0.113, 95% coverage 0.962).
+(never-seen entity) split it leads outright (MAE 6.82, R² 0.117, 95% coverage 0.965).
 Point accuracy was never the deliverable, though — *calibrated uncertainty* is:
 intervals as a modeled quantity, an interpretable between-entity vs residual variance
 decomposition, and a generative model you can interrogate — and the model now wins on

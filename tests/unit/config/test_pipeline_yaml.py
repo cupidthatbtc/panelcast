@@ -123,8 +123,8 @@ class TestRepositoryConfigs:
         config = PipelineConfig(**kwargs)
         assert config.num_chains == 4
         assert config.num_samples == 5000
-        assert config.num_warmup == 3000
-        assert config.target_accept == 0.95
+        assert config.num_warmup == 5000
+        assert config.target_accept == 0.90
         assert config.target_transform == "offset_logit"
         assert config.ar_center == "global"
         assert config.calibration_intervals == (0.80, 0.95)
@@ -196,8 +196,8 @@ class TestCliConfigOption:
             monkeypatch, ["--config", str(REPO_ROOT / "configs" / "publication.yaml")]
         )
         assert config.num_samples == 5000
-        assert config.num_warmup == 3000
-        assert config.target_accept == 0.95
+        assert config.num_warmup == 5000
+        assert config.target_accept == 0.90
 
     def test_invalid_yaml_value_is_bad_parameter(self, monkeypatch, tmp_path):
         _make_pipeline_mocks(monkeypatch)
