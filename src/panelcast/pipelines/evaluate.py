@@ -624,15 +624,26 @@ def _prepare_test_model_args(
     propagate_rw = priors_obj.propagate_rw_horizon
     eiv_on = priors_obj.errors_in_variables
 
-    test_counts = pd.Series(artist_idx).value_counts().sort_index()
-    test_counts = test_counts.reindex(range(summary["n_artists"]), fill_value=0)
+    # The cap offset must come from TRAIN-ONLY counts, matching training exactly
+    # (train_bayes.py:_apply_max_albums_cap). Building it from train+test counts
+    # over-shifts test albums onto earlier RW positions than training assigned,
+    # under-counting accumulated random-walk variance (#247). With the train-only
+    # offset, test albums keep their training frame and extend past max_seq_train
+    # into the horizon-clamp path below.
     if train_df is not None:
-        train_idx = train_df[entity_col].map(summary["artist_to_idx"]).dropna().astype(int)
-        train_counts = train_idx.value_counts().sort_index()
-        train_counts = train_counts.reindex(range(summary["n_artists"]), fill_value=0)
-        artist_album_counts = train_counts + test_counts
+        counted = train_df
+        # Training counts albums after dropping invalid-n_reviews rows
+        # (train_bayes.py); mirror the drop or capped artists with such rows
+        # get a residual over-shift.
+        nrev_col = "n_reviews" if "n_reviews" in counted.columns else n_obs_col
+        if nrev_col in counted.columns:
+            nrev = counted[nrev_col]
+            counted = counted[~(pd.isna(nrev) | (nrev <= 0))]
+        train_idx = counted[entity_col].map(summary["artist_to_idx"]).dropna().astype(int)
+        counts = train_idx.value_counts().sort_index()
     else:
-        artist_album_counts = test_counts
+        counts = pd.Series(artist_idx).value_counts().sort_index()
+    artist_album_counts = counts.reindex(range(summary["n_artists"]), fill_value=0)
 
     temp_args = {
         "artist_idx": artist_idx,

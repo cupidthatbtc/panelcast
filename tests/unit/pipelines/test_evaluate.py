@@ -2325,6 +2325,109 @@ class TestPrepareTestModelArgs:
         assert np.isfinite(sigma).all()
         assert (sigma > 0).all()
 
+    def test_capped_artist_uses_train_only_offset(self):
+        """Regression for #247: an artist with n_train + n_test > max_albums must
+        get the TRAIN-ONLY cap offset (matching training), so test albums keep
+        their training-frame positions and extend past max_seq_train — not pulled
+        back onto earlier RW positions by a train+test offset."""
+        # max_albums=3 with 4 training albums -> training cap offset = 1 and the
+        # training frame ends at max_seq_train=3. The two test albums must land at
+        # positions 4 and 5, not the 2 and 3 a train+test offset of 3 would give.
+        summary = self._make_summary()
+        summary["max_albums"] = 3
+        summary["max_seq"] = 3
+        summary["priors"]["propagate_rw_horizon"] = True
+
+        train_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "A", "A", "B", "B"],
+                "User_Score": [70.0, 72.0, 74.0, 76.0, 80.0, 82.0],
+            }
+        )
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A"],
+                "User_Score": [78.0, 79.0],
+                "Album": ["a5", "a6"],
+            }
+        )
+        test_features = pd.DataFrame({"f1": [1.0, 2.0], "n_reviews": [10, 20]})
+
+        model_args, _, _ = _prepare_test_model_args(
+            test_df, test_features, summary, train_df=train_df, strict=False
+        )
+
+        np.testing.assert_array_equal(
+            model_args["album_seq"], np.array([4, 5], dtype=np.int32)
+        )
+        assert model_args["album_seq"].max() > summary["max_seq"]
+
+    def test_capped_artist_strict_horizon_guard_fires(self):
+        """Regression for #247: with the train-only offset the capped artist's
+        test albums correctly exceed max_seq_train, so the strict-mode
+        beyond-horizon guard fires. Pre-fix the train+test offset masked them
+        below the horizon and the guard silently no-opped."""
+        summary = self._make_summary()
+        summary["max_albums"] = 3
+        summary["max_seq"] = 3
+        summary["priors"]["propagate_rw_horizon"] = False
+
+        train_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "A", "A", "B", "B"],
+                "User_Score": [70.0, 72.0, 74.0, 76.0, 80.0, 82.0],
+            }
+        )
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A"],
+                "User_Score": [78.0, 79.0],
+                "Album": ["a5", "a6"],
+            }
+        )
+        test_features = pd.DataFrame({"f1": [1.0, 2.0], "n_reviews": [10, 20]})
+
+        with pytest.raises(ValueError, match="extrapolation beyond training horizon"):
+            _prepare_test_model_args(
+                test_df, test_features, summary, train_df=train_df, strict=True
+            )
+
+    def test_capped_artist_offset_ignores_invalid_n_reviews_rows(self):
+        """Training counts albums after dropping invalid-n_reviews rows, so the
+        eval cap offset must count the same rows — a capped artist with a
+        dropped row would otherwise get a residual over-shift."""
+        summary = self._make_summary()
+        summary["max_albums"] = 3
+        summary["max_seq"] = 4
+        summary["priors"]["propagate_rw_horizon"] = True
+
+        # A: 5 train rows but one invalid (n_reviews=0) -> training counted 4,
+        # offset 1. Counting all 5 would give offset 2 and land the test albums
+        # one RW position early.
+        train_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A", "A", "A", "A", "B", "B"],
+                "User_Score": [70.0, 72.0, 74.0, 76.0, 77.0, 80.0, 82.0],
+                "n_reviews": [10, 10, 0, 10, 10, 10, 10],
+            }
+        )
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["A", "A"],
+                "User_Score": [78.0, 79.0],
+                "Album": ["a6", "a7"],
+            }
+        )
+        test_features = pd.DataFrame({"f1": [1.0, 2.0], "n_reviews": [10, 20]})
+
+        model_args, _, _ = _prepare_test_model_args(
+            test_df, test_features, summary, train_df=train_df, strict=False
+        )
+
+        np.testing.assert_array_equal(
+            model_args["album_seq"], np.array([5, 6], dtype=np.int32)
+        )
+
     def test_eiv_missing_global_std_zeros_sigma(self):
         """errors_in_variables against a legacy summary (no global_std_score) emits
         an all-zero measurement scale (EIV no-op) instead of failing."""
