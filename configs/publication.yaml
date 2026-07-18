@@ -4,8 +4,8 @@
 # `panelcast run --config configs/publication.yaml` once the YAML config
 # wiring lands. Until then, the equivalent CLI invocation is:
 #
-#   panelcast run --num-chains 4 --num-samples 5000 --num-warmup 3000 \
-#       --target-accept 0.95 --strict
+#   panelcast run --num-chains 4 --num-samples 5000 --num-warmup 5000 \
+#       --target-accept 0.90 --strict
 #
 # Adopted gate decisions (validated on 2x500 cheap runs, 2026-06-10):
 # - target_transform: offset_logit — ADOPTED in 0.5.0 (#43), reversing the
@@ -25,8 +25,12 @@
 #   not triggered: under the corrected estimator (#63) the paired ELPD difference
 #   is -2.2 ± 0.93 (a small decrement, not a win) while bulk ESS drops 787 -> 635.
 #   Held; rw stays default.
-# - Warmup 3000 (plan range 3000-5000): the centered geometry adapts fast
-#   (stable step size well before iteration 500 on cheap runs).
+# - target_accept 0.90 / warmup 5000 (amended in 0.13.0 for the entity-obs
+#   re-baseline): with heteroscedastic_entity_obs now on by default, target_accept
+#   0.95 FAILED the convergence gate twice (at warmup 3000 and again at 5000) —
+#   sigma_artist R-hat at/over 1.01, bulk ESS ~650-690. Dropping to 0.90 with
+#   warmup 5000 passed on all three confirmation seeds and every site (R-hat 1.00,
+#   bulk ESS >= 1119, 0 divergences). Evidence in .audit/select_entityobs_confirm/.
 #
 # Preflight status (RTX 5090 laptop, 24 GB; re-verified 2026-06-10 with the
 # measured-ladder overhaul — outputs/experiments/preflight_validation.json):
@@ -44,8 +48,8 @@
 
 num_chains: 4
 num_samples: 5000
-num_warmup: 3000
-target_accept: 0.95
+num_warmup: 5000
+target_accept: 0.90
 max_tree_depth: 10
 chain_method: sequential
 
