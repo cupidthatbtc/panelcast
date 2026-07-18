@@ -376,6 +376,21 @@ class TestCreateDiagnosticsTable:
         status = create_diagnostics_table(idata).loc["c", "Status"]
         assert status == "n/a (no variance)"
 
+    def test_nan_rhat_with_low_ess_fails_ess(self):
+        """NaN R-hat but ESS below threshold is a genuine ESS failure, not 'n/a'."""
+        np.random.seed(11)
+        n_chains, n_draws = 1, 800
+        posterior = xr.Dataset(
+            {"p": xr.DataArray(np.random.randn(n_chains, n_draws), dims=["chain", "draw"])}
+        )
+        sample_stats = xr.Dataset(
+            {"diverging": xr.DataArray(np.zeros((n_chains, n_draws), dtype=bool), dims=["chain", "draw"])}
+        )
+        idata = az.InferenceData(posterior=posterior, sample_stats=sample_stats)
+
+        status = create_diagnostics_table(idata, ess_threshold=10_000).loc["p", "Status"]
+        assert status == "Fail (ESS)"
+
     def test_ess_as_integers(self, mock_idata):
         """ESS values should be formatted as integers."""
         result = create_diagnostics_table(mock_idata)
