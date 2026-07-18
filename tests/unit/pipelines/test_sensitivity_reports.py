@@ -291,6 +291,7 @@ class TestRunSplitSeedSensitivity:
             "n_reviews_stats": {"median": 10.0},
             "global_mean_score": 70.0,
             "likelihood_df": 4.0,
+            "priors": {},
         }
 
     def _make_source_df(self, n=60, prefix="user"):
@@ -402,6 +403,53 @@ class TestRunSplitSeedSensitivity:
             source_df, posterior_samples, summary, seeds=(42,)
         )
         assert "seed_42" in result
+
+    def test_threads_observation_model_from_priors(self, monkeypatch):
+        """Coverage is scored under the trained observation model, sourced from
+        the single PriorConfig (not a mix of top-level and priors lookups)."""
+        posterior_samples = self._make_posterior_samples()
+        summary = self._make_summary()
+        # Production summaries carry the family both top-level and in priors;
+        # the fix reads the priors copy, so a stale top-level default must lose.
+        summary["likelihood_family"] = "studentt"
+        summary["discretize_observation"] = False
+        summary["priors"] = {
+            "likelihood_family": "beta",
+            "skew_tailweight": 1.7,
+            "discretize_observation": True,
+        }
+        summary["learn_n_exponent"] = False
+        summary["n_exponent"] = 0.5
+        source_df = self._make_source_df()
+
+        small_test = pd.DataFrame({"Artist": ["A1"], "Score": [70.0]})
+
+        captured: list[dict] = []
+        monkeypatch.setattr(
+            "panelcast.data.split.entity_disjoint_split",
+            lambda df, **kw: (df, df, small_test),
+        )
+
+        def _capture(*a, **kw):
+            captured.append(kw)
+            return {"y": np.full((200, 1), 75.0)}
+
+        monkeypatch.setattr(
+            "panelcast.models.bayes.predict.predict_new_entity", _capture
+        )
+        monkeypatch.setattr(
+            "panelcast.pipelines.training_summary.ar_center_on_model_scale",
+            lambda s: 0.0,
+        )
+
+        run_split_seed_sensitivity(source_df, posterior_samples, summary, seeds=(42,))
+
+        assert captured
+        call = captured[0]
+        assert call["likelihood_family"] == "beta"
+        assert call["skew_tailweight"] == pytest.approx(1.7)
+        assert call["discretize_observation"] is True
+        assert call["fixed_n_exponent"] == pytest.approx(0.5)
 
 
 # ============================================================================

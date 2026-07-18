@@ -1053,6 +1053,16 @@ def run_split_seed_sensitivity(
     n_reviews_median = float(summary.get("n_reviews_stats", {}).get("median", 100.0))
     global_mean = float(summary.get("global_mean_score", (bounds[0] + bounds[1]) / 2))
     ar_center = float(ar_center_on_model_scale(summary))
+    # Match the cold-start evaluation's predictive distribution exactly
+    # (evaluate._run_new_artist_predictive); scoring coverage under a different
+    # observation model than metrics.json silently shifts the published
+    # seed-sensitivity number for any non-default fit.
+    priors_obj = PriorConfig(**summary["priors"])
+    learn_n_exponent = bool(summary.get("learn_n_exponent", False))
+    fixed_n_exponent = float(summary.get("n_exponent", 0.0) or 0.0)
+    obs_kwargs: dict = {}
+    if not learn_n_exponent and fixed_n_exponent != 0.0:
+        obs_kwargs["fixed_n_exponent"] = fixed_n_exponent
 
     prev = global_mean
     if target_transform != "identity":
@@ -1085,9 +1095,13 @@ def run_split_seed_sensitivity(
             seed=seed_offset + seed,
             target_bounds=bounds,
             likelihood_df=float(summary.get("likelihood_df", 4.0)),
+            likelihood_family=priors_obj.likelihood_family,
+            skew_tailweight=priors_obj.skew_tailweight,
+            discretize_observation=priors_obj.discretize_observation,
             target_transform=target_transform,
             logit_offset=logit_offset,
             ar_center=ar_center,
+            **obs_kwargs,
         )
         y_samples = np.asarray(pred["y"]).reshape(-1, n)
         lo = np.percentile(y_samples, lo_q, axis=0)
