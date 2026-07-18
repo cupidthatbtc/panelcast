@@ -83,6 +83,50 @@ def rename_columns(
     return df.rename(columns=dict(column_map if column_map is not None else RAW_TO_CANONICAL))
 
 
+def _to_identifier_string(value: object) -> object:
+    """Stringify one identifier value, preserving missing and integer form."""
+    if pd.isna(value):
+        return value
+    # Integer-valued floats (a numeric ID column becomes float64 the moment it
+    # carries a missing value) must render as the bare integer, not "1234.0".
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def coerce_identifier_columns(
+    df: pd.DataFrame,
+    *,
+    entity_col: str = "Artist",
+    event_col: str = "Album",
+) -> pd.DataFrame:
+    """Coerce the entity and event identifier columns to string at ingest.
+
+    Numeric catalog IDs (e.g. Gaia DR3 source_ids, the norm in astronomy)
+    read from CSV as int64. Left numeric they reach ``artist_to_idx`` as int
+    keys and only blow up at training-summary serialization — after the fit
+    has already run. Coercing here, the single cleaning chokepoint every
+    processed dataset flows through, keeps IDs as strings end to end.
+
+    Missing values are preserved as NaN rather than stringified to ``"nan"``,
+    so the downstream non-empty-identifier filter still drops those rows. AOTY
+    entity/event columns are already strings, so this is a no-op for the
+    default path.
+
+    Caveat: if a numeric ID column contains any missing value, pandas has
+    already parsed it as float64 before this runs, and IDs beyond 2**53 (e.g.
+    full-precision Gaia source_ids) were rounded at read time. Exactness for
+    such columns requires reading them as strings at CSV ingest.
+    """
+    df = df.copy()
+    for col in (entity_col, event_col):
+        if col in df.columns:
+            # Whole-column replacement (not a masked .loc write) so pandas
+            # never has to upcast an int64 column in place.
+            df[col] = df[col].map(_to_identifier_string).astype("object")
+    return df
+
+
 def ensure_optional_columns(
     df: pd.DataFrame,
     optional_columns: Sequence[str] | None = None,
@@ -312,6 +356,11 @@ def clean_albums(
 
     # Apply transformations
     df = rename_columns(df, descriptor.raw_column_map)
+    df = coerce_identifier_columns(
+        df,
+        entity_col=descriptor.entity_col,
+        event_col=descriptor.event_col,
+    )
     df = ensure_optional_columns(
         df,
         tuple(descriptor.raw_column_map.get(col, col) for col in descriptor.optional_raw_columns),

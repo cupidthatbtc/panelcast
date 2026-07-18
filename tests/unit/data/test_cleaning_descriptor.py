@@ -16,6 +16,7 @@ from panelcast.data.cleaning import (
 )
 from panelcast.data.lineage import AuditLogger
 from panelcast.pipelines.prepare_dataset import PrepareConfig
+from panelcast.pipelines.training_summary import TrainingSummary
 from tests.helpers.aero_data import make_aero_descriptor as _aero_descriptor
 
 
@@ -76,6 +77,83 @@ class TestCleanAlbumsAeroDescriptor:
         cleaned = clean_albums(_make_aero_raw(), config=config)
         assert "num_artists" not in cleaned.columns
         assert "is_collaboration" not in cleaned.columns
+
+
+class TestNumericEntityIdCoercion:
+    """All-digit catalog IDs (Gaia DR3 source_ids) must ingest as strings (#250).
+
+    pandas reads numeric ID columns as int64; left numeric they reach
+    ``artist_to_idx`` as int keys and only fail training-summary validation
+    after the fit has run. Coercion at ingest keeps them strings end to end.
+    """
+
+    def _numeric_raw(self) -> pd.DataFrame:
+        # Airframe / Flight ID as all-digit ints, the way pandas parses a
+        # Gaia DR3 source_id column from CSV (int64, not object).
+        return pd.DataFrame(
+            {
+                "Airframe": [4295806720, 4295806720, 34361129088],
+                "Flight ID": [10001, 10002, 10003],
+                "Campaign Year": [2021, 2021, 2022],
+                "Flight Date": ["2021-03-15", "2021-05-01", "2022-07-01"],
+                "Perf Score": [7.5, 8.1, 6.2],
+                "Sensor Samples": [120, 95, 60],
+                "Test Crew": ["4295806720", "4295806720", "34361129088"],
+                "original_row_id": [0, 1, 2],
+            }
+        )
+
+    def test_entity_and_event_columns_become_strings(self):
+        cleaned = clean_albums(
+            self._numeric_raw(),
+            config=CleaningConfig(min_year=2015, descriptor=_aero_descriptor()),
+        )
+        assert cleaned["Airframe"].map(type).eq(str).all()
+        assert cleaned["Flight_ID"].map(type).eq(str).all()
+        # Exact catalog ID, no float artifacts.
+        assert cleaned.loc[0, "Airframe"] == "4295806720"
+        assert cleaned.loc[0, "Flight_ID"] == "10001"
+
+    def test_artist_to_idx_keys_are_strings_end_to_end(self):
+        descriptor = _aero_descriptor()
+        cleaned = clean_albums(
+            self._numeric_raw(),
+            config=CleaningConfig(min_year=2015, descriptor=descriptor),
+        )
+        filtered = filter_for_target_model(cleaned, descriptor, 5)
+        # Reproduce the train stage's artist_to_idx construction.
+        artists = sorted(filtered[descriptor.entity_col].unique())
+        artist_to_idx = {a: i for i, a in enumerate(artists)}
+        assert all(isinstance(k, str) for k in artist_to_idx)
+        # The typed summary requires str keys; numeric IDs would fail here.
+        summary = TrainingSummary(artist_to_idx=artist_to_idx)
+        assert set(summary.artist_to_idx) == set(artist_to_idx)
+
+    def test_missing_entity_preserved_as_nan_not_string(self):
+        raw = pd.DataFrame(
+            {
+                # None among ints -> pandas upcasts to float64; the coercion
+                # must render clean integers (no ".0") and leave the gap as
+                # NaN, never the string "nan".
+                "Airframe": [4295806720, None, 34361129088],
+                "Flight ID": [10001, 10002, 10003],
+                "Campaign Year": [2021, 2021, 2022],
+                "Flight Date": ["2021-03-15", "2021-05-01", "2022-07-01"],
+                "Perf Score": [7.5, 8.1, 6.2],
+                "Sensor Samples": [120, 95, 60],
+                "Test Crew": ["a", "b", "c"],
+                "original_row_id": [0, 1, 2],
+            }
+        )
+        descriptor = _aero_descriptor()
+        cleaned = clean_albums(
+            raw, config=CleaningConfig(min_year=2015, descriptor=descriptor)
+        )
+        assert cleaned["Airframe"].isna().tolist() == [False, True, False]
+        assert "nan" not in cleaned["Airframe"].dropna().tolist()
+        # The missing-entity row is dropped by the existing identifier filter.
+        filtered = filter_for_target_model(cleaned, descriptor, 5)
+        assert filtered["Airframe"].tolist() == ["4295806720", "34361129088"]
 
 
 class TestFilterForTargetModelAero:
