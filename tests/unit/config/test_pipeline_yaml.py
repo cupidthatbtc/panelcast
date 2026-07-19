@@ -95,6 +95,42 @@ class TestApplyYamlOverrides:
         for key, spec in PIPELINE_YAML_MAPPING.items():
             assert spec.config_field in config_fields, (key, spec.config_field)
 
+    def test_prior_and_init_knobs_map_onto_valid_config(self):
+        out = apply_yaml_overrides(
+            {},
+            {
+                "sigma_artist_prior_type": "lognormal",
+                "artist_effect_param": "zerosum",
+                "init_strategy": "median",
+            },
+        )
+        config = PipelineConfig(**out)
+        assert config.sigma_artist_prior_type == "lognormal"
+        assert config.artist_effect_param == "zerosum"
+        assert config.init_strategy == "median"
+
+    def test_prior_and_init_knobs_survive_resolved_roundtrip(self):
+        from panelcast.config.pipeline_yaml import (
+            dump_resolved_config,
+            load_resolved_config,
+        )
+
+        config = PipelineConfig(
+            sigma_artist_prior_type="lognormal",
+            artist_effect_param="zerosum",
+            init_strategy="feasible",
+        )
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "resolved.yaml"
+            p.write_text(dump_resolved_config(config), encoding="utf-8")
+            restored = PipelineConfig(**load_resolved_config(p))
+        assert restored.sigma_artist_prior_type == "lognormal"
+        assert restored.artist_effect_param == "zerosum"
+        assert restored.init_strategy == "feasible"
+
     def test_select_knobs_are_yaml_mapped(self):
         # select writes every knob into arm run-configs; an unmapped knob is
         # silently dropped and the arm fits as a mislabeled reference (#158's

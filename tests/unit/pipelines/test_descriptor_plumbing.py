@@ -140,6 +140,58 @@ class TestResumeDescriptorGuard:
         )
 
 
+class TestPriorAndInitKnobPlumbing:
+    """sigma_artist prior, artist-effect param, and init strategy must reach the
+    StageContext and, from there, PriorConfig / MCMCConfig the way train_bayes
+    consumes them (attribute-name wiring is easy to break silently)."""
+
+    def test_context_carries_knobs(self, tmp_path):
+        config = PipelineConfig(
+            sigma_artist_prior_type="lognormal",
+            artist_effect_param="zerosum",
+            init_strategy="median",
+        )
+        ctx = PipelineOrchestrator(config, output_base=tmp_path)._create_stage_context()
+        assert ctx.sigma_artist_prior_type == "lognormal"
+        assert ctx.artist_effect_param == "zerosum"
+        assert ctx.init_strategy == "median"
+
+    def test_knobs_reach_prior_and_mcmc_config(self, tmp_path):
+        from panelcast.models.bayes.fit import MCMCConfig
+        from panelcast.models.bayes.priors import priors_for_transform
+
+        config = PipelineConfig(
+            sigma_artist_prior_type="lognormal",
+            artist_effect_param="zerosum",
+            init_strategy="feasible",
+        )
+        ctx = PipelineOrchestrator(config, output_base=tmp_path)._create_stage_context()
+
+        priors = priors_for_transform(
+            "identity",
+            sigma_artist_prior_type=str(getattr(ctx, "sigma_artist_prior_type", "halfnormal")),
+            artist_effect_param=str(getattr(ctx, "artist_effect_param", "noncentered")),
+        )
+        assert priors.sigma_artist_prior_type == "lognormal"
+        assert priors.artist_effect_param == "zerosum"
+
+        mcmc = MCMCConfig(init_strategy=str(getattr(ctx, "init_strategy", "uniform")))
+        assert mcmc.init_strategy == "feasible"
+
+    def test_defaults_are_byte_identical(self, tmp_path):
+        from panelcast.models.bayes.fit import MCMCConfig
+        from panelcast.models.bayes.priors import PriorConfig
+
+        ctx = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)._create_stage_context()
+        assert ctx.sigma_artist_prior_type == "halfnormal"
+        assert ctx.artist_effect_param == "noncentered"
+        assert ctx.init_strategy == "uniform"
+        # Defaults match the untouched PriorConfig / MCMCConfig defaults.
+        assert PriorConfig().sigma_artist_prior_type == "halfnormal"
+        assert PriorConfig().artist_effect_param == "noncentered"
+        assert MCMCConfig().init_strategy == "uniform"
+
+
 class TestBetaBinomialGate:
     """The orchestrator rejects beta_binomial on a non-aggregation descriptor."""
 

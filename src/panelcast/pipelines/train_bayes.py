@@ -1171,6 +1171,7 @@ def train_models(
         target_accept_prob=ctx.target_accept,
         max_tree_depth=ctx.max_tree_depth,
         chain_method=resolved_chain_method,
+        init_strategy=str(getattr(ctx, "init_strategy", "uniform")),
         checkpoint_every_draws=getattr(ctx, "checkpoint_every_draws", None),
     )
 
@@ -1184,6 +1185,8 @@ def train_models(
         ar_center=ar_center,
         latent_process=str(getattr(ctx, "latent_process", "rw")),
         sigma_obs_prior_type=str(getattr(ctx, "sigma_obs_prior_type", "halfnormal")),
+        sigma_artist_prior_type=str(getattr(ctx, "sigma_artist_prior_type", "halfnormal")),
+        artist_effect_param=str(getattr(ctx, "artist_effect_param", "noncentered")),
         beta_prior_type=str(getattr(ctx, "beta_prior_type", "normal")),
         hs_global_scale=float(getattr(ctx, "hs_global_scale", 0.1)),
         heteroscedastic_entity_obs=bool(getattr(ctx, "heteroscedastic_entity_obs", False)),
@@ -1417,6 +1420,8 @@ def train_models(
         "gpu_info": fit_result.gpu_info,
         "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
         "sigma_obs_prior_type": getattr(ctx, "sigma_obs_prior_type", "halfnormal"),
+        "sigma_artist_prior_type": getattr(ctx, "sigma_artist_prior_type", "halfnormal"),
+        "artist_effect_param": getattr(ctx, "artist_effect_param", "noncentered"),
         "beta_prior_type": getattr(ctx, "beta_prior_type", "normal"),
         "hs_global_scale": float(getattr(ctx, "hs_global_scale", 0.1)),
         "heteroscedastic_entity_obs": entity_obs_on,

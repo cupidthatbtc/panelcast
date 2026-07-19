@@ -39,12 +39,15 @@ from panelcast import __version__ as panelcast_version
 from panelcast.config.descriptor import load_descriptor, resolve_descriptor_path
 from panelcast.config.gates import (
     ArCenter,
+    ArtistEffectParam,
     BetaPriorType,
     ChainMethod,
     DebutPrevScoreSource,
+    InitStrategy,
     LatentProcess,
     LikelihoodFamily,
     NExponentPrior,
+    SigmaArtistPriorType,
     SigmaObsPriorType,
     TargetTransform,
 )
@@ -171,6 +174,11 @@ class PipelineConfig:
     num_warmup: int = 1000
     target_accept: float = 0.90
     max_tree_depth: int = 10
+    # NUTS initialization strategy: "uniform" (legacy default) | "median" |
+    # "feasible". No CLI flag; via run_config.yaml. External domains whose chains
+    # trap in a degenerate init corner (e.g. the baseball beta_binomial
+    # replication) switch to "median"/"feasible" here.
+    init_strategy: InitStrategy = "uniform"
     chain_method: ChainMethod = "sequential"
     checkpoint_every_draws: int | None = None
     # Warmup-transfer seams (YAML-only; the select runner writes them per arm).
@@ -217,6 +225,13 @@ class PipelineConfig:
     # sigma_obs prior family gate: "halfnormal" (legacy default) | "lognormal"
     # (removes the zero-boundary pile-up behind the econ variance-collapse).
     sigma_obs_prior_type: SigmaObsPriorType = "halfnormal"
+    # sigma_artist prior family gate: "halfnormal" (legacy default) | "lognormal"
+    # (removes the zero-boundary pile-up; mirrors sigma_rw/sigma_obs). No CLI flag.
+    sigma_artist_prior_type: SigmaArtistPriorType = "halfnormal"
+    # Artist-effect parameterization: "noncentered" (legacy default) | "zerosum"
+    # (ZeroSumNormal deviations around mu_artist — removes the mu_artist<->effects
+    # location ridge that throttles sigma_artist ESS). No CLI flag.
+    artist_effect_param: ArtistEffectParam = "noncentered"
     # Covariate-block prior gate (#155): "normal" (legacy default, bit-identical
     # RNG path) | "horseshoe" (regularized horseshoe; global-local shrinkage
     # against the #76 coefficient dilution). No CLI flag; via run_config.yaml.
@@ -334,6 +349,21 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid sigma_obs_prior_type: '{self.sigma_obs_prior_type}'. "
                 "Must be 'halfnormal' or 'lognormal'."
+            )
+        if self.sigma_artist_prior_type not in ("halfnormal", "lognormal"):
+            raise ValueError(
+                f"Invalid sigma_artist_prior_type: '{self.sigma_artist_prior_type}'. "
+                "Must be 'halfnormal' or 'lognormal'."
+            )
+        if self.artist_effect_param not in ("noncentered", "zerosum"):
+            raise ValueError(
+                f"Invalid artist_effect_param: '{self.artist_effect_param}'. "
+                "Must be 'noncentered' or 'zerosum'."
+            )
+        if self.init_strategy not in ("uniform", "median", "feasible"):
+            raise ValueError(
+                f"Invalid init_strategy: '{self.init_strategy}'. "
+                "Must be 'uniform', 'median', or 'feasible'."
             )
         if self.beta_prior_type not in ("normal", "horseshoe"):
             raise ValueError(
@@ -707,6 +737,7 @@ class PipelineOrchestrator:
                 "num_warmup": self.config.num_warmup,
                 "target_accept": self.config.target_accept,
                 "max_tree_depth": self.config.max_tree_depth,
+                "init_strategy": self.config.init_strategy,
                 "chain_method": self.config.chain_method,
                 "checkpoint_every_draws": self.config.checkpoint_every_draws,
                 # Convergence thresholds
@@ -735,6 +766,8 @@ class PipelineOrchestrator:
                 "ar_center": self.config.ar_center,
                 "latent_process": self.config.latent_process,
                 "sigma_obs_prior_type": self.config.sigma_obs_prior_type,
+                "sigma_artist_prior_type": self.config.sigma_artist_prior_type,
+                "artist_effect_param": self.config.artist_effect_param,
                 "beta_prior_type": self.config.beta_prior_type,
                 "hs_global_scale": self.config.hs_global_scale,
                 "heteroscedastic_entity_obs": self.config.heteroscedastic_entity_obs,
@@ -792,6 +825,7 @@ class PipelineOrchestrator:
         "seed",
         "target_accept",
         "max_tree_depth",
+        "init_strategy",
         "chain_method",
         "num_chains",
         "num_samples",
@@ -812,6 +846,8 @@ class PipelineOrchestrator:
         "ar_center",
         "latent_process",
         "sigma_obs_prior_type",
+        "sigma_artist_prior_type",
+        "artist_effect_param",
         "beta_prior_type",
         "hs_global_scale",
         "heteroscedastic_entity_obs",
@@ -993,6 +1029,8 @@ class PipelineOrchestrator:
             parts.append(f"--target-accept {self.config.target_accept}")
         if self.config.max_tree_depth != defaults.max_tree_depth:
             parts.append(f"--max-tree-depth {self.config.max_tree_depth}")
+        if self.config.init_strategy != defaults.init_strategy:
+            parts.append(f"--init-strategy {self.config.init_strategy}")
         if self.config.chain_method != defaults.chain_method:
             parts.append(f"--chain-method {self.config.chain_method}")
         if self.config.checkpoint_every_draws is not None:
@@ -1052,6 +1090,10 @@ class PipelineOrchestrator:
             parts.append(f"--debut-prev-score-source {self.config.debut_prev_score_source}")
         if self.config.sigma_obs_prior_type != defaults.sigma_obs_prior_type:
             parts.append(f"--sigma-obs-prior-type {self.config.sigma_obs_prior_type}")
+        if self.config.sigma_artist_prior_type != defaults.sigma_artist_prior_type:
+            parts.append(f"--sigma-artist-prior-type {self.config.sigma_artist_prior_type}")
+        if self.config.artist_effect_param != defaults.artist_effect_param:
+            parts.append(f"--artist-effect-param {self.config.artist_effect_param}")
         if self.config.beta_prior_type != defaults.beta_prior_type:
             parts.append(f"--beta-prior-type {self.config.beta_prior_type}")
         if self.config.hs_global_scale != defaults.hs_global_scale:
@@ -1349,6 +1391,7 @@ class PipelineOrchestrator:
             num_warmup=self.config.num_warmup,
             target_accept=self.config.target_accept,
             max_tree_depth=self.config.max_tree_depth,
+            init_strategy=self.config.init_strategy,
             chain_method=self.config.chain_method,
             checkpoint_every_draws=self.config.checkpoint_every_draws,
             # Convergence thresholds
@@ -1377,6 +1420,8 @@ class PipelineOrchestrator:
             ar_center=self.config.ar_center,
             latent_process=self.config.latent_process,
             sigma_obs_prior_type=self.config.sigma_obs_prior_type,
+            sigma_artist_prior_type=self.config.sigma_artist_prior_type,
+            artist_effect_param=self.config.artist_effect_param,
             beta_prior_type=self.config.beta_prior_type,
             hs_global_scale=self.config.hs_global_scale,
             heteroscedastic_entity_obs=self.config.heteroscedastic_entity_obs,
