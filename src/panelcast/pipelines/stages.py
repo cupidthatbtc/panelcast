@@ -129,6 +129,12 @@ class StageContext:
     sigma_artist_prior_type: str = "halfnormal"
     # Artist-effect parameterization: "noncentered" (legacy) | "zerosum"
     artist_effect_param: str = "noncentered"
+    # LogNormal(loc, sigma) params for the sigma_rw / sigma_artist priors, sized
+    # for the AOTY scale; external domains right-size them per scale.
+    sigma_rw_lognormal_loc: float = -2.8
+    sigma_rw_lognormal_sigma: float = 0.6
+    sigma_artist_lognormal_loc: float = -0.9
+    sigma_artist_lognormal_sigma: float = 0.6
     # Covariate-block prior gate (#155): "normal" (legacy) | "horseshoe"
     beta_prior_type: str = "normal"
     hs_global_scale: float = 0.1

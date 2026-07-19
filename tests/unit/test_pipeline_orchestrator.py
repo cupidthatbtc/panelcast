@@ -1120,6 +1120,25 @@ class TestPipelineConfigValidation:
         assert config.artist_effect_param == "noncentered"
         assert config.init_strategy == "uniform"
 
+    def test_nonpositive_sigma_rw_lognormal_sigma_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="sigma_rw_lognormal_sigma"):
+            PipelineConfig(sigma_rw_lognormal_sigma=0.0)
+
+    def test_nonpositive_sigma_artist_lognormal_sigma_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="sigma_artist_lognormal_sigma"):
+            PipelineConfig(sigma_artist_lognormal_sigma=-0.1)
+
+    def test_lognormal_prior_param_defaults(self):
+        config = PipelineConfig()
+        assert config.sigma_rw_lognormal_loc == -2.8
+        assert config.sigma_rw_lognormal_sigma == 0.6
+        assert config.sigma_artist_lognormal_loc == -0.9
+        assert config.sigma_artist_lognormal_sigma == 0.6
+
     def test_nonpositive_tau_entity_scale_raises(self):
         import pytest
 

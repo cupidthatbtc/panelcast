@@ -192,6 +192,62 @@ class TestPriorAndInitKnobPlumbing:
         assert MCMCConfig().init_strategy == "uniform"
 
 
+class TestLognormalPriorParamPlumbing:
+    """The sigma_rw / sigma_artist LogNormal(loc, sigma) params must reach the
+    StageContext and, via priors_for_transform, the PriorConfig."""
+
+    def test_context_carries_params(self, tmp_path):
+        config = PipelineConfig(
+            sigma_rw_lognormal_loc=-6.0,
+            sigma_rw_lognormal_sigma=0.4,
+            sigma_artist_lognormal_loc=-3.7,
+            sigma_artist_lognormal_sigma=0.5,
+        )
+        ctx = PipelineOrchestrator(config, output_base=tmp_path)._create_stage_context()
+        assert ctx.sigma_rw_lognormal_loc == -6.0
+        assert ctx.sigma_rw_lognormal_sigma == 0.4
+        assert ctx.sigma_artist_lognormal_loc == -3.7
+        assert ctx.sigma_artist_lognormal_sigma == 0.5
+
+    def test_params_reach_prior_config(self, tmp_path):
+        from panelcast.models.bayes.priors import priors_for_transform
+
+        config = PipelineConfig(
+            sigma_rw_lognormal_loc=-6.0,
+            sigma_rw_lognormal_sigma=0.4,
+            sigma_artist_lognormal_loc=-3.7,
+            sigma_artist_lognormal_sigma=0.5,
+        )
+        ctx = PipelineOrchestrator(config, output_base=tmp_path)._create_stage_context()
+
+        priors = priors_for_transform(
+            "identity",
+            sigma_rw_lognormal_loc=float(getattr(ctx, "sigma_rw_lognormal_loc", -2.8)),
+            sigma_rw_lognormal_sigma=float(getattr(ctx, "sigma_rw_lognormal_sigma", 0.6)),
+            sigma_artist_lognormal_loc=float(getattr(ctx, "sigma_artist_lognormal_loc", -0.9)),
+            sigma_artist_lognormal_sigma=float(
+                getattr(ctx, "sigma_artist_lognormal_sigma", 0.6)
+            ),
+        )
+        assert priors.sigma_rw_lognormal_loc == -6.0
+        assert priors.sigma_rw_lognormal_sigma == 0.4
+        assert priors.sigma_artist_lognormal_loc == -3.7
+        assert priors.sigma_artist_lognormal_sigma == 0.5
+
+    def test_defaults_are_byte_identical(self, tmp_path):
+        from panelcast.models.bayes.priors import PriorConfig
+
+        ctx = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)._create_stage_context()
+        assert ctx.sigma_rw_lognormal_loc == -2.8
+        assert ctx.sigma_rw_lognormal_sigma == 0.6
+        assert ctx.sigma_artist_lognormal_loc == -0.9
+        assert ctx.sigma_artist_lognormal_sigma == 0.6
+        assert PriorConfig().sigma_rw_lognormal_loc == -2.8
+        assert PriorConfig().sigma_rw_lognormal_sigma == 0.6
+        assert PriorConfig().sigma_artist_lognormal_loc == -0.9
+        assert PriorConfig().sigma_artist_lognormal_sigma == 0.6
+
+
 class TestBetaBinomialGate:
     """The orchestrator rejects beta_binomial on a non-aggregation descriptor."""
 

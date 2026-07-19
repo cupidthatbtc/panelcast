@@ -613,6 +613,10 @@ class TestBuildCommandStringExtended:
             sigma_artist_prior_type="lognormal",
             artist_effect_param="zerosum",
             init_strategy="median",
+            sigma_rw_lognormal_loc=-6.0,
+            sigma_rw_lognormal_sigma=0.4,
+            sigma_artist_lognormal_loc=-3.7,
+            sigma_artist_lognormal_sigma=0.5,
             beta_prior_type="horseshoe",
             heteroscedastic_entity_obs=False,
             tau_entity_scale=0.5,
@@ -634,6 +638,10 @@ class TestBuildCommandStringExtended:
         assert "--sigma-artist-prior-type lognormal" in cmd
         assert "--artist-effect-param zerosum" in cmd
         assert "--init-strategy median" in cmd
+        assert "--sigma-rw-lognormal-loc -6.0" in cmd
+        assert "--sigma-rw-lognormal-sigma 0.4" in cmd
+        assert "--sigma-artist-lognormal-loc -3.7" in cmd
+        assert "--sigma-artist-lognormal-sigma 0.5" in cmd
         assert "--beta-prior-type horseshoe" in cmd
         # default-True since 0.13.0, so the recorded flag is the --no- form
         assert "--no-heteroscedastic-entity-obs" in cmd

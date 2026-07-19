@@ -231,6 +231,15 @@ class PipelineConfig:
     # (ZeroSumNormal deviations around mu_artist — removes the mu_artist<->effects
     # location ridge that throttles sigma_artist ESS). No CLI flag.
     artist_effect_param: ArtistEffectParam = "noncentered"
+    # LogNormal(loc, sigma) parameters for the sigma_rw / sigma_artist priors
+    # (used only when the respective *_prior_type is "lognormal"). The default
+    # locations are sized for the AOTY score scale; external domains on other
+    # scales (e.g. the baseball beta_binomial replication, sigma ~1e-2/1e-3)
+    # right-size them here to avoid prior-likelihood conflict. No CLI flag.
+    sigma_rw_lognormal_loc: float = -2.8
+    sigma_rw_lognormal_sigma: float = 0.6
+    sigma_artist_lognormal_loc: float = -0.9
+    sigma_artist_lognormal_sigma: float = 0.6
     # Covariate-block prior gate (#155): "normal" (legacy default, bit-identical
     # RNG path) | "horseshoe" (regularized horseshoe; global-local shrinkage
     # against the #76 coefficient dilution). No CLI flag; via run_config.yaml.
@@ -368,6 +377,15 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid beta_prior_type: '{self.beta_prior_type}'. "
                 "Must be 'normal' or 'horseshoe'."
+            )
+        if self.sigma_rw_lognormal_sigma <= 0.0:
+            raise ValueError(
+                f"Invalid sigma_rw_lognormal_sigma: {self.sigma_rw_lognormal_sigma}. Must be > 0."
+            )
+        if self.sigma_artist_lognormal_sigma <= 0.0:
+            raise ValueError(
+                f"Invalid sigma_artist_lognormal_sigma: {self.sigma_artist_lognormal_sigma}. "
+                "Must be > 0."
             )
         if self.hs_global_scale <= 0.0:
             raise ValueError(f"Invalid hs_global_scale: {self.hs_global_scale}. Must be > 0.")
@@ -767,6 +785,10 @@ class PipelineOrchestrator:
                 "sigma_obs_prior_type": self.config.sigma_obs_prior_type,
                 "sigma_artist_prior_type": self.config.sigma_artist_prior_type,
                 "artist_effect_param": self.config.artist_effect_param,
+                "sigma_rw_lognormal_loc": self.config.sigma_rw_lognormal_loc,
+                "sigma_rw_lognormal_sigma": self.config.sigma_rw_lognormal_sigma,
+                "sigma_artist_lognormal_loc": self.config.sigma_artist_lognormal_loc,
+                "sigma_artist_lognormal_sigma": self.config.sigma_artist_lognormal_sigma,
                 "beta_prior_type": self.config.beta_prior_type,
                 "hs_global_scale": self.config.hs_global_scale,
                 "heteroscedastic_entity_obs": self.config.heteroscedastic_entity_obs,
@@ -847,6 +869,10 @@ class PipelineOrchestrator:
         "sigma_obs_prior_type",
         "sigma_artist_prior_type",
         "artist_effect_param",
+        "sigma_rw_lognormal_loc",
+        "sigma_rw_lognormal_sigma",
+        "sigma_artist_lognormal_loc",
+        "sigma_artist_lognormal_sigma",
         "beta_prior_type",
         "hs_global_scale",
         "heteroscedastic_entity_obs",
@@ -1093,6 +1119,16 @@ class PipelineOrchestrator:
             parts.append(f"--sigma-artist-prior-type {self.config.sigma_artist_prior_type}")
         if self.config.artist_effect_param != defaults.artist_effect_param:
             parts.append(f"--artist-effect-param {self.config.artist_effect_param}")
+        if self.config.sigma_rw_lognormal_loc != defaults.sigma_rw_lognormal_loc:
+            parts.append(f"--sigma-rw-lognormal-loc {self.config.sigma_rw_lognormal_loc}")
+        if self.config.sigma_rw_lognormal_sigma != defaults.sigma_rw_lognormal_sigma:
+            parts.append(f"--sigma-rw-lognormal-sigma {self.config.sigma_rw_lognormal_sigma}")
+        if self.config.sigma_artist_lognormal_loc != defaults.sigma_artist_lognormal_loc:
+            parts.append(f"--sigma-artist-lognormal-loc {self.config.sigma_artist_lognormal_loc}")
+        if self.config.sigma_artist_lognormal_sigma != defaults.sigma_artist_lognormal_sigma:
+            parts.append(
+                f"--sigma-artist-lognormal-sigma {self.config.sigma_artist_lognormal_sigma}"
+            )
         if self.config.beta_prior_type != defaults.beta_prior_type:
             parts.append(f"--beta-prior-type {self.config.beta_prior_type}")
         if self.config.hs_global_scale != defaults.hs_global_scale:
@@ -1421,6 +1457,10 @@ class PipelineOrchestrator:
             sigma_obs_prior_type=self.config.sigma_obs_prior_type,
             sigma_artist_prior_type=self.config.sigma_artist_prior_type,
             artist_effect_param=self.config.artist_effect_param,
+            sigma_rw_lognormal_loc=self.config.sigma_rw_lognormal_loc,
+            sigma_rw_lognormal_sigma=self.config.sigma_rw_lognormal_sigma,
+            sigma_artist_lognormal_loc=self.config.sigma_artist_lognormal_loc,
+            sigma_artist_lognormal_sigma=self.config.sigma_artist_lognormal_sigma,
             beta_prior_type=self.config.beta_prior_type,
             hs_global_scale=self.config.hs_global_scale,
             heteroscedastic_entity_obs=self.config.heteroscedastic_entity_obs,

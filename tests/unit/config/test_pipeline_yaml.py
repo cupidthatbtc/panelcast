@@ -131,6 +131,46 @@ class TestApplyYamlOverrides:
         assert restored.artist_effect_param == "zerosum"
         assert restored.init_strategy == "feasible"
 
+    def test_lognormal_prior_params_map_onto_valid_config(self):
+        out = apply_yaml_overrides(
+            {},
+            {
+                "sigma_rw_lognormal_loc": -6.0,
+                "sigma_rw_lognormal_sigma": 0.4,
+                "sigma_artist_lognormal_loc": -3.7,
+                "sigma_artist_lognormal_sigma": 0.5,
+            },
+        )
+        config = PipelineConfig(**out)
+        assert config.sigma_rw_lognormal_loc == -6.0
+        assert config.sigma_rw_lognormal_sigma == 0.4
+        assert config.sigma_artist_lognormal_loc == -3.7
+        assert config.sigma_artist_lognormal_sigma == 0.5
+
+    def test_lognormal_prior_params_survive_resolved_roundtrip(self):
+        from panelcast.config.pipeline_yaml import (
+            dump_resolved_config,
+            load_resolved_config,
+        )
+
+        config = PipelineConfig(
+            sigma_rw_lognormal_loc=-6.0,
+            sigma_rw_lognormal_sigma=0.4,
+            sigma_artist_lognormal_loc=-3.7,
+            sigma_artist_lognormal_sigma=0.5,
+        )
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "resolved.yaml"
+            p.write_text(dump_resolved_config(config), encoding="utf-8")
+            restored = PipelineConfig(**load_resolved_config(p))
+        assert restored.sigma_rw_lognormal_loc == -6.0
+        assert restored.sigma_rw_lognormal_sigma == 0.4
+        assert restored.sigma_artist_lognormal_loc == -3.7
+        assert restored.sigma_artist_lognormal_sigma == 0.5
+
     def test_select_knobs_are_yaml_mapped(self):
         # select writes every knob into arm run-configs; an unmapped knob is
         # silently dropped and the arm fits as a mislabeled reference (#158's
