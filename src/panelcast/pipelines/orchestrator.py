@@ -385,21 +385,16 @@ class PipelineConfig:
                 f"Invalid beta_prior_type: '{self.beta_prior_type}'. "
                 "Must be 'normal' or 'horseshoe'."
             )
-        if self.sigma_rw_lognormal_sigma <= 0.0:
-            raise ValueError(
-                f"Invalid sigma_rw_lognormal_sigma: {self.sigma_rw_lognormal_sigma}. Must be > 0."
-            )
-        if self.sigma_artist_lognormal_sigma <= 0.0:
-            raise ValueError(
-                f"Invalid sigma_artist_lognormal_sigma: {self.sigma_artist_lognormal_sigma}. "
-                "Must be > 0."
-            )
-        if self.rho_scale <= 0.0:
-            raise ValueError(f"Invalid rho_scale: {self.rho_scale}. Must be > 0.")
-        if self.hs_global_scale <= 0.0:
-            raise ValueError(f"Invalid hs_global_scale: {self.hs_global_scale}. Must be > 0.")
-        if self.tau_entity_scale <= 0.0:
-            raise ValueError(f"Invalid tau_entity_scale: {self.tau_entity_scale}. Must be > 0.")
+        for scale_field in (
+            "sigma_rw_lognormal_sigma",
+            "sigma_artist_lognormal_sigma",
+            "rho_scale",
+            "hs_global_scale",
+            "tau_entity_scale",
+        ):
+            value = getattr(self, scale_field)
+            if value <= 0.0:
+                raise ValueError(f"Invalid {scale_field}: {value}. Must be > 0.")
         if self.coverage_tolerance < 0.0:
             raise ValueError("coverage_tolerance must be >= 0.")
         if not 0.0 < self.prediction_interval < 1.0:
