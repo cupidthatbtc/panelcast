@@ -99,6 +99,7 @@ def coerce_identifier_columns(
     *,
     entity_col: str = "Artist",
     event_col: str = "Album",
+    numeric_columns: Sequence[str] = (),
 ) -> pd.DataFrame:
     """Coerce the entity and event identifier columns to string at ingest.
 
@@ -107,6 +108,9 @@ def coerce_identifier_columns(
     keys and only blow up at training-summary serialization — after the fit
     has already run. Coercing here, the single cleaning chokepoint every
     processed dataset flows through, keeps IDs as strings end to end.
+
+    Columns listed in ``numeric_columns`` are left unchanged when a descriptor
+    reuses an identifier column for a numeric role such as ``year_col``.
 
     Missing values are preserved as NaN rather than stringified to ``"nan"``,
     so the downstream non-empty-identifier filter still drops those rows. AOTY
@@ -120,6 +124,8 @@ def coerce_identifier_columns(
     """
     df = df.copy()
     for col in (entity_col, event_col):
+        if col in numeric_columns:
+            continue
         if col in df.columns:
             # Whole-column replacement (not a masked .loc write) so pandas
             # never has to upcast an int64 column in place.
@@ -360,6 +366,7 @@ def clean_albums(
         df,
         entity_col=descriptor.entity_col,
         event_col=descriptor.event_col,
+        numeric_columns=(descriptor.year_col,),
     )
     df = ensure_optional_columns(
         df,
