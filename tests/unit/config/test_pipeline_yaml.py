@@ -171,6 +171,32 @@ class TestApplyYamlOverrides:
         assert restored.sigma_artist_lognormal_loc == -3.7
         assert restored.sigma_artist_lognormal_sigma == 0.5
 
+    def test_rho_prior_params_map_onto_valid_config(self):
+        out = apply_yaml_overrides(
+            {},
+            {"rho_loc": 0.2, "rho_scale": 0.02},
+        )
+        config = PipelineConfig(**out)
+        assert config.rho_loc == 0.2
+        assert config.rho_scale == 0.02
+
+    def test_rho_prior_params_survive_resolved_roundtrip(self):
+        from panelcast.config.pipeline_yaml import (
+            dump_resolved_config,
+            load_resolved_config,
+        )
+
+        config = PipelineConfig(rho_loc=0.2, rho_scale=0.02)
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "resolved.yaml"
+            p.write_text(dump_resolved_config(config), encoding="utf-8")
+            restored = PipelineConfig(**load_resolved_config(p))
+        assert restored.rho_loc == 0.2
+        assert restored.rho_scale == 0.02
+
     def test_select_knobs_are_yaml_mapped(self):
         # select writes every knob into arm run-configs; an unmapped knob is
         # silently dropped and the arm fits as a mislabeled reference (#158's

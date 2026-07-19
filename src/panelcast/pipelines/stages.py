@@ -135,6 +135,10 @@ class StageContext:
     sigma_rw_lognormal_sigma: float = 0.6
     sigma_artist_lognormal_loc: float = -0.9
     sigma_artist_lognormal_sigma: float = 0.6
+    # Normal(loc, scale) params for the AR(1) coefficient prior; domains set
+    # rho_scale small to pin rho near zero and disable the AR channel.
+    rho_loc: float = 0.0
+    rho_scale: float = 0.3
     # Covariate-block prior gate (#155): "normal" (legacy) | "horseshoe"
     beta_prior_type: str = "normal"
     hs_global_scale: float = 0.1

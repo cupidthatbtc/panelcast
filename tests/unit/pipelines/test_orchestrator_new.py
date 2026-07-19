@@ -617,6 +617,8 @@ class TestBuildCommandStringExtended:
             sigma_rw_lognormal_sigma=0.4,
             sigma_artist_lognormal_loc=-3.7,
             sigma_artist_lognormal_sigma=0.5,
+            rho_loc=0.2,
+            rho_scale=0.02,
             beta_prior_type="horseshoe",
             heteroscedastic_entity_obs=False,
             tau_entity_scale=0.5,
@@ -642,6 +644,8 @@ class TestBuildCommandStringExtended:
         assert "--sigma-rw-lognormal-sigma 0.4" in cmd
         assert "--sigma-artist-lognormal-loc -3.7" in cmd
         assert "--sigma-artist-lognormal-sigma 0.5" in cmd
+        assert "--rho-loc 0.2" in cmd
+        assert "--rho-scale 0.02" in cmd
         assert "--beta-prior-type horseshoe" in cmd
         # default-True since 0.13.0, so the recorded flag is the --no- form
         assert "--no-heteroscedastic-entity-obs" in cmd

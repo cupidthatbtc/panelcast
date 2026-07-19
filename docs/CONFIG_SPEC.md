@@ -66,6 +66,7 @@ Observation noise
 - `sigma_artist_prior_type`: `halfnormal` (default) | `lognormal` (no mass at the sigma=0 boundary)
 - `sigma_rw_lognormal_loc`, `sigma_rw_lognormal_sigma`: float (default -2.8 / 0.6; LogNormal params for the sigma_rw prior, used when the prior type is lognormal — right-size per domain scale)
 - `sigma_artist_lognormal_loc`, `sigma_artist_lognormal_sigma`: float (default -0.9 / 0.6; LogNormal params for the sigma_artist prior, used when `sigma_artist_prior_type` is lognormal)
+- `rho_loc`, `rho_scale`: float (default 0.0 / 0.3; Normal params for the AR(1) coefficient prior. `rho_scale` must be > 0; set it small — e.g. ~0.02 — to pin rho near zero and effectively disable the AR persistence channel per domain)
 - `heteroscedastic_entity_obs`: bool (AOTY default true since 0.13.0, #238; per-entity multiplicative noise, promoted on the three-seed subset confirmation under #237's coverage non-inferiority rule — see [`decisions/entity_overdispersion.md`](decisions/entity_overdispersion.md). Domains that rejected it — IMDb, econ — pin false)
 - `tau_entity_scale`: float (default 0.25)
 
