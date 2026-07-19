@@ -324,6 +324,18 @@ EXCLUDED_FIELDS: dict[str, str] = {
         "sampler-geometry reparameterization, not a model-search dimension"
     ),
     "init_strategy": "execution mechanics; initialization is statistically neutral",
+    "sigma_rw_lognormal_loc": (
+        "prior-scale calibration per domain, not a search dimension"
+    ),
+    "sigma_rw_lognormal_sigma": (
+        "prior-scale calibration per domain, not a search dimension"
+    ),
+    "sigma_artist_lognormal_loc": (
+        "prior-scale calibration per domain, not a search dimension"
+    ),
+    "sigma_artist_lognormal_sigma": (
+        "prior-scale calibration per domain, not a search dimension"
+    ),
     "conformal_calibration": (
         "post-hoc evaluation layer over the predictive; no refit, not a model option"
     ),
