@@ -47,7 +47,6 @@ from panelcast.config.gates import (
     LatentProcess,
     LikelihoodFamily,
     NExponentPrior,
-    SigmaArtistPriorType,
     SigmaObsPriorType,
     TargetTransform,
 )
@@ -227,7 +226,7 @@ class PipelineConfig:
     sigma_obs_prior_type: SigmaObsPriorType = "halfnormal"
     # sigma_artist prior family gate: "halfnormal" (legacy default) | "lognormal"
     # (removes the zero-boundary pile-up; mirrors sigma_rw/sigma_obs). No CLI flag.
-    sigma_artist_prior_type: SigmaArtistPriorType = "halfnormal"
+    sigma_artist_prior_type: SigmaObsPriorType = "halfnormal"
     # Artist-effect parameterization: "noncentered" (legacy default) | "zerosum"
     # (ZeroSumNormal deviations around mu_artist — removes the mu_artist<->effects
     # location ridge that throttles sigma_artist ESS). No CLI flag.

@@ -41,6 +41,7 @@ MCMC
 - `target_accept`: float (default 0.90)
 - `max_tree_depth`: int (default 10)
 - `chain_method`: `sequential` | `vectorized` | `parallel`
+- `init_strategy`: `uniform` (default) | `median` | `feasible`
 
 Convergence gates
 - `rhat_threshold`: float (default 1.01)
@@ -62,10 +63,12 @@ Observation noise
 - `n_exponent_prior`: `logit-normal` | `beta`
 - `n_exponent_alpha`, `n_exponent_beta`: float (legacy beta-prior parameters)
 - `sigma_obs_prior_type`: `halfnormal` | `lognormal`
+- `sigma_artist_prior_type`: `halfnormal` (default) | `lognormal` (no mass at the sigma=0 boundary)
 - `heteroscedastic_entity_obs`: bool (AOTY default true since 0.13.0, #238; per-entity multiplicative noise, promoted on the three-seed subset confirmation under #237's coverage non-inferiority rule — see [`decisions/entity_overdispersion.md`](decisions/entity_overdispersion.md). Domains that rejected it — IMDb, econ — pin false)
 - `tau_entity_scale`: float (default 0.25)
 
 Likelihood and model gates
+- `artist_effect_param`: `noncentered` (default) | `zerosum` (removes the mu_artist <-> effects location ridge)
 - `likelihood_family`: one of the registry families (default `studentt`)
 - `likelihood_df`: float (default 4.0; >= 100 degrades Student-t to Normal)
 - `discretize_observation`: bool (default false)
