@@ -84,6 +84,8 @@ class StageContext:
     num_warmup: int = 1000
     target_accept: float = 0.90
     max_tree_depth: int = 10
+    # NUTS init strategy: "uniform" (legacy) | "median" | "feasible"
+    init_strategy: str = "uniform"
     chain_method: str = "sequential"
     # Blocked-sampling checkpoint cadence; None = single-shot. train_bayes reads
     # this via getattr, so a dropped field silently disables checkpointing.
@@ -123,6 +125,10 @@ class StageContext:
     latent_process: str = "rw"
     # sigma_obs prior family gate: "halfnormal" (legacy) | "lognormal"
     sigma_obs_prior_type: str = "halfnormal"
+    # sigma_artist prior family gate: "halfnormal" (legacy) | "lognormal"
+    sigma_artist_prior_type: str = "halfnormal"
+    # Artist-effect parameterization: "noncentered" (legacy) | "zerosum"
+    artist_effect_param: str = "noncentered"
     # Covariate-block prior gate (#155): "normal" (legacy) | "horseshoe"
     beta_prior_type: str = "normal"
     hs_global_scale: float = 0.1

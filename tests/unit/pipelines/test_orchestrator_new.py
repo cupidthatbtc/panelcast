@@ -610,6 +610,9 @@ class TestBuildCommandStringExtended:
             latent_process="ar1",
             debut_prev_score_source="dataset_stats",
             sigma_obs_prior_type="lognormal",
+            sigma_artist_prior_type="lognormal",
+            artist_effect_param="zerosum",
+            init_strategy="median",
             beta_prior_type="horseshoe",
             heteroscedastic_entity_obs=False,
             tau_entity_scale=0.5,
@@ -628,6 +631,9 @@ class TestBuildCommandStringExtended:
         assert "--latent-process ar1" in cmd
         assert "--debut-prev-score-source dataset_stats" in cmd
         assert "--sigma-obs-prior-type lognormal" in cmd
+        assert "--sigma-artist-prior-type lognormal" in cmd
+        assert "--artist-effect-param zerosum" in cmd
+        assert "--init-strategy median" in cmd
         assert "--beta-prior-type horseshoe" in cmd
         # default-True since 0.13.0, so the recorded flag is the --no- form
         assert "--no-heteroscedastic-entity-obs" in cmd

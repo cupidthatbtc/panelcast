@@ -317,6 +317,13 @@ EXCLUDED_FIELDS: dict[str, str] = {
     "exclude_rw_raw_from_collection": "memory-only; posterior parity guarded by tests",
     "evaluate_secondary_split": "evaluation scope, not a model option",
     "seed": "replication knob — multi-seed confirmation varies it, the search does not",
+    "sigma_artist_prior_type": (
+        "sampler-geometry remedy flipped on diagnostic evidence, not searched"
+    ),
+    "artist_effect_param": (
+        "sampler-geometry reparameterization, not a model-search dimension"
+    ),
+    "init_strategy": "execution mechanics; initialization is statistically neutral",
     "conformal_calibration": (
         "post-hoc evaluation layer over the predictive; no refit, not a model option"
     ),

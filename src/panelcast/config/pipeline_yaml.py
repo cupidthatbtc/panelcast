@@ -124,6 +124,11 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     # sigma_obs prior family + entity-level overdispersion gate (no CLI flags;
     # configured per-domain via run_config.yaml, like logit_offset).
     "sigma_obs_prior_type": _spec("sigma_obs_prior_type", None),
+    # sigma_artist prior family, artist-effect parameterization, and NUTS init
+    # strategy (no CLI flags; configured per-domain via run_config.yaml).
+    "sigma_artist_prior_type": _spec("sigma_artist_prior_type", None),
+    "artist_effect_param": _spec("artist_effect_param", None),
+    "init_strategy": _spec("init_strategy", None),
     # Covariate-block prior gate (#155; no CLI flag).
     "beta_prior_type": _spec("beta_prior_type", None),
     "hs_global_scale": _spec("hs_global_scale", None),

@@ -1096,6 +1096,30 @@ class TestPipelineConfigValidation:
         with pytest.raises(ValueError, match="sigma_obs_prior_type"):
             PipelineConfig(sigma_obs_prior_type="bogus")
 
+    def test_invalid_sigma_artist_prior_type_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="sigma_artist_prior_type"):
+            PipelineConfig(sigma_artist_prior_type="bogus")
+
+    def test_invalid_artist_effect_param_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="artist_effect_param"):
+            PipelineConfig(artist_effect_param="bogus")
+
+    def test_invalid_init_strategy_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="init_strategy"):
+            PipelineConfig(init_strategy="bogus")
+
+    def test_prior_and_init_knob_defaults(self):
+        config = PipelineConfig()
+        assert config.sigma_artist_prior_type == "halfnormal"
+        assert config.artist_effect_param == "noncentered"
+        assert config.init_strategy == "uniform"
+
     def test_nonpositive_tau_entity_scale_raises(self):
         import pytest
 

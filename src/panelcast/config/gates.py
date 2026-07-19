@@ -13,7 +13,12 @@ from typing import Literal
 
 TargetTransform = Literal["identity", "offset_logit"]
 LatentProcess = Literal["rw", "ar1"]
+# Shared by sigma_obs_prior_type and sigma_artist_prior_type: typing caches
+# identical Literals, so a second alias for the same value set would be
+# indistinguishable at runtime (and orphaned by the select-space guard).
 SigmaObsPriorType = Literal["halfnormal", "lognormal"]
+ArtistEffectParam = Literal["noncentered", "zerosum"]
+InitStrategy = Literal["uniform", "median", "feasible"]
 BetaPriorType = Literal["normal", "horseshoe"]
 ArCenter = Literal["global", "none", "artist_running"]
 DebutPrevScoreSource = Literal["train_mean", "dataset_stats"]
@@ -31,6 +36,8 @@ __all__ = [
     "TargetTransform",
     "LatentProcess",
     "SigmaObsPriorType",
+    "ArtistEffectParam",
+    "InitStrategy",
     "BetaPriorType",
     "ArCenter",
     "DebutPrevScoreSource",
