@@ -336,6 +336,12 @@ EXCLUDED_FIELDS: dict[str, str] = {
     "sigma_artist_lognormal_sigma": (
         "prior-scale calibration per domain, not a search dimension"
     ),
+    "rho_loc": (
+        "prior-scale calibration per domain, not a search dimension"
+    ),
+    "rho_scale": (
+        "prior-scale calibration per domain, not a search dimension"
+    ),
     "conformal_calibration": (
         "post-hoc evaluation layer over the predictive; no refit, not a model option"
     ),

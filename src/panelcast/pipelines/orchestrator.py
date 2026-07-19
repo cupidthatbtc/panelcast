@@ -240,6 +240,13 @@ class PipelineConfig:
     sigma_rw_lognormal_sigma: float = 0.6
     sigma_artist_lognormal_loc: float = -0.9
     sigma_artist_lognormal_sigma: float = 0.6
+    # Normal(loc, scale) parameters for the AR(1) coefficient prior. The default
+    # centers rho at zero with moderate spread; external domains where the AR
+    # term competes with the artist effects as an alternative persistence channel
+    # (e.g. the baseball replication's previous-season average) set rho_scale
+    # small to pin rho near zero and disable the channel. No CLI flag.
+    rho_loc: float = 0.0
+    rho_scale: float = 0.3
     # Covariate-block prior gate (#155): "normal" (legacy default, bit-identical
     # RNG path) | "horseshoe" (regularized horseshoe; global-local shrinkage
     # against the #76 coefficient dilution). No CLI flag; via run_config.yaml.
@@ -378,19 +385,16 @@ class PipelineConfig:
                 f"Invalid beta_prior_type: '{self.beta_prior_type}'. "
                 "Must be 'normal' or 'horseshoe'."
             )
-        if self.sigma_rw_lognormal_sigma <= 0.0:
-            raise ValueError(
-                f"Invalid sigma_rw_lognormal_sigma: {self.sigma_rw_lognormal_sigma}. Must be > 0."
-            )
-        if self.sigma_artist_lognormal_sigma <= 0.0:
-            raise ValueError(
-                f"Invalid sigma_artist_lognormal_sigma: {self.sigma_artist_lognormal_sigma}. "
-                "Must be > 0."
-            )
-        if self.hs_global_scale <= 0.0:
-            raise ValueError(f"Invalid hs_global_scale: {self.hs_global_scale}. Must be > 0.")
-        if self.tau_entity_scale <= 0.0:
-            raise ValueError(f"Invalid tau_entity_scale: {self.tau_entity_scale}. Must be > 0.")
+        for scale_field in (
+            "sigma_rw_lognormal_sigma",
+            "sigma_artist_lognormal_sigma",
+            "rho_scale",
+            "hs_global_scale",
+            "tau_entity_scale",
+        ):
+            value = getattr(self, scale_field)
+            if value <= 0.0:
+                raise ValueError(f"Invalid {scale_field}: {value}. Must be > 0.")
         if self.coverage_tolerance < 0.0:
             raise ValueError("coverage_tolerance must be >= 0.")
         if not 0.0 < self.prediction_interval < 1.0:
@@ -789,6 +793,8 @@ class PipelineOrchestrator:
                 "sigma_rw_lognormal_sigma": self.config.sigma_rw_lognormal_sigma,
                 "sigma_artist_lognormal_loc": self.config.sigma_artist_lognormal_loc,
                 "sigma_artist_lognormal_sigma": self.config.sigma_artist_lognormal_sigma,
+                "rho_loc": self.config.rho_loc,
+                "rho_scale": self.config.rho_scale,
                 "beta_prior_type": self.config.beta_prior_type,
                 "hs_global_scale": self.config.hs_global_scale,
                 "heteroscedastic_entity_obs": self.config.heteroscedastic_entity_obs,
@@ -873,6 +879,8 @@ class PipelineOrchestrator:
         "sigma_rw_lognormal_sigma",
         "sigma_artist_lognormal_loc",
         "sigma_artist_lognormal_sigma",
+        "rho_loc",
+        "rho_scale",
         "beta_prior_type",
         "hs_global_scale",
         "heteroscedastic_entity_obs",
@@ -1129,6 +1137,10 @@ class PipelineOrchestrator:
             parts.append(
                 f"--sigma-artist-lognormal-sigma {self.config.sigma_artist_lognormal_sigma}"
             )
+        if self.config.rho_loc != defaults.rho_loc:
+            parts.append(f"--rho-loc {self.config.rho_loc}")
+        if self.config.rho_scale != defaults.rho_scale:
+            parts.append(f"--rho-scale {self.config.rho_scale}")
         if self.config.beta_prior_type != defaults.beta_prior_type:
             parts.append(f"--beta-prior-type {self.config.beta_prior_type}")
         if self.config.hs_global_scale != defaults.hs_global_scale:
@@ -1461,6 +1473,8 @@ class PipelineOrchestrator:
             sigma_rw_lognormal_sigma=self.config.sigma_rw_lognormal_sigma,
             sigma_artist_lognormal_loc=self.config.sigma_artist_lognormal_loc,
             sigma_artist_lognormal_sigma=self.config.sigma_artist_lognormal_sigma,
+            rho_loc=self.config.rho_loc,
+            rho_scale=self.config.rho_scale,
             beta_prior_type=self.config.beta_prior_type,
             hs_global_scale=self.config.hs_global_scale,
             heteroscedastic_entity_obs=self.config.heteroscedastic_entity_obs,

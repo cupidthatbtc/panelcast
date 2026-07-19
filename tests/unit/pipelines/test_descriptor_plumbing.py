@@ -248,6 +248,40 @@ class TestLognormalPriorParamPlumbing:
         assert PriorConfig().sigma_artist_lognormal_sigma == 0.6
 
 
+class TestRhoPriorParamPlumbing:
+    """The AR(1) rho_loc / rho_scale params must reach the StageContext and,
+    via priors_for_transform, the PriorConfig."""
+
+    def test_context_carries_params(self, tmp_path):
+        config = PipelineConfig(rho_loc=0.2, rho_scale=0.02)
+        ctx = PipelineOrchestrator(config, output_base=tmp_path)._create_stage_context()
+        assert ctx.rho_loc == 0.2
+        assert ctx.rho_scale == 0.02
+
+    def test_params_reach_prior_config(self, tmp_path):
+        from panelcast.models.bayes.priors import priors_for_transform
+
+        config = PipelineConfig(rho_loc=0.2, rho_scale=0.02)
+        ctx = PipelineOrchestrator(config, output_base=tmp_path)._create_stage_context()
+
+        priors = priors_for_transform(
+            "identity",
+            rho_loc=float(getattr(ctx, "rho_loc", 0.0)),
+            rho_scale=float(getattr(ctx, "rho_scale", 0.3)),
+        )
+        assert priors.rho_loc == 0.2
+        assert priors.rho_scale == 0.02
+
+    def test_defaults_are_byte_identical(self, tmp_path):
+        from panelcast.models.bayes.priors import PriorConfig
+
+        ctx = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)._create_stage_context()
+        assert ctx.rho_loc == 0.0
+        assert ctx.rho_scale == 0.3
+        assert PriorConfig().rho_loc == 0.0
+        assert PriorConfig().rho_scale == 0.3
+
+
 class TestBetaBinomialGate:
     """The orchestrator rejects beta_binomial on a non-aggregation descriptor."""
 

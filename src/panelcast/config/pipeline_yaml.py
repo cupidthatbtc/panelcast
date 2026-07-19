@@ -135,6 +135,10 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "sigma_rw_lognormal_sigma": _spec("sigma_rw_lognormal_sigma", None),
     "sigma_artist_lognormal_loc": _spec("sigma_artist_lognormal_loc", None),
     "sigma_artist_lognormal_sigma": _spec("sigma_artist_lognormal_sigma", None),
+    # Normal(loc, scale) params for the AR(1) coefficient prior (no CLI flags;
+    # per-domain right-sizing via run_config.yaml).
+    "rho_loc": _spec("rho_loc", None),
+    "rho_scale": _spec("rho_scale", None),
     # Covariate-block prior gate (#155; no CLI flag).
     "beta_prior_type": _spec("beta_prior_type", None),
     "hs_global_scale": _spec("hs_global_scale", None),

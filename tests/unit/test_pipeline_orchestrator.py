@@ -1139,6 +1139,17 @@ class TestPipelineConfigValidation:
         assert config.sigma_artist_lognormal_loc == -0.9
         assert config.sigma_artist_lognormal_sigma == 0.6
 
+    def test_nonpositive_rho_scale_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="rho_scale"):
+            PipelineConfig(rho_scale=0.0)
+
+    def test_rho_prior_param_defaults(self):
+        config = PipelineConfig()
+        assert config.rho_loc == 0.0
+        assert config.rho_scale == 0.3
+
     def test_nonpositive_tau_entity_scale_raises(self):
         import pytest
 
