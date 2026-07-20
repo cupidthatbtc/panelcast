@@ -57,6 +57,16 @@ class TestCleanAlbumsAeroDescriptor:
         assert cleaned.loc[2, "Flight_Date_Parsed"] == pd.Timestamp("2022-01-01")
         assert not bool(cleaned.loc[2, "date_missing"])
 
+    def test_event_col_shared_with_year_col_stays_numeric(self):
+        descriptor = _aero_descriptor()
+        descriptor = descriptor.model_copy(update={"event_col": descriptor.year_col})
+        config = CleaningConfig(min_year=descriptor.min_year, descriptor=descriptor)
+
+        cleaned = clean_albums(_make_aero_raw(), config=config)
+
+        assert cleaned[descriptor.year_col].tolist() == [2021, 2022, 2022]
+        assert not bool(cleaned["flag_future_year"].any())
+
     def test_no_genres_column_skips_primary_genre(self):
         cleaned = clean_albums(_make_aero_raw(), config=_aero_cleaning_config())
         assert "primary_genre" not in cleaned.columns
