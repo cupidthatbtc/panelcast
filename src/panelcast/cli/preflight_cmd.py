@@ -29,7 +29,12 @@ def preflight(
         help="Fit-config YAML(s), same as `panelcast run`, so priors match the fit.",
     ),
     strict: bool = typer.Option(
-        False, "--strict", help="Exit nonzero if any check FAILs (default: warn-only, exit 0)."
+        False,
+        "--strict",
+        help=(
+            "Exit 1 if any check FAILs (default: warn-only, exit 0). A setup error "
+            "(features not built) exits 2, so a strict '1' always means bad statistics."
+        ),
     ),
     as_json: bool = typer.Option(False, "--json", help="Machine-readable output for CI."),
 ) -> None:
@@ -86,4 +91,9 @@ def preflight(
         )
 
     if strict and any(r.status == "FAIL" for r in results):
-        raise typer.Exit(code=1)
+        from panelcast.model_preflight import SETUP_ERROR_NAME
+
+        # A setup error (couldn't assemble inputs) exits 2 so a strict "1" is
+        # unambiguously "the statistics are bad", not "features weren't built".
+        setup_error = len(results) == 1 and results[0].name == SETUP_ERROR_NAME
+        raise typer.Exit(code=2 if setup_error else 1)

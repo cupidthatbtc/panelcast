@@ -107,8 +107,10 @@ Prediction batching (YAML-only)
 features stage and before the first fit**. It reads the prepared splits and
 feature matrices, resolves the exact `PriorConfig` and `X / artist_idx / y` the
 fit would use (same `--dataset` / `--config` arguments as `run`), and never
-touches the GPU or MCMC. Warn-only by default (exit 0); `--strict` exits nonzero
-if any check FAILs. `--json` emits a machine-readable payload for CI.
+touches the GPU or MCMC. Warn-only by default (exit 0); under `--strict` a
+statistical FAIL exits 1 while a setup error (features not built yet) exits 2,
+so a strict `1` unambiguously means the statistics are bad. `--json` emits a
+machine-readable payload for CI.
 
 Not to be confused with `panelcast run --preflight`, which estimates **GPU
 memory** — a different concern. `preflight` audits the *statistics* of the fit:

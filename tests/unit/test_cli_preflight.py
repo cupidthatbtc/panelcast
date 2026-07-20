@@ -169,14 +169,41 @@ class TestPreflightCli:
     def test_missing_data_reports_fail_row_json(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)  # no data/ here
         result = runner.invoke(app, ["preflight", "--json"])
-        start = result.output.index("[")
+        start = result.output.index("[\n")  # the indent=2 array start, past any log noise
         payload = json.loads(result.output[start:])
         assert payload[0]["status"] == "FAIL"
         # warn-only by default: exit 0 even on a FAIL row
         assert result.exit_code == 0
 
-    def test_strict_exits_nonzero_on_fail(self, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
+    def test_strict_setup_error_exits_2(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)  # features not built -> assemble fails
+        result = runner.invoke(app, ["preflight", "--strict"])
+        assert result.exit_code == 2  # setup error, distinct from a statistical FAIL
+
+    def test_strict_statistical_fail_exits_1(self, monkeypatch):
+        y, artist_idx = _panel()
+        rng = np.random.default_rng(0)
+        n = len(y)
+        x1 = rng.normal(size=n)
+        x2 = rng.normal(size=n)
+        x3 = x1 + 2.0 * x2 + 1e-6 * rng.normal(size=n)  # near-collinear -> FAIL
+        inputs = _StubInputs(
+            X=np.column_stack([x1, x2, x3]),
+            artist_idx=artist_idx,
+            y=y,
+            feature_names=["x1", "x2", "x3"],
+            group_idx_by_artist=None,
+            priors=PriorConfig(
+                sigma_rw_prior_type="lognormal",
+                sigma_rw_lognormal_loc=math.log(within_entity_step_sd(y, artist_idx)),
+                sigma_artist_prior_type="halfnormal",
+                sigma_artist_scale=cross_entity_mean_sd(y, artist_idx),
+            ),
+        )
+        monkeypatch.setattr(
+            "panelcast.model_preflight_data.assemble_preflight_inputs",
+            lambda *a, **k: inputs,
+        )
         result = runner.invoke(app, ["preflight", "--strict"])
         assert result.exit_code == 1
 

@@ -59,6 +59,12 @@ _LOADING_MIN = 0.15
 _DEGENERATE_REL = 1.0e-6
 
 
+# Name of the single row returned when the fit inputs can't even be assembled
+# (features not built yet). A setup error, not a statistical FAIL — the CLI maps
+# it to a distinct exit code under --strict.
+SETUP_ERROR_NAME = "preflight"
+
+
 @dataclass(frozen=True)
 class CheckResult:
     name: str
@@ -83,8 +89,9 @@ def within_entity_step_sd(y: np.ndarray, artist_idx: np.ndarray) -> float:
     ``sqrt(2)``: a random walk's one-step innovation SD if the diffs were pure
     innovation. Observation noise and overdispersion inflate it, so it is an
     UPPER bound on the latent ``sigma_rw`` — Check A treats it asymmetrically.
-    Entities are grouped by a stable sort, which preserves their in-array
-    (temporal) order.
+    Entities are grouped by a stable sort, which preserves their in-array order;
+    that order is temporal by the same pipeline invariant ``album_seq`` relies on
+    (``groupby(entity).cumcount()`` in ``prepare_model_data``).
     """
     y = np.asarray(y, dtype=float)
     idx = np.asarray(artist_idx)
@@ -317,7 +324,7 @@ def run_model_preflight(
 
         inputs = assemble_preflight_inputs(dataset, config_files)
     except Exception as exc:
-        return [CheckResult("preflight", "FAIL", f"could not assemble fit inputs: {exc}")]
+        return [CheckResult(SETUP_ERROR_NAME, "FAIL", f"could not assemble fit inputs: {exc}")]
 
     results.extend(
         check_prior_data_scale(
