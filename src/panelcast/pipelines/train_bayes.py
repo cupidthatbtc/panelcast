@@ -128,6 +128,60 @@ def locate_level_prior(
     return dataclasses.replace(priors, mu_artist_loc=level)
 
 
+def build_training_priors(
+    ctx,
+    *,
+    target_transform: str,
+    logit_offset: float,
+    ar_center: str,
+    entity_group_pooling: bool,
+    effective_ceiling: float | None,
+    ar_center_value: float,
+    target_bounds: tuple[float, float],
+):
+    """Resolve the exact PriorConfig a fit would use from a ctx-like object.
+
+    ``ctx`` is any object carrying the prior-shaping attributes (a StageContext
+    during a run, or a PipelineConfig for the pre-fit `preflight` check). The
+    training stage and `panelcast preflight` both call this so they never drift
+    on how config becomes priors.
+    """
+    priors = priors_for_transform(
+        target_transform,
+        logit_offset=logit_offset,
+        n_exponent_alpha=ctx.n_exponent_alpha,
+        n_exponent_beta=ctx.n_exponent_beta,
+        ar_center=ar_center,
+        latent_process=str(getattr(ctx, "latent_process", "rw")),
+        sigma_obs_prior_type=str(getattr(ctx, "sigma_obs_prior_type", "halfnormal")),
+        sigma_artist_prior_type=str(getattr(ctx, "sigma_artist_prior_type", "halfnormal")),
+        artist_effect_param=str(getattr(ctx, "artist_effect_param", "noncentered")),
+        sigma_rw_lognormal_loc=float(getattr(ctx, "sigma_rw_lognormal_loc", -2.8)),
+        sigma_rw_lognormal_sigma=float(getattr(ctx, "sigma_rw_lognormal_sigma", 0.6)),
+        sigma_artist_lognormal_loc=float(getattr(ctx, "sigma_artist_lognormal_loc", -0.9)),
+        sigma_artist_lognormal_sigma=float(getattr(ctx, "sigma_artist_lognormal_sigma", 0.6)),
+        rho_loc=float(getattr(ctx, "rho_loc", 0.0)),
+        rho_scale=float(getattr(ctx, "rho_scale", 0.3)),
+        beta_prior_type=str(getattr(ctx, "beta_prior_type", "normal")),
+        hs_global_scale=float(getattr(ctx, "hs_global_scale", 0.1)),
+        heteroscedastic_entity_obs=bool(getattr(ctx, "heteroscedastic_entity_obs", False)),
+        tau_entity_scale=float(getattr(ctx, "tau_entity_scale", 0.25)),
+        likelihood_family=str(getattr(ctx, "likelihood_family", "studentt")),
+        discretize_observation=bool(getattr(ctx, "discretize_observation", False)),
+        errors_in_variables=bool(getattr(ctx, "errors_in_variables", False)),
+        propagate_rw_horizon=bool(getattr(ctx, "propagate_rw_horizon", False)),
+        entity_group_pooling=entity_group_pooling,
+        effective_ceiling=effective_ceiling,
+    )
+    return locate_level_prior(
+        priors,
+        ar_center_value=ar_center_value,
+        target_transform=target_transform,
+        logit_offset=logit_offset,
+        target_bounds=target_bounds,
+    )
+
+
 def load_training_data(
     features_path: Path,
     splits_path: Path,
@@ -1176,40 +1230,16 @@ def train_models(
     )
 
     # Get priors with heteroscedastic config from CLI; the transform factory
-    # right-sizes noise scales when training on the logit scale.
-    priors = priors_for_transform(
-        target_transform,
-        logit_offset=logit_offset,
-        n_exponent_alpha=ctx.n_exponent_alpha,
-        n_exponent_beta=ctx.n_exponent_beta,
-        ar_center=ar_center,
-        latent_process=str(getattr(ctx, "latent_process", "rw")),
-        sigma_obs_prior_type=str(getattr(ctx, "sigma_obs_prior_type", "halfnormal")),
-        sigma_artist_prior_type=str(getattr(ctx, "sigma_artist_prior_type", "halfnormal")),
-        artist_effect_param=str(getattr(ctx, "artist_effect_param", "noncentered")),
-        sigma_rw_lognormal_loc=float(getattr(ctx, "sigma_rw_lognormal_loc", -2.8)),
-        sigma_rw_lognormal_sigma=float(getattr(ctx, "sigma_rw_lognormal_sigma", 0.6)),
-        sigma_artist_lognormal_loc=float(getattr(ctx, "sigma_artist_lognormal_loc", -0.9)),
-        sigma_artist_lognormal_sigma=float(getattr(ctx, "sigma_artist_lognormal_sigma", 0.6)),
-        rho_loc=float(getattr(ctx, "rho_loc", 0.0)),
-        rho_scale=float(getattr(ctx, "rho_scale", 0.3)),
-        beta_prior_type=str(getattr(ctx, "beta_prior_type", "normal")),
-        hs_global_scale=float(getattr(ctx, "hs_global_scale", 0.1)),
-        heteroscedastic_entity_obs=bool(getattr(ctx, "heteroscedastic_entity_obs", False)),
-        tau_entity_scale=float(getattr(ctx, "tau_entity_scale", 0.25)),
-        likelihood_family=str(getattr(ctx, "likelihood_family", "studentt")),
-        discretize_observation=bool(getattr(ctx, "discretize_observation", False)),
-        errors_in_variables=bool(getattr(ctx, "errors_in_variables", False)),
-        propagate_rw_horizon=bool(getattr(ctx, "propagate_rw_horizon", False)),
-        entity_group_pooling=entity_group_pooling,
-        effective_ceiling=effective_ceiling,
-    )
-
-    priors = locate_level_prior(
-        priors,
-        ar_center_value=ar_center_value,
+    # right-sizes noise scales when training on the logit scale. Shared with
+    # `panelcast preflight` so the pre-fit check audits the exact priors.
+    priors = build_training_priors(
+        ctx,
         target_transform=target_transform,
         logit_offset=logit_offset,
+        ar_center=ar_center,
+        entity_group_pooling=entity_group_pooling,
+        effective_ceiling=effective_ceiling,
+        ar_center_value=ar_center_value,
         target_bounds=tuple(descriptor.target_bounds),
     )
     model_args["priors"] = priors

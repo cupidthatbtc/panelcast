@@ -109,6 +109,16 @@ bare `--dataset` names resolve to `configs/datasets/{name}.yaml` *relative to
 the working directory* — from a separate domain directory, pass the
 descriptor's absolute path instead.
 
+**Before the first fit, run `panelcast preflight`.** After the data/splits/
+features stages exist (`panelcast run --dataset <name> --stages
+data,splits,features`), run `panelcast preflight --dataset <name>` (plus the
+same `--config` you will fit with). It reads the prepared data and flags two
+common porting mistakes without touching the GPU: AOTY-scale `sigma_rw` /
+`sigma_artist` priors that don't match your target's scale, and covariate
+collinearity given the per-entity intercepts (e.g. an age-period-cohort
+identity from time-like covariates). It is warn-only; add `--strict` to make a
+FAIL exit nonzero in CI. See `docs/CONFIG_SPEC.md` for the two checks.
+
 ## Step 3 — Verify
 
 - `training_summary.json` gains a `dataset` block recording the descriptor
