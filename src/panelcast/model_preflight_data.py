@@ -33,7 +33,11 @@ def _resolve_config(dataset: str | None, config_files: list[str] | None):
         from panelcast.config.pipeline_yaml import apply_yaml_overrides
 
         yaml_data = load_yaml_config(list(config_files))
-        config_kwargs = apply_yaml_overrides(config_kwargs, yaml_data, set())
+        # An explicit --dataset must win over a config's `dataset:` key, exactly
+        # as it does for `panelcast run`; a config may still set it when --dataset
+        # was omitted.
+        explicit = {"dataset"} if dataset is not None else set()
+        config_kwargs = apply_yaml_overrides(config_kwargs, yaml_data, explicit)
     return PipelineConfig(**config_kwargs)
 
 

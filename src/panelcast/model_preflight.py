@@ -204,15 +204,6 @@ def check_prior_data_scale(
     return results
 
 
-def _format_offenders(participating: set[str]) -> str:
-    """Name the collinear features, collapsing the cohort one-hots into one entry."""
-    cohorts = [n for n in participating if n.startswith("cohort[")]
-    named = sorted(n for n in participating if not n.startswith("cohort["))
-    if cohorts:
-        named.append(f"cohort dummies ({len(cohorts)})")
-    return ", ".join(named)
-
-
 def _within_entity_demean(col: np.ndarray, idx: np.ndarray, counts: np.ndarray) -> np.ndarray:
     sums = np.bincount(idx, weights=col, minlength=counts.size)
     entity_mean = sums / counts
@@ -305,7 +296,7 @@ def check_collinearity(
                 for j in np.where(np.abs(Vt[i]) > _LOADING_MIN)[0]:
                     participating.add(kept_names[j])
         if participating:
-            offenders = _format_offenders(participating)
+            offenders = ", ".join(sorted(participating))
             detail += f"; near-collinear set: {offenders}"
             suggestion = (
                 f"{offenders} form an approximate identity given per-entity "

@@ -17,6 +17,7 @@ from panelcast.model_preflight import (
     check_collinearity,
     check_prior_data_scale,
     cross_entity_mean_sd,
+    run_model_preflight,
     within_entity_step_sd,
 )
 from panelcast.models.bayes.priors import PriorConfig
@@ -178,3 +179,159 @@ class TestPreflightCli:
         monkeypatch.chdir(tmp_path)
         result = runner.invoke(app, ["preflight", "--strict"])
         assert result.exit_code == 1
+
+    def test_human_output_prints_suggestion(self, tmp_path, monkeypatch):
+        y, artist_idx = _panel()
+        rw = within_entity_step_sd(y, artist_idx)
+        inputs = _StubInputs(
+            X=np.random.default_rng(0).normal(size=(len(y), 3)),
+            artist_idx=artist_idx,
+            y=y,
+            feature_names=["a", "b", "c"],
+            group_idx_by_artist=None,
+            priors=PriorConfig(
+                sigma_rw_prior_type="lognormal",
+                sigma_rw_lognormal_loc=math.log(rw) + 6.0,
+                sigma_artist_prior_type="halfnormal",
+                sigma_artist_scale=cross_entity_mean_sd(y, artist_idx) * 100.0,
+            ),
+        )
+        monkeypatch.setattr(
+            "panelcast.model_preflight_data.assemble_preflight_inputs",
+            lambda *a, **k: inputs,
+        )
+        result = runner.invoke(app, ["preflight"])
+        assert "sigma_artist_lognormal_loc" in result.output  # suggestion block printed
+        assert "WARN" in result.output or "FAIL" in result.output
+
+
+class _StubInputs:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+class TestEdgeBranches:
+    def test_zero_step_sd_warns(self):
+        # y constant within each entity -> no within-entity variation
+        artist_idx = np.repeat(np.arange(6), 3)
+        y = np.repeat(np.arange(6).astype(float), 3)
+        by = {
+            r.name: r
+            for r in check_prior_data_scale(y=y, artist_idx=artist_idx, priors=PriorConfig())
+        }
+        assert by["sigma_rw scale"].status == "WARN"
+
+    def test_single_entity_cross_sd_warns(self):
+        artist_idx = np.zeros(5, dtype=int)
+        y = np.array([1.0, 2.0, 3.0, 2.5, 1.5])
+        by = {
+            r.name: r
+            for r in check_prior_data_scale(y=y, artist_idx=artist_idx, priors=PriorConfig())
+        }
+        assert by["sigma_artist scale"].status == "WARN"
+
+    def test_halfnormal_and_lognormal_prior_medians(self):
+        y, artist_idx = _panel()
+        rw = within_entity_step_sd(y, artist_idx)
+        art = cross_entity_mean_sd(y, artist_idx)
+        priors = PriorConfig(
+            sigma_rw_prior_type="halfnormal",
+            sigma_rw_scale=rw / 0.6744897501960817,  # HalfNormal median == rw
+            sigma_artist_prior_type="lognormal",
+            sigma_artist_lognormal_loc=math.log(art),
+        )
+        by = {r.name: r for r in check_prior_data_scale(y=y, artist_idx=artist_idx, priors=priors)}
+        assert by["sigma_rw scale"].status == "PASS"
+        assert by["sigma_artist scale"].status == "PASS"
+
+    def test_empty_covariates_warn(self):
+        result = check_collinearity(X=np.empty((5, 0)), artist_idx=np.arange(5), feature_names=[])
+        assert result.status == "WARN"
+
+    def test_single_varying_column_passes(self):
+        artist_idx = np.repeat(np.arange(10), 3)
+        rng = np.random.default_rng(0)
+        X = rng.normal(size=(30, 1))
+        result = check_collinearity(X=X, artist_idx=artist_idx, feature_names=["only"])
+        assert result.status == "PASS"
+
+    def test_run_model_preflight_reports_assembly_failure(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)  # no prepared data -> FileNotFoundError
+        results = run_model_preflight(None, None)
+        assert len(results) == 1 and results[0].status == "FAIL"
+
+    def test_moment_guards_return_zero(self):
+        assert within_entity_step_sd(np.array([1.0]), np.array([0])) == 0.0
+        # every entity a singleton -> no within-entity diffs
+        assert within_entity_step_sd(np.arange(4.0), np.arange(4)) == 0.0
+        assert cross_entity_mean_sd(np.array([]), np.array([], dtype=int)) == 0.0
+
+    def test_moderate_collinearity_warns(self):
+        rng = np.random.default_rng(0)
+        artist_idx = np.repeat(np.arange(40), 4)
+        n = len(artist_idx)
+        x1 = rng.normal(size=n)
+        x2 = rng.normal(size=n)
+        x3 = x1 + 2.0 * x2 + 0.01 * rng.normal(size=n)  # residual cond ~460
+        result = check_collinearity(
+            X=np.column_stack([x1, x2, x3]),
+            artist_idx=artist_idx,
+            feature_names=["x1", "x2", "x3"],
+        )
+        assert result.status == "WARN"
+
+
+def _write_prepared(tmp_path):
+    import pandas as pd
+
+    rng = np.random.default_rng(7)
+    n_art, per = 8, 4
+    rows = n_art * per
+    artist = np.repeat([f"A{i}" for i in range(n_art)], per)
+    rid = np.arange(rows)
+    base = rng.uniform(60.0, 85.0, n_art)
+    user_score = np.clip(base[np.repeat(np.arange(n_art), per)] + rng.normal(0, 5, rows), 1, 99)
+    ratings = rng.integers(20, 200, rows)
+    split_df = pd.DataFrame(
+        {
+            "Artist": artist,
+            "User_Score": user_score,
+            "User_Ratings": ratings,
+            "original_row_id": rid,
+        }
+    )
+    features_df = pd.DataFrame(
+        {
+            "feat_a": rng.normal(size=rows),
+            "feat_b": rng.normal(size=rows),
+            "n_reviews": ratings,
+            "original_row_id": rid,
+        }
+    )
+    fdir = tmp_path / "data" / "features"
+    fdir.mkdir(parents=True)
+    features_df.to_parquet(fdir / "train_features.parquet")
+    sdir = tmp_path / "data" / "splits" / "within_entity_temporal"
+    sdir.mkdir(parents=True)
+    split_df.to_parquet(sdir / "train.parquet")
+
+
+class TestAssembleOnPreparedData:
+    def test_assemble_and_run(self, tmp_path, monkeypatch):
+        _write_prepared(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        results = run_model_preflight(None, None)
+        assert [r.name for r in results] == [
+            "sigma_rw scale",
+            "sigma_artist scale",
+            "collinearity",
+        ]
+        assert all(r.status in ("PASS", "WARN", "FAIL") for r in results)
+
+    def test_config_file_layer(self, tmp_path, monkeypatch):
+        _write_prepared(tmp_path)
+        monkeypatch.chdir(tmp_path)
+        cfg = tmp_path / "fit.yaml"
+        cfg.write_text("target_transform: identity\n", encoding="utf-8")
+        results = run_model_preflight(None, [str(cfg)])
+        assert len(results) == 3

@@ -116,9 +116,11 @@ memory** — a different concern. `preflight` audits the *statistics* of the fit
 - **Check A — prior/data scale.** Resolved `sigma_rw` / `sigma_artist` prior
   medians vs the data moments they govern, on the model-training scale: the
   within-entity per-step SD of the target, and the cross-entity SD of
-  entity-mean targets. Gaps beyond ~0.75 / ~1.5 orders of magnitude WARN / FAIL
-  (the `sigma_rw` moment is an upper bound on the latent scale, so a prior below
-  it is not flagged). On a flag it prints a ready-to-paste, data-derived YAML
+  entity-mean targets. Gaps beyond ~0.75 / ~1.5 orders of magnitude WARN / FAIL.
+  The `sigma_rw` moment is an upper bound on the latent scale, so it is treated
+  asymmetrically: a prior *below* the moment skips the WARN band and only FAILs
+  once it is more than ~1.5 orders below, while a prior above WARNs/FAILs at the
+  usual thresholds. On a flag it prints a ready-to-paste, data-derived YAML
   block. This catches AOTY-scale sigma priors carried onto a differently-scaled
   domain, which push the data far into the prior tail.
 - **Check B — collinearity given entity intercepts.** Within-entity demeans and
