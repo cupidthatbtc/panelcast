@@ -100,3 +100,35 @@ Prediction batching (YAML-only)
 
 "YAML-only" keys have no CLI flag; everything else also exists as a
 `panelcast run` option, and the explicit CLI spelling wins over any YAML value.
+
+## Pre-fit check: `panelcast preflight`
+
+`panelcast preflight` is a statistical sanity check that runs **after the
+features stage and before the first fit**. It reads the prepared splits and
+feature matrices, resolves the exact `PriorConfig` and `X / artist_idx / y` the
+fit would use (same `--dataset` / `--config` arguments as `run`), and never
+touches the GPU or MCMC. Warn-only by default (exit 0); under `--strict` a
+statistical FAIL exits 1 while a setup error (features not built yet) exits 2,
+so a strict `1` unambiguously means the statistics are bad. `--json` emits a
+machine-readable payload for CI.
+
+Not to be confused with `panelcast run --preflight`, which estimates **GPU
+memory** — a different concern. `preflight` audits the *statistics* of the fit:
+
+- **Check A — prior/data scale.** Resolved `sigma_rw` / `sigma_artist` prior
+  medians vs the data moments they govern, on the model-training scale: the
+  within-entity per-step SD of the target, and the cross-entity SD of
+  entity-mean targets. Gaps beyond ~0.75 / ~1.5 orders of magnitude WARN / FAIL.
+  The `sigma_rw` moment is an upper bound on the latent scale, so it is treated
+  asymmetrically: a prior *below* the moment skips the WARN band and only FAILs
+  once it is more than ~1.5 orders below, while a prior above WARNs/FAILs at the
+  usual thresholds. On a flag it prints a ready-to-paste, data-derived YAML
+  block. This catches AOTY-scale sigma priors carried onto a differently-scaled
+  domain, which push the data far into the prior tail.
+- **Check B — collinearity given entity intercepts.** Within-entity demeans and
+  standardizes the covariate matrix (appending cohort dummies when group pooling
+  is active), then reports the *residual* condition number — after machine-exact
+  structural nulls (benign one-hot / sequence-count redundancies the `beta`
+  ridge prior absorbs) are stripped. A large residual condition number names the
+  participating feature set, e.g. an `age_c + album_sequence + release_year +
+  cohort` age-period-cohort identity that per-entity intercepts otherwise hide.
