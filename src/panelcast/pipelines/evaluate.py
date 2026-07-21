@@ -858,7 +858,7 @@ def _run_known_artist_predictive(
             n_batches=n_batches,
             batch_size=int(batch_size),
         )
-    t_start = time.perf_counter()
+    t_start = t_prev = time.perf_counter()
 
     cpu_device = jax.devices("cpu")[0]
     with jax.default_device(cpu_device):
@@ -884,19 +884,21 @@ def _run_known_artist_predictive(
             rng_key = random.key(seed_offset + start)
             preds = predictive(rng_key, **model_args)
             y_key = next(k for k in preds if k.endswith("_y"))
-            # Block on the device result so the logged elapsed time reflects the
-            # batch's real compute, not lazy dispatch that resolves at concat.
-            chunk = np.asarray(jax.block_until_ready(preds[y_key]))
-            y_pred_chunks.append(chunk)
+            # np.asarray materializes on host, which blocks on this batch's
+            # device compute — so the heartbeat below times real work per batch.
+            y_pred_chunks.append(np.asarray(preds[y_key]))
             if progress_label is not None:
+                now = time.perf_counter()
                 log.info(
                     "predictive_progress",
                     label=progress_label,
                     batch=batch_i,
                     n_batches=n_batches,
                     draws_done=int(end),
-                    elapsed_s=round(time.perf_counter() - t_start, 1),
+                    batch_s=round(now - t_prev, 1),
+                    elapsed_s=round(now - t_start, 1),
                 )
+                t_prev = now
 
     return np.concatenate(y_pred_chunks, axis=0)
 
@@ -1098,7 +1100,7 @@ def _compute_info_criteria(
         n_batches=n_batches,
         marginalized_latents=excluded_latents,
     )
-    t_start = time.perf_counter()
+    t_start = t_prev = time.perf_counter()
 
     log_lik_chunks: list[np.ndarray] = []
     for batch_i, start in enumerate(range(0, n_total, batch_size), start=1):
@@ -1122,14 +1124,18 @@ def _compute_info_criteria(
         y_key = next((k for k in log_lik_dict if k.endswith("_y")), None)
         if y_key is None:
             raise ValueError("Unable to locate observed site in log_likelihood output.")
-        log_lik_chunks.append(np.asarray(jax.block_until_ready(log_lik_dict[y_key])))
+        # np.asarray blocks on device compute, so this heartbeat times real work.
+        log_lik_chunks.append(np.asarray(log_lik_dict[y_key]))
+        now = time.perf_counter()
         log.info(
             "info_criteria_progress",
             batch=batch_i,
             n_batches=n_batches,
             draws_done=int(end),
-            elapsed_s=round(time.perf_counter() - t_start, 1),
+            batch_s=round(now - t_prev, 1),
+            elapsed_s=round(now - t_start, 1),
         )
+        t_prev = now
 
     log_lik = np.concatenate(log_lik_chunks, axis=0)
 
