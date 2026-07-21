@@ -60,7 +60,7 @@ at all is enforced by `tests/e2e/test_domain_portability.py`. See
 re-analyses published panel studies through this pipeline — one descriptor YAML
 per paper, zero source changes: Berry–Reese–Larkey 1999 (baseball aging/ability)
 and Strittmatter–Sunde–Zegners 2020 (chess cognitive life cycle), with the
-diagnostic ladders and identification caveats written up in full.
+diagnostic ladder and identification caveats written up in full.
 
 ## Model structure
 
