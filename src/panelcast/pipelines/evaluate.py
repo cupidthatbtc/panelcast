@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -833,10 +834,31 @@ def _run_known_artist_predictive(
     seed_offset: int = 0,
     prefix: str = "user",
     batch_size: int = 500,
+    progress_label: str | None = None,
 ) -> np.ndarray:
-    """Run Predictive on known artists using chunked posterior batches."""
+    """Run Predictive on known artists using chunked posterior batches.
+
+    When ``progress_label`` is set, each posterior batch emits a progress log.
+    The predictive is silent otherwise, and at the primary-split scale (~1e3
+    draws x ~1e3 obs, on CPU, sampling the full random-walk latent per draw)
+    it can run for minutes with no output — indistinguishable from a hang
+    (#274). The per-batch heartbeat makes slow-vs-stuck decidable in the field.
+    """
     n_total_samples = next(iter(posterior_samples.values())).shape[0]
+    n_batches = (n_total_samples + batch_size - 1) // batch_size
     y_pred_chunks: list[np.ndarray] = []
+
+    if progress_label is not None:
+        n_obs = int(np.asarray(model_args["artist_idx"]).shape[0])
+        log.info(
+            "predictive_start",
+            label=progress_label,
+            n_draws=int(n_total_samples),
+            n_obs=n_obs,
+            n_batches=n_batches,
+            batch_size=int(batch_size),
+        )
+    t_start = time.perf_counter()
 
     cpu_device = jax.devices("cpu")[0]
     with jax.default_device(cpu_device):
@@ -845,7 +867,7 @@ def _run_known_artist_predictive(
         # reassigning posterior_samples is only safe between chunks of the
         # same length.
         predictives: dict[int, Predictive] = {}
-        for start in range(0, n_total_samples, batch_size):
+        for batch_i, start in enumerate(range(0, n_total_samples, batch_size), start=1):
             end = min(start + batch_size, n_total_samples)
             batch_samples = {k: v[start:end] for k, v in posterior_samples.items()}
             predictive = predictives.get(end - start)
@@ -862,7 +884,19 @@ def _run_known_artist_predictive(
             rng_key = random.key(seed_offset + start)
             preds = predictive(rng_key, **model_args)
             y_key = next(k for k in preds if k.endswith("_y"))
-            y_pred_chunks.append(np.asarray(preds[y_key]))
+            # Block on the device result so the logged elapsed time reflects the
+            # batch's real compute, not lazy dispatch that resolves at concat.
+            chunk = np.asarray(jax.block_until_ready(preds[y_key]))
+            y_pred_chunks.append(chunk)
+            if progress_label is not None:
+                log.info(
+                    "predictive_progress",
+                    label=progress_label,
+                    batch=batch_i,
+                    n_batches=n_batches,
+                    draws_done=int(end),
+                    elapsed_s=round(time.perf_counter() - t_start, 1),
+                )
 
     return np.concatenate(y_pred_chunks, axis=0)
 
@@ -1055,9 +1089,19 @@ def _compute_info_criteria(
         excluded_latents.append(eiv_site)
     needs_latents = bool(excluded_latents)
     n_total = int(next(iter(posterior_samples.values())).shape[0])
+    n_batches = (n_total + batch_size - 1) // batch_size
+
+    log.info(
+        "info_criteria_start",
+        n_draws=n_total,
+        n_obs=int(np.asarray(y_true).shape[0]),
+        n_batches=n_batches,
+        marginalized_latents=excluded_latents,
+    )
+    t_start = time.perf_counter()
 
     log_lik_chunks: list[np.ndarray] = []
-    for start in range(0, n_total, batch_size):
+    for batch_i, start in enumerate(range(0, n_total, batch_size), start=1):
         end = min(start + batch_size, n_total)
         chunk = {k: v[start:end] for k, v in posterior_samples.items()}
         if needs_latents:
@@ -1078,7 +1122,14 @@ def _compute_info_criteria(
         y_key = next((k for k in log_lik_dict if k.endswith("_y")), None)
         if y_key is None:
             raise ValueError("Unable to locate observed site in log_likelihood output.")
-        log_lik_chunks.append(np.asarray(log_lik_dict[y_key]))
+        log_lik_chunks.append(np.asarray(jax.block_until_ready(log_lik_dict[y_key])))
+        log.info(
+            "info_criteria_progress",
+            batch=batch_i,
+            n_batches=n_batches,
+            draws_done=int(end),
+            elapsed_s=round(time.perf_counter() - t_start, 1),
+        )
 
     log_lik = np.concatenate(log_lik_chunks, axis=0)
 
@@ -1444,6 +1495,7 @@ def _conformal_block(
         seed_offset=ctx.seed + 2000,
         prefix=prefix,
         batch_size=int(getattr(ctx, "predictive_batch_size", 500)),
+        progress_label="conformal_val",
     )
     if transform.name != "identity":
         val_samples = np.asarray(transform.inverse(val_samples))
@@ -1499,6 +1551,7 @@ def _evaluate_primary_split(
         seed_offset=ctx.seed,
         prefix=prefix,
         batch_size=int(getattr(ctx, "predictive_batch_size", 500)),
+        progress_label="primary",
     )
     # Predictive draws come out on the model scale; metrics/PPC/calibration
     # operate on the score scale.
