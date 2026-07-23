@@ -9,6 +9,7 @@ from panelcast.reporting.curves import (
     basis_matrix,
     extract_curve_draws,
     extract_posterior_curve,
+    standardized_basis_matrix,
     summarize_curve_peak,
 )
 
@@ -85,3 +86,62 @@ def test_extractor_rejects_pretraining_state_without_scaler():
     del state["standardization"]
     with pytest.raises(ValueError, match="training_summary.json"):
         extract_curve_draws(np.ones((2, 5)), state)
+
+
+def test_curve_validation_rejects_corrupt_inputs_and_state():
+    with pytest.raises(ValueError, match="one-dimensional"):
+        basis_matrix([[20.0]], _state())
+    with pytest.raises(ValueError, match="finite"):
+        basis_matrix([np.nan], _state())
+
+    state = _state()
+    state["spec"]["type"] = "natural"
+    with pytest.raises(ValueError, match="Unsupported"):
+        basis_matrix([20.0], state)
+
+    state = _state()
+    state["feature_names"].append("extra")
+    with pytest.raises(ValueError, match="declares"):
+        basis_matrix([20.0], state)
+
+    state = _state()
+    state["standardization"]["feature_names"] = list(reversed(state["feature_names"]))
+    with pytest.raises(ValueError, match="ordering"):
+        standardized_basis_matrix([20.0], state)
+
+    state = _state()
+    state["standardization"]["mean"].pop()
+    with pytest.raises(ValueError, match="mean/std"):
+        standardized_basis_matrix([20.0], state)
+
+    state = _state()
+    state["standardization"]["std"][0] = 0.0
+    with pytest.raises(ValueError, match="positive"):
+        standardized_basis_matrix([20.0], state)
+
+    with pytest.raises(ValueError, match="finite"):
+        extract_curve_draws(np.full((2, 5), np.nan), _state())
+    with pytest.raises(ValueError, match="grid_size"):
+        extract_curve_draws(np.ones((2, 5)), _state(), grid_size=1)
+
+    state = _state()
+    with pytest.raises(ValueError, match="missing basis"):
+        extract_posterior_curve(np.ones((2, 1)), ["other"], state)
+    names = [*state["feature_names"], "other"]
+    with pytest.raises(ValueError, match="last dimension"):
+        extract_posterior_curve(np.ones((2, 5)), names, state)
+
+    state["standardization"]["feature_indices"] = [-1, 1, 2, 3, 4]
+    with pytest.raises(ValueError, match="valid fitted-model"):
+        extract_posterior_curve(np.ones((2, 6)), names, state)
+    state["standardization"]["feature_indices"] = [1, 0, 2, 3, 4]
+    with pytest.raises(ValueError, match="ordering"):
+        extract_posterior_curve(np.ones((2, 6)), names, state)
+
+    curve = PosteriorCurve(x=np.array([0.0, 1.0]), draws=np.ones((2, 2)))
+    with pytest.raises(ValueError, match="direction"):
+        summarize_curve_peak(curve, direction="left")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="credible_mass"):
+        summarize_curve_peak(curve, credible_mass=1.0)
+    with pytest.raises(ValueError, match="shape"):
+        summarize_curve_peak(PosteriorCurve(x=np.array([0.0]), draws=np.ones((2, 2))))

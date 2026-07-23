@@ -3,6 +3,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.pipelines.build_features import build_features
@@ -84,3 +85,69 @@ def test_training_provenance_binds_basis_names_to_actual_scaler(tmp_path):
         "mean": [1.5, -2.0],
         "std": [0.25, 3.5],
     }
+
+
+def test_training_provenance_rejects_incomplete_or_inconsistent_state(tmp_path):
+    feature_dir = tmp_path / "features"
+    feature_dir.mkdir()
+    features_path = feature_dir / "train_features.parquet"
+    manifest_path = feature_dir / "manifest.json"
+    names = ["curve__basis_00", "curve__basis_01"]
+    means = np.array([0.1, 0.2])
+    stds = np.array([1.0, 2.0])
+
+    manifest_path.write_text("{}", encoding="utf-8")
+    assert _build_basis_model_provenance(features_path, names, means, stds) is None
+
+    manifest_path.write_text(
+        json.dumps({"basis_curves": {"fitted_by_split": {}}}), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="no fitted basis state"):
+        _build_basis_model_provenance(features_path, names, means, stds)
+
+    state = {"feature_names": names}
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "legacy_primary_split": "within_entity_temporal",
+                "basis_curves": {
+                    "fitted_by_split": {"within_entity_temporal": {"curve": state}}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="unique"):
+        _build_basis_model_provenance(features_path, [names[0], names[0]], means, stds)
+    with pytest.raises(ValueError, match="dimension"):
+        _build_basis_model_provenance(features_path, names, means[:1], stds)
+
+    state["feature_names"] = ["missing"]
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "legacy_primary_split": "within_entity_temporal",
+                "basis_curves": {
+                    "fitted_by_split": {"within_entity_temporal": {"curve": state}}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="missing from the fitted model"):
+        _build_basis_model_provenance(features_path, names, means, stds)
+
+    state["feature_names"] = names
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "legacy_primary_split": "within_entity_temporal",
+                "basis_curves": {
+                    "fitted_by_split": {"within_entity_temporal": {"curve": state}}
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="invalid fitted feature scaler"):
+        _build_basis_model_provenance(features_path, names, means, np.array([1.0, 0.0]))

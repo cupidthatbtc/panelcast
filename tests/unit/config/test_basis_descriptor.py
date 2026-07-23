@@ -30,6 +30,7 @@ def test_declared_curve_adds_basis_block_and_provenance():
         ({"col": "age", "type": "spline", "df": 3}, "greater than or equal"),
         ({"col": "age", "type": "spline", "df": 5, "bogus": 1}, "Extra inputs"),
         ({"col": "", "type": "spline", "df": 5}, "at least 1 character"),
+        ({"col": "age", "type": "spline", "df": 5, "center": float("inf")}, "finite"),
     ],
 )
 def test_malformed_or_unsupported_specs_are_rejected(spec, message):

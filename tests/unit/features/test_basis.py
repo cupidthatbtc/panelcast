@@ -11,6 +11,11 @@ CTX = FeatureContext(config={}, random_state=42)
 SPEC = {"curves": {"age_curve": {"col": "age", "type": "spline", "df": 5, "center": 27.0}}}
 
 
+def test_basis_block_requires_a_curve():
+    with pytest.raises(ValueError, match="at least one curve"):
+        BasisBlock({})
+
+
 def test_deterministic_names_and_state():
     train = pd.DataFrame({"age": [20.0, 22.0, 24.0, 27.0, 31.0, 35.0, 40.0]})
     first = BasisBlock(SPEC).fit(train, CTX)
@@ -76,6 +81,15 @@ def test_repeated_interior_quantiles_adapt_dimension_and_order():
     matrix = output.data.to_numpy()
     centered = matrix - matrix.mean(axis=0)
     assert np.linalg.matrix_rank(centered) == state["fitted_df"]
+
+
+def test_transform_rejects_inconsistent_persisted_dimension():
+    train = pd.DataFrame({"age": [20.0, 22.0, 24.0, 27.0, 31.0, 35.0, 40.0]})
+    block = BasisBlock(SPEC).fit(train, CTX)
+    block.fitted_state["age_curve"]["feature_names"].pop()
+
+    with pytest.raises(ValueError, match="state declares"):
+        block.transform(train, CTX)
 
 
 @pytest.mark.parametrize("values", [[1.0, np.nan], [1.0, np.inf], [2.0, 2.0], [0.0, 0.0, 1.0, 1.0]])
