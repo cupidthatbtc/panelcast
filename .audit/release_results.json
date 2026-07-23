@@ -76,6 +76,7 @@
     }
   },
   "ppc": {
+    "split": "within_entity_temporal",
     "pinned": ["skewness", "max"],
     "interior": ["mean", "sd", "min", "q10", "q50", "q90"],
     "p_values": {
@@ -88,7 +89,7 @@
       "q50": 0.178,
       "q90": 0.974
     },
-    "note": "q10 sits near the 0.025 boundary but is interior; the entity-obs default cleared q10 and q90, the first movement on the bounded-skew tail misfit. skewness and max remain the confirmed structural mismatch."
+    "note": "Primary-split PPC (the published headline claim); the entity_disjoint split pins only skewness (its max is interior at p=0.896) — see the metrics snapshot. q10 sits near the 0.025 boundary but is interior; the entity-obs default cleared q10 and q90, the first movement on the bounded-skew tail misfit. skewness and max remain the confirmed structural mismatch."
   },
   "limitations": [
     "skewness/max PPC pins are a confirmed structural symmetric-likelihood vs left-skewed-target mismatch; six alternative likelihood families plus dequantization did not resolve them (docs/LIKELIHOOD_CANDIDATES.md)",

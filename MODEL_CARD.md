@@ -165,8 +165,9 @@ all three confirmation seeds. The fit was produced on 0.12.x code with the flag
 set through config; the likelihood-registry parity lock makes it bit-identical to
 the flipped 0.13.0 default. Data: a representative subset of the full AOTY corpus
 — ~800 whole artists sampled with their full discographies
-(`scripts/make_aoty_subset.py`), albums with ≥10 user ratings across 653
-multi-album artists, observed user-score skewness −2.08 — fit on GPU (RTX 5090),
+(`scripts/make_aoty_subset.py`), albums with ≥10 user ratings; 653 of the ~800
+artists are multi-album and contribute one held-out next album each (the 653
+evaluated test rows), observed user-score skewness −2.08 — fit on GPU (RTX 5090),
 Student-t likelihood on the transformed `offset_logit` scale.
 
 - **Convergence gate: PASS** — R-hat (max) 1.00, bulk ESS 1,119 (≥ 400), 0

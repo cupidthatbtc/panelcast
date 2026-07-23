@@ -64,15 +64,17 @@ class TestManifestMatchesMetricsSnapshot:
         assert flow["entity_disjoint_n"] == COLD["point_metrics"]["n_observations"]
 
     def test_ppc_pinned_set_matches_snapshot(self):
+        split = SNAPSHOT["splits"][MANIFEST["ppc"]["split"]]
         assert sorted(MANIFEST["ppc"]["pinned"]) == sorted(
-            WITHIN["ppc"]["extreme_statistics"]
+            split["ppc"]["extreme_statistics"]
         )
         recorded = set(MANIFEST["ppc"]["pinned"]) | set(MANIFEST["ppc"]["interior"])
-        assert recorded == set(WITHIN["ppc"]["summary"])
+        assert recorded == set(split["ppc"]["summary"])
 
     def test_ppc_p_values_match_snapshot(self):
+        split = SNAPSHOT["splits"][MANIFEST["ppc"]["split"]]
         for stat, p in MANIFEST["ppc"]["p_values"].items():
-            assert p == round(WITHIN["ppc"]["summary"][stat]["p_value"], 3), stat
+            assert p == round(split["ppc"]["summary"][stat]["p_value"], 3), stat
 
 
 class TestReadmeClaims:
@@ -113,9 +115,11 @@ class TestModelCardClaims:
         assert f"R-squared: {m['r2']:.3f}" in MODEL_CARD
 
     def test_ppc_p_values(self):
+        # One regex per stat, binding the value to its own line so two swapped
+        # p-values cannot pass.
         for stat, p in MANIFEST["ppc"]["p_values"].items():
-            assert f"- {stat}: " in MODEL_CARD, stat
-            assert f"p={p:.3f}" in MODEL_CARD, (stat, p)
+            pattern = rf"^- {re.escape(stat)}: T\(y_obs\)=[^,]+, p={p:.3f}$"
+            assert re.search(pattern, MODEL_CARD, re.MULTILINE), (stat, p)
 
     def test_scale_tiers_distinguished(self):
         for tier in ("Raw corpus", "Eligible corpus", "Validated subset"):
@@ -127,17 +131,21 @@ class TestNoSurfaceClaimsAClearedPin:
     def test_pinned_language_only_names_pinned_stats(self, surface_name, text):
         interior = set(MANIFEST["ppc"]["interior"])
         for line in text.splitlines():
-            match = re.search(r"stays? pinned", line)
-            if not match:
-                continue
-            # Only the clause ending in "stay pinned" names the pinned
-            # statistics; neighboring clauses may legitimately discuss cleared
-            # ones ("cleared q10 and q90; only skewness and max stay pinned").
-            subject = re.split(r"[;.—]", line[: match.start()])[-1]
-            offenders = [
-                stat for stat in interior if re.search(rf"\b{re.escape(stat)}\b", subject)
-            ]
-            assert not offenders, (surface_name, offenders, line)
+            for match in re.finditer(r"stays? pinned", line):
+                # Only the clause ending in "stay pinned" names the pinned
+                # statistics; neighboring clauses may legitimately discuss
+                # cleared ones ("cleared q10 and q90; only skewness and max
+                # stay pinned"). Contrastive joins ("but", "while") bound the
+                # clause too.
+                subject = re.split(
+                    r"[;.—,]|\b(?:but|while|whereas)\b", line[: match.start()]
+                )[-1]
+                offenders = [
+                    stat
+                    for stat in interior
+                    if re.search(rf"\b{re.escape(stat)}\b", subject)
+                ]
+                assert not offenders, (surface_name, offenders, line)
 
     def test_historical_combined_pin_phrase_is_gone(self):
         assert "skewness/max/q90" not in README
