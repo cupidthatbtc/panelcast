@@ -26,6 +26,7 @@ from tests.e2e.conftest import create_minimal_dataset
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AERO_DESCRIPTOR = REPO_ROOT / "examples" / "aerospace" / "descriptor.yaml"
+ELECTIONS_DESCRIPTOR = REPO_ROOT / "examples" / "elections" / "descriptor.yaml"
 AOTY_DESCRIPTOR = REPO_ROOT / "configs" / "datasets" / "aoty_full.yaml"
 
 
@@ -213,7 +214,80 @@ class TestAeroTinyMcmc:
 
 
 # ============================================================================
-# (c) AOTY equivalence: --dataset aoty_full == no flag, byte-identical
+# (c) Elections tiny-MCMC full pipeline (slow; local/nightly): real data,
+# unit-interval bounds, empty feature packs, and the beta_binomial likelihood
+# path — the surface the synthetic aero example structurally can't exercise.
+# ============================================================================
+
+
+@pytest.mark.slow
+class TestElectionsTinyMcmc:
+    @pytest.fixture(scope="class")
+    def elections_full_run(self, tmp_path_factory: pytest.TempPathFactory) -> Path:
+        tmp = tmp_path_factory.mktemp("elections_full")
+        exit_code, orchestrator = _run_pipeline_in(
+            tmp,
+            tmp / "outputs",
+            stages=["data", "splits", "features", "train", "evaluate", "predict"],
+            dataset=str(ELECTIONS_DESCRIPTOR),
+            min_ratings=1000,
+            likelihood_family="beta_binomial",
+            # beta_binomial is discrete on the raw score scale.
+            target_transform="identity",
+            num_chains=1,
+            num_samples=50,
+            num_warmup=50,
+            allow_divergences=True,
+            rhat_threshold=1.1,
+            ess_threshold=100,
+        )
+        assert exit_code == 0, "Elections full pipeline failed"
+        return orchestrator.run_dir
+
+    def test_processed_dataset_named_and_bounded_by_descriptor(self, elections_full_run):
+        # run_dir = <workdir>/outputs/<run_id>; the shared data root is <workdir>/data.
+        data_root = elections_full_run.parent.parent
+        processed = data_root / "data" / "processed" / "dem_share_minvotes_1000.parquet"
+        assert processed.exists()
+        df = pd.read_parquet(processed)
+        assert "State" in df.columns
+        assert "Artist" not in df.columns
+        assert df["Dem_Share"].between(0.0, 1.0).all()
+
+    def test_training_summary_carries_elections_domain(self, elections_full_run):
+        summary = json.loads(
+            (elections_full_run / "models" / "training_summary.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        dataset = summary["dataset"]
+        assert dataset["model_prefix"] == "dem"
+        assert dataset["target_bounds"] == [0.0, 1.0]
+        assert dataset["entity_col"] == "State"
+        assert summary["likelihood_family"] == "beta_binomial"
+
+    def test_posterior_sites_use_dem_prefix_and_bb_phi(self, elections_full_run):
+        import arviz as az
+
+        nc_files = sorted((elections_full_run / "models").rglob("*.nc"))
+        assert nc_files, "no posterior netcdf saved"
+        site_names = list(az.from_netcdf(nc_files[0]).posterior.data_vars)
+        assert any(name.startswith("dem_") for name in site_names), site_names
+        assert not any(name.startswith("user_") for name in site_names), site_names
+        # The family's own global site proves the beta_binomial path ran.
+        assert any("bb_phi" in name for name in site_names), site_names
+
+    def test_known_state_predictions_in_unit_interval(self, elections_full_run):
+        preds = pd.read_csv(
+            elections_full_run / "predictions" / "next_event_known_entities.csv"
+        )
+        assert len(preds) > 0
+        for col in ("pred_mean", "pred_q05", "pred_q95"):
+            assert preds[col].between(0.0, 1.0).all(), f"{col} outside unit bounds"
+
+
+# ============================================================================
+# (d) AOTY equivalence: --dataset aoty_full == no flag, byte-identical
 # ============================================================================
 
 
