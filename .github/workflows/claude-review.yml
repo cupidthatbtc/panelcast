@@ -31,7 +31,96 @@ jobs:
         with:
           cache: true
 
-      - name: Claude review
+      - name: Setup Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: "22"
+
+      - name: Install Clodex
+        run: npm install --global @bman654/clodex@1.2.0
+
+      - name: Start Clodex proxy
+        shell: bash
+        env:
+          CLODEX_OPENAI_OAUTH: ${{ secrets.CLODEX_OPENAI_OAUTH }}
+        run: |
+          set -euo pipefail
+          export CLODEX_HOME="$RUNNER_TEMP/clodex"
+          export CLODEX_CREDENTIAL_HELPER="$RUNNER_TEMP/clodex-credential-helper"
+          export CLODEX_CREDENTIAL_FILE="$RUNNER_TEMP/clodex-oauth.json"
+          mkdir -p "$CLODEX_HOME"
+          printf '%s' "$CLODEX_OPENAI_OAUTH" > "$CLODEX_CREDENTIAL_FILE"
+          chmod 600 "$CLODEX_CREDENTIAL_FILE"
+
+          cat > "$CLODEX_CREDENTIAL_HELPER" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          operation="$1"
+          service="$2"
+          account="$3"
+          [[ "$service" == clodex && "$account" == oauth:provider:openai-oauth ]] || exit 2
+          case "$operation" in
+            get) test -f "$CLODEX_CREDENTIAL_FILE" || exit 2; cat "$CLODEX_CREDENTIAL_FILE" ;;
+            set) temp="$CLODEX_CREDENTIAL_FILE.tmp"; cat > "$temp"; chmod 600 "$temp"; mv "$temp" "$CLODEX_CREDENTIAL_FILE" ;;
+            delete) rm -f "$CLODEX_CREDENTIAL_FILE" ;;
+            *) exit 1 ;;
+          esac
+          SH
+          chmod 700 "$CLODEX_CREDENTIAL_HELPER"
+          HELPER_ID="$(printf 'clodex-credential-helper\0%s' "$(realpath "$CLODEX_CREDENTIAL_HELPER")" | sha256sum | cut -d' ' -f1)"
+
+          jq -n --arg auth_ref "helper:v1:$HELPER_ID:oauth:provider:openai-oauth" '{
+            schemaVersion: 1,
+            providers: [{
+              id: "openai-oauth",
+              templateId: "openai",
+              name: "OpenAI (ChatGPT)",
+              enabled: true,
+              authRef: $auth_ref,
+              api: {npm: "@ai-sdk/openai", url: "https://api.openai.com/v1"},
+              addedAt: "2026-07-23T00:00:00Z",
+              authType: "oauth"
+            }]
+          }' > "$CLODEX_HOME/providers.json"
+
+          clodex providers refresh-models openai-oauth
+          SOL_MODEL="$(jq -r '[.providers[] | select(.id == "openai-oauth") | .modelsCache.models[] | select(.id | endswith("-sol")) | .id] | first // empty' "$CLODEX_HOME/providers.json")"
+          test -n "$SOL_MODEL"
+          jq -n --arg model "$SOL_MODEL" '{
+            lastModel: $model,
+            lastProvider: "openai-oauth",
+            favoriteModels: [{providerId: "openai-oauth", modelId: $model}],
+            modelAliases: [{name: "sol", providerId: "openai-oauth", modelId: $model}],
+            claudeBridgeMode: "proxy"
+          }' > "$CLODEX_HOME/config.json"
+
+          nohup clodex server --proxy --port 17645 --no-discovery > "$RUNNER_TEMP/clodex.log" 2>&1 &
+          CLODEX_PID=$!
+          ready=false
+          for _ in {1..30}; do
+            if kill -0 "$CLODEX_PID" 2>/dev/null &&
+               test -s "$CLODEX_HOME/http-proxy/clodex-ca.pem" &&
+               (exec 3<>/dev/tcp/127.0.0.1/17645); then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != true ]]; then
+            cat "$RUNNER_TEMP/clodex.log"
+            exit 1
+          fi
+
+          {
+            echo "CLODEX_HOME=$CLODEX_HOME"
+            echo "HTTP_PROXY=http://127.0.0.1:17645"
+            echo "HTTPS_PROXY=http://127.0.0.1:17645"
+            echo "NODE_EXTRA_CA_CERTS=$CLODEX_HOME/http-proxy/clodex-ca.pem"
+          } >> "$GITHUB_ENV"
+
+      - name: Claude review with Opus
+        id: opus_review
+        continue-on-error: true
         uses: anthropics/claude-code-action@ba0aafd4308cbba7165f9f2cdb0cfbed5a3c99ce  # v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -42,8 +131,58 @@ jobs:
             --model claude-opus-4-8
             --effort xhigh
             --allowedTools "Bash(pixi run *),Read,Grep,Glob"
-          # display_report only surfaces the report on the Actions job
-          # summary; track_progress is what posts a visible PR comment
-          # (progress + final report), so a clean review still responds.
           display_report: "true"
           track_progress: "true"
+          use_sticky_comment: "true"
+
+      - name: Select fallback model
+        id: fallback
+        shell: bash
+        env:
+          OPUS_OUTCOME: ${{ steps.opus_review.outcome }}
+          EXECUTION_FILE: ${{ steps.opus_review.outputs.execution_file }}
+        run: |
+          use_sol=false
+          if [[ "$OPUS_OUTCOME" != success || ! -s "$EXECUTION_FILE" ]]; then
+            use_sol=true
+          elif jq -e 'any(.[]; .type == "result" and .is_error == true)' "$EXECUTION_FILE" > /dev/null; then
+            use_sol=true
+          fi
+          echo "use_sol=$use_sol" >> "$GITHUB_OUTPUT"
+
+      - name: Claude review with Sol
+        id: sol_review
+        if: steps.fallback.outputs.use_sol == 'true'
+        uses: anthropics/claude-code-action@ba0aafd4308cbba7165f9f2cdb0cfbed5a3c99ce  # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
+          plugins: "code-review@claude-code-plugins"
+          prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          claude_args: |
+            --model sol
+            --effort xhigh
+            --allowedTools "Bash(pixi run *),Read,Grep,Glob"
+          display_report: "true"
+          track_progress: "true"
+          use_sticky_comment: "true"
+
+      - name: Verify review completed
+        if: always()
+        shell: bash
+        env:
+          USE_SOL: ${{ steps.fallback.outputs.use_sol }}
+          OPUS_FILE: ${{ steps.opus_review.outputs.execution_file }}
+          SOL_FILE: ${{ steps.sol_review.outputs.execution_file }}
+        run: |
+          if [[ "$USE_SOL" == true ]]; then
+            EXECUTION_FILE="$SOL_FILE"
+          else
+            EXECUTION_FILE="$OPUS_FILE"
+          fi
+          if [[ ! -s "$EXECUTION_FILE" ]] ||
+             ! jq -e 'any(.[]; .type == "result" and .is_error == false)' "$EXECUTION_FILE" > /dev/null; then
+            echo "Claude review did not complete successfully." >&2
+            test ! -s "$EXECUTION_FILE" || jq -r '.[] | select(.type == "result") | .result // empty' "$EXECUTION_FILE" >&2
+            exit 1
+          fi
