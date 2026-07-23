@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import shlex
 from pathlib import Path
 
 import arviz as az
@@ -29,6 +30,19 @@ def test_machine_record_recomputes_paired_elpd() -> None:
     paired_se = math.sqrt(pointwise.size * np.var(pointwise, ddof=1))
     assert paired_se == pytest.approx(paired["paired_se"], abs=1e-10)
     assert pointwise.sum() / paired_se == pytest.approx(paired["z"], abs=1e-10)
+
+
+def test_recorded_builder_command_is_shell_valid_and_parseable() -> None:
+    record = json.loads((AUDIT / "fair_eval.json").read_text(encoding="utf-8"))
+    command = record["commands"][-1]
+    argv = record["builder_argv"]
+
+    assert "<" not in command and ">" not in command
+    assert shlex.split(command) == argv
+    parsed = _BUILDER.make_parser().parse_args(argv[2:])
+    assert parsed.entity_source.is_absolute()
+    assert parsed.data_root.is_absolute()
+    assert parsed.output == Path(".audit/fair_eval_0131")
 
 
 def test_builder_derives_paired_elpd_from_netcdf(tmp_path) -> None:

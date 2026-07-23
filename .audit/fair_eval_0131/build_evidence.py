@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import json
 import math
+import shlex
 import shutil
 from pathlib import Path
 
@@ -179,6 +180,35 @@ def arm_record(source: Path, fixed: Path, model_file: str) -> dict:
     }
 
 
+def builder_argv(args: argparse.Namespace) -> list[str]:
+    return [
+        "python",
+        ".audit/fair_eval_0131/build_evidence.py",
+        "--entity-source",
+        str(args.entity_source.resolve()),
+        "--entity-fixed",
+        str(args.entity_fixed.resolve()),
+        "--entity-model",
+        args.entity_model,
+        "--incumbent-source",
+        str(args.incumbent_source.resolve()),
+        "--incumbent-fixed",
+        str(args.incumbent_fixed.resolve()),
+        "--incumbent-model",
+        args.incumbent_model,
+        "--data-root",
+        str(args.data_root.resolve()),
+        "--output",
+        ".audit/fair_eval_0131",
+        "--evaluated-at",
+        args.evaluated_at,
+        "--evaluator-revision",
+        args.evaluator_revision,
+        "--code-base-revision",
+        args.code_base_revision,
+    ]
+
+
 def build(args: argparse.Namespace) -> dict:
     data_root = args.data_root.resolve()
     output = args.output.resolve()
@@ -229,22 +259,38 @@ def build(args: argparse.Namespace) -> dict:
             "save_log_likelihood": True,
         },
         "commands": [
-            "JAX_PLATFORMS=cpu python .audit/fair_eval_0131/reproduce.py <source-run> <fixed-run>",
-            "panelcast compare --baselines --metrics "
-            "<entity-fixed>/evaluation/metrics.json "
-            "--output <entity-fixed>/reports/baselines",
-            "python .audit/fair_eval_0131/build_evidence.py "
-            f"--entity-source <outputs>/{args.entity_source.name} "
-            f"--entity-fixed <outputs>/{args.entity_fixed.name} "
-            f"--entity-model {args.entity_model} "
-            f"--incumbent-source <outputs>/{args.incumbent_source.name} "
-            f"--incumbent-fixed <outputs>/{args.incumbent_fixed.name} "
-            f"--incumbent-model {args.incumbent_model} "
-            "--data-root <data-root> --output .audit/fair_eval_0131 "
-            f"--evaluated-at {args.evaluated_at} "
-            f"--evaluator-revision {args.evaluator_revision} "
-            f"--code-base-revision {args.code_base_revision}",
+            "JAX_PLATFORMS=cpu "
+            + shlex.join(
+                [
+                    "python",
+                    ".audit/fair_eval_0131/reproduce.py",
+                    str(args.entity_source.resolve()),
+                    str(args.entity_fixed.resolve()),
+                ]
+            ),
+            "JAX_PLATFORMS=cpu "
+            + shlex.join(
+                [
+                    "python",
+                    ".audit/fair_eval_0131/reproduce.py",
+                    str(args.incumbent_source.resolve()),
+                    str(args.incumbent_fixed.resolve()),
+                ]
+            ),
+            shlex.join(
+                [
+                    "panelcast",
+                    "compare",
+                    "--baselines",
+                    "--metrics",
+                    str(args.entity_fixed.resolve() / "evaluation/metrics.json"),
+                    "--output",
+                    str(args.entity_fixed.resolve() / "reports/baselines"),
+                ]
+            ),
+            shlex.join(builder_argv(args)),
         ],
+        "builder_argv": builder_argv(args),
         "data": {
             "feature_input_hash": stamp["input_hash"],
             "files": files,
@@ -264,7 +310,7 @@ def build(args: argparse.Namespace) -> dict:
     }
 
 
-def main() -> None:
+def make_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("--entity-source", type=Path, required=True)
     parser.add_argument("--entity-fixed", type=Path, required=True)
@@ -277,8 +323,11 @@ def main() -> None:
     parser.add_argument("--evaluated-at", required=True)
     parser.add_argument("--evaluator-revision", required=True)
     parser.add_argument("--code-base-revision", required=True)
-    args = parser.parse_args()
+    return parser
 
+
+def main() -> None:
+    args = make_parser().parse_args()
     record = build(args)
     (args.output / "fair_eval.json").write_text(
         json.dumps(record, indent=2) + "\n", encoding="utf-8"
