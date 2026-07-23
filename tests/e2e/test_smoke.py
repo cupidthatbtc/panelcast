@@ -11,17 +11,12 @@ from __future__ import annotations
 
 import pytest
 
-from tests.e2e.test_domain_portability import (
-    AERO_DESCRIPTOR,
-    _run_pipeline_in,
-    _write_aero_raw,
-)
+from tests.e2e.test_domain_portability import AERO_DESCRIPTOR, _run_pipeline_in
 
 
 @pytest.mark.smoke
 @pytest.mark.e2e
 def test_demo_pipeline_smoke(tmp_path):
-    _write_aero_raw(tmp_path)
     exit_code, orchestrator = _run_pipeline_in(
         tmp_path,
         tmp_path / "outputs",
