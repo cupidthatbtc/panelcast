@@ -50,6 +50,7 @@ from panelcast.config.gates import (
     SigmaObsPriorType,
     TargetTransform,
 )
+from panelcast.model_preflight import beta_binomial_trial_scale
 from panelcast.paths import ArtifactPaths, resolve_latest
 from panelcast.pipelines.errors import (
     ConvergenceError,
@@ -562,12 +563,12 @@ class PipelineOrchestrator:
                 "Use an aggregation-count domain or a different likelihood_family."
             )
         if config.likelihood_family == "beta_binomial":
-            span = float(self.descriptor.target_bounds[1] - self.descriptor.target_bounds[0])
-            if round(span) != 1:
+            span, is_unit = beta_binomial_trial_scale(self.descriptor.target_bounds)
+            if not is_unit:
                 log.warning(
                     "beta_binomial_trial_count_scaled",
                     target_span=span,
-                    count_multiplier=round(span),
+                    count_multiplier=span,
                     message=(
                         "The Beta-Binomial expands each aggregation count by the target span. "
                         "For a genuine proportion, rescale the target and target_bounds to [0, 1]."

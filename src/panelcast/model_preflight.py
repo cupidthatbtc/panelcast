@@ -213,6 +213,12 @@ def check_prior_data_scale(
     return results
 
 
+def beta_binomial_trial_scale(target_bounds: tuple[float, float]) -> tuple[float, bool]:
+    low, high = (float(v) for v in target_bounds)
+    span = high - low
+    return span, math.isclose(span, 1.0, rel_tol=0.0, abs_tol=1e-9)
+
+
 def check_beta_binomial_trial_scale(
     *,
     likelihood_family: str,
@@ -226,15 +232,13 @@ def check_beta_binomial_trial_scale(
     if not n_obs_is_aggregation_count:
         return CheckResult(name, "FAIL", "n_obs is not a true aggregation count")
 
-    low, high = (float(v) for v in target_bounds)
-    span = high - low
-    multiplier = round(span)
-    if multiplier == 1:
+    span, is_unit = beta_binomial_trial_scale(target_bounds)
+    if is_unit:
         return CheckResult(name, "PASS", f"target span {span:g} preserves trial counts")
     return CheckResult(
         name,
         "FAIL",
-        f"target span {span:g} multiplies each aggregation count by about {multiplier:g}",
+        f"target span {span:g} multiplies each aggregation count by about {span:g}",
         "If the target is a genuine proportion, rescale it to [0, 1] and set "
         "target_bounds: [0.0, 1.0]. Otherwise verify that each observation really "
         "contains span-sized integer rating units.",

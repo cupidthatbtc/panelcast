@@ -10,6 +10,7 @@ import json
 import math
 
 import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from panelcast.cli import app
@@ -111,6 +112,16 @@ class TestBetaBinomialTrialScale:
         assert result.status == "FAIL"
         assert "100" in result.detail
         assert "[0, 1]" in result.suggestion
+
+    @pytest.mark.parametrize("span", [0.6, 1.2, 1.4])
+    def test_fractional_nonunit_span_fails(self, span):
+        result = check_beta_binomial_trial_scale(
+            likelihood_family="beta_binomial",
+            n_obs_is_aggregation_count=True,
+            target_bounds=(0.0, span),
+        )
+        assert result.status == "FAIL"
+        assert f"{span:g}" in result.detail
 
     def test_other_likelihood_is_inactive(self):
         result = check_beta_binomial_trial_scale(

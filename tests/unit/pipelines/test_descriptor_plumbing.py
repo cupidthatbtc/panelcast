@@ -323,6 +323,22 @@ class TestBetaBinomialGate:
         assert warning.call_args.args[0] == "beta_binomial_trial_count_scaled"
         assert warning.call_args.kwargs["count_multiplier"] == 100
 
+    def test_fractional_nonunit_span_logs_exact_multiplier(self, tmp_path):
+        yaml_path = self._yaml(tmp_path, agg=True)
+        yaml_path.write_text(
+            "name: ds\nn_obs_is_aggregation_count: true\ntarget_bounds: [0.0, 1.4]\n",
+            encoding="utf-8",
+        )
+        config = PipelineConfig(
+            likelihood_family="beta_binomial",
+            target_transform="identity",
+            dataset=str(yaml_path),
+        )
+        with patch("panelcast.pipelines.orchestrator.log.warning") as warning:
+            PipelineOrchestrator(config)
+
+        assert warning.call_args.kwargs["count_multiplier"] == pytest.approx(1.4)
+
     def test_unit_span_does_not_log_trial_count_warning(self, tmp_path):
         yaml_path = self._yaml(tmp_path, agg=True)
         yaml_path.write_text(
