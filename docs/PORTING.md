@@ -114,12 +114,13 @@ descriptor's absolute path instead.
 **Before the first fit, run `panelcast preflight`.** After the data/splits/
 features stages exist (`panelcast run --dataset <name> --stages
 data,splits,features`), run `panelcast preflight --dataset <name>` (plus the
-same `--config` you will fit with). It reads the prepared data and flags two
+same `--config` you will fit with). It reads the prepared data and flags three
 common porting mistakes without touching the GPU: AOTY-scale `sigma_rw` /
-`sigma_artist` priors that don't match your target's scale, and covariate
+`sigma_artist` priors that don't match your target's scale; covariate
 collinearity given the per-entity intercepts (e.g. an age-period-cohort
-identity from time-like covariates). It is warn-only; add `--strict` to make a
-FAIL exit nonzero in CI. See `docs/CONFIG_SPEC.md` for the checks.
+identity from time-like covariates); and a Beta-Binomial target span that
+silently multiplies genuine aggregation counts. It is warn-only; add `--strict`
+to make a FAIL exit nonzero in CI. See `docs/CONFIG_SPEC.md` for the checks.
 
 ### First-fit acceptance checklist
 
