@@ -33,14 +33,41 @@ class CurvePeakSummary:
 
 
 def basis_matrix(x: Sequence[float] | np.ndarray, state: dict[str, Any]) -> np.ndarray:
-    """Rebuild a basis matrix exactly from feature-manifest fitted state."""
+    """Rebuild the unstandardized basis matrix from fitted curve state."""
     values = np.asarray(x, dtype=float)
     if values.ndim != 1 or not np.isfinite(values).all():
         raise ValueError("Curve grid must be a one-dimensional array of finite values.")
     spec = state.get("spec", {})
     if spec.get("type") != "spline":
         raise ValueError(f"Unsupported basis curve type: {spec.get('type')!r}.")
-    return basis_matrix_from_state(values, state)
+    matrix = basis_matrix_from_state(values, state)
+    expected = len(state.get("feature_names", []))
+    if matrix.shape[1] != expected:
+        raise ValueError(
+            f"Basis state declares {expected} columns but its knots produce {matrix.shape[1]}."
+        )
+    return matrix
+
+
+def standardized_basis_matrix(x: Sequence[float] | np.ndarray, state: dict[str, Any]) -> np.ndarray:
+    """Rebuild the exact basis columns supplied to the fitted model."""
+    matrix = basis_matrix(x, state)
+    standardization = state.get("standardization")
+    if not isinstance(standardization, dict):
+        raise ValueError(
+            "Basis state lacks model feature standardization; use the curve state "
+            "persisted in training_summary.json, not the pre-training feature manifest."
+        )
+    required = list(state["feature_names"])
+    if list(standardization.get("feature_names", [])) != required:
+        raise ValueError("Basis standardization feature-name ordering does not match curve state.")
+    mean = np.asarray(standardization.get("mean"), dtype=float)
+    std = np.asarray(standardization.get("std"), dtype=float)
+    if mean.shape != (len(required),) or std.shape != (len(required),):
+        raise ValueError("Basis standardization mean/std must match the declared basis dimension.")
+    if not np.isfinite(mean).all() or not np.isfinite(std).all() or np.any(std <= 0.0):
+        raise ValueError("Basis standardization requires finite means and positive finite stds.")
+    return (matrix - mean) / std
 
 
 def extract_curve_draws(
@@ -66,7 +93,7 @@ def extract_curve_draws(
         x = np.linspace(float(state["train_min"]), float(state["train_max"]), grid_size)
     else:
         x = np.asarray(grid, dtype=float)
-    matrix = basis_matrix(x, state)
+    matrix = standardized_basis_matrix(x, state)
     flat = coefficients.reshape(-1, expected)
     return PosteriorCurve(x=x, draws=flat @ matrix.T)
 
@@ -79,7 +106,7 @@ def extract_posterior_curve(
     grid: Sequence[float] | np.ndarray | None = None,
     grid_size: int = 201,
 ) -> PosteriorCurve:
-    """Select a curve's model coefficients by manifest names and evaluate it."""
+    """Select model coefficients using persisted curve names/indices and evaluate."""
     names = list(feature_names)
     required = list(state["feature_names"])
     missing = [name for name in required if name not in names]
@@ -91,7 +118,17 @@ def extract_posterior_curve(
             "Coefficient draws' last dimension must match feature_names; "
             f"got {draws.shape} and {len(names)} names."
         )
-    indices = [names.index(name) for name in required]
+    standardization = state.get("standardization", {})
+    indices = list(standardization.get("feature_indices", []))
+    if len(indices) != len(required) or any(
+        not isinstance(index, int) or index < 0 or index >= len(names) for index in indices
+    ):
+        raise ValueError("Basis state lacks a valid fitted-model feature-index mapping.")
+    mapped_names = [names[index] for index in indices]
+    if mapped_names != required:
+        raise ValueError(
+            "Posterior feature ordering does not match the basis state fitted-model mapping."
+        )
     return extract_curve_draws(draws[..., indices], state, grid=grid, grid_size=grid_size)
 
 
@@ -109,9 +146,7 @@ def summarize_curve_peak(
     if curve.draws.ndim != 2 or curve.draws.shape[1] != len(curve.x):
         raise ValueError("Curve draws must have shape (draw, grid_point).")
     indices = (
-        np.argmax(curve.draws, axis=1)
-        if direction == "max"
-        else np.argmin(curve.draws, axis=1)
+        np.argmax(curve.draws, axis=1) if direction == "max" else np.argmin(curve.draws, axis=1)
     )
     vertex_draws = curve.x[indices]
     value_draws = curve.draws[np.arange(len(indices)), indices]

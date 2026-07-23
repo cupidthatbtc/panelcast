@@ -31,6 +31,7 @@ from .curves import (
     basis_matrix,
     extract_curve_draws,
     extract_posterior_curve,
+    standardized_basis_matrix,
     summarize_curve_peak,
 )
 from .tables import (
@@ -46,6 +47,7 @@ __all__ = [
     "basis_matrix",
     "extract_curve_draws",
     "extract_posterior_curve",
+    "standardized_basis_matrix",
     "summarize_curve_peak",
     # Tables
     "create_coefficient_table",
