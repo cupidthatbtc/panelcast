@@ -12,8 +12,9 @@
     "save_log_likelihood": true
   },
   "commands": [
-    "PYTHONPATH=<clean-pr-283>/src JAX_PLATFORMS=cpu PANELCAST_SAVE_LOG_LIKELIHOOD=1 python .audit/fair_eval_0131/reproduce.py <source-run> <output-run>",
-    "panelcast compare --baselines --metrics <entity-obs-fixed>/evaluation/metrics.json --output <entity-obs-fixed>/reports/baselines"
+    "JAX_PLATFORMS=cpu python .audit/fair_eval_0131/reproduce.py <source-run> <fixed-run>",
+    "panelcast compare --baselines --metrics <entity-fixed>/evaluation/metrics.json --output <entity-fixed>/reports/baselines",
+    "python .audit/fair_eval_0131/build_evidence.py --help"
   ],
   "data": {
     "feature_input_hash": "4ec61a13ab1b6f2007600ac50235e959a1c84610a7ef05bc46f3e7ed3d75d780",
