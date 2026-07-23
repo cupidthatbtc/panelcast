@@ -1,5 +1,8 @@
 # Repository lineage
 
+> Not to be confused with [`DATA_LINEAGE.md`](DATA_LINEAGE.md), which documents
+> the data pipeline's lineage. This page is about the repository's history.
+
 The public panelcast history begins with scaffolding commits on 2026-06-20.
 That is a migration boundary, not the start of the project: panelcast is the
 renamed, generalized continuation of a private research repository, and this
@@ -42,7 +45,7 @@ All development since 2026-06-20 has happened in public on
 [github.com/cupidthatbtc/panelcast](https://github.com/cupidthatbtc/panelcast):
 600+ commits, 300+ tracked issues, PR-reviewed changes with CI gates, and
 releases 0.1.0 through the current version (see `CHANGELOG.md`). Companion
-public repositories:
+public repository:
 [panelcast-replications](https://github.com/cupidthatbtc/panelcast-replications)
 (re-analyses of published panel studies through this pipeline).
 
