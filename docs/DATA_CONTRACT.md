@@ -49,6 +49,16 @@ Schema enforcement
 - Strict raw-schema validation runs when pipeline strict mode is enabled (`panelcast run --strict`).
 - Optional columns are accepted as missing and will be added as nullable fields in cleaning.
 
+Canonical chronology
+- `data.chronology.normalize_chronology` is the sole event-order policy used by
+  temporal splits, history/temporal/GBM features, model preparation, evaluation,
+  prediction, and publication. It parses mixed date precision
+  into UTC-naive timestamps, sorts missing dates first, then uses entity, the stable
+  event key, and immutable integer row identity for ties.
+- Missing/invalid dates are exposed as `date_missing`; temporal held-out rows
+  continue to reject missing dates because their prospective order is unknowable.
+- Consumers must not introduce local pandas ordering rules for event history.
+
 Canonical names (internal)
 - Artist -> Artist
 - Album -> Album

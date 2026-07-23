@@ -2939,12 +2939,12 @@ class TestRowIdentities:
 
         assert len(row_ids) == len(y_true) == 3
         expected = {"A1": 75.0, "A2": 90.0, "B2": 80.0}
-        assert row_ids["event"].tolist() == ["A1", "A2", "B2"]
+        assert row_ids["event"].tolist() == ["A1", "B2", "A2"]
         for event, y in zip(row_ids["event"], y_true):
             assert expected[event] == y
-        assert row_ids["entity"].tolist() == ["Artist_A", "Artist_A", "Artist_B"]
-        assert row_ids["n_reviews"].tolist() == [100, 30, 50]
-        assert row_ids["train_history"].tolist() == [3, 3, 1]
+        assert row_ids["entity"].tolist() == ["Artist_A", "Artist_B", "Artist_A"]
+        assert row_ids["n_reviews"].tolist() == [100, 50, 30]
+        assert row_ids["train_history"].tolist() == [3, 1, 3]
 
     def test_disjoint_ids_have_zero_history(self):
         test_df = pd.DataFrame(

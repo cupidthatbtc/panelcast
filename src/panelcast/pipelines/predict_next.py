@@ -20,7 +20,8 @@ import structlog
 from jax import random
 from numpyro.infer import Predictive
 
-from panelcast.data.alignment import join_splits_with_features
+from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
+from panelcast.data.chronology import normalize_chronology
 from panelcast.data.imputation import apply_imputation
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.models.bayes.io import load_manifest, load_model
@@ -590,6 +591,32 @@ def _load_conformal_levels(
         return None
 
 
+def _normalize_training_chronology(
+    frame: pd.DataFrame, entity_col: str, dataset: dict
+) -> pd.DataFrame:
+    date_candidates = (
+        dataset.get("parsed_date_col"),
+        dataset.get("date_col"),
+        "Release_Date_Parsed",
+        "Release_Date",
+    )
+    date_col = next((column for column in date_candidates if column in frame.columns), None)
+    if date_col is None:
+        return frame
+    event_col = dataset.get("event_col", "Album")
+    try:
+        return normalize_chronology(
+            frame, entity_col=entity_col, date_col=date_col, event_col=event_col
+        )
+    except ValueError as exc:
+        if ROW_ID_COL not in frame.columns and "ties require immutable row identity" in str(exc):
+            raise ValueError(
+                "Legacy prediction data has tied chronology without original_row_id; "
+                "rerun data, splits, and features before predicting."
+            ) from exc
+        raise
+
+
 def predict_next_events(ctx: StageContext) -> dict:
     """Generate next-event predictions for known and new entities.
 
@@ -658,6 +685,7 @@ def predict_next_events(ctx: StageContext) -> dict:
     # Join on the stable original_row_id key (legacy parquets fall back to
     # positional index alignment inside the helper).
     train_df = join_splits_with_features(train_df, train_features, name="predict_train")
+    train_df = _normalize_training_chronology(train_df, entity_col, ds_block)
 
     feature_cols = summary["feature_cols"]
     train_df = apply_imputation(
@@ -863,6 +891,7 @@ def predict_entity_next(
     train_df = pd.read_parquet(splits_path)
     train_features = pd.read_parquet(features_path)
     train_df = join_splits_with_features(train_df, train_features, name="predict_one_train")
+    train_df = _normalize_training_chronology(train_df, entity_col, ds_block)
     train_df = train_df[train_df[entity_col] == entity].copy()
     if train_df.empty:
         raise KeyError(

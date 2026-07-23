@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import numpy as np
 import pandas as pd
 import structlog
 from sklearn.model_selection import GroupShuffleSplit
+
+from panelcast.data.chronology import DATE_MISSING_COL, normalize_chronology
 
 
 def within_entity_temporal_split(
@@ -57,6 +58,8 @@ def within_entity_temporal_split(
     """
     if date_col not in df.columns:
         raise ValueError(f"Missing required date column for temporal split: '{date_col}'")
+    if origin_offset < 0:
+        raise ValueError(f"origin_offset must be >= 0, got {origin_offset}")
 
     # Sort by entity and date to ensure temporal ordering.
     # Add deterministic tie-breakers to avoid split drift when dates tie.
@@ -64,26 +67,20 @@ def within_entity_temporal_split(
     # ASSUMPTION (logged for lineage): events with unknown dates are treated as
     # earliest-in-history, so they always land on the train side and can never
     # reach the held-out test/validation tail.
-    n_missing_dates = int(df[date_col].isna().sum())
+    df_sorted = normalize_chronology(
+        df,
+        entity_col=entity_col,
+        date_col=date_col,
+        event_col=event_col,
+    )
+    n_missing_dates = int(df_sorted[DATE_MISSING_COL].sum())
     if n_missing_dates > 0:
         structlog.get_logger().info(
             "temporal_split_missing_dates",
             n_missing_dates=n_missing_dates,
-            assumption="NaT events sorted earliest-in-history (train side)",
+            assumption="missing/invalid dates sorted earliest-in-history (train side)",
             rationale="unknown chronology must never be treated as the latest event",
         )
-    if event_col is not None and event_col in df.columns:
-        sort_cols = [entity_col, date_col, event_col]
-        df_sorted = df.sort_values(sort_cols, na_position="first")
-    else:
-        df_sorted = (
-            df.assign(_row_order=np.arange(len(df)))
-            .sort_values([entity_col, date_col, "_row_order"], na_position="first")
-            .drop(columns="_row_order")
-        )
-
-    if origin_offset < 0:
-        raise ValueError(f"origin_offset must be >= 0, got {origin_offset}")
 
     # Count events per entity
     album_counts = df_sorted.groupby(entity_col).size()

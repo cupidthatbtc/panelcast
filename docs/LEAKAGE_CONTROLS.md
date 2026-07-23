@@ -21,10 +21,10 @@ Mandatory rules
   The deployment GBM is refit on
   all training observations admissible before held-out prediction. Feature
   manifests retain each OOF row's protocol, cutoff, entity overlap, and hashes of
-  fit/held rows. Missing dates sort after dated observations and are scored
-  together without using another missing-date row as history. Direct non-panel
-  construction without entity/date columns is the
-  explicit legacy KFold migration path.
+  fit/held rows. Missing dates occupy the canonical earliest bucket and carry the
+  `date_missing` feature; an entirely unparseable date column fails before OOF.
+  Direct non-panel construction without entity/date columns is the explicit legacy
+  KFold migration path.
 
 Artifacts to store
 - data/splits/within_entity_temporal/manifest.json

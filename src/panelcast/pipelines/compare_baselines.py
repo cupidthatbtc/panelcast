@@ -19,6 +19,7 @@ import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor, load_descriptor
 from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
+from panelcast.data.chronology import normalize_chronology
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.models.baselines import PanelData, benchmark_baselines
 from panelcast.models.baselines.core import BaselineScore
@@ -69,12 +70,12 @@ def _entity_last_score(
     """Map each entity to its chronologically-last score in a split frame."""
     entity_col = descriptor.entity_col
     target_col = descriptor.target_col
-    sort_cols = [entity_col]
-    if descriptor.parsed_date_col in df.columns:
-        sort_cols.append(descriptor.parsed_date_col)
-    if descriptor.event_col in df.columns:
-        sort_cols.append(descriptor.event_col)
-    ordered = df.sort_values(sort_cols, na_position="first")
+    ordered = normalize_chronology(
+        df,
+        entity_col=entity_col,
+        date_col=descriptor.parsed_date_col,
+        event_col=descriptor.event_col,
+    )
     last = ordered.groupby(entity_col)[target_col].last()
     return {e: float(v) for e, v in last.items() if pd.notna(v)}
 
@@ -110,12 +111,12 @@ def _build_panel(
     if is_train or sequential:
         # Order chronologically within entity before shift(1) so prev_score is
         # the true predecessor, not a random row (mirrors _entity_last_score).
-        sort_cols = [entity_col]
-        if descriptor.parsed_date_col in merged.columns:
-            sort_cols.append(descriptor.parsed_date_col)
-        if descriptor.event_col in merged.columns:
-            sort_cols.append(descriptor.event_col)
-        ordered = merged.sort_values(sort_cols, kind="stable", na_position="first")
+        ordered = normalize_chronology(
+            merged,
+            entity_col=entity_col,
+            date_col=descriptor.parsed_date_col,
+            event_col=descriptor.event_col,
+        )
         prev = ordered.groupby(entity_col)[target_col].shift(1)
         prev = pd.to_numeric(prev.reindex(merged.index), errors="coerce")
         if is_train:

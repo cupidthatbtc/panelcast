@@ -15,6 +15,8 @@ from typing import ClassVar
 import numpy as np
 import pandas as pd
 
+from panelcast.data.chronology import normalize_chronology
+
 from .base import BaseFeatureBlock, FeatureContext, FeatureOutput
 
 # AOTY default: (score column, output prefix) pairs.
@@ -117,8 +119,12 @@ class EntityHistoryBlock(BaseFeatureBlock):
         self._check_is_fitted()
         self.validate_columns(df)
 
-        # Sort by entity, date, and event (event for deterministic tie-breaking)
-        df_sorted = df.sort_values([self.entity_col, self.date_col, self.event_col]).copy()
+        df_sorted = normalize_chronology(
+            df,
+            entity_col=self.entity_col,
+            date_col=self.date_col,
+            event_col=self.event_col,
+        )
 
         # Compute LOO expanding statistics for each score type
         for score_col, prefix in self.score_specs:

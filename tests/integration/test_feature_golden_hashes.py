@@ -50,17 +50,20 @@ def _stable_feature_hash(df: pd.DataFrame) -> str:
 # moved from GroupKFold to the entity-aware temporal/cold-start protocol. Only
 # train rows carry OOF offsets; held-out validation/test rows still use the
 # same full-train deployment refit, so their four digests remain unchanged.
+# Issue #294 then routed all temporal/history consumers through the canonical
+# missing/tied-date order. The three affected matrices below are deliberately
+# re-frozen; the remaining split/part matrices are byte-identical.
 GOLDEN_FEATURE_HASHES = {
     "within_entity_temporal/train": (
-        "b6762fc0c26ce30a03b2257b78886e5c2d9bce469d78b9a6e6ef85557f921575"
+        "b56b3cb6a8510472b45a8a729e42df8bb6df63c9f7a1d7b62fd7e2280c99b2af"
     ),
     "within_entity_temporal/validation": (
         "6cd73a3fb0ce81ab75630ddd8ddcee40471554a98c48eee4a496ed3881dbee7d"
     ),
     "within_entity_temporal/test": (
-        "59ad6ec23443101aaf4da9f33e7bb651a0b83bbb64793e6a0af5e7493beac539"
+        "ad60b3a9081b990cbe444ec2e453764beeeda02beae7b85fdb1d766013ceee99"
     ),
-    "entity_disjoint/train": ("c600f28eb6a04e043132d15268530817e5ea63b559a0f160d97d417900047b55"),
+    "entity_disjoint/train": ("3f1d451cf631a9b9c88ce268b26cfa62fd092ad8ca0635b4d8513203cad680f8"),
     "entity_disjoint/validation": (
         "6981f543faaa714f1d4c8e389cdba2034aa26cf76f7323ecd56cf732591d9ae5"
     ),

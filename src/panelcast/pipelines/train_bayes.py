@@ -23,6 +23,7 @@ import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
+from panelcast.data.chronology import normalize_chronology
 from panelcast.data.imputation import apply_imputation, fit_imputation
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.gpu_memory import estimate_memory_gb
@@ -261,12 +262,17 @@ def load_training_data(
     else:
         train_df[feature_cols] = train_df[feature_cols].fillna(0)
 
+    # Keep the returned training frame aligned with the chronologically ordered
+    # model arrays and their validity mask.
+    resolved_descriptor = descriptor or DatasetDescriptor()
+    train_df = _normalize_model_frame(train_df, resolved_descriptor)
+
     # Prepare model data
     model_args, valid_mask = prepare_model_data(
         train_df,
         feature_cols,
         min_albums_filter=min_albums_filter,
-        descriptor=descriptor,
+        descriptor=resolved_descriptor,
         debut_prev_score_source=debut_prev_score_source,
         target_transform=target_transform,
         logit_offset=logit_offset,
@@ -418,6 +424,24 @@ def _build_entity_groups(
     return group_idx_by_artist, group_to_idx
 
 
+def _normalize_model_frame(
+    frame: pd.DataFrame, descriptor: DatasetDescriptor
+) -> pd.DataFrame:
+    date_col = (
+        descriptor.parsed_date_col
+        if descriptor.parsed_date_col in frame.columns
+        else descriptor.date_col
+    )
+    if date_col not in frame.columns:
+        return frame
+    return normalize_chronology(
+        frame,
+        entity_col=descriptor.entity_col,
+        date_col=date_col,
+        event_col=descriptor.event_col,
+    )
+
+
 def prepare_model_data(
     train_df: pd.DataFrame,
     feature_cols: list[str],
@@ -469,6 +493,7 @@ def prepare_model_data(
     entity_col = descriptor.entity_col
     target_col = descriptor.target_col
     n_obs_col = descriptor.n_obs_col
+    train_df = _normalize_model_frame(train_df, descriptor)
 
     # Create artist index mapping (sorted for deterministic ordering)
     artists = sorted(train_df[entity_col].unique())

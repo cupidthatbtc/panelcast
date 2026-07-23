@@ -72,8 +72,58 @@ def sample_train_df():
     )
 
 
+def test_prepare_model_data_is_invariant_to_input_permutation():
+    frame = pd.DataFrame(
+        {
+            "Artist": ["a", "b", "a", "b"],
+            "Album": ["a2", "b1", "a1", "b2"],
+            "Release_Date_Parsed": ["2021-01-01", "2020-02-01", "2020-01-01", "2021-02-01"],
+            "User_Score": [80.0, 60.0, 70.0, 65.0],
+            "feature": [2.0, 3.0, 1.0, 4.0],
+            "n_reviews": [20, 30, 10, 40],
+            "original_row_id": [2, 3, 1, 4],
+        }
+    )
+    first, _ = prepare_model_data(frame, ["feature"])
+    second, _ = prepare_model_data(frame.sample(frac=1, random_state=9), ["feature"])
+    for key in ("artist_idx", "album_seq", "prev_score", "prev_meas_sigma", "X", "y"):
+        np.testing.assert_array_equal(first[key], second[key])
+
+
 class TestLoadTrainingData:
     """Tests for load_training_data function."""
+
+    def test_returned_frame_matches_canonical_model_order_and_valid_mask(self, tmp_path):
+        splits = pd.DataFrame(
+            {
+                "Artist": ["a", "a", "b", "b"],
+                "Album": ["a2", "a1", "b1", "b2"],
+                "Release_Date_Parsed": pd.to_datetime(
+                    ["2021-01-01", "2020-01-01", "2020-06-01", "2022-01-01"]
+                ),
+                "User_Score": [30.0, 10.0, 20.0, 40.0],
+                "User_Ratings": [30, 10, 20, 40],
+                "original_row_id": [3, 1, 2, 4],
+            }
+        )
+        features = pd.DataFrame(
+            {
+                "feature": [3.0, 1.0, 2.0, 4.0],
+                "n_reviews": [30, 10, -1, 40],
+                "original_row_id": [3, 1, 2, 4],
+            }
+        )
+        split_path = tmp_path / "train.parquet"
+        feature_path = tmp_path / "train_features.parquet"
+        splits.to_parquet(split_path)
+        features.to_parquet(feature_path)
+
+        model_args, _, returned, _ = load_training_data(
+            feature_path, split_path, min_albums_filter=1
+        )
+
+        assert returned["original_row_id"].tolist() == [1, 3, 4]
+        assert model_args["y"].tolist() == [10.0, 30.0, 40.0]
 
     def test_length_mismatch_raises_value_error(self, tmp_path, sample_splits_df):
         """Should raise ValueError when DataFrames have different lengths."""

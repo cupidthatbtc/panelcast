@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+from panelcast.data.chronology import normalize_chronology
+
 from .base import BaseFeatureBlock, FeatureContext, FeatureOutput
 
 
@@ -114,9 +116,12 @@ class TemporalBlock(BaseFeatureBlock):
         """
         self._check_is_fitted()
 
-        # Sort by entity, date, event for deterministic ordering
-        # Event as tiebreaker ensures same-date events have consistent order
-        df_sorted = df.sort_values([self.entity_col, self.date_col, self.event_col]).copy()
+        df_sorted = normalize_chronology(
+            df,
+            entity_col=self.entity_col,
+            date_col=self.date_col,
+            event_col=self.event_col,
+        )
 
         # Event sequence (1-indexed): cumcount + 1 within entity
         df_sorted["album_sequence"] = df_sorted.groupby(self.entity_col).cumcount() + 1

@@ -52,9 +52,9 @@ def test_temporal_oof_accepts_missing_training_dates_and_bounds_fit_count(monkey
     assert np.isfinite(list(block._oof_by_row_id_.values())).all()
     missing_folds = [record for record in block.fold_manifest if record["held_date_missing"]]
     assert len(missing_folds) == 1
+    assert missing_folds[0]["estimand"] == "cold_start"
     assert missing_folds[0]["effective_date_cutoff"] is None
     assert missing_folds[0]["n_fit_missing_dates"] == 0
-    assert missing_folds[0]["max_fit_rank"] < missing_folds[0]["min_held_rank"]
 
 
 def test_all_missing_dates_fail_with_the_configured_column():

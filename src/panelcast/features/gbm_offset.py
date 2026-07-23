@@ -17,6 +17,7 @@ from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.model_selection import GroupKFold, KFold
 
 from panelcast.data.alignment import ROW_ID_COL
+from panelcast.data.chronology import DATE_MISSING_COL, normalize_chronology
 
 from .base import BaseFeatureBlock, FeatureContext, FeatureOutput
 
@@ -88,46 +89,32 @@ class GbmOffsetBlock(BaseFeatureBlock):
         if self.date_col not in df.columns:
             raise ValueError(f"gbm_offset: configured date_col '{self.date_col}' is absent")
 
-        date_values = df[self.date_col]
-        if pd.api.types.is_datetime64_any_dtype(date_values.dtype):
-            dates = pd.to_datetime(date_values, errors="coerce", utc=True).dt.tz_convert(None)
-        else:
-            try:
-                dates = pd.to_datetime(
-                    date_values, errors="coerce", format="mixed", utc=True
-                ).dt.tz_convert(None)
-            except TypeError:  # pandas < 2.0
-                dates = pd.to_datetime(date_values, errors="coerce", utc=True).dt.tz_convert(None)
-        if not bool(dates.notna().any()):
+        ordered = normalize_chronology(
+            df,
+            entity_col=self.entity_col,
+            date_col=self.date_col,
+            event_col=self.event_col,
+        )
+        if not bool(ordered[self.date_col].notna().any()):
             raise ValueError(
                 f"gbm_offset: date_col '{self.date_col}' has no parseable dates; "
                 "temporal OOF cannot establish an admissible history"
             )
-        event = (
-            df[self.event_col].astype("string").fillna("")
-            if self.event_col is not None and self.event_col in df.columns
-            else pd.Series("", index=df.index, dtype="string")
-        )
-        chronology_frame = pd.DataFrame(
-            {
-                "date_missing": dates.isna().astype("int8"),
-                "date": dates,
-                "event": event,
-                "row_id": df[ROW_ID_COL].astype(np.int64),
-                "position": np.arange(len(df), dtype=np.int64),
-            },
+        ordered_by_id = ordered.set_index(ROW_ID_COL)
+        row_ids = df[ROW_ID_COL].astype(np.int64)
+        dates = pd.Series(
+            ordered_by_id.loc[row_ids, self.date_col].to_numpy(),
             index=df.index,
         )
-        global_order = chronology_frame.sort_values(
-            ["date_missing", "date", "event", "row_id"],
-            ascending=[True, True, True, True],
-            kind="stable",
-            na_position="last",
+        date_missing = pd.Series(
+            ordered_by_id.loc[row_ids, DATE_MISSING_COL].to_numpy(dtype="int8"),
+            index=df.index,
         )
-        order_positions = global_order["position"].to_numpy(dtype=np.int64)
-        rank_values = np.empty(len(df), dtype=np.int64)
-        rank_values[order_positions] = np.arange(len(df))
-        rank = pd.Series(rank_values, index=df.index)
+        rank_by_id = pd.Series(
+            np.arange(len(ordered), dtype=np.int64),
+            index=ordered[ROW_ID_COL].astype(np.int64),
+        )
+        rank = pd.Series(row_ids.map(rank_by_id).to_numpy(dtype=np.int64), index=df.index)
         entities = df[self.entity_col]
 
         first_for_entity = rank.groupby(entities, sort=False).transform("min") == rank
@@ -163,7 +150,8 @@ class GbmOffsetBlock(BaseFeatureBlock):
             if (
                 estimand == "prospective_within_entity"
                 and not pd.isna(held_date_min)
-                and (pd.isna(fit_date_max) or fit_date_max >= held_date_min)
+                and not pd.isna(fit_date_max)
+                and fit_date_max >= held_date_min
             ):
                 raise AssertionError(
                     "gbm_offset prospective fold includes contemporaneous observations"
@@ -210,22 +198,29 @@ class GbmOffsetBlock(BaseFeatureBlock):
             prospective_positions = prospective_positions[
                 np.argsort(rank.iloc[prospective_positions].to_numpy())
             ]
-            dated = prospective_positions[dates.iloc[prospective_positions].notna().to_numpy()]
-            undated = prospective_positions[dates.iloc[prospective_positions].isna().to_numpy()]
+            dated = prospective_positions[
+                date_missing.iloc[prospective_positions].eq(0).to_numpy()
+            ]
+            undated = prospective_positions[
+                date_missing.iloc[prospective_positions].eq(1).to_numpy()
+            ]
             dated_fold_limit = self.n_splits - int(bool(len(undated)))
+            if len(undated):
+                cutoff_rank = int(rank.iloc[undated].min())
+                fit = np.flatnonzero((rank < cutoff_rank).to_numpy())
+                fit_fold(fit, undated, "prospective_within_entity", None)
             if len(dated):
                 for held in np.array_split(dated, min(max(1, dated_fold_limit), len(dated))):
                     cutoff_date = dates.iloc[held].min()
-                    fit = np.flatnonzero((dates < cutoff_date).to_numpy())
+                    fit = np.flatnonzero(
+                        ((date_missing == 1) | (dates < cutoff_date)).to_numpy()
+                    )
                     fit_fold(
                         fit,
                         held,
                         "prospective_within_entity",
                         cutoff_date.isoformat(),
                     )
-            if len(undated):
-                fit = np.flatnonzero(dates.notna().to_numpy())
-                fit_fold(fit, undated, "prospective_within_entity", None)
 
         if np.isnan(oof).any():
             missing_ids = df.loc[np.isnan(oof), ROW_ID_COL].astype(int).tolist()
