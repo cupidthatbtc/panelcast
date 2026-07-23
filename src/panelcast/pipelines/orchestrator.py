@@ -1508,7 +1508,7 @@ class PipelineOrchestrator:
             strict=self.config.strict,
             verbose=self.config.verbose,
             progress_bar=self.config.progress_bar,
-            manifest=self._require_manifest(),
+            manifest=self.manifest,
             max_albums=self.config.max_albums,
             # MCMC configuration
             num_chains=self.config.num_chains,
