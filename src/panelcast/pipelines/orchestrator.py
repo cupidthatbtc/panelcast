@@ -634,6 +634,24 @@ class PipelineOrchestrator:
                 "of those, or add the value to the descriptor's min_obs_thresholds."
             )
 
+    def _require_run_dir(self) -> Path:
+        """The run directory, or a hard error if a stage runs before setup."""
+        if self.run_dir is None:
+            raise PipelineError("run directory not initialized before use", stage="setup")
+        return self.run_dir
+
+    def _require_manifest(self) -> RunManifest:
+        """The run manifest, or a hard error if a stage runs before setup."""
+        if self.manifest is None:
+            raise PipelineError("manifest not initialized before use", stage="setup")
+        return self.manifest
+
+    def _resolved_min_ratings(self) -> int:
+        """min_ratings after __init__/resume resolution (None here is a bug)."""
+        if self.config.min_ratings is None:
+            raise PipelineError("min_ratings unresolved before use", stage="setup")
+        return self.config.min_ratings
+
     def run(self) -> int:
         """Execute the pipeline and return exit code.
 
@@ -689,7 +707,7 @@ class PipelineOrchestrator:
         try:
             stages = get_execution_order(
                 self.config.stages,
-                min_ratings=self.config.min_ratings,
+                min_ratings=self._resolved_min_ratings(),
                 descriptor=self.descriptor,
                 descriptor_path=self.descriptor_path,
                 paths=self._artifact_paths(),
@@ -880,6 +898,8 @@ class PipelineOrchestrator:
     def _setup_resume(self) -> None:
         """Set up for resuming a previous run."""
         resume_id = self.config.resume
+        if resume_id is None:
+            raise PipelineError("resume requested without a run id", stage="setup")
 
         # Try to find the run directory
         run_dir = self.output_base / resume_id
@@ -1324,7 +1344,7 @@ class PipelineOrchestrator:
                         )
                         if self.manifest:
                             self.manifest.stages_skipped.append(stage.name)
-                            save_run_manifest(self.manifest, self.run_dir)
+                            save_run_manifest(self._require_manifest(), self._require_run_dir())
                         progress.advance(task_id, weights[stage.name])
                         continue
 
@@ -1413,7 +1433,7 @@ class PipelineOrchestrator:
         wins over latest-run resolution, so ``--stages evaluate,report`` reads
         evaluate's fresh output. Writes always target the current run dir.
         """
-        current = ArtifactPaths.for_run(self.run_dir)
+        current = ArtifactPaths.for_run(self._require_run_dir())
         if self.config.stages is None:
             return current  # full run: every product is produced here
         selected = set(self.config.stages)
@@ -1488,7 +1508,7 @@ class PipelineOrchestrator:
             strict=self.config.strict,
             verbose=self.config.verbose,
             progress_bar=self.config.progress_bar,
-            manifest=self.manifest,
+            manifest=self._require_manifest(),
             max_albums=self.config.max_albums,
             # MCMC configuration
             num_chains=self.config.num_chains,
@@ -1508,7 +1528,7 @@ class PipelineOrchestrator:
             ess_threshold=self.config.ess_threshold,
             allow_divergences=self.config.allow_divergences,
             # Data filtering
-            min_ratings=self.config.min_ratings,
+            min_ratings=self._resolved_min_ratings(),
             min_albums_filter=self.config.min_albums_filter,
             # Feature flags
             enable_genre=self.config.enable_genre,
@@ -1676,7 +1696,7 @@ class PipelineOrchestrator:
                 log.info("stage_skipped", stage=stage.name, reason=e.message)
                 if self.manifest:
                     self.manifest.stages_skipped.append(stage.name)
-                    save_run_manifest(self.manifest, self.run_dir)
+                    save_run_manifest(self._require_manifest(), self._require_run_dir())
                 return
             except ConvergenceError as e:
                 # Handle convergence errors: fail in strict mode, warn otherwise
@@ -1715,7 +1735,7 @@ class PipelineOrchestrator:
                     self.manifest.run_id,
                 )
             self._record_stage_outputs(stage, run_result=run_result)
-            save_run_manifest(self.manifest, self.run_dir)
+            save_run_manifest(self._require_manifest(), self._require_run_dir())
 
         log.info(
             "stage_completed",

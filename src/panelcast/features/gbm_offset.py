@@ -9,7 +9,6 @@ scored a row never saw its target); held-out rows get the full-train model.
 from __future__ import annotations
 
 import hashlib
-from typing import ClassVar
 
 import numpy as np
 import pandas as pd
@@ -35,7 +34,7 @@ class GbmOffsetBlock(BaseFeatureBlock):
     that fits and transforms every split.
     """
 
-    name: ClassVar[str] = FEATURE_NAME
+    name: str = FEATURE_NAME
 
     def __init__(
         self,

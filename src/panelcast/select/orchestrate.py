@@ -394,7 +394,7 @@ def run_select(
     # fits below; a single-seed z is one draw from the selection lottery.
     winner = max(
         (s for s in scores if screenable(s, rules, reference)),
-        key=lambda s: s.elpd_z,
+        key=lambda s: s.elpd_z if s.elpd_z is not None else float("-inf"),
         default=None,
     )
     confirmed: bool | None = None

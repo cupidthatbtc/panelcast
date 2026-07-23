@@ -6,7 +6,7 @@ is_collaboration, num_artists, collab_type.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any
 
 import pandas as pd
 
@@ -51,9 +51,9 @@ class CollaborationBlock(BaseFeatureBlock):
     ['is_collaboration', 'num_artists', 'collab_type_ordinal']
     """
 
-    name: ClassVar[str] = "collaboration"
-    requires: ClassVar[list[str]] = []
-    required_columns: ClassVar[list[str]] = ["is_collaboration", "collab_type", "num_artists"]
+    name: str = "collaboration"
+    requires: list[str] = []
+    required_columns: list[str] = ["is_collaboration", "collab_type", "num_artists"]
 
     def __init__(self, params: dict[str, Any] | None = None) -> None:
         super().__init__(params)

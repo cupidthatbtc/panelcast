@@ -10,7 +10,7 @@ from typing import Any
 
 import pandas as pd
 
-from .base import BaseFeatureBlock, FeatureContext, FeatureOutput
+from .base import BaseFeatureBlock, FeatureBlock, FeatureContext, FeatureOutput
 from .errors import NotFittedError
 from .registry import build_default_registry, parse_feature_specs
 
@@ -164,7 +164,7 @@ class FeaturePipeline:
 def build_blocks_from_config(
     config: dict[str, Any],
     descriptor=None,
-) -> list[BaseFeatureBlock]:
+) -> list[FeatureBlock]:
     """Build feature blocks from configuration.
 
     Parameters
@@ -177,7 +177,7 @@ def build_blocks_from_config(
 
     Returns
     -------
-    list[BaseFeatureBlock]
+    list[FeatureBlock]
         List of configured feature blocks.
     """
     registry = build_default_registry(descriptor)

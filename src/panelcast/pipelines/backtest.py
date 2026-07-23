@@ -200,7 +200,11 @@ def aggregate_backtest(records: list[OriginRecord]) -> dict:
     completed = [r for r in records if r.status == "completed" and r.metrics]
     metrics_agg: dict[str, dict] = {}
     for name, _ in _AGGREGATED_METRICS:
-        values = [r.metrics[name] for r in completed if r.metrics.get(name) is not None]
+        values = [
+            r.metrics[name]
+            for r in completed
+            if r.metrics is not None and r.metrics.get(name) is not None
+        ]
         if not values:
             metrics_agg[name] = None
             continue
@@ -211,7 +215,11 @@ def aggregate_backtest(records: list[OriginRecord]) -> dict:
             "min": float(arr.min()),
             "max": float(arr.max()),
             "n_origins": len(arr),
-            "per_origin": {str(r.origin): r.metrics.get(name) for r in completed},
+            "per_origin": {
+                str(r.origin): r.metrics.get(name)
+                for r in completed
+                if r.metrics is not None
+            },
         }
     return {
         "n_origins_requested": len(records),

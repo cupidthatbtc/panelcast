@@ -301,7 +301,7 @@ def _verdict(ranked: list[ArmScore], reference_label: str) -> str:
     else:
         top = scored[0]
         stats = f"{top.elpd_diff:+.1f} +/- {top.elpd_dse:.1f} held-out ELPD (z {top.elpd_z:+.2f})"
-        if top.elpd_diff > 0:
+        if (top.elpd_diff or 0.0) > 0:
             head = f"{top.arm} leads: {stats} vs {reference_label}."
         else:
             head = f"No arm beats {reference_label}; the closest is {top.arm} at {stats}."
@@ -355,10 +355,13 @@ def _baseline_conclusion(rows: list[Mapping[str, Any]]) -> str | None:
     )
     if gbm is None:
         return None
-    verb = "beats" if _mae(bayes) < _mae(gbm) else "does not beat"
+    bayes_mae, gbm_mae = _mae(bayes), _mae(gbm)
+    if bayes_mae is None or gbm_mae is None:
+        return None
+    verb = "beats" if bayes_mae < gbm_mae else "does not beat"
     return (
         f"The structured model {verb} the GBM floor on MAE "
-        f"({_mae(bayes):.2f} vs {_mae(gbm):.2f})."
+        f"({bayes_mae:.2f} vs {gbm_mae:.2f})."
     )
 
 

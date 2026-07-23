@@ -149,7 +149,7 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
             action="rows kept; verify duplicates are distinct events, not repeats",
         )
 
-    results = {"temporal": {}, "disjoint": {}}
+    results: dict[str, dict] = {"temporal": {}, "disjoint": {}}
 
     # ===== WITHIN-ENTITY TEMPORAL SPLIT =====
     temporal_dir = config.output_dir / split_dir_name(SplitType.WITHIN_ENTITY_TEMPORAL)

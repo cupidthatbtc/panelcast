@@ -239,7 +239,7 @@ def ofat_arms(
     return arms
 
 
-def diagnose_data(train_df, descriptor: DatasetDescriptor) -> dict[str, bool]:
+def diagnose_data(train_df, descriptor: DatasetDescriptor) -> dict[str, bool | float]:
     """Cheap data signals that reorder the search (never prune)."""
     y = train_df[descriptor.target_col].dropna()
     skew = 0.0
@@ -369,7 +369,7 @@ def rung_survivors(
     scored.sort(key=lambda t: (-t[0], t[1]))
     n_keep = max(1, math.ceil(keep_fraction * len(scored)))
     rescue_bar = promote_z - screen_margin
-    survivors = []
+    survivors: list[tuple[dict[str, Any], str | None]] = []
     for i, (z, _aid, knobs) in enumerate(scored):
         if i < n_keep:
             survivors.append((knobs, f"promoted from rung {rung} (z={z:+.2f})"))
@@ -1062,7 +1062,7 @@ def run_sweep(  # noqa: C901  # tracked complexity debt: the _execute/_run_bucke
                 return False
             head, tail_arms = bucket[0], bucket[1:]
             _execute(stage, head[0], head[1], rung)
-            runnable = []
+            runnable: list[tuple[dict[str, Any], str | None]] = []
             for arm, note in tail_arms:
                 # Reserve a slot per submission: fits_done() can't see arms that
                 # are merely queued, so the prospective count must include them

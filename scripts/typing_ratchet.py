@@ -29,17 +29,11 @@ BASELINE_PATH = REPO_ROOT / "typing_baseline.json"
 RATCHETED_CODES = (
     "arg-type",
     "assignment",
-    "return-value",
-    "var-annotated",
-    "misc",
-    "union-attr",
-    "operator",
     "attr-defined",
-    "call-arg",
-    "no-any-return",
 )
 
 _ERROR_RE = re.compile(r"^(?P<path>[^:]+):\d+: error: .*\[(?P<code>[a-z-]+)\]$")
+_SUMMARY_RE = re.compile(r"^Found (?P<n>\d+) errors? in \d+ files?", re.MULTILINE)
 
 
 def run_mypy() -> str:
@@ -55,11 +49,25 @@ def run_mypy() -> str:
 
 def collect_counts(output: str) -> dict[str, dict[str, int]]:
     counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    parsed = 0
     for line in output.splitlines():
         match = _ERROR_RE.match(line.strip())
-        if match:
-            path = match.group("path").replace("\\", "/")
-            counts[path][match.group("code")] += 1
+        if not match:
+            continue
+        parsed += 1
+        path = match.group("path").replace("\\", "/")
+        if not path.startswith("src/panelcast/"):
+            raise SystemExit(f"mypy error outside src/panelcast (follow-imports leak?): {line}")
+        counts[path][match.group("code")] += 1
+    # Insurance against a mypy output-format change silently zeroing the
+    # counts: the parsed total must match mypy's own summary line.
+    summary = _SUMMARY_RE.search(output)
+    reported = int(summary.group("n")) if summary else 0
+    if reported != parsed:
+        raise SystemExit(
+            f"parsed {parsed} error lines but mypy reported {reported} — "
+            "has the mypy output format changed?"
+        )
     return {path: dict(codes) for path, codes in sorted(counts.items())}
 
 

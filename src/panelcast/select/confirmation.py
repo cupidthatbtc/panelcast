@@ -72,7 +72,8 @@ class ConfirmationResult:
         if len(measured) < len(self.seeds) or not measured:
             return False
         return all(
-            s.elpd.get("z") is not None
+            s.elpd is not None
+            and s.elpd.get("z") is not None
             and s.elpd["z"] >= self.promote_z
             and s.winner_converged is True
             for s in measured
@@ -209,10 +210,16 @@ def _confirmation_timeout(
         return None
     if cfg.arm_timeout_seconds == "auto":
         base_arm = default_arm()
-        screening = max(
-            resolve_arm_timeout(cfg, merged, dims)[0]
+        resolved = [
+            timeout
             for merged in (base_arm, {**base_arm, **(winner_knobs or {})})
-        )
+            if (timeout := resolve_arm_timeout(cfg, merged, dims)[0]) is not None
+        ]
+        if not resolved:
+            # The auto resolver had no dims to predict from and no floor:
+            # treat as no timeout, same as arm_timeout_seconds=None.
+            return None
+        screening = max(resolved)
     else:
         screening = float(cfg.arm_timeout_seconds)
     overrides = sampler_overrides or {}

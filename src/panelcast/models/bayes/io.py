@@ -247,8 +247,8 @@ def save_model(
     filename = generate_model_filename(model_type)
     filepath = output_dir / filename
 
-    # Save InferenceData to NetCDF
-    fit_result.idata.to_netcdf(filepath)
+    # Save InferenceData to NetCDF (arviz's annotation wants str, not Path)
+    fit_result.idata.to_netcdf(str(filepath))
 
     if mcmc_config is None:
         mcmc_dict: dict[str, Any] = {}

@@ -9,6 +9,7 @@ on untouched settings. `select` RECOMMENDS; default flips remain manual PRs.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -63,7 +64,7 @@ class DecisionRules:
                 f"got {type(payload).__name__}"
             )
         block = payload.get("rules") or {}
-        known = {
+        known: dict[str, Callable[[Any], Any]] = {
             "promote_z": float,
             "coverage_tolerance": float,
             "require_convergence": bool,

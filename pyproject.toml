@@ -128,8 +128,9 @@ disallow_untyped_defs = false  # Too strict for gradual adoption
 ignore_missing_imports = true  # Many data science libs lack stubs
 check_untyped_defs = true  # Check type errors inside untyped functions
 strict = false
-# Ignore specific error codes that are too noisy for data science code
-disable_error_code = ["arg-type", "assignment", "return-value", "var-annotated", "misc", "union-attr", "operator", "attr-defined", "call-arg", "no-any-return"]
+# Globally forgiven codes, shrunk by the #302 ratchet (was ten): the remaining
+# three are held per-file by typing_baseline.json until they reach zero too.
+disable_error_code = ["arg-type", "assignment", "attr-defined"]
 
 # Boundary modules: re-enable a few of the globally-disabled codes so the typed
 # seams (config gates as Literals, the prediction-result and split-manifest
@@ -146,22 +147,22 @@ module = [
 ]
 enable_error_code = ["arg-type", "return-value", "assignment"]
 
-# The orchestrator carries the PipelineConfig gate types; re-enable
-# return-value/assignment there (arg-type stays off — its run_dir/manifest
-# attributes are set-after-init Optionals, a separate refactor).
+# Typing ratchet (#302): these subsystems are fully strict — every globally
+# disabled code is re-enabled. The whole-package baseline lives in
+# typing_baseline.json (scripts/typing_ratchet.py). Covers the config layer,
+# manifests, the feature system, model fit results/IO/likelihoods, and the
+# orchestrator (the documented public API surface).
 [[tool.mypy.overrides]]
-module = ["panelcast.pipelines.orchestrator"]
-enable_error_code = ["return-value", "assignment"]
-
-# Typing ratchet stage 1 (#302): the config and manifest subsystems are fully
-# strict — every globally-disabled code is re-enabled here. The whole-package
-# baseline lives in typing_baseline.json (scripts/typing_ratchet.py).
-[[tool.mypy.overrides]]
-module = ["panelcast.config.*", "panelcast.pipelines.manifest"]
-enable_error_code = [
-  "arg-type", "assignment", "return-value", "var-annotated", "misc",
-  "union-attr", "operator", "attr-defined", "call-arg", "no-any-return",
+module = [
+  "panelcast.config.*",
+  "panelcast.pipelines.manifest",
+  "panelcast.pipelines.orchestrator",
+  "panelcast.features.*",
+  "panelcast.models.bayes.fit",
+  "panelcast.models.bayes.io",
+  "panelcast.models.bayes.likelihoods",
 ]
+enable_error_code = ["arg-type", "assignment", "attr-defined"]
 
 # Ship the PEP 561 marker so downstream type checkers trust panelcast's inline
 # types (see docs/API.md for the supported import surface).

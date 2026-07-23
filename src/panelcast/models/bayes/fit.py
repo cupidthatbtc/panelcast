@@ -436,7 +436,8 @@ def _run_blocked(
                 for k, v in mcmc.get_extra_fields(group_by_chain=True).items()
             }
         )
-        np.savez(checkpoint_dir / f"block_{i:04d}.npz", **block_payload)
+        # Explicit allow_pickle keeps mypy from binding the payload kwargs to it.
+        np.savez(checkpoint_dir / f"block_{i:04d}.npz", allow_pickle=True, **block_payload)
         with state_path.open("wb") as fh:
             pickle.dump(state, fh)
         cursor_path.write_text(
