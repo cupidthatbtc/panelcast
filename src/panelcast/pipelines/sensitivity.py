@@ -953,7 +953,7 @@ def create_oat_summary_table(
         eligible = (convergence_passed is True) and (elpd is not None) and base_eligible
 
         # Compute delta from baseline
-        if eligible and name != base_name and base_elpd is not None:
+        if eligible and elpd is not None and name != base_name and base_elpd is not None:
             elpd_delta = elpd - base_elpd
         elif name == base_name and eligible:
             elpd_delta = 0.0

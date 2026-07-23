@@ -14,7 +14,7 @@ with no Python required.
 
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import Any
 
 import pandas as pd
 
@@ -48,8 +48,8 @@ class CoreNumericBlock(BaseFeatureBlock):
     ['Thrust_Margin']
     """
 
-    name: ClassVar[str] = "core_numeric"
-    requires: ClassVar[list[str]] = []
+    name: str = "core_numeric"
+    requires: list[str] = []
 
     def __init__(self, params: dict[str, Any] | None = None) -> None:
         super().__init__(params)

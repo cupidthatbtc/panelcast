@@ -11,8 +11,6 @@ Computes temporal features that capture career trajectory context:
 
 from __future__ import annotations
 
-from typing import ClassVar
-
 from panelcast.data.chronology import normalize_chronology
 
 from .base import BaseFeatureBlock, FeatureContext, FeatureOutput
@@ -48,7 +46,7 @@ class TemporalBlock(BaseFeatureBlock):
     """
 
     name = "temporal"
-    requires: ClassVar[list[str]] = []
+    requires: list[str] = []
 
     def __init__(
         self,

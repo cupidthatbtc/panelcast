@@ -831,6 +831,7 @@ def make_score_model(score_type: str) -> Callable:
         use_sigma_ref = (n_ref is not None) and heteroscedastic_requested
 
         if use_sigma_ref:
+            assert n_ref is not None  # implied by use_sigma_ref
             if n_ref <= 0:
                 raise ValueError(
                     f"n_ref must be positive for sigma-ref parameterization, got {n_ref}"

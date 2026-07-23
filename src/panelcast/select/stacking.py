@@ -449,7 +449,7 @@ def run_stack(
             f"stacking needs at least two arms with elpd snapshots; found {len(arms)} "
             f"in {sweep_dir} ({len(excluded)} excluded)"
         )
-    matrix = np.vstack([a.elpd for a in arms])
+    matrix = np.vstack([a.elpd for a in arms if a.elpd is not None])
     w_stack = stacking_weights(matrix)
     w_bma = pseudo_bma_plus_weights(matrix, seed=seed)
     for arm, ws, wb in zip(arms, w_stack, w_bma):

@@ -161,7 +161,8 @@ def export_figures(
                         samples = samples.reshape(1, -1)
                     figures["trace"] = create_trace_plot(samples, var_name)
         except Exception as e:  # Broad catch intentional: idata format varies widely
-            logger.debug("trace_plot_skipped", reason="unexpected_idata_format", error=str(e))
+            # Stdlib logger here, not structlog — kwargs would TypeError.
+            logger.debug("trace_plot_skipped: unexpected idata format (%s)", e)
 
     if not figures:
         typer.echo("No data available for export. Run pipeline first.", err=True)
@@ -536,7 +537,7 @@ def runs_list(
     except OSError:
         run_dirs = []
 
-    rows: list[tuple[str, str, str, str, str]] = []
+    rows: list[tuple[str, ...]] = []  # 11 columns, all preformatted strings
     for run_dir in run_dirs:
         if run_dir.name in ("latest", "failed"):
             continue

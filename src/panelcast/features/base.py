@@ -8,7 +8,7 @@ on training data only before transforming any split.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, Protocol
+from typing import Any, Protocol
 
 from .errors import NotFittedError
 
@@ -57,9 +57,12 @@ class BaseFeatureBlock:
     >>> output = block.transform(test_df, ctx)
     """
 
+    # Plain (instance-compatible) attributes: subclasses may declare them as
+    # class attributes or rebind per instance in __init__; both satisfy the
+    # FeatureBlock protocol's read-only view.
     name: str = "base"
-    requires: ClassVar[list[str]] = []
-    required_columns: ClassVar[list[str]] = []
+    requires: list[str] = []
+    required_columns: list[str] = []
 
     def __init__(self, params: dict[str, Any] | None = None) -> None:
         self.params = params or {}
@@ -187,8 +190,15 @@ class FeatureBlock(Protocol):
     Defines the expected interface for feature blocks for type checking.
     """
 
-    name: str
-    requires: list[str]
+    @property
+    def name(self) -> str:
+        """Registry name of the block."""
+        ...
+
+    @property
+    def requires(self) -> list[str]:
+        """Names of blocks this one depends on."""
+        ...
 
     @property
     def is_fitted(self) -> bool:

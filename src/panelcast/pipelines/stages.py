@@ -73,7 +73,9 @@ class StageContext:
     seed: int
     strict: bool
     verbose: bool
-    manifest: RunManifest
+    # None only when a context is built outside a full orchestrator setup
+    # (tests, dry paths); no stage reads it today.
+    manifest: RunManifest | None
     # MCMC progress bars: None = auto (stderr TTY only), False = disabled.
     progress_bar: bool | None = None
     max_albums: int = 50

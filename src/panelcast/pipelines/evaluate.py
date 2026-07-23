@@ -288,6 +288,7 @@ def _build_sequential_prev_scores(
         first_idx = group.index[0]
         group_prev = [float(base_prev.loc[first_idx])]
         if eiv_on:
+            assert base_prev_nrev is not None  # set alongside eiv_on
             group_nrev = [float(base_prev_nrev.loc[first_idx])]
         for j in range(1, len(group)):
             group_prev.append(float(group.iloc[j - 1][target_col]))
