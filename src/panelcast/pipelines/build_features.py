@@ -44,7 +44,12 @@ def _safe_split_stats(features: pd.DataFrame, path: Path) -> dict:
 
 
 def _partition_schema(features: pd.DataFrame) -> dict:
-    """Ordered column name/dtype schema with a stable content hash (#295)."""
+    """Ordered column name/dtype schema with a stable content hash (#295).
+
+    Describes the persisted artifact, so join/metadata columns (n_reviews,
+    original_row_id) are included; the manifest's ``feature_names`` is the
+    model-feature projection.
+    """
     columns = [{"name": str(col), "dtype": str(dtype)} for col, dtype in features.dtypes.items()]
     payload = json.dumps(columns, sort_keys=True)
     return {
@@ -297,13 +302,12 @@ def build_features(ctx: StageContext) -> dict:
     split_manifests: dict[str, dict] = {}
     basis_states: dict[str, dict] = {}
     feature_schemas: dict[str, dict[str, dict]] = {}
+    computed: dict[str, dict[str, Any]] = {}
 
     for split_name in split_names:
         # Read from the canonical directory, falling back to a legacy-named
         # directory if only a pre-rename one exists on disk.
         split_dir = resolve_split_dir(splits_root, split_name)
-        feature_split_dir = features_dir / split_name
-        feature_split_dir.mkdir(parents=True, exist_ok=True)
 
         train_df = pd.read_parquet(split_dir / "train.parquet")
         val_df = pd.read_parquet(split_dir / "validation.parquet")
@@ -362,9 +366,9 @@ def build_features(ctx: StageContext) -> dict:
         val_features = _attach_row_ids(val_features, val_df, f"{split_name}_val")
         test_features = _attach_row_ids(test_features, test_df, f"{split_name}_test")
 
-        # Record and enforce per-partition schemas before anything is written
-        # (#295): a train/validation/test drift must fail feature building, not
-        # surface as a shape error mid-fit.
+        # Record and enforce per-partition schemas (#295): a train/validation/
+        # test drift must fail feature building, not surface as a shape error
+        # mid-fit.
         schemas = {
             "train": _partition_schema(train_features),
             "validation": _partition_schema(val_features),
@@ -378,6 +382,22 @@ def build_features(ctx: StageContext) -> dict:
                     f"disagrees with train — {mismatch}."
                 )
         feature_schemas[split_name] = schemas
+        computed[split_name] = {
+            "train": train_features,
+            "validation": val_features,
+            "test": test_features,
+            "gbm_block": next((b for b in blocks if b.name == "gbm_offset"), None),
+            "n_train_rows": len(train_df),
+        }
+
+    # Every split validated — only now touch the filesystem, so a drift in a
+    # later split cannot leave an earlier split's artifacts on disk.
+    for split_name in split_names:
+        feature_split_dir = features_dir / split_name
+        feature_split_dir.mkdir(parents=True, exist_ok=True)
+        train_features = computed[split_name]["train"]
+        val_features = computed[split_name]["validation"]
+        test_features = computed[split_name]["test"]
 
         train_path = feature_split_dir / "train_features.parquet"
         val_path = feature_split_dir / "validation_features.parquet"
@@ -398,12 +418,12 @@ def build_features(ctx: StageContext) -> dict:
             "validation": _safe_split_stats(val_features, val_path),
             "test": _safe_split_stats(test_features, test_path),
         }
-        gbm_block = next((block for block in blocks if block.name == "gbm_offset"), None)
+        gbm_block = computed[split_name]["gbm_block"]
         if gbm_block is not None:
             split_manifests[split_name]["gbm_oof_folds"] = gbm_block.fold_manifest
             split_manifests[split_name]["gbm_deployment_refit"] = {
                 "protocol": "all_training_rows_admissible_before_held_out_prediction",
-                "n_rows": len(train_df),
+                "n_rows": computed[split_name]["n_train_rows"],
             }
 
     # Save manifest

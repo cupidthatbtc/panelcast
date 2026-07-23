@@ -571,6 +571,23 @@ class TestFeatureSchemas:
         with pytest.raises(ValueError, match="schema drift.*reordered"):
             build_features(_make_ctx(enable_genre=False))
 
+    def test_dtype_drift_fails_before_training(self, tmp_path, monkeypatch):
+        self._setup_splits(tmp_path, monkeypatch)
+
+        def recast(out):
+            out = out.copy()
+            col = out.columns[0]
+            target = "float32" if str(out[col].dtype) != "float32" else "float64"
+            out[col] = out[col].astype(target)
+            return out
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.build_features._transform_with_train_history",
+            self._drifting_transform(recast),
+        )
+        with pytest.raises(ValueError, match="schema drift.*dtype drift"):
+            build_features(_make_ctx(enable_genre=False))
+
     def test_drift_fails_before_artifacts_are_written(self, tmp_path, monkeypatch):
         self._setup_splits(tmp_path, monkeypatch)
         monkeypatch.setattr(
@@ -578,6 +595,39 @@ class TestFeatureSchemas:
             self._drifting_transform(lambda out: out.drop(columns=[out.columns[0]])),
         )
         with pytest.raises(ValueError, match="schema drift"):
+            build_features(_make_ctx(enable_genre=False))
+        features_dir = tmp_path / "data" / "features"
+        assert not (features_dir / "manifest.json").exists()
+        assert not list(features_dir.rglob("*.parquet"))
+
+    def test_later_split_drift_leaves_no_earlier_artifacts(self, tmp_path, monkeypatch):
+        self._setup_splits(tmp_path, monkeypatch)
+        from panelcast.pipelines.build_features import _transform_with_train_history
+
+        calls = {"n": 0}
+
+        def drift_second_split_only(
+            pipeline, train_df, target_df, feature_ctx, mask_target_score_cols=()
+        ):
+            calls["n"] += 1
+            out = _transform_with_train_history(
+                pipeline,
+                train_df,
+                target_df,
+                feature_ctx,
+                mask_target_score_cols=mask_target_score_cols,
+            )
+            # Two transforms (validation, test) per split: calls 3+ belong to
+            # the second split.
+            if calls["n"] >= 3:
+                out = out.drop(columns=[out.columns[0]])
+            return out
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.build_features._transform_with_train_history",
+            drift_second_split_only,
+        )
+        with pytest.raises(ValueError, match="entity_disjoint"):
             build_features(_make_ctx(enable_genre=False))
         features_dir = tmp_path / "data" / "features"
         assert not (features_dir / "manifest.json").exists()
