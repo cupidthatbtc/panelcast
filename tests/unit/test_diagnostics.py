@@ -976,6 +976,17 @@ class TestDetectCagedChains:
 
         assert result.chain_ids == []
 
+    def test_single_chain_has_no_cross_chain_consensus(self):
+        idata = _caged_idata([1000, 63, 64, 62], [0.001, 0.08, 0.09, 0.10]).sel(
+            chain=[10]
+        )
+        result = detect_caged_chains(
+            idata,
+            scale_parameter="user_sigma_artist",
+            max_tree_depth=10,
+        )
+        assert result.chain_ids == []
+
     def test_missing_scale_or_num_steps_is_not_caged(self):
         idata = _caged_idata([1000, 63, 64, 62], [0.001, 0.08, 0.09, 0.10])
 

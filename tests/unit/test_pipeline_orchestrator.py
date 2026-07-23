@@ -652,6 +652,20 @@ class TestBuildCommandString:
         assert "--strict" in cmd
         assert "--verbose" in cmd
 
+    def test_command_with_caged_chain_overrides(self, tmp_path: Path):
+        config = PipelineConfig(
+            caged_chain_retries=2,
+            caged_chain_tree_depth_fraction=0.99,
+            caged_chain_boundary_sigma=0.002,
+            caged_chain_consensus_ratio=8.0,
+        )
+        cmd = PipelineOrchestrator(config, output_base=tmp_path)._build_command_string()
+
+        assert "--caged-chain-retries 2" in cmd
+        assert "--caged-chain-tree-depth-fraction 0.99" in cmd
+        assert "--caged-chain-boundary-sigma 0.002" in cmd
+        assert "--caged-chain-consensus-ratio 8.0" in cmd
+
 
 class TestResumeConfigRestoration:
     """Tests for resume config restoration from manifest."""

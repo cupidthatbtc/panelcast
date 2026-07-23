@@ -7,9 +7,11 @@ import xarray as xr
 
 from panelcast.models.bayes.fit import MCMCConfig
 from panelcast.pipelines.train_bayes import (
+    _finalize_retry_warmup_export,
     _fit_with_caged_chain_retries,
     _passes_convergence_gate,
     _prepare_retry_attempt_io,
+    _retry_warmup_export_path,
 )
 
 
@@ -75,6 +77,20 @@ def test_retry_is_off_by_default_and_does_not_call_sampler():
     fit_once.assert_not_called()
 
 
+def test_enabled_retry_returns_immediately_for_consensus_fit():
+    initial = _result(caged=False)
+    fit_once = Mock()
+
+    selected, config, diagnostics, caged, attempts = _run(initial, fit_once, retries=2)
+
+    assert selected is initial
+    assert config.seed == 42
+    assert diagnostics.passed is True
+    assert caged.chain_ids == []
+    assert len(attempts) == 1
+    fit_once.assert_not_called()
+
+
 def test_disabled_retry_preserves_pre_feature_acceptance_for_synthetic_cage():
     baseline = _run(_result(caged=False), Mock(), retries=0)
     caged = _run(_result(caged=True), Mock(), retries=0)
@@ -116,6 +132,36 @@ def test_retry_attempt_gets_fresh_isolated_checkpoint_and_no_warmup_import(tmp_p
     assert retry_checkpoint == checkpoint_dir / "attempt_1"
     assert retry_import is None
     assert not retry_checkpoint.exists()
+
+
+def test_retry_warmup_export_selects_retained_attempt_and_cleans_ledger(tmp_path):
+    target = tmp_path / "warmup.npz"
+    attempt_0 = _retry_warmup_export_path(target, retry_limit=2, attempt=0)
+    attempt_1 = _retry_warmup_export_path(target, retry_limit=2, attempt=1)
+    assert attempt_0 is not None and attempt_1 is not None
+    attempt_0.write_bytes(b"initial")
+    attempt_1.write_bytes(b"selected")
+
+    _finalize_retry_warmup_export(
+        target,
+        retry_limit=2,
+        selected_seed=43,
+        initial_seed=42,
+        attempts=2,
+    )
+
+    assert target.read_bytes() == b"selected"
+    assert not attempt_0.exists()
+    assert not attempt_1.exists()
+    assert _retry_warmup_export_path(target, retry_limit=0, attempt=1) == target
+    assert _retry_warmup_export_path(None, retry_limit=2, attempt=1) is None
+    _finalize_retry_warmup_export(
+        None,
+        retry_limit=2,
+        selected_seed=43,
+        initial_seed=42,
+        attempts=2,
+    )
 
 
 def test_survivor_gate_blocks_retry():

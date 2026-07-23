@@ -1091,14 +1091,12 @@ def _fit_with_caged_chain_retries(
             "survivor_diagnostics": diagnostics_record(survivors),
         }
     ]
-    if max_retries == 0:
+    if max_retries == 0 or not caged.chains:
         return initial_result, initial_config, diagnostics, caged, attempts
 
     current_assessment = initial_assessment
     for retry in range(1, max_retries + 1):
         _, current_caged, current_survivors = current_assessment
-        if not current_caged.chains:
-            break
         if current_survivors is None or not current_survivors.passed:
             log.warning(
                 "caged_chain_retry_skipped",
@@ -1149,6 +1147,42 @@ def _fit_with_caged_chain_retries(
 def _passes_convergence_gate(diagnostics, caged_chains, *, retry_limit: int) -> bool:
     """Cage classification gates acceptance only when retries were requested."""
     return diagnostics.passed and (retry_limit == 0 or not caged_chains.chains)
+
+
+def _retry_warmup_export_path(
+    target: Path | None,
+    *,
+    retry_limit: int,
+    attempt: int,
+) -> Path | None:
+    if target is None or retry_limit == 0:
+        return target
+    return target.with_name(f"{target.stem}.attempt_{attempt}{target.suffix}")
+
+
+def _finalize_retry_warmup_export(
+    target: Path | None,
+    *,
+    retry_limit: int,
+    selected_seed: int,
+    initial_seed: int,
+    attempts: int,
+) -> None:
+    if target is None or retry_limit == 0:
+        return
+    import shutil
+
+    selected = _retry_warmup_export_path(
+        target,
+        retry_limit=retry_limit,
+        attempt=selected_seed - initial_seed,
+    )
+    if selected is not None and selected.exists():
+        shutil.copy2(selected, target)
+    for attempt in range(attempts):
+        export = _retry_warmup_export_path(target, retry_limit=retry_limit, attempt=attempt)
+        if export is not None:
+            export.unlink(missing_ok=True)
 
 
 def _prepare_retry_attempt_io(
@@ -1472,13 +1506,6 @@ def train_models(  # noqa: C901  # tracked complexity debt
     warmup_export_target = Path(warmup_export) if warmup_export else None
     warmup_import_target = Path(warmup_import) if warmup_import else None
 
-    def _attempt_export_path(attempt: int) -> Path | None:
-        if warmup_export_target is None or not retry_limit:
-            return warmup_export_target
-        return warmup_export_target.with_name(
-            f"{warmup_export_target.stem}.attempt_{attempt}{warmup_export_target.suffix}"
-        )
-
     def _run_fit(config: MCMCConfig, attempt: int):
         attempt_checkpoint, attempt_warmup_import = _prepare_retry_attempt_io(
             checkpoint_dir,
@@ -1494,7 +1521,11 @@ def train_models(  # noqa: C901  # tracked complexity debt
             exclude_from_idata=tuple(idata_excludes),
             exclude_from_collection=(tuple(collection_excludes) or None),
             checkpoint_dir=attempt_checkpoint,
-            warmup_export_path=_attempt_export_path(attempt),
+            warmup_export_path=_retry_warmup_export_path(
+                warmup_export_target,
+                retry_limit=retry_limit,
+                attempt=attempt,
+            ),
             warmup_import_path=attempt_warmup_import,
         )
 
@@ -1514,17 +1545,13 @@ def train_models(  # noqa: C901  # tracked complexity debt
             allow_divergences=ctx.allow_divergences,
         )
     )
-    if warmup_export_target is not None and retry_limit:
-        import shutil
-
-        selected_attempt = mcmc_config.seed - ctx.seed
-        selected_export = _attempt_export_path(selected_attempt)
-        if selected_export is not None and selected_export.exists():
-            shutil.copy2(selected_export, warmup_export_target)
-        for attempt in range(len(retry_attempts)):
-            attempt_export = _attempt_export_path(attempt)
-            if attempt_export is not None:
-                attempt_export.unlink(missing_ok=True)
+    _finalize_retry_warmup_export(
+        warmup_export_target,
+        retry_limit=retry_limit,
+        selected_seed=mcmc_config.seed,
+        initial_seed=ctx.seed,
+        attempts=len(retry_attempts),
+    )
 
     log.info(
         "model_fitted",
