@@ -538,7 +538,7 @@ def _predict_new_entities(
                 "discretize_observation": priors_obj.discretize_observation,
             }
 
-            if has_hetero:
+            if has_hetero or priors_obj.likelihood_family == "beta_binomial":
                 kwargs["n_reviews_new"] = jnp.array([n_reviews_val])
                 if not learn_n_exponent and n_exponent != 0.0:
                     kwargs["fixed_n_exponent"] = n_exponent

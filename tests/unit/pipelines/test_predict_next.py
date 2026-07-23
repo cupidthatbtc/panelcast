@@ -684,6 +684,22 @@ class TestPredictNewEntities:
         for call in mock_predict.call_args_list:
             assert "n_reviews_new" not in call.kwargs
 
+    def test_homoscedastic_beta_binomial_passes_aggregation_counts(
+        self, mock_posterior_samples, mock_summary
+    ):
+        summary = dict(mock_summary)
+        summary["priors"] = {
+            **summary["priors"],
+            "likelihood_family": "beta_binomial",
+        }
+
+        _, mock_predict = self._run(mock_posterior_samples, summary)
+
+        expected = [summary["n_reviews_stats"]["median"], summary["n_reviews_stats"]["min"]]
+        for call, count in zip(mock_predict.call_args_list, expected, strict=True):
+            np.testing.assert_array_equal(np.asarray(call.kwargs["n_reviews_new"]), [count])
+            assert "fixed_n_exponent" not in call.kwargs
+
     def test_heteroscedastic_passes_n_reviews(self, mock_posterior_samples, mock_summary):
         """Heteroscedastic (n_exponent=0.5) passes n_reviews_new."""
         summary = dict(mock_summary)
