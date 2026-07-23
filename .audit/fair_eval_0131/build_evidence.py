@@ -57,7 +57,10 @@ def metric_delta(old: dict, fixed: dict) -> dict:
     return {
         key: fixed[key] - old[key]
         for key in fixed
-        if isinstance(fixed[key], (int, float)) and key != "n"
+        if key != "n"
+        and key in old
+        and isinstance(old[key], (int, float))
+        and isinstance(fixed[key], (int, float))
     }
 
 

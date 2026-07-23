@@ -45,6 +45,13 @@ def test_recorded_builder_command_is_shell_valid_and_parseable() -> None:
     assert parsed.output == Path(".audit/fair_eval_0131")
 
 
+def test_metric_delta_skips_schema_mismatches() -> None:
+    assert _BUILDER.metric_delta(
+        {"n": 2, "shared": 1.0, "old_only": 4.0},
+        {"n": 2, "shared": 1.5, "new_only": 3.0},
+    ) == {"shared": 0.5}
+
+
 def test_builder_derives_paired_elpd_from_netcdf(tmp_path) -> None:
     entity_values = np.array([[[-1.0, -2.0, -3.0], [-1.0, -2.0, -3.0]]])
     incumbent_values = np.array([[[-1.1, -2.2, -3.4], [-1.1, -2.2, -3.4]]])
