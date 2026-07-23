@@ -70,6 +70,10 @@ GOLDEN_FEATURE_HASHES = {
     "entity_disjoint/test": ("f79929a90ee7329627d8d093eae5eb725abe70f1f130b1b2ae7fff207cc104ab"),
 }
 
+# Re-frozen for #295: feature_names is now the canonical (within_entity_temporal)
+# split's projection instead of whichever split iterated last. This fixture's
+# primary train rows include a Mixtape that the entity_disjoint train rows lack,
+# so is_mixtape appears — the parquet hashes above are untouched.
 GOLDEN_FEATURE_NAMES = [
     "album_sequence",
     "career_years",
@@ -79,6 +83,7 @@ GOLDEN_FEATURE_NAMES = [
     "date_missing",
     "is_album",
     "is_ep",
+    "is_mixtape",
     "user_prior_mean",
     "user_prior_std",
     "user_prior_count",
