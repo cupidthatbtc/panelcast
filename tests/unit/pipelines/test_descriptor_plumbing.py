@@ -75,11 +75,19 @@ class TestDescriptorDrivenPaths:
         stage = make_stage_data(descriptor=_aero_descriptor())
         assert str(stage.input_paths[0]).replace("\\", "/") == "elsewhere/flights.csv"
 
-    def test_descriptor_yaml_in_input_paths(self, tmp_path):
-        yaml_path = tmp_path / "aero.yaml"
-        yaml_path.write_text("name: aero\n", encoding="utf-8")
-        stage = make_stage_data(descriptor=_aero_descriptor(), descriptor_path=yaml_path)
-        assert yaml_path in stage.input_paths
+    def test_data_stage_hash_uses_semantic_descriptor_content(self):
+        descriptor = _aero_descriptor()
+        stage = make_stage_data(descriptor=descriptor)
+        presentation_only = make_stage_data(
+            descriptor=descriptor.model_copy(update={"invert_target_axis": True})
+        )
+        changed_target = make_stage_data(
+            descriptor=descriptor.model_copy(update={"target_bounds": (0.0, 20.0)})
+        )
+
+        assert stage.input_values == [descriptor.descriptor_hash()]
+        assert presentation_only.input_values == stage.input_values
+        assert changed_target.input_values != stage.input_values
 
     def test_splits_input_from_descriptor(self):
         stage = make_stage_splits(min_ratings=5, descriptor=_aero_descriptor())

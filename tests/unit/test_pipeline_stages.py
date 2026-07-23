@@ -70,6 +70,22 @@ class TestComputeInputHash:
         )
         assert stage.compute_input_hash() == ""
 
+    def test_hash_includes_semantic_input_values(self):
+        first = PipelineStage(
+            name="test",
+            description="Test",
+            run_fn=None,
+            input_values=["descriptor-a"],
+        )
+        second = PipelineStage(
+            name="test",
+            description="Test",
+            run_fn=None,
+            input_values=["descriptor-b"],
+        )
+        assert len(first.compute_input_hash()) == 64
+        assert first.compute_input_hash() != second.compute_input_hash()
+
     def test_hash_when_input_exists(self, tmp_path: Path):
         """Returns SHA256 hash when input file exists."""
         input_file = tmp_path / "input.csv"
