@@ -274,7 +274,9 @@ class TestUnknownFieldsAreFatal:
             "    parms: {x: 1}\n",
             encoding="utf-8",
         )
-        with pytest.raises(ValueError, match=r"feature_blocks\.0\.parms"):
+        with pytest.raises(
+            ValueError, match=r"feature_blocks\.0\.parms' — did you mean: params"
+        ):
             load_descriptor(yaml_path)
 
     def test_unknown_constructor_field_raises(self):

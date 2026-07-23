@@ -14,7 +14,8 @@ options given explicitly on the command line.
 keys, so a typo'd or nested key cannot silently fall back to the default. The
 `--allow-unknown-config-keys` escape downgrades the error to a warning for
 migrating old configs; ignored keys are then preserved in the run manifest
-under `unknown_config_keys` (their intended effect is still not applied). The
+under `unknown_config_keys` as provenance only — their intended effect is not
+applied, and they are never written to `resolved_config.yaml`. The
 same strictness applies to dataset descriptors: unknown descriptor fields are
 fatal.
 

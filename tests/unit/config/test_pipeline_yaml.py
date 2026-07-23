@@ -378,3 +378,19 @@ class TestUnknownKeysReachTheManifest:
         )
         orch._setup_run()
         assert orch.manifest.flags["unknown_config_keys"] == {"num_sample": 5000}
+
+    def test_unknown_keys_do_not_invalidate_skip_detection(self):
+        from panelcast.pipelines.manifest import flag_differences
+        from panelcast.pipelines.orchestrator import (
+            PipelineOrchestrator,
+            _get_default_config,
+        )
+
+        assert "unknown_config_keys" in PipelineOrchestrator.SKIP_FLAG_IGNORE
+        diffs = flag_differences(
+            {"seed": 42, "unknown_config_keys": {"num_sample": 5000}},
+            {"seed": 42, "unknown_config_keys": {}},
+            _get_default_config(),
+            ignore=PipelineOrchestrator.SKIP_FLAG_IGNORE,
+        )
+        assert diffs == []

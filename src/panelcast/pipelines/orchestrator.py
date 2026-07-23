@@ -966,7 +966,9 @@ class PipelineOrchestrator:
     # Flags that should not invalidate input-hash skip detection.
     # These only affect execution mechanics, not stage outputs.
     SKIP_FLAG_IGNORE = frozenset(
-        {"skip_existing", "dry_run", "verbose", "resume", "progress_bar"}
+        {"skip_existing", "dry_run", "verbose", "resume", "progress_bar",
+         # Provenance of ignored keys, never applied — must not force reruns.
+         "unknown_config_keys"}
     )
 
     def _skip_flag_differences(self, previous_manifest: RunManifest) -> list[str]:

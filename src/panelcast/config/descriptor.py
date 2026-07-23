@@ -13,6 +13,7 @@ Retargeting the pipeline to a new domain means writing one YAML file (see
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import math
@@ -363,19 +364,23 @@ def load_descriptor(ref: str | Path | None) -> DatasetDescriptor:
     try:
         descriptor = DatasetDescriptor(**data)
     except ValidationError as e:
-        unknown = [
-            ".".join(str(part) for part in err["loc"])
-            for err in e.errors()
-            if err["type"] == "extra_forbidden"
-        ]
-        if not unknown:
+        # Suggest against the model that owns the unknown leaf, not the root.
+        nested_models = {"feature_blocks": FeatureBlockSpec, "basis_curves": BasisCurveSpec}
+        lines = []
+        for err in e.errors():
+            if err["type"] != "extra_forbidden":
+                continue
+            loc = [str(part) for part in err["loc"]]
+            model = nested_models.get(loc[0], DatasetDescriptor)
+            matches = difflib.get_close_matches(loc[-1], list(model.model_fields), n=3, cutoff=0.6)
+            suggestion = f" — did you mean: {', '.join(matches)}?" if matches else ""
+            lines.append(f"  '{'.'.join(loc)}'{suggestion}")
+        if not lines:
             raise
-        from panelcast.config.pipeline_yaml import describe_unknown_keys
-
         raise ValueError(
             f"Unknown field(s) in dataset descriptor {path}:\n"
-            f"{describe_unknown_keys(unknown, DatasetDescriptor.model_fields)}\n"
-            "Unknown fields are fatal because a typo would silently keep the "
+            + "\n".join(sorted(lines))
+            + "\nUnknown fields are fatal because a typo would silently keep the "
             "AOTY default. Field reference: src/panelcast/config/descriptor.py."
         ) from e
     descriptor._source_path = path.resolve()
