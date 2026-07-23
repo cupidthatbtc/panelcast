@@ -249,6 +249,29 @@ class TestRunNewArtistPredictive:
         assert "fixed_n_exponent" in captured
         assert captured["fixed_n_exponent"] == pytest.approx(0.3)
 
+    def test_beta_binomial_adds_observed_aggregation_counts(self, summary):
+        s = dict(summary)
+        s["priors"] = {**summary["priors"], "likelihood_family": "beta_binomial"}
+        n_rev = np.array([17, 31], dtype=np.int32)
+        captured: dict = {}
+
+        def fake_predict(**kwargs):
+            captured.update(kwargs)
+            return {"y": np.ones((4, 2), dtype=np.float32)}
+
+        with patch("panelcast.pipelines.evaluate.predict_new_entity", side_effect=fake_predict):
+            _run_new_artist_predictive(
+                self._minimal_posterior(),
+                s,
+                np.zeros((2, 2), dtype=np.float32),
+                np.full(2, 70.0, dtype=np.float32),
+                n_rev,
+                seed=0,
+            )
+
+        np.testing.assert_array_equal(np.asarray(captured["n_reviews_new"]), n_rev)
+        assert "fixed_n_exponent" not in captured
+
 
 class TestComputeInfoCriteriaBranches:
     def test_entity_overdispersion_gate_excludes_entity_site(self):

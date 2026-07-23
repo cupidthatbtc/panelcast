@@ -222,6 +222,11 @@ def predict_new_entity_score(
     learn_n = summary.get("learn_n_exponent", False)
     n_exp = summary.get("n_exponent", 0.0)
     has_hetero = learn_n or n_exp != 0.0
+    likelihood_family = (
+        summary.get("likelihood_family")
+        or summary.get("priors", {}).get("likelihood_family")
+        or "studentt"
+    )
 
     prev = float(prev_score)
     if target_transform != "identity":
@@ -238,10 +243,10 @@ def predict_new_entity_score(
         "target_transform": target_transform,
         "logit_offset": logit_offset,
         "ar_center": ar_center_on_model_scale(summary),
-        "likelihood_family": summary.get("likelihood_family") or "studentt",
+        "likelihood_family": likelihood_family,
         "discretize_observation": bool(summary.get("discretize_observation")),
     }
-    if has_hetero:
+    if has_hetero or likelihood_family == "beta_binomial":
         kwargs["n_reviews_new"] = jnp.array([summary["n_reviews_stats"]["median"]])
         if not learn_n and n_exp != 0.0:
             kwargs["fixed_n_exponent"] = n_exp

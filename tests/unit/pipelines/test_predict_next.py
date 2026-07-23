@@ -6,7 +6,9 @@ external dependencies (JAX devices, NumPyro Predictive, file I/O, idata loading)
 
 from __future__ import annotations
 
+import importlib.util
 from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import jax.numpy as jnp
@@ -25,6 +27,15 @@ from panelcast.pipelines.predict_next import (
     predict_entity_next,
     predict_next_events,
 )
+
+_SCRIPT_SPEC = importlib.util.spec_from_file_location(
+    "panelcast_predict_entity_script",
+    Path(__file__).resolve().parents[3] / "scripts" / "predict_entity.py",
+)
+assert _SCRIPT_SPEC is not None and _SCRIPT_SPEC.loader is not None
+_SCRIPT_MODULE = importlib.util.module_from_spec(_SCRIPT_SPEC)
+_SCRIPT_SPEC.loader.exec_module(_SCRIPT_MODULE)
+predict_new_entity_score = _SCRIPT_MODULE.predict_new_entity_score
 
 
 class TestGroupPoolingArgs:
@@ -684,6 +695,22 @@ class TestPredictNewEntities:
         for call in mock_predict.call_args_list:
             assert "n_reviews_new" not in call.kwargs
 
+    def test_homoscedastic_beta_binomial_passes_aggregation_counts(
+        self, mock_posterior_samples, mock_summary
+    ):
+        summary = dict(mock_summary)
+        summary["priors"] = {
+            **summary["priors"],
+            "likelihood_family": "beta_binomial",
+        }
+
+        _, mock_predict = self._run(mock_posterior_samples, summary)
+
+        expected = [summary["n_reviews_stats"]["median"], summary["n_reviews_stats"]["min"]]
+        for call, count in zip(mock_predict.call_args_list, expected, strict=True):
+            np.testing.assert_array_equal(np.asarray(call.kwargs["n_reviews_new"]), [count])
+            assert "fixed_n_exponent" not in call.kwargs
+
     def test_heteroscedastic_passes_n_reviews(self, mock_posterior_samples, mock_summary):
         """Heteroscedastic (n_exponent=0.5) passes n_reviews_new."""
         summary = dict(mock_summary)
@@ -756,6 +783,32 @@ class TestPredictNewEntities:
         for call in mock_predict.call_args_list:
             assert call.kwargs["likelihood_family"] == "studentt"
             assert call.kwargs["discretize_observation"] is False
+
+
+class TestStandalonePredictEntity:
+    def test_homoscedastic_beta_binomial_passes_median_count(
+        self, mock_posterior_samples, mock_summary
+    ):
+        summary = dict(mock_summary)
+        summary["priors"] = {
+            **summary["priors"],
+            "likelihood_family": "beta_binomial",
+        }
+
+        with patch.object(
+            _SCRIPT_MODULE,
+            "predict_new_entity",
+            return_value={"y": np.ones(5, dtype=np.float32)},
+        ) as predict:
+            predict_new_entity_score(summary, mock_posterior_samples, prev_score=70.0)
+
+        kwargs = predict.call_args.kwargs
+        np.testing.assert_array_equal(
+            np.asarray(kwargs["n_reviews_new"]),
+            [summary["n_reviews_stats"]["median"]],
+        )
+        assert kwargs["likelihood_family"] == "beta_binomial"
+        assert "fixed_n_exponent" not in kwargs
 
 
 class TestPredictNextEvents:
