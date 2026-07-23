@@ -84,7 +84,7 @@ jobs:
           }' > "$CLODEX_HOME/providers.json"
 
           clodex providers refresh-models openai-oauth
-          SOL_MODEL="$(jq -r '[.providers[] | select(.id == "openai-oauth") | .modelsCache.models[] | select(.id | endswith("-sol")) | .id] | last // empty' "$CLODEX_HOME/providers.json")"
+          SOL_MODEL="$(jq -r '[.providers[] | select(.id == "openai-oauth") | .modelsCache.models[] | select(.id | endswith("-sol")) | .id] | first // empty' "$CLODEX_HOME/providers.json")"
           test -n "$SOL_MODEL"
           jq -n --arg model "$SOL_MODEL" '{
             lastModel: $model,
