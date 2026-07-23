@@ -12,18 +12,20 @@
 >
 > The reproducibility, diagnostics, and domain-portability scaffolding is the
 > finished part. The headline *statistical* result is now **partially
-> established on real data**: on a representative ~800-artist / ~5k-album AOTY
-> subset (skewness −2.08), the model **passes the convergence gate** at the
-> publication configuration under the promoted `offset_logit` transform
-> (R-hat 1.00, bulk ESS 2,333, 0 divergences), and the baseline benchmark runs
-> on the same real splits. Still open: the skewness/max/q90
-> posterior-predictive p-values stay pinned by a bounded-skew mismatch — the
-> transform relieved mean/sd/q50, and six likelihood families plus a
-> dequantization toggle were tried against the rest with **none resolving it**
-> — and this is a subset, not the full ~62k-album corpus. See
+> established on real data**: on a representative ~800-artist / ~5,182-album
+> AOTY subset (skewness −2.08), the published fit **passes the convergence
+> gate** at the amended publication configuration with the 0.13.0 entity-obs
+> default (R-hat 1.00, bulk ESS 1,119, 0 divergences), and the baseline
+> benchmark runs on the same real splits. Still open: the **skewness and max**
+> posterior-predictive p-values stay pinned by a bounded-skew mismatch — six
+> likelihood families plus a dequantization toggle were tried with **none
+> resolving them**, though the entity-obs default cleared q10 and q90, the
+> first movement on those tails — and this is the validated subset, not the
+> full eligible corpus (~62k albums with ≥10 ratings; #15). See
 > [`MODEL_CARD.md`](MODEL_CARD.md) and
 > [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md). Treat the
-> subset numbers as real but not final.
+> subset numbers as real but not final. Canonical numbers:
+> [`.audit/release_results.json`](.audit/release_results.json).
 
 **Hierarchical Bayesian prediction for bounded scores of events nested in entities over time — configured by one YAML descriptor.**
 
@@ -209,10 +211,11 @@ See [`docs/CLI.md`](docs/CLI.md) for the complete command reference.
 - [`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md) — raw schema and cleaned artifacts
 - [`MODEL_CARD.md`](MODEL_CARD.md) — intended use, results, and limitations
 
-A note on results: at the publication configuration the model now **passes the
-convergence gate** on a real ~800-artist / ~5k-album AOTY subset (R-hat 1.00,
-bulk ESS 2,333, 0 divergences) under the default **Student-t** likelihood on
-the `offset_logit` transformed scale:
+A note on results: at the amended publication configuration the published fit
+**passes the convergence gate** on a real ~800-artist / ~5,182-album AOTY
+subset (R-hat 1.00, bulk ESS 1,119, 0 divergences) under the default
+**Student-t** likelihood on the `offset_logit` transformed scale with the
+0.13.0 entity-obs default:
 
 ```bash
 panelcast run --preset publication        # 4 chains × 5000, Student-t likelihood
@@ -222,15 +225,18 @@ panelcast compare --baselines             # the model vs. simple baselines
 
 What's resolved: leak-safe splits with role-based names, an honest baseline
 comparison (`panelcast compare`) on the same real splits, and a convergent
-publication-scale fit on real data. Still open: the posterior-predictive
-p-values stay pinned at the extremes from a symmetric-likelihood /
-left-skewed-target mismatch — six likelihood families (`beta`, `skew_studentt`,
-`skew_normal`, `split_normal`, `beta_binomial`, `mixture`) plus a dequantization
-toggle were tried and **none resolves it** (see
-[`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md)) — and this is a
-subset, not the full ~62k-album corpus, which needs the full dataset and a GPU.
-The code, the diagnostics, and the honest naming of what is and isn't resolved
-are the point.
+publication-scale fit on real data. Still open: the **skewness and max**
+posterior-predictive p-values stay pinned at the extremes from a
+symmetric-likelihood / left-skewed-target mismatch — six likelihood families
+(`beta`, `skew_studentt`, `skew_normal`, `split_normal`, `beta_binomial`,
+`mixture`) plus a dequantization toggle were tried and **none resolves them**,
+though the entity-obs default cleared the q10 and q90 pins (see
+[`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md)) — and this is
+the validated subset, not the full eligible corpus (~62k albums with ≥10 user
+ratings), which needs the full dataset and a GPU (#15). The code, the
+diagnostics, and the honest naming of what is and isn't resolved are the point.
+Every headline number here derives from the canonical release-result manifest,
+[`.audit/release_results.json`](.audit/release_results.json), and drift fails CI.
 
 ## License
 

@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "description": "Canonical release-result manifest (#298). Every headline claim in README.md and MODEL_CARD.md derives from this file; tests/unit/test_publication_claims.py fails CI when a publication surface or this manifest drifts from .audit/baseline_metrics.json.",
+  "release": {
+    "adopted_as_default_in": "0.13.0",
+    "fit_produced_on": "0.12.x (bit-identical to the flipped 0.13.0 default via the likelihood-registry parity lock)",
+    "baseline_date": "2026-07-12"
+  },
+  "identity": {
+    "model_path": "models/user_score_20260712_014147.nc",
+    "seed": 42,
+    "preset": "publication (amended for 0.13.0): 4 chains x 5000 draws, warmup 5000, target_accept 0.90",
+    "likelihood_family": "studentt",
+    "target_transform": "offset_logit",
+    "heteroscedastic_entity_obs": true,
+    "feature_stamp_input_hash": "sha256 recorded in .audit/baseline_metrics.json feature_stamp",
+    "hardware": "RTX 5090 (GPU fit)"
+  },
+  "dataset_flow": {
+    "raw_corpus": {
+      "rows": 130000,
+      "approximate": true,
+      "note": "all_albums_full.csv scrape; includes albums without user scores"
+    },
+    "eligible_corpus": {
+      "albums": 62000,
+      "artists": 11600,
+      "approximate": true,
+      "note": "albums with a user score and >= 10 user ratings — the population the validated subset was sampled from and the full-corpus target of #15"
+    },
+    "validated_subset": {
+      "artists": 800,
+      "albums": 5182,
+      "artists_approximate": true,
+      "user_score_skewness": -2.08,
+      "note": "whole artists sampled with full discographies (scripts/make_aoty_subset.py)"
+    },
+    "evaluated_test": {
+      "within_entity_temporal_n": 653,
+      "entity_disjoint_n": 799,
+      "note": "multi-album artists with >= 10 ratings; one held-out next album per artist on the primary split"
+    }
+  },
+  "convergence_gate": {
+    "pass": true,
+    "rhat_max": 1.0,
+    "ess_bulk_min": 1119,
+    "divergences": 0,
+    "source": "0.13.0 entity-obs re-baseline confirmation fit (seed 42)"
+  },
+  "metrics": {
+    "within_entity_temporal": {
+      "mae": 5.28,
+      "rmse": 7.67,
+      "r2": 0.498,
+      "crps": 3.81,
+      "heldout_elpd": -2133.7,
+      "heldout_elpd_se": 23.7,
+      "heldout_elpd_per_obs": -3.27,
+      "coverage_80": 0.83,
+      "coverage_95": 0.968,
+      "interval_width_80": 17.0,
+      "interval_width_95": 31.0
+    },
+    "entity_disjoint": {
+      "mae": 6.82,
+      "rmse": 10.18,
+      "r2": 0.117,
+      "coverage_95": 0.965
+    },
+    "vs_incumbent": {
+      "paired_heldout_elpd_delta": 29.8,
+      "paired_heldout_elpd_se": 7.0,
+      "z": 4.25,
+      "incumbent": "0.6.0 default (entity-obs off)"
+    }
+  },
+  "ppc": {
+    "pinned": ["skewness", "max"],
+    "interior": ["mean", "sd", "min", "q10", "q50", "q90"],
+    "p_values": {
+      "mean": 0.721,
+      "sd": 0.365,
+      "skewness": 0.999,
+      "min": 0.828,
+      "max": 1.0,
+      "q10": 0.028,
+      "q50": 0.178,
+      "q90": 0.974
+    },
+    "note": "q10 sits near the 0.025 boundary but is interior; the entity-obs default cleared q10 and q90, the first movement on the bounded-skew tail misfit. skewness and max remain the confirmed structural mismatch."
+  },
+  "limitations": [
+    "skewness/max PPC pins are a confirmed structural symmetric-likelihood vs left-skewed-target mismatch; six alternative likelihood families plus dequantization did not resolve them (docs/LIKELIHOOD_CANDIDATES.md)",
+    "all numbers are from the ~5k-album validated subset, not the full eligible corpus; full-corpus validation is tracked as #15 and needs >24 GB GPU",
+    "domain portability is structural, not predictive: accuracy off the AOTY flagship is untested by construction"
+  ],
+  "artifacts": {
+    "metrics_snapshot": ".audit/baseline_metrics.json",
+    "promotion_evidence": ".audit/select_entityobs_confirm/",
+    "baselines_table": "docs/BASELINES.md",
+    "likelihood_evidence": "docs/LIKELIHOOD_CANDIDATES.md",
+    "decision_record": "docs/decisions/entity_overdispersion.md"
+  }
+}
