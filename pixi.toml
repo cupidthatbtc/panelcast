@@ -1,6 +1,6 @@
 [workspace]
 name = "panelcast"
-version = "0.13.1"
+version = "0.14.0"
 description = "Hierarchical Bayesian prediction for bounded scores of events nested in entities over time, configured by a YAML descriptor"
 channels = ["conda-forge"]
 platforms = ["win-64", "linux-64", "osx-arm64"]
