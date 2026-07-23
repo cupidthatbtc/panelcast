@@ -13,6 +13,11 @@ on:
       - pyproject.toml
       - .github/workflows/wheels.yml
 
+# A superseded push must not keep a 10-lane cross-OS matrix running.
+concurrency:
+  group: wheels-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-wheel:
     runs-on: ubuntu-latest
