@@ -68,7 +68,9 @@ feature_blocks:
 Key decisions:
 
 - **`target_bounds`** drive the model's soft-clipping and (under the
-  `offset_logit` transform) the exact logit offset. Get these right.
+  `offset_logit` transform) the exact logit offset. Get these right. Report
+  figures derive non-default-domain labels and fan-chart limits from the
+  descriptor/data; set `invert_target_axis: true` for magnitude-like targets.
 - **`model_prefix`** names every posterior site (`perf_beta`, `perf_rho`, …)
   and the model key in `models/manifest.json` (`perf_score`). Pick once;
   changing it later orphans fitted models.
@@ -117,7 +119,46 @@ common porting mistakes without touching the GPU: AOTY-scale `sigma_rw` /
 `sigma_artist` priors that don't match your target's scale, and covariate
 collinearity given the per-entity intercepts (e.g. an age-period-cohort
 identity from time-like covariates). It is warn-only; add `--strict` to make a
-FAIL exit nonzero in CI. See `docs/CONFIG_SPEC.md` for the two checks.
+FAIL exit nonzero in CI. See `docs/CONFIG_SPEC.md` for the checks.
+
+### First-fit acceptance checklist
+
+Use this order for a new domain; it separates data/descriptor mistakes from
+sampling failures before either can send you into a model-spec diagnostic loop.
+
+1. **Record claims and provenance first.** Extract the source paper's target
+   numbers, hash or otherwise identify the exact input bytes, and state what a
+   successful replication must recover before fitting anything.
+2. **Audit descriptor roles.** Confirm entity, event, and year columns have the
+   intended distinctness; catalog IDs remain strings; target bounds match the
+   stored scale; and the observation-count column has the meaning claimed by
+   `n_obs_is_aggregation_count`.
+3. **Protect true proportions.** A `beta_binomial` target with genuine trial
+   counts must use a unit span (`target_bounds: [0.0, 1.0]`). A wider span
+   expands the effective trial count and can make intervals absurdly tight;
+   `panelcast preflight --strict` rejects that configuration.
+4. **Audit feature identities.** Entity intercepts, cohort pooling, generic
+   temporal/history blocks, and domain age/experience covariates can form an
+   exact age-period-cohort identity. Strip redundant temporal/history blocks;
+   represent era through the cohort group when that matches the design.
+5. **Size priors from the data.** Compute the cross-entity SD and pooled
+   within-entity step SD of the target. Set the corresponding lognormal prior
+   locations near the log moments, with widths around 0.8–1.0, rather than
+   inheriting scales from a differently-sized domain.
+6. **Run preflight on the exact fit config.** Run the data, splits, and features
+   stages, then `panelcast preflight --dataset <name> --config <fit.yaml>
+   --strict`. Resolve every FAIL before starting MCMC.
+7. **Start with the robust fit recipe.** Use uniform initialization, warmup of at
+   least 2,000, and target acceptance of at least 0.90. If the source model has
+   no persistence term, pin `rho` tightly near zero rather than leaving an
+   unidentified AR channel.
+8. **Verify resolved knobs.** Read the run's `resolved_config.yaml`; do not infer
+   from the input YAML that a key reached the model.
+9. **Autopsy chains before changing the model.** Inspect per-chain posteriors. A
+   group of agreeing chains plus one boundary-scale, tree-depth-saturated chain
+   is a caged chain, not evidence for a new specification. Retry or exclude it
+   under a declared protocol, then accept only a diagnostics-passing run that
+   agrees with the healthy-chain consensus across seeds.
 
 ## Step 3 — Verify
 
