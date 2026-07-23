@@ -9,7 +9,6 @@ Usage: python scripts/execute_notebook.py examples/quickstart.ipynb [timeout_s]
 
 from __future__ import annotations
 
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -19,12 +18,13 @@ from nbclient import NotebookClient
 
 
 def main() -> int:
+    if len(sys.argv) < 2:
+        print(__doc__)
+        return 2
     notebook = Path(sys.argv[1]).resolve()
     timeout = int(sys.argv[2]) if len(sys.argv) > 2 else 600
+    nb = nbformat.read(notebook, as_version=4)
     with tempfile.TemporaryDirectory() as scratch:
-        staged = Path(scratch) / notebook.name
-        shutil.copy2(notebook, staged)
-        nb = nbformat.read(staged, as_version=4)
         client = NotebookClient(
             nb,
             timeout=timeout,
