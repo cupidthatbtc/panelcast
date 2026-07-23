@@ -90,6 +90,14 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "max_tree_depth": _spec("max_tree_depth", "max_tree_depth"),
     "chain_method": _spec("chain_method", "chain_method", _as_chain_method),
     "checkpoint_every": _spec("checkpoint_every_draws", "checkpoint_every"),
+    "caged_chain_retries": _spec("caged_chain_retries", "caged_chain_retries"),
+    "caged_chain_tree_depth_fraction": _spec(
+        "caged_chain_tree_depth_fraction", "caged_chain_tree_depth_fraction"
+    ),
+    "caged_chain_boundary_sigma": _spec("caged_chain_boundary_sigma", "caged_chain_boundary_sigma"),
+    "caged_chain_consensus_ratio": _spec(
+        "caged_chain_consensus_ratio", "caged_chain_consensus_ratio"
+    ),
     # Warmup-transfer seams (no CLI flags; the select runner writes them per arm).
     "warmup_export_path": _spec("warmup_export_path"),
     "warmup_import_path": _spec("warmup_import_path"),

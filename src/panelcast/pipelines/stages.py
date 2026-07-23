@@ -89,6 +89,10 @@ class StageContext:
     # Blocked-sampling checkpoint cadence; None = single-shot. train_bayes reads
     # this via getattr, so a dropped field silently disables checkpointing.
     checkpoint_every_draws: int | None = None
+    caged_chain_retries: int = 0
+    caged_chain_tree_depth_fraction: float = 0.95
+    caged_chain_boundary_sigma: float = 0.005
+    caged_chain_consensus_ratio: float = 5.0
     # Convergence thresholds
     rhat_threshold: float = 1.01
     ess_threshold: int = 400

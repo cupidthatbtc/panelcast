@@ -30,10 +30,61 @@ import numpy as np
 import pandas as pd
 
 __all__ = [
+    "CagedChain",
+    "CagedChainDiagnostics",
     "ConvergenceDiagnostics",
     "check_convergence",
+    "detect_caged_chains",
     "get_divergence_info",
 ]
+
+
+@dataclass(frozen=True)
+class CagedChain:
+    """One chain meeting both caged-chain criteria."""
+
+    chain_id: int | str
+    mean_num_steps: float
+    mean_sigma: float
+    consensus_sigma: float
+
+
+@dataclass(frozen=True)
+class CagedChainDiagnostics:
+    """Post-fit caged-chain classification and its exact criterion."""
+
+    scale_parameter: str
+    max_num_steps: int
+    tree_depth_fraction: float
+    boundary_sigma: float
+    consensus_ratio: float
+    chains: list[CagedChain]
+
+    @property
+    def chain_ids(self) -> list[int | str]:
+        return [chain.chain_id for chain in self.chains]
+
+    def to_dict(self) -> dict:
+        return {
+            "count": len(self.chains),
+            "chain_ids": self.chain_ids,
+            "scale_parameter": self.scale_parameter,
+            "criterion": {
+                "mean_num_steps_gte": self.tree_depth_fraction * self.max_num_steps,
+                "max_num_steps": self.max_num_steps,
+                "posterior_mean_sigma_lte": self.boundary_sigma,
+                "other_chain_median_ratio_gte": self.consensus_ratio,
+            },
+            "chains": [
+                {
+                    "chain_id": chain.chain_id,
+                    "mean_num_steps": chain.mean_num_steps,
+                    "posterior_mean_sigma": chain.mean_sigma,
+                    "other_chain_median_sigma": chain.consensus_sigma,
+                }
+                for chain in self.chains
+            ],
+        }
 
 
 @dataclass(frozen=True)
@@ -79,6 +130,72 @@ class ConvergenceDiagnostics:
             f"ess_bulk_min={self.ess_bulk_min}, "
             f"divergences={self.divergences})"
         )
+
+
+def detect_caged_chains(
+    idata: az.InferenceData,
+    *,
+    scale_parameter: str,
+    max_tree_depth: int,
+    tree_depth_fraction: float = 0.95,
+    boundary_sigma: float = 0.005,
+    consensus_ratio: float = 5.0,
+) -> CagedChainDiagnostics:
+    """Find chains that are both tree-depth saturated and at a scale boundary."""
+    max_num_steps = 2**max_tree_depth - 1
+    result = CagedChainDiagnostics(
+        scale_parameter=scale_parameter,
+        max_num_steps=max_num_steps,
+        tree_depth_fraction=tree_depth_fraction,
+        boundary_sigma=boundary_sigma,
+        consensus_ratio=consensus_ratio,
+        chains=[],
+    )
+    if (
+        "posterior" not in idata.groups()
+        or "sample_stats" not in idata.groups()
+        or scale_parameter not in idata.posterior
+        or "num_steps" not in idata.sample_stats
+    ):
+        return result
+
+    steps = idata.sample_stats["num_steps"]
+    sigma = idata.posterior[scale_parameter]
+    step_means = steps.mean(dim=[dim for dim in steps.dims if dim != "chain"])
+    sigma_means = sigma.mean(dim=[dim for dim in sigma.dims if dim != "chain"])
+    chain_ids = list(step_means.coords["chain"].values)
+    if len(chain_ids) < 2:
+        return result
+
+    caged: list[CagedChain] = []
+    for chain_id in chain_ids:
+        mean_steps = float(step_means.sel(chain=chain_id).values)
+        mean_sigma = float(sigma_means.sel(chain=chain_id).values)
+        other_sigmas = [
+            float(sigma_means.sel(chain=other).values) for other in chain_ids if other != chain_id
+        ]
+        consensus_sigma = float(np.median(other_sigmas))
+        saturated = mean_steps >= tree_depth_fraction * max_num_steps
+        boundary = mean_sigma <= boundary_sigma
+        separated = consensus_sigma >= consensus_ratio * mean_sigma
+        if saturated and boundary and separated:
+            serial_id = chain_id.item() if isinstance(chain_id, np.generic) else chain_id
+            caged.append(
+                CagedChain(
+                    chain_id=serial_id,
+                    mean_num_steps=mean_steps,
+                    mean_sigma=mean_sigma,
+                    consensus_sigma=consensus_sigma,
+                )
+            )
+    return CagedChainDiagnostics(
+        scale_parameter=scale_parameter,
+        max_num_steps=max_num_steps,
+        tree_depth_fraction=tree_depth_fraction,
+        boundary_sigma=boundary_sigma,
+        consensus_ratio=consensus_ratio,
+        chains=caged,
+    )
 
 
 def check_convergence(

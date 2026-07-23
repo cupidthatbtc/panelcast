@@ -1,8 +1,11 @@
 """Bayesian hierarchical models for album score prediction."""
 
 from panelcast.models.bayes.diagnostics import (
+    CagedChain,
+    CagedChainDiagnostics,
     ConvergenceDiagnostics,
     check_convergence,
+    detect_caged_chains,
     get_divergence_info,
 )
 from panelcast.models.bayes.fit import (
@@ -48,8 +51,11 @@ __all__ = [
     "FitResult",
     "get_gpu_info",
     # Diagnostics
+    "CagedChain",
+    "CagedChainDiagnostics",
     "ConvergenceDiagnostics",
     "check_convergence",
+    "detect_caged_chains",
     "get_divergence_info",
     # Prediction
     "PredictionResult",

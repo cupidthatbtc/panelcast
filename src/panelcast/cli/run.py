@@ -579,6 +579,40 @@ def run(
             ),
         ),
     ] = None,
+    caged_chain_retries: Annotated[
+        int,
+        typer.Option(
+            "--caged-chain-retries",
+            min=0,
+            max=10,
+            help="Auto-reseed caged-chain fits up to N times (default: off)",
+        ),
+    ] = 0,
+    caged_chain_tree_depth_fraction: Annotated[
+        float,
+        typer.Option(
+            "--caged-chain-tree-depth-fraction",
+            min=0.01,
+            max=1.0,
+            help="Mean NUTS step-budget fraction used to identify a caged chain",
+        ),
+    ] = 0.95,
+    caged_chain_boundary_sigma: Annotated[
+        float,
+        typer.Option(
+            "--caged-chain-boundary-sigma",
+            min=1e-12,
+            help="Maximum posterior-mean entity sigma for a caged chain",
+        ),
+    ] = 0.005,
+    caged_chain_consensus_ratio: Annotated[
+        float,
+        typer.Option(
+            "--caged-chain-consensus-ratio",
+            min=1.000001,
+            help="Minimum other-chain median/entity-sigma ratio for a caged chain",
+        ),
+    ] = 5.0,
     # Convergence Thresholds
     rhat_threshold: Annotated[
         float,
@@ -887,6 +921,10 @@ def run(
         max_tree_depth=max_tree_depth,
         chain_method=chain_method,
         checkpoint_every_draws=checkpoint_every,
+        caged_chain_retries=caged_chain_retries,
+        caged_chain_tree_depth_fraction=caged_chain_tree_depth_fraction,
+        caged_chain_boundary_sigma=caged_chain_boundary_sigma,
+        caged_chain_consensus_ratio=caged_chain_consensus_ratio,
         # Convergence thresholds
         rhat_threshold=rhat_threshold,
         ess_threshold=ess_threshold,
