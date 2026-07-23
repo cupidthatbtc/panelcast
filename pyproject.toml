@@ -154,7 +154,7 @@ enable_error_code = ["return-value", "assignment"]
 # Ship the PEP 561 marker so downstream type checkers trust panelcast's inline
 # types (see docs/API.md for the supported import surface).
 [tool.setuptools.package-data]
-panelcast = ["py.typed"]
+panelcast = ["py.typed", "_data/**/*"]
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]

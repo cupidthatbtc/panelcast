@@ -1,17 +1,18 @@
 # Getting Started
 
-Step-by-step guide from cloning the repository to running your first prediction.
+Step-by-step guide from installation to running your first prediction.
 This is the quickstart for panelcast's flagship example domain, **Album of the
 Year (AOTY)**. To run a different domain, see `docs/PORTING.md` — the steps are
 the same, with that domain's descriptor and dataset path.
 
-> **Fastest path — no data required.** After installing (Steps 1–3 below), run
-> `panelcast demo`. It runs the whole pipeline end-to-end on the bundled
-> synthetic aerospace example (`examples/aerospace/`) at tiny scale and writes a
-> model card under `outputs/<run_id>/reports/` — a one-command way to see every
-> stage execute before wiring up the AOTY dataset. Then `panelcast compare --baselines
-> --dataset examples/aerospace/descriptor.yaml` prints the baseline benchmark
-> table for that run.
+> **Fastest path — no clone or data required.** Run `pip install panelcast`, then
+> `panelcast demo` from an empty directory. It runs the whole pipeline end-to-end
+> on the wheel's bundled synthetic aerospace example at tiny scale and writes a
+> model card under `outputs/<run_id>/reports/`. Then `panelcast compare
+> --baselines --dataset aero` prints the baseline benchmark table for that run.
+>
+> For an exact reproducible environment or development checkout, follow the pixi
+> steps below; `pixi.lock` remains the authoritative dependency lock.
 
 ## Prerequisites
 

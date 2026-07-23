@@ -176,7 +176,7 @@ def export_figures(
 @app.command("demo")
 def demo(
     descriptor_path: str = typer.Option(
-        "examples/aerospace/descriptor.yaml",
+        "aero",
         "--descriptor",
         "--dataset",
         help="Descriptor YAML for the demo dataset (--dataset is an alias, as in run/stage).",
@@ -204,14 +204,14 @@ def demo(
     """
     from pathlib import Path
 
+    from panelcast.config.descriptor import resolve_demo_descriptor_path
     from panelcast.pipelines.orchestrator import PipelineConfig, run_pipeline
 
-    if not Path(descriptor_path).exists():
-        typer.echo(
-            f"Error: demo descriptor not found at {descriptor_path}.\n"
-            "Regenerate the example with: python scripts/generate_aero_example.py"
-        )
+    resolved_descriptor = resolve_demo_descriptor_path(descriptor_path)
+    if not resolved_descriptor.exists():
+        typer.echo(f"Error: demo descriptor not found at {descriptor_path}.")
         raise typer.Exit(code=1)
+    descriptor_path = str(resolved_descriptor)
 
     typer.echo(f"Running the panelcast demo on {descriptor_path} (tiny scale)...\n")
 

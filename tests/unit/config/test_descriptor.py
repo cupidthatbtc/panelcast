@@ -206,6 +206,51 @@ class TestLoadDescriptor:
         d = load_descriptor(yaml_path)
         assert d.raw_path_default == "/data/somewhere.csv"
 
+    def test_raw_path_environment_override_wins(self, tmp_path, monkeypatch):
+        override = tmp_path / "override.csv"
+        monkeypatch.setenv("CUSTOM_DATA_PATH", str(override))
+        descriptor = DatasetDescriptor(
+            raw_path_env="CUSTOM_DATA_PATH",
+            raw_path_default="bundled.csv",
+        )
+        assert descriptor.resolve_raw_path() == override
+
+    def test_raw_path_falls_back_to_descriptor_directory(self, tmp_path, monkeypatch):
+        descriptor_dir = tmp_path / "domain"
+        descriptor_dir.mkdir()
+        csv_path = descriptor_dir / "panel.csv"
+        csv_path.write_text("entity,target\na,1\n", encoding="utf-8")
+        yaml_path = descriptor_dir / "descriptor.yaml"
+        yaml_path.write_text("raw_path_default: panel.csv\n", encoding="utf-8")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        descriptor = load_descriptor(yaml_path)
+
+        assert descriptor.resolve_raw_path() == csv_path
+
+    def test_descriptor_directory_wins_over_checkout_root_collision(
+        self, tmp_path, monkeypatch
+    ):
+        checkout = tmp_path / "checkout"
+        descriptor_dir = checkout / "examples" / "domain"
+        descriptor_dir.mkdir(parents=True)
+        (checkout / "pyproject.toml").write_text("[project]\nname='test'\n", encoding="utf-8")
+        root_csv = checkout / "panel.csv"
+        local_csv = descriptor_dir / "panel.csv"
+        root_csv.write_text("entity,target\nroot,1\n", encoding="utf-8")
+        local_csv.write_text("entity,target\nlocal,2\n", encoding="utf-8")
+        yaml_path = descriptor_dir / "descriptor.yaml"
+        yaml_path.write_text("raw_path_default: panel.csv\n", encoding="utf-8")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        descriptor = load_descriptor(yaml_path)
+
+        assert descriptor.resolve_raw_path() == local_csv
+
 
 class TestFeatureBlockSpec:
     def test_defaults(self):

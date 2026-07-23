@@ -239,7 +239,7 @@ class TestPrepareConfigDescriptorResolution:
     def test_raw_path_falls_back_to_descriptor_default(self, monkeypatch):
         monkeypatch.delenv("AERO_DATASET_PATH", raising=False)
         cfg = PrepareConfig(descriptor=_aero_descriptor())
-        assert cfg.raw_path == "data/raw/test_flights.csv"
+        assert cfg.raw_path == "examples/aerospace/flights.csv"
 
     def test_thresholds_and_primary_resolve_from_descriptor(self):
         cfg = PrepareConfig(descriptor=_aero_descriptor())

@@ -1,0 +1,37 @@
+# AOTY dataset descriptor.
+#
+# Every DatasetDescriptor field defaults to the AOTY literal it replaced, so
+# this file only needs to (re)state the name: `--dataset aoty_full` must be
+# byte-identical to running with no --dataset flag at all (verified by
+# tests/e2e/test_domain_portability.py).
+#
+# Full field reference: src/panelcast/config/descriptor.py.
+# Worked non-music example: configs/datasets/aero.yaml + docs/PORTING.md.
+#
+# Operational note: processed data, splits, features and models all live under
+# relative paths (data/, models/, outputs/) — run each domain from its own
+# working directory to keep artifacts isolated. A --data-root option is a
+# post-publication stretch item.
+
+name: aoty
+
+# Commented examples of the AOTY defaults this file inherits (do not uncomment
+# unless you mean to override):
+#
+# raw_path_env: AOTY_DATASET_PATH
+# raw_path_default: data/raw/all_albums_full.csv
+# encoding: utf-8-sig
+# entity_col: Artist
+# event_col: Album
+# target_col: User_Score
+# target_bounds: [0.0, 100.0]
+# model_prefix: user
+# n_obs_col: User_Ratings
+# secondary_target_col: Critic_Score
+# secondary_prefix: critic
+# secondary_n_obs_col: Critic_Reviews
+# date_format: "%B %d, %Y"
+# min_obs_thresholds: [5, 10, 25]
+# primary_min_obs: 10
+# processed_name_template: "user_score_minratings_{min_ratings}"
+# feature_packs: [aoty]

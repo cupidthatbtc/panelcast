@@ -7,7 +7,6 @@ dependencies, input/output paths, and hash-based skip logic for incremental runs
 from __future__ import annotations
 
 import hashlib
-import os
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -467,7 +466,7 @@ def _run_sensitivity_stage(ctx: StageContext):
 def _resolve_raw_dataset_path(descriptor: DatasetDescriptor | None = None) -> Path:
     """Resolve raw dataset path from environment with descriptor default."""
     descriptor = descriptor or DatasetDescriptor()
-    return Path(os.environ.get(descriptor.raw_path_env, descriptor.raw_path_default))
+    return descriptor.resolve_raw_path()
 
 
 def make_stage_data(
