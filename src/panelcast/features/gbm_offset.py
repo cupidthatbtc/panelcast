@@ -8,6 +8,7 @@ scored a row never saw its target); held-out rows get the full-train model.
 
 from __future__ import annotations
 
+import hashlib
 from typing import ClassVar
 
 import numpy as np
@@ -41,6 +42,8 @@ class GbmOffsetBlock(BaseFeatureBlock):
         *,
         target_col: str,
         entity_col: str | None = None,
+        date_col: str | None = None,
+        event_col: str | None = None,
         n_splits: int = 5,
         random_state: int = 0,
     ) -> None:
@@ -51,6 +54,8 @@ class GbmOffsetBlock(BaseFeatureBlock):
         self.requires = [b.name for b in self.base_blocks]
         self.target_col = target_col
         self.entity_col = entity_col
+        self.date_col = date_col
+        self.event_col = event_col
         self.n_splits = n_splits
         self.random_state = random_state
         self.required_columns = [ROW_ID_COL, target_col]
@@ -66,6 +71,168 @@ class GbmOffsetBlock(BaseFeatureBlock):
             X = X.reindex(columns=self._feature_cols_)
         return X
 
+    @staticmethod
+    def _row_hash(row_ids: pd.Series) -> str:
+        values = ",".join(str(value) for value in sorted(row_ids.astype(int).tolist()))
+        return hashlib.sha256(values.encode()).hexdigest()
+
+    def _temporal_oof(
+        self,
+        df: pd.DataFrame,
+        X: pd.DataFrame,
+        y: np.ndarray,
+        seed: int,
+    ) -> np.ndarray:
+        """Score rows with a bounded set of leakage-safe temporal/entity folds."""
+        assert self.entity_col is not None and self.date_col is not None
+        if self.date_col not in df.columns:
+            raise ValueError(f"gbm_offset: configured date_col '{self.date_col}' is absent")
+
+        date_values = df[self.date_col]
+        if pd.api.types.is_datetime64_any_dtype(date_values.dtype):
+            dates = pd.to_datetime(date_values, errors="coerce", utc=True).dt.tz_convert(None)
+        else:
+            try:
+                dates = pd.to_datetime(
+                    date_values, errors="coerce", format="mixed", utc=True
+                ).dt.tz_convert(None)
+            except TypeError:  # pandas < 2.0
+                dates = pd.to_datetime(date_values, errors="coerce", utc=True).dt.tz_convert(None)
+        if not bool(dates.notna().any()):
+            raise ValueError(
+                f"gbm_offset: date_col '{self.date_col}' has no parseable dates; "
+                "temporal OOF cannot establish an admissible history"
+            )
+        event = (
+            df[self.event_col].astype("string").fillna("")
+            if self.event_col is not None and self.event_col in df.columns
+            else pd.Series("", index=df.index, dtype="string")
+        )
+        chronology_frame = pd.DataFrame(
+            {
+                "date_missing": dates.isna().astype("int8"),
+                "date": dates,
+                "event": event,
+                "row_id": df[ROW_ID_COL].astype(np.int64),
+                "position": np.arange(len(df), dtype=np.int64),
+            },
+            index=df.index,
+        )
+        global_order = chronology_frame.sort_values(
+            ["date_missing", "date", "event", "row_id"],
+            ascending=[True, True, True, True],
+            kind="stable",
+            na_position="last",
+        )
+        order_positions = global_order["position"].to_numpy(dtype=np.int64)
+        rank_values = np.empty(len(df), dtype=np.int64)
+        rank_values[order_positions] = np.arange(len(df))
+        rank = pd.Series(rank_values, index=df.index)
+        entities = df[self.entity_col]
+
+        first_for_entity = rank.groupby(entities, sort=False).transform("min") == rank
+        cold_positions = np.flatnonzero(first_for_entity.to_numpy())
+        prospective_positions = np.flatnonzero((~first_for_entity).to_numpy())
+        oof = np.full(len(df), np.nan, dtype=float)
+        manifest: list[dict[str, object]] = []
+
+        def fit_fold(
+            fit_positions: np.ndarray,
+            held_positions: np.ndarray,
+            estimand: str,
+            cutoff: object,
+        ) -> None:
+            if not len(fit_positions) or not len(held_positions):
+                return
+            if np.intersect1d(fit_positions, held_positions).size:
+                raise AssertionError("gbm_offset OOF fold includes a held row in its fit set")
+            model = HistGradientBoostingRegressor(random_state=seed)
+            model.fit(X.iloc[fit_positions], y[fit_positions])
+            oof[held_positions] = model.predict(X.iloc[held_positions])
+            fit_entities = set(entities.iloc[fit_positions])
+            held_entities = set(entities.iloc[held_positions])
+            overlap_entities = fit_entities & held_entities
+            if estimand == "cold_start" and overlap_entities:
+                raise AssertionError("gbm_offset cold-start fold has entity overlap")
+            min_held_rank = int(rank.iloc[held_positions].min())
+            max_fit_rank = int(rank.iloc[fit_positions].max())
+            if estimand == "prospective_within_entity" and max_fit_rank >= min_held_rank:
+                raise AssertionError("gbm_offset prospective fold includes future observations")
+            fit_date_max = dates.iloc[fit_positions].max()
+            held_date_min = dates.iloc[held_positions].min()
+            if (
+                estimand == "prospective_within_entity"
+                and not pd.isna(held_date_min)
+                and (pd.isna(fit_date_max) or fit_date_max >= held_date_min)
+            ):
+                raise AssertionError(
+                    "gbm_offset prospective fold includes contemporaneous observations"
+                )
+            manifest.append(
+                {
+                    "protocol": "entity_aware_temporal_v1",
+                    "estimand": estimand,
+                    "held_row_hash": self._row_hash(df.iloc[held_positions][ROW_ID_COL]),
+                    "fit_row_hash": self._row_hash(df.iloc[fit_positions][ROW_ID_COL]),
+                    "effective_date_cutoff": cutoff,
+                    "fit_effective_date_max": (
+                        None if pd.isna(fit_date_max) else fit_date_max.isoformat()
+                    ),
+                    "min_held_rank": min_held_rank,
+                    "max_fit_rank": max_fit_rank,
+                    "n_fit_rows": int(len(fit_positions)),
+                    "n_held_rows": int(len(held_positions)),
+                    "n_fit_missing_dates": int(dates.iloc[fit_positions].isna().sum()),
+                    "held_date_missing": bool(dates.iloc[held_positions].isna().any()),
+                    "entity_overlap": bool(overlap_entities),
+                    "entity_overlap_count": len(overlap_entities),
+                }
+            )
+
+        if len(cold_positions):
+            cold_entities = entities.iloc[cold_positions].to_numpy()
+            unique_entities = pd.unique(cold_entities)
+            n_entity_folds = min(self.n_splits, len(unique_entities))
+            if n_entity_folds < 2:
+                raise ValueError(
+                    "gbm_offset: cold-start OOF requires at least two entities; "
+                    "a single-entity panel cannot identify the cold-start estimand"
+                )
+            for _, held_local in GroupKFold(n_splits=n_entity_folds).split(
+                cold_positions, groups=cold_entities
+            ):
+                held = cold_positions[held_local]
+                held_values = set(entities.iloc[held])
+                fit = np.flatnonzero((~entities.isin(held_values)).to_numpy())
+                fit_fold(fit, held, "cold_start", None)
+
+        if len(prospective_positions):
+            prospective_positions = prospective_positions[
+                np.argsort(rank.iloc[prospective_positions].to_numpy())
+            ]
+            dated = prospective_positions[dates.iloc[prospective_positions].notna().to_numpy()]
+            undated = prospective_positions[dates.iloc[prospective_positions].isna().to_numpy()]
+            dated_fold_limit = self.n_splits - int(bool(len(undated)))
+            if len(dated):
+                for held in np.array_split(dated, min(max(1, dated_fold_limit), len(dated))):
+                    cutoff_date = dates.iloc[held].min()
+                    fit = np.flatnonzero((dates < cutoff_date).to_numpy())
+                    fit_fold(
+                        fit,
+                        held,
+                        "prospective_within_entity",
+                        cutoff_date.isoformat(),
+                    )
+            if len(undated):
+                fit = np.flatnonzero(dates.notna().to_numpy())
+                fit_fold(fit, undated, "prospective_within_entity", None)
+
+        if np.isnan(oof).any():
+            missing_ids = df.loc[np.isnan(oof), ROW_ID_COL].astype(int).tolist()
+            raise ValueError(f"gbm_offset: no admissible OOF fold for row_ids {missing_ids}")
+        self._fold_manifest_ = manifest
+        return oof
+
     def fit(self, df: pd.DataFrame, ctx: FeatureContext) -> GbmOffsetBlock:
         self.validate_columns(df)
         X = self._features(df, ctx)
@@ -79,42 +246,63 @@ class GbmOffsetBlock(BaseFeatureBlock):
             )
 
         seed = int(getattr(ctx, "random_state", self.random_state))
-        self._full_model_ = HistGradientBoostingRegressor(random_state=seed).fit(X, y)
 
-        oof = self._full_model_.predict(X)
-        # Group out-of-fold folds by entity so a train row's offset never
-        # conditions on the same entity's other (chronologically later) targets;
-        # held-out rows only ever see the past-only full-train model, so the
-        # covariate would otherwise carry more information in train than in test.
-        groups = None
+        if self.entity_col is not None and self.entity_col not in df.columns:
+            raise ValueError(
+                f"gbm_offset: configured entity_col '{self.entity_col}' is absent from "
+                "the fit frame; refusing entity-blind fallback."
+            )
         if self.entity_col is not None:
-            if self.entity_col not in df.columns:
+            entities = df[self.entity_col]
+            invalid = entities.isna()
+            invalid |= entities.map(
+                lambda value: isinstance(value, (int, float, np.number))
+                and not np.isfinite(value)
+            )
+            if bool(invalid.any()):
+                row_ids = df.loc[invalid, ROW_ID_COL].astype(int).tolist()
                 raise ValueError(
-                    f"gbm_offset: configured entity_col '{self.entity_col}' is "
-                    "absent from the fit frame; refusing to silently fall back to "
-                    "entity-blind KFold, which would reintroduce within-entity "
-                    "leakage. Pass entity_col=None only for non-panel data."
+                    f"gbm_offset: entity_col '{self.entity_col}' has null or non-finite "
+                    f"identities for row_ids {row_ids}"
                 )
-            groups = df[self.entity_col].to_numpy()
-        n_splits = min(self.n_splits, len(df))
-        if groups is not None:
-            n_splits = min(n_splits, int(pd.unique(groups).size))
-        if n_splits >= 2:
+
+        self._full_model_ = HistGradientBoostingRegressor(random_state=seed).fit(X, y)
+        if self.entity_col is not None and self.date_col is not None:
+            oof = self._temporal_oof(df, X, y, seed)
+        else:
+            # Explicit legacy/non-panel migration path. Repository defaults pass
+            # entity+date and therefore use entity_aware_temporal_v1.
+            oof = self._full_model_.predict(X)
+            groups = df[self.entity_col].to_numpy() if self.entity_col is not None else None
+            n_splits = min(self.n_splits, len(df))
             if groups is not None:
-                splits = GroupKFold(n_splits=n_splits).split(X, y, groups)
-            else:
-                splits = KFold(
-                    n_splits=n_splits, shuffle=True, random_state=seed
-                ).split(X)
-            for fit_idx, held_idx in splits:
-                fold_model = HistGradientBoostingRegressor(random_state=seed)
-                fold_model.fit(X.iloc[fit_idx], y[fit_idx])
-                oof[held_idx] = fold_model.predict(X.iloc[held_idx])
+                n_splits = min(n_splits, int(pd.unique(groups).size))
+            if n_splits >= 2:
+                splits = (
+                    GroupKFold(n_splits=n_splits).split(X, y, groups)
+                    if groups is not None
+                    else KFold(n_splits=n_splits, shuffle=True, random_state=seed).split(X)
+                )
+                for fit_idx, held_idx in splits:
+                    fold_model = HistGradientBoostingRegressor(random_state=seed)
+                    fold_model.fit(X.iloc[fit_idx], y[fit_idx])
+                    oof[held_idx] = fold_model.predict(X.iloc[held_idx])
+            self._fold_manifest_ = [
+                {
+                    "protocol": "legacy_group_kfold" if groups is not None else "legacy_kfold",
+                    "n_fit_rows": int(len(df)),
+                }
+            ]
         self._oof_by_row_id_ = dict(
             zip(df[ROW_ID_COL].astype(np.int64), oof.astype(float), strict=True)
         )
         self._fitted_ = True
         return self
+
+    @property
+    def fold_manifest(self) -> list[dict[str, object]]:
+        self._check_is_fitted()
+        return [dict(record) for record in self._fold_manifest_]
 
     def transform(self, df: pd.DataFrame, ctx: FeatureContext) -> FeatureOutput:
         self._check_is_fitted()
