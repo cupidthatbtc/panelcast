@@ -24,6 +24,7 @@ from numpyro.infer import Predictive, log_likelihood
 from scipy.special import logsumexp
 
 from panelcast.data.alignment import join_splits_with_features
+from panelcast.data.chronology import normalize_chronology
 from panelcast.data.imputation import apply_imputation
 from panelcast.data.split_types import (
     SplitType,
@@ -177,6 +178,7 @@ def _summary_dataset(summary: dict) -> dict:
     return {
         "entity_col": block.get("entity_col", "Artist"),
         "event_col": block.get("event_col", "Album"),
+        "parsed_date_col": block.get("parsed_date_col", "Release_Date_Parsed"),
         "target_col": block.get("target_col", "User_Score"),
         "n_obs_col": block.get("n_obs_col", "User_Ratings"),
         "prefix": block.get("model_prefix", "user"),
@@ -363,12 +365,16 @@ def _build_horizon_panel(
     entity_col, target_col, n_obs_col = ds["entity_col"], ds["target_col"], ds["n_obs_col"]
 
     test_df = join_splits_with_features(test_df, test_features, name="horizon_eval")
-    sort_cols = [entity_col]
-    if "Release_Date_Parsed" in test_df.columns:
-        sort_cols.append("Release_Date_Parsed")
-    if "Album" in test_df.columns:
-        sort_cols.append("Album")
-    test_df = test_df.sort_values(sort_cols, na_position="first").copy()
+    date_col = ds["parsed_date_col"]
+    if date_col in test_df.columns:
+        test_df = normalize_chronology(
+            test_df,
+            entity_col=entity_col,
+            date_col=date_col,
+            event_col=ds["event_col"],
+        )
+    else:
+        test_df = test_df.sort_values(entity_col, kind="stable").copy()
 
     artist_to_idx = summary["artist_to_idx"]
     entity_ids = pd.unique(test_df[entity_col])
@@ -551,6 +557,19 @@ def _evaluate_horizon_rollout(
     }
 
 
+def _normalize_optional_frame(
+    frame: pd.DataFrame | None, ds: dict, date_col: str
+) -> pd.DataFrame | None:
+    if frame is None or date_col not in frame.columns:
+        return frame
+    return normalize_chronology(
+        frame,
+        entity_col=ds["entity_col"],
+        date_col=date_col,
+        event_col=ds["event_col"],
+    )
+
+
 def _prepare_test_model_args(
     test_df: pd.DataFrame,
     test_features: pd.DataFrame,
@@ -564,14 +583,20 @@ def _prepare_test_model_args(
     entity_col = ds["entity_col"]
     target_col = ds["target_col"]
     n_obs_col = ds["n_obs_col"]
+    date_col = ds["parsed_date_col"]
+    train_df = _normalize_optional_frame(train_df, ds, date_col)
+    val_df = _normalize_optional_frame(val_df, ds, date_col)
     test_df = join_splits_with_features(test_df, test_features, name="primary_test")
 
-    sort_cols = [entity_col]
-    if "Release_Date_Parsed" in test_df.columns:
-        sort_cols.append("Release_Date_Parsed")
-    if "Album" in test_df.columns:
-        sort_cols.append("Album")
-    test_df = test_df.sort_values(sort_cols, na_position="first").copy()
+    if date_col in test_df.columns:
+        test_df = normalize_chronology(
+            test_df,
+            entity_col=entity_col,
+            date_col=date_col,
+            event_col=ds["event_col"],
+        )
+    else:
+        test_df = test_df.sort_values(entity_col, kind="stable").copy()
 
     artist_to_idx = summary["artist_to_idx"]
     test_df = test_df.copy()
@@ -1334,6 +1359,13 @@ def _run_training_prior_predictive(
         train_df_pp = join_splits_with_features(
             train_df_pp, train_features_pp, name="prior_predictive_train"
         )
+        if ds["parsed_date_col"] in train_df_pp.columns:
+            train_df_pp = normalize_chronology(
+                train_df_pp,
+                entity_col=ds["entity_col"],
+                date_col=ds["parsed_date_col"],
+                event_col=ds["event_col"],
+            )
 
         feature_cols = summary["feature_cols"]
         scaler = summary.get("feature_scaler", {})

@@ -17,6 +17,7 @@ import pandas as pd
 import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
+from panelcast.data.chronology import normalize_chronology
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.evaluation.calibration import ReliabilityData
 from panelcast.models.bayes.io import load_manifest, load_model
@@ -907,10 +908,18 @@ def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) 
 
         fan_descriptor = getattr(inp.ctx, "descriptor", None) or DatasetDescriptor()
         train_for_fans = pd.read_parquet(train_path)
-        sort_cols_fans = [fan_descriptor.entity_col]
-        if fan_descriptor.parsed_date_col in train_for_fans.columns:
-            sort_cols_fans.append(fan_descriptor.parsed_date_col)
-        train_for_fans = train_for_fans.sort_values(sort_cols_fans)
+        chronology_date = (
+            fan_descriptor.parsed_date_col
+            if fan_descriptor.parsed_date_col in train_for_fans.columns
+            else fan_descriptor.date_col
+        )
+        if chronology_date in train_for_fans.columns:
+            train_for_fans = normalize_chronology(
+                train_for_fans,
+                entity_col=fan_descriptor.entity_col,
+                date_col=chronology_date,
+                event_col=fan_descriptor.event_col,
+            )
         fan_plot_kwargs = _fan_plot_kwargs(fan_descriptor)
 
         def _fan_chart_for_artist(artist: str, categories: list[str]) -> None:
