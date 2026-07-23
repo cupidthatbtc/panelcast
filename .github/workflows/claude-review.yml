@@ -46,6 +46,12 @@ jobs:
             fi
           fi
 
+          if [[ "$should_run" == true ]] &&
+             gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number/files" --paginate --jq '.[].filename' |
+               grep -Fxq '.github/workflows/claude-review.yml'; then
+            should_run=false
+          fi
+
           echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
           echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
 
