@@ -1070,14 +1070,14 @@ def _fit_with_caged_chain_retries(
             allow_divergences=allow_divergences,
         )
 
-    def survivor_record(survivors):
-        if survivors is None:
+    def diagnostics_record(value):
+        if value is None:
             return None
         return {
-            "passed": survivors.passed,
-            "rhat_max": survivors.rhat_max,
-            "ess_bulk_min": survivors.ess_bulk_min,
-            "divergences": survivors.divergences,
+            "passed": value.passed,
+            "rhat_max": value.rhat_max,
+            "ess_bulk_min": value.ess_bulk_min,
+            "divergences": value.divergences,
         }
 
     initial_assessment = assess(initial_result, initial_config)
@@ -1087,7 +1087,8 @@ def _fit_with_caged_chain_retries(
             "attempt": 0,
             "seed": initial_config.seed,
             "caged_chain_ids": caged.chain_ids,
-            "survivor_diagnostics": survivor_record(survivors),
+            "diagnostics": diagnostics_record(diagnostics),
+            "survivor_diagnostics": diagnostics_record(survivors),
         }
     ]
     if max_retries == 0:
@@ -1111,7 +1112,7 @@ def _fit_with_caged_chain_retries(
             attempt=retry - 1,
             chain_ids=current_caged.chain_ids,
             criterion=current_caged.to_dict()["criterion"],
-            survivor_diagnostics=survivor_record(current_survivors),
+            survivor_diagnostics=diagnostics_record(current_survivors),
         )
         retry_config = dataclasses.replace(initial_config, seed=initial_config.seed + retry)
         log.warning(
@@ -1128,7 +1129,8 @@ def _fit_with_caged_chain_retries(
                 "attempt": retry,
                 "seed": retry_config.seed,
                 "caged_chain_ids": candidate_caged.chain_ids,
-                "survivor_diagnostics": survivor_record(candidate_survivors),
+                "diagnostics": diagnostics_record(candidate_diagnostics),
+                "survivor_diagnostics": diagnostics_record(candidate_survivors),
             }
         )
         if not candidate_caged.chains:
@@ -1142,6 +1144,29 @@ def _fit_with_caged_chain_retries(
         retained_seed=initial_config.seed,
     )
     return initial_result, initial_config, diagnostics, caged, attempts
+
+
+def _passes_convergence_gate(diagnostics, caged_chains, *, retry_limit: int) -> bool:
+    """Cage classification gates acceptance only when retries were requested."""
+    return diagnostics.passed and (retry_limit == 0 or not caged_chains.chains)
+
+
+def _prepare_retry_attempt_io(
+    checkpoint_dir: Path | None,
+    warmup_import_path: Path | None,
+    *,
+    retry_limit: int,
+    attempt: int,
+) -> tuple[Path | None, Path | None]:
+    attempt_checkpoint = checkpoint_dir
+    if checkpoint_dir is not None and retry_limit:
+        attempt_checkpoint = checkpoint_dir / f"attempt_{attempt}"
+        if attempt > 0 and attempt_checkpoint.exists():
+            import shutil
+
+            shutil.rmtree(attempt_checkpoint)
+    attempt_warmup_import = warmup_import_path if attempt == 0 else None
+    return attempt_checkpoint, attempt_warmup_import
 
 
 def train_models(  # noqa: C901  # tracked complexity debt
@@ -1445,6 +1470,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
     warmup_import = getattr(ctx, "warmup_import_path", None)
     retry_limit = int(getattr(ctx, "caged_chain_retries", 0))
     warmup_export_target = Path(warmup_export) if warmup_export else None
+    warmup_import_target = Path(warmup_import) if warmup_import else None
 
     def _attempt_export_path(attempt: int) -> Path | None:
         if warmup_export_target is None or not retry_limit:
@@ -1454,9 +1480,12 @@ def train_models(  # noqa: C901  # tracked complexity debt
         )
 
     def _run_fit(config: MCMCConfig, attempt: int):
-        attempt_checkpoint = checkpoint_dir
-        if checkpoint_dir is not None and retry_limit:
-            attempt_checkpoint = checkpoint_dir / f"attempt_{attempt}"
+        attempt_checkpoint, attempt_warmup_import = _prepare_retry_attempt_io(
+            checkpoint_dir,
+            warmup_import_target,
+            retry_limit=retry_limit,
+            attempt=attempt,
+        )
         return fit_model(
             model=make_score_model(prefix),
             model_args=model_args,
@@ -1466,7 +1495,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
             exclude_from_collection=(tuple(collection_excludes) or None),
             checkpoint_dir=attempt_checkpoint,
             warmup_export_path=_attempt_export_path(attempt),
-            warmup_import_path=Path(warmup_import) if warmup_import else None,
+            warmup_import_path=attempt_warmup_import,
         )
 
     fit_result = _run_fit(mcmc_config, 0)
@@ -1526,7 +1555,9 @@ def train_models(  # noqa: C901  # tracked complexity debt
         resource_usage["predicted_seconds"] = round(prediction.seconds, 1)
     log.info("resource_usage", **resource_usage)
 
-    convergence_passed = diagnostics.passed and not caged_chains.chains
+    convergence_passed = _passes_convergence_gate(
+        diagnostics, caged_chains, retry_limit=retry_limit
+    )
     log.info(
         "convergence_check",
         passed=convergence_passed,

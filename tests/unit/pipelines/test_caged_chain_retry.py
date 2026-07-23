@@ -6,7 +6,11 @@ import numpy as np
 import xarray as xr
 
 from panelcast.models.bayes.fit import MCMCConfig
-from panelcast.pipelines.train_bayes import _fit_with_caged_chain_retries
+from panelcast.pipelines.train_bayes import (
+    _fit_with_caged_chain_retries,
+    _passes_convergence_gate,
+    _prepare_retry_attempt_io,
+)
 
 
 def _result(*, caged: bool, bad_survivors: bool = False):
@@ -66,8 +70,52 @@ def test_retry_is_off_by_default_and_does_not_call_sampler():
     assert attempts[0]["attempt"] == 0
     assert attempts[0]["seed"] == 42
     assert attempts[0]["caged_chain_ids"] == [0]
+    assert attempts[0]["diagnostics"]["passed"] is False
     assert attempts[0]["survivor_diagnostics"]["passed"] is True
     fit_once.assert_not_called()
+
+
+def test_disabled_retry_preserves_pre_feature_acceptance_for_synthetic_cage():
+    baseline = _run(_result(caged=False), Mock(), retries=0)
+    caged = _run(_result(caged=True), Mock(), retries=0)
+
+    baseline_result, baseline_config, _, baseline_cage, _ = baseline
+    caged_result, caged_config, _, caged_cage, _ = caged
+    pre_feature_diagnostics = SimpleNamespace(passed=True)
+
+    assert caged_result is not baseline_result
+    assert caged_config == baseline_config
+    assert caged_config.seed == 42
+    assert _passes_convergence_gate(
+        pre_feature_diagnostics, baseline_cage, retry_limit=0
+    ) is True
+    assert _passes_convergence_gate(
+        pre_feature_diagnostics, caged_cage, retry_limit=0
+    ) is True
+    assert _passes_convergence_gate(
+        pre_feature_diagnostics, caged_cage, retry_limit=1
+    ) is False
+
+
+def test_retry_attempt_gets_fresh_isolated_checkpoint_and_no_warmup_import(tmp_path):
+    checkpoint_dir = tmp_path / "checkpoint"
+    stale_retry = checkpoint_dir / "attempt_1"
+    stale_retry.mkdir(parents=True)
+    (stale_retry / "state.pkl").write_bytes(b"caged adapted state")
+    warmup_import = tmp_path / "imported-warmup.npz"
+
+    initial_checkpoint, initial_import = _prepare_retry_attempt_io(
+        checkpoint_dir, warmup_import, retry_limit=2, attempt=0
+    )
+    retry_checkpoint, retry_import = _prepare_retry_attempt_io(
+        checkpoint_dir, warmup_import, retry_limit=2, attempt=1
+    )
+
+    assert initial_checkpoint == checkpoint_dir / "attempt_0"
+    assert initial_import == warmup_import
+    assert retry_checkpoint == checkpoint_dir / "attempt_1"
+    assert retry_import is None
+    assert not retry_checkpoint.exists()
 
 
 def test_survivor_gate_blocks_retry():
@@ -108,4 +156,7 @@ def test_retry_exhaustion_retains_original_result():
     assert config.seed == 42
     assert caged.chain_ids == [0]
     assert len(attempts) == 3
+    assert [attempt["attempt"] for attempt in attempts] == [0, 1, 2]
+    assert [attempt["seed"] for attempt in attempts] == [42, 43, 44]
+    assert all(attempt["diagnostics"] is not None for attempt in attempts)
     assert fit_once.call_count == 2
