@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -129,6 +130,21 @@ class TestLikelihoodDiscovery:
         with pytest.raises(TypeError, match="LikelihoodSpec"):
             likelihoods._discovered_likelihoods()
         likelihoods._discovered_likelihoods.cache_clear()
+
+
+def test_no_direct_registry_lookups_outside_likelihoods():
+    """Every family resolution must go through the plugin-aware accessors.
+
+    A direct REGISTRY[...] lookup in a consumer is a seam plugins can't reach
+    (the rollout path was missed exactly this way in review).
+    """
+    src = Path(__file__).resolve().parents[2] / "src" / "panelcast"
+    offenders = [
+        path.relative_to(src).as_posix()
+        for path in sorted(src.rglob("*.py"))
+        if path.name != "likelihoods.py" and "REGISTRY[" in path.read_text(encoding="utf-8")
+    ]
+    assert not offenders, f"direct REGISTRY lookups outside likelihoods.py: {offenders}"
 
 
 class TestProvenance:
