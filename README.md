@@ -124,27 +124,27 @@ headline parameters (4 chains, well-mixed), and their pairwise joint posterior
 
 ## Install
 
-**Prerequisites:** Python ≥ 3.11. [pixi](https://pixi.sh) is the supported
-environment manager (it pins the full conda + PyPI stack, including JAX).
+**Prerequisite:** Python ≥ 3.11.
 
 ```bash
-# Install pixi if needed
-curl -fsSL https://pixi.sh/install.sh | bash
-
-git clone https://github.com/cupidthatbtc/panelcast.git
-cd panelcast
-pixi install                 # resolves the locked environment
-pip install -e .             # install the panelcast package + CLI into it
-
+pip install panelcast
 panelcast --help
 ```
 
-> **pixi is the supported, reproducible path.** `pixi.lock` pins the exact,
-> tested versions of the whole stack (notably the tightly-coupled jax/numpyro
-> pair). A standalone `pip install -e .` outside pixi is best-effort: the
-> dependency bounds in `pyproject.toml` cap known-breaking majors, but they do
-> not guarantee an identical environment. For anything reproducibility-sensitive,
-> use pixi.
+For the exact tested environment or repository development, use
+[pixi](https://pixi.sh):
+
+```bash
+git clone https://github.com/cupidthatbtc/panelcast.git
+cd panelcast
+pixi install
+pixi run panelcast --help
+```
+
+> `pixi.lock` is the reproducible environment: it pins the full stack, notably
+> the tightly coupled JAX/NumPyro pair. A plain pip installation obeys the tested
+> dependency bounds but does not promise an identical solver result. Use pixi
+> for publication or reproduction work.
 
 ## 60-second quickstart (aerospace example)
 
@@ -157,9 +157,10 @@ the bundled synthetic aerospace dataset (committed under `examples/aerospace/`:
 panelcast demo
 ```
 
-`demo` reads `examples/aerospace/descriptor.yaml` — one file that remaps the
+`demo` reads the bundled aerospace descriptor and CSV from the installed wheel
+(the checkout copies live under `examples/aerospace/`). The descriptor remaps the
 columns, switches the score bounds to [0, 10], drops the music-specific feature
-packs, and adds the domain's own numeric covariates — and runs data → splits →
+packs, and adds the domain's own numeric covariates. It runs data → splits →
 features → train → evaluate → predict → report, finishing with a generated
 model card under `outputs/<run_id>/reports/`. The model code is untouched.
 

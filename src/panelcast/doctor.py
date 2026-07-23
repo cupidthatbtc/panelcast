@@ -105,12 +105,12 @@ def _dataset(dataset: str | None) -> CheckResult:
     from panelcast.config.descriptor import load_descriptor
 
     descriptor = load_descriptor(dataset)
-    csv_path = os.environ.get(descriptor.raw_path_env, descriptor.raw_path_default)
-    if not csv_path or not Path(csv_path).exists():
+    csv_path = descriptor.resolve_raw_path()
+    if not csv_path.exists():
         return CheckResult(
             "dataset",
             "FAIL",
-            f"{descriptor.name}: raw CSV not found at {csv_path or '(unset)'}",
+            f"{descriptor.name}: raw CSV not found at {csv_path}",
             f"set {descriptor.raw_path_env} or place the file at the descriptor default",
         )
     return CheckResult(

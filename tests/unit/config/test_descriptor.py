@@ -206,6 +206,21 @@ class TestLoadDescriptor:
         d = load_descriptor(yaml_path)
         assert d.raw_path_default == "/data/somewhere.csv"
 
+    def test_raw_path_falls_back_to_descriptor_directory(self, tmp_path, monkeypatch):
+        descriptor_dir = tmp_path / "domain"
+        descriptor_dir.mkdir()
+        csv_path = descriptor_dir / "panel.csv"
+        csv_path.write_text("entity,target\na,1\n", encoding="utf-8")
+        yaml_path = descriptor_dir / "descriptor.yaml"
+        yaml_path.write_text("raw_path_default: panel.csv\n", encoding="utf-8")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        descriptor = load_descriptor(yaml_path)
+
+        assert descriptor.resolve_raw_path() == csv_path
+
 
 class TestFeatureBlockSpec:
     def test_defaults(self):

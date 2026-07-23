@@ -50,9 +50,7 @@ class PrepareConfig:
 
     def __post_init__(self) -> None:
         if self.raw_path is None:
-            self.raw_path = os.environ.get(
-                self.descriptor.raw_path_env, self.descriptor.raw_path_default
-            )
+            self.raw_path = str(self.descriptor.resolve_raw_path())
         if self.min_ratings_thresholds is None:
             self.min_ratings_thresholds = list(self.descriptor.min_obs_thresholds)
         if self.primary_min_ratings is None:

@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from importlib.resources import files
 from pathlib import Path
 from typing import Any
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 # Default raw->canonical column mapping (mirrors data.cleaning.RAW_TO_CANONICAL;
 # kept as a literal here so the descriptor module has no panelcast imports and
@@ -107,6 +109,9 @@ class DatasetDescriptor(BaseModel):
     Field defaults are the AOTY literals they replaced; constructing with no
     arguments reproduces the original hard-coded behavior exactly.
     """
+
+    _source_path: Path | None = PrivateAttr(default=None)
+    _source_root: Path | None = PrivateAttr(default=None)
 
     # --- identity -------------------------------------------------------
     name: str = "aoty"
@@ -203,6 +208,18 @@ class DatasetDescriptor(BaseModel):
         value = self.primary_min_obs if min_obs is None else min_obs
         return self.processed_name_template.format(min_ratings=value)
 
+    def resolve_raw_path(self) -> Path:
+        """Resolve the environment, cwd, descriptor-local, then packaged raw path."""
+        env_value = os.environ.get(self.raw_path_env)
+        path = Path(env_value if env_value is not None else self.raw_path_default)
+        if env_value is not None or path.is_absolute() or path.exists():
+            return path
+        roots = [self._source_root, self._source_path.parent if self._source_path else None]
+        for root in roots:
+            if root is not None and (candidate := root / path).exists():
+                return candidate
+        return path
+
     def descriptor_hash(self) -> str:
         """Stable fit/data hash; presentation-only fields do not invalidate runs."""
         payload = json.dumps(
@@ -231,14 +248,22 @@ class DatasetDescriptor(BaseModel):
 DEFAULT_DESCRIPTOR = DatasetDescriptor()
 
 
+def _packaged_data_root() -> Path:
+    return Path(str(files("panelcast").joinpath("_data")))
+
+
 def resolve_descriptor_path(ref: str | Path | None) -> Path | None:
-    """Resolve a descriptor reference to its YAML path (None for defaults)."""
+    """Resolve a descriptor reference, preferring checkout files over package data."""
     if ref is None:
         return None
     path = Path(ref)
-    if path.suffix not in (".yaml", ".yml"):
-        path = Path("configs/datasets") / f"{path.name}.yaml"
-    return path
+    if path.suffix in (".yaml", ".yml"):
+        return path
+    checkout_path = Path("configs/datasets") / f"{path.name}.yaml"
+    if checkout_path.exists():
+        return checkout_path
+    packaged_path = _packaged_data_root() / "datasets" / f"{path.name}.yaml"
+    return packaged_path if packaged_path.exists() else checkout_path
 
 
 def load_descriptor(ref: str | Path | None) -> DatasetDescriptor:
@@ -272,4 +297,9 @@ def load_descriptor(ref: str | Path | None) -> DatasetDescriptor:
     from panelcast.config.loader import _expand_env_vars
 
     data = _expand_env_vars(data)
-    return DatasetDescriptor(**data)
+    descriptor = DatasetDescriptor(**data)
+    descriptor._source_path = path.resolve()
+    package_root = _packaged_data_root().resolve()
+    if descriptor._source_path.is_relative_to(package_root):
+        descriptor._source_root = package_root
+    return descriptor

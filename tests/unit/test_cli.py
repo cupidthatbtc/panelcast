@@ -912,6 +912,21 @@ class TestDemoCommand:
         assert result.exit_code == 0
         assert "Demo complete" in strip_ansi(result.output)
 
+    def test_demo_uses_packaged_descriptor_outside_checkout(self, tmp_path, monkeypatch):
+        captured = {}
+
+        def run(config):
+            captured["config"] = config
+            return 0
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.run_pipeline", run)
+
+        result = runner.invoke(app, ["demo"])
+
+        assert result.exit_code == 0
+        assert "_data/datasets/aero.yaml" in captured["config"].dataset.replace("\\", "/")
+
 
 class TestCompareCommand:
     """Tests for the compare subcommand."""
@@ -964,10 +979,7 @@ class TestCompareCommand:
         assert runner.invoke(app, ["compare", "--baselines"]).exit_code == 0
         assert captured["output_dir"] is None
         assert (
-            runner.invoke(
-                app, ["compare", "--baselines", "--output", "custom/dir"]
-            ).exit_code
-            == 0
+            runner.invoke(app, ["compare", "--baselines", "--output", "custom/dir"]).exit_code == 0
         )
         assert captured["output_dir"] == Path("custom/dir")
 

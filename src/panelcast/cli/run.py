@@ -361,8 +361,6 @@ def _run_full_preflight(
 def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> None:
     """Run the quick estimation preflight (--preflight). Raises typer.Exit on
     preflight-only or on a failure not overridden by --force-run."""
-    import os
-
     from panelcast.config.descriptor import load_descriptor
     from panelcast.data.ingest import extract_data_dimensions
     from panelcast.preflight import (
@@ -375,9 +373,7 @@ def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> No
     # preflight reads the configured domain's data and columns, not just
     # AOTY's. config.dataset=None -> AOTY defaults.
     quick_descriptor = load_descriptor(config.dataset)
-    quick_csv_path = os.environ.get(
-        quick_descriptor.raw_path_env, quick_descriptor.raw_path_default
-    )
+    quick_csv_path = quick_descriptor.resolve_raw_path()
     # Mirror the orchestrator's resolution so the preflight reads the same
     # threshold a default run would use.
     effective_min_ratings = (
