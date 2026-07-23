@@ -55,7 +55,7 @@ prefixes, feature blocks) flows through a single `DatasetDescriptor`. Each field
 |---|---|---|---|
 | **Album of the Year** (flagship) | Artist → Album | `User_Score` ∈ [0, 100] | Built-in defaults + the `aoty` feature pack (genre, album-type, collaboration). Run with no `--dataset` flag. |
 | **Aerospace** (worked example) | Airframe → Test flight | `Perf_Score` ∈ [0, 10] | Bundled descriptor `configs/datasets/aero.yaml` + end-to-end portability test. One YAML, no music-specific code. |
-| **US elections** | Candidate/seat → Contest | Vote share ∈ [0, 1] | Sibling project (`elections_pred`) that retargets this pipeline — lives in its own repo, not bundled here. |
+| **US elections** (worked example, real data) | State → Senate contest | Two-party Dem share ∈ [0, 1] | Bundled descriptor + distilled MEDSL statewide returns (`examples/elections/`, CC0). Exercises unit bounds, empty feature packs, and the `beta_binomial` likelihood — the surface the synthetic aero example can't. |
 
 The contract that `--dataset aoty_full` is byte-identical to running with no flag
 at all is enforced by `tests/e2e/test_domain_portability.py`. See

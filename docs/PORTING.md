@@ -6,6 +6,12 @@ from a `DatasetDescriptor` (`src/panelcast/config/descriptor.py`). Retargeting
 from AOTY (artists releasing albums scored 0–100) to a completely different
 domain is **one YAML file and zero source changes**.
 
+> A second bundled retarget — real data, unit-interval bounds, and the
+> `beta_binomial` likelihood — lives at `examples/elections/` (US Senate
+> statewide returns, CC0; see its `ATTRIBUTION.md`). The walkthrough below
+> uses the synthetic aerospace example; the elections descriptor follows the
+> identical pattern.
+
 This guide walks the bundled aerospace example end to end:
 airframes fly sequential test flights, each scored 0–10 by flight-test
 telemetry. The full descriptor lives at `configs/datasets/aero.yaml`;

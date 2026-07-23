@@ -1,0 +1,96 @@
+# US Senate statewide elections — a real-data, non-synthetic worked domain.
+#
+# States contest Senate seats; each contest carries a two-party Democratic vote
+# share in [0, 1] and the two-party vote total. This is the bounded-score
+# regime the aerospace example structurally can't exercise: unit-interval
+# target bounds, an empty feature-pack list, and a true aggregation count
+# (every vote is a 0/1 "rating" whose mean IS the target), which makes the
+# beta_binomial likelihood meaningful here.
+#
+# Data: MIT Election Data and Science Lab, "U.S. Senate statewide 1976–2020"
+# (with subsequent cycle updates; Harvard Dataverse, doi:10.7910/DVN/PEJ5QU),
+# CC0 1.0 public-domain dedication, distilled to two-party shares; demographic
+# covariates are single-vintage ACS figures via the Census Reporter API —
+# constant within each state, so they carry cross-sectional (between-state)
+# signal only, alongside the entity effect. See ATTRIBUTION.md.
+#
+# Senate terms are staggered, so the temporal split's "last event per state"
+# is each state's most recent race (2018/2020/2022/2024 by seat class) — a
+# next-race holdout, not one uniform year.
+#
+# Every key omitted here keeps its AOTY default — see
+# src/panelcast/config/descriptor.py. Walkthrough: docs/PORTING.md.
+
+name: elections
+
+# --- raw source ----------------------------------------------------------
+raw_path_env: ELEC_DATASET_PATH
+raw_path_default: examples/elections/results.csv
+encoding: utf-8
+raw_column_map: {}
+required_raw_columns:
+  - State
+  - Election_ID
+  - Year
+  - Election_Date
+  - Dem_Share
+  - Two_Party_Votes
+optional_raw_columns: []
+
+# --- identity / sequencing ------------------------------------------------
+entity_col: State
+event_col: Election_ID
+# No per-event group column — the entity_group_pooling gate is structurally
+# unusable for this domain.
+entity_group_col: null
+date_col: Election_Date
+parsed_date_col: Election_Date_Parsed
+year_col: Year
+date_format: "%Y-%m-%d"
+
+# --- targets ----------------------------------------------------------------
+target_col: Dem_Share
+target_bounds: [0.0, 1.0]
+model_prefix: dem
+n_obs_col: Two_Party_Votes
+# Two_Party_Votes counts independent voters whose 0/1 choices average to
+# Dem_Share — a true aggregation count, so beta_binomial is meaningful.
+n_obs_is_aggregation_count: true
+secondary_target_col: null
+secondary_prefix: null
+secondary_n_obs_col: null
+
+# --- cleaning semantics ----------------------------------------------------
+multi_entity_col: null
+unknown_entity_sentinel: null
+min_year: 1976
+
+# --- dataset preparation -----------------------------------------------------
+# Tiers straddle the data (min two-party turnout is ~122k): 1000 keeps all
+# 805 races, 500k keeps 605, 1M keeps 465 — real progressive filtering.
+min_obs_thresholds: [1000, 500000, 1000000]
+primary_min_obs: 1000
+processed_name_template: "dem_share_minvotes_{min_ratings}"
+
+# --- features -----------------------------------------------------------------
+feature_packs: []
+feature_blocks:
+  - name: temporal
+  - name: entity_history
+  - name: core_numeric
+    params:
+      columns:
+        - pct_white
+        - pct_black
+        - pct_hispanic
+        - pct_asian
+        - pct_college
+        - median_income
+        - median_age
+        - log_pop
+        - region_south
+        - region_west
+        - region_midwest
+ablation_groups:
+  temporal: [temporal]
+  artist: [entity_history]
