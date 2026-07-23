@@ -42,10 +42,10 @@ MCMC
 - `max_tree_depth`: int (default 10)
 - `chain_method`: `sequential` | `vectorized` | `parallel`
 - `init_strategy`: `uniform` (default) | `median` | `feasible`
-- `caged_chain_retries`: int from 0 to 10 (default 0/off). When enabled, a fit is reseeded only if at least one chain meets both caged-chain criteria and the remaining chains pass the configured R-hat/ESS/divergence gate. Retry seeds are `seed + 1`, `seed + 2`, and so on; the first result with no caged chains is retained.
-- `caged_chain_tree_depth_fraction`: float in (0, 1] (default 0.95)
-- `caged_chain_boundary_sigma`: positive float (default 0.005)
-- `caged_chain_consensus_ratio`: float > 1 (default 5.0). A chain is caged when its mean `num_steps` reaches the configured fraction of `2^max_tree_depth - 1`, its posterior-mean `{model_prefix}_sigma_artist` is at or below the boundary, and the median posterior-mean sigma of the other chains is at least this multiple larger.
+- `caged_chain_retries`: integer from 0 to 10 (default 0/off; booleans and fractional values are rejected). When enabled, a fit is reseeded only if at least one chain meets both caged-chain criteria and the remaining chains pass the configured R-hat/ESS/divergence gate. Retry seeds are `seed + 1`, `seed + 2`, and so on; the first result with no caged chains is retained.
+- `caged_chain_tree_depth_fraction`: finite float in (0, 1] (default 0.95)
+- `caged_chain_boundary_sigma`: positive finite float (default 0.005)
+- `caged_chain_consensus_ratio`: finite float > 1 (default 5.0). A chain is caged when its mean `num_steps` reaches the configured fraction of `2^max_tree_depth - 1`, its posterior-mean `{model_prefix}_sigma_artist` is at or below the boundary, and the median posterior-mean sigma of the other chains is at least this multiple larger.
 
 Convergence gates
 - `rhat_threshold`: float (default 1.01)
