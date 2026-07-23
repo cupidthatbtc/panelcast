@@ -1009,7 +1009,11 @@ def _run_new_artist_predictive(
 
     learn_n_exponent = bool(summary.get("learn_n_exponent", False))
     fixed_n_exponent = float(summary.get("n_exponent", 0.0))
-    if learn_n_exponent or fixed_n_exponent != 0.0:
+    if (
+        learn_n_exponent
+        or fixed_n_exponent != 0.0
+        or priors_obj.likelihood_family == "beta_binomial"
+    ):
         kwargs["n_reviews_new"] = jnp.asarray(n_reviews, dtype=jnp.float32)
         if not learn_n_exponent and fixed_n_exponent != 0.0:
             kwargs["fixed_n_exponent"] = fixed_n_exponent
