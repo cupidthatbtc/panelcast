@@ -63,6 +63,20 @@ def _uses_default_plot_presentation(descriptor: DatasetDescriptor) -> bool:
     )
 
 
+def _fan_plot_kwargs(descriptor: DatasetDescriptor) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    if not _uses_default_plot_presentation(descriptor):
+        kwargs.update(
+            event_label=descriptor.event_col.replace("_", " "),
+            target_label=descriptor.target_col.replace("_", " "),
+            y_limits=None,
+            invert_y_axis=descriptor.invert_target_axis,
+        )
+    if descriptor.name != "aoty":
+        kwargs["max_x_ticks"] = 20
+    return kwargs
+
+
 @dataclass(frozen=True)
 class _CoverageLike:
     empirical: float
@@ -897,15 +911,7 @@ def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) 
         if fan_descriptor.parsed_date_col in train_for_fans.columns:
             sort_cols_fans.append(fan_descriptor.parsed_date_col)
         train_for_fans = train_for_fans.sort_values(sort_cols_fans)
-        fan_plot_kwargs = {}
-        if not _uses_default_plot_presentation(fan_descriptor):
-            fan_plot_kwargs = {
-                "event_label": fan_descriptor.event_col.replace("_", " "),
-                "target_label": fan_descriptor.target_col.replace("_", " "),
-                "y_limits": None,
-                "invert_y_axis": fan_descriptor.invert_target_axis,
-                "max_x_ticks": 20,
-            }
+        fan_plot_kwargs = _fan_plot_kwargs(fan_descriptor)
 
         def _fan_chart_for_artist(artist: str, categories: list[str]) -> None:
             artist_train = train_for_fans[train_for_fans[fan_descriptor.entity_col] == artist]

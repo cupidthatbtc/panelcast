@@ -19,6 +19,7 @@ from panelcast.pipelines.publication import (
     _build_publication_readiness,
     _ConvergenceLike,
     _CoverageLike,
+    _fan_plot_kwargs,
     _get_coefficient_var_names,
     _LooLike,
     _parse_convergence,
@@ -2063,6 +2064,15 @@ class TestPlotPresentationSelection:
     def test_target_presentation_override_uses_portable_axes(self):
         descriptor = DatasetDescriptor(target_col="g_mag")
         assert _uses_default_plot_presentation(descriptor) is False
+
+    def test_external_default_looking_domain_still_caps_ticks(self):
+        descriptor = DatasetDescriptor(name="my_reviews")
+        assert _uses_default_plot_presentation(descriptor) is True
+        assert _fan_plot_kwargs(descriptor) == {"max_x_ticks": 20}
+
+    def test_aoty_data_override_keeps_legacy_ticks(self):
+        descriptor = DatasetDescriptor(raw_path_default="data/raw/alternate.csv")
+        assert _fan_plot_kwargs(descriptor) == {}
 
 
 class TestPredictionsScatterPlot:
