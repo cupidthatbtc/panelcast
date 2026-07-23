@@ -29,6 +29,9 @@ jobs:
       - name: Type-check boundary modules
         run: pixi run typecheck
 
+      - name: Whole-package typing ratchet
+        run: pixi run typecheck-ratchet
+
   test-fast:
     runs-on: ubuntu-latest
     timeout-minutes: 30

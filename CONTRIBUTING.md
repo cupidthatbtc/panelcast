@@ -58,8 +58,17 @@ both pre-commit and CI:
 
 ```bash
 pixi run lint                 # ruff check src/  (what CI runs)
+pixi run typecheck            # strict boundary modules (config, manifests, ...)
+pixi run typecheck-ratchet    # whole-package drift check vs typing_baseline.json
 pre-commit run --all-files    # ruff-format, ruff --fix, mypy on everything
 ```
+
+The typing ratchet (#302) runs mypy over the whole package with the globally
+disabled error codes re-enabled and compares per-file counts against
+`typing_baseline.json`. New errors fail CI; if your change *reduces* the
+count, bank it with `python scripts/typing_ratchet.py --update` so the
+baseline stays exact. The goal is a monotonically shrinking baseline until the
+global `disable_error_code` list can go.
 
 Please run `pre-commit run --all-files` before opening a PR so the hooks have a
 chance to auto-fix formatting and imports.

@@ -153,6 +153,16 @@ enable_error_code = ["arg-type", "return-value", "assignment"]
 module = ["panelcast.pipelines.orchestrator"]
 enable_error_code = ["return-value", "assignment"]
 
+# Typing ratchet stage 1 (#302): the config and manifest subsystems are fully
+# strict — every globally-disabled code is re-enabled here. The whole-package
+# baseline lives in typing_baseline.json (scripts/typing_ratchet.py).
+[[tool.mypy.overrides]]
+module = ["panelcast.config.*", "panelcast.pipelines.manifest"]
+enable_error_code = [
+  "arg-type", "assignment", "return-value", "var-annotated", "misc",
+  "union-attr", "operator", "attr-defined", "call-arg", "no-any-return",
+]
+
 # Ship the PEP 561 marker so downstream type checkers trust panelcast's inline
 # types (see docs/API.md for the supported import surface).
 [tool.setuptools.package-data]

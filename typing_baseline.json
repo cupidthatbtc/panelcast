@@ -1,0 +1,167 @@
+{
+  "description": "Per-file, per-code mypy error counts with the globally-disabled codes re-enabled (#302). scripts/typing_ratchet.py --check fails CI on any drift; --update rewrites this file.",
+  "total_errors": 160,
+  "files": {
+    "src/panelcast/cli/commands.py": {
+      "call-arg": 2,
+      "arg-type": 1,
+      "misc": 1
+    },
+    "src/panelcast/cli/run.py": {
+      "arg-type": 1
+    },
+    "src/panelcast/cli/runs_cmd.py": {
+      "attr-defined": 3,
+      "arg-type": 1
+    },
+    "src/panelcast/data/cleaning.py": {
+      "assignment": 1
+    },
+    "src/panelcast/evaluation/cv.py": {
+      "attr-defined": 1,
+      "arg-type": 1
+    },
+    "src/panelcast/features/basis.py": {
+      "misc": 1
+    },
+    "src/panelcast/features/collaboration.py": {
+      "misc": 1
+    },
+    "src/panelcast/features/core.py": {
+      "misc": 2
+    },
+    "src/panelcast/features/gbm_offset.py": {
+      "misc": 3
+    },
+    "src/panelcast/features/genre.py": {
+      "misc": 1
+    },
+    "src/panelcast/features/history.py": {
+      "misc": 1
+    },
+    "src/panelcast/features/packs/aoty.py": {
+      "arg-type": 4,
+      "return-value": 4
+    },
+    "src/panelcast/features/pipeline.py": {
+      "return-value": 1
+    },
+    "src/panelcast/features/registry.py": {
+      "arg-type": 6,
+      "return-value": 6
+    },
+    "src/panelcast/features/temporal.py": {
+      "misc": 1
+    },
+    "src/panelcast/model_preflight_data.py": {
+      "arg-type": 2
+    },
+    "src/panelcast/models/bayes/diagnostics.py": {
+      "attr-defined": 9
+    },
+    "src/panelcast/models/bayes/fit.py": {
+      "arg-type": 1
+    },
+    "src/panelcast/models/bayes/io.py": {
+      "arg-type": 1
+    },
+    "src/panelcast/models/bayes/model.py": {
+      "operator": 1,
+      "arg-type": 2
+    },
+    "src/panelcast/models/bayes/transforms.py": {
+      "arg-type": 1
+    },
+    "src/panelcast/pipelines/backtest.py": {
+      "index": 1,
+      "union-attr": 2,
+      "assignment": 1,
+      "arg-type": 1
+    },
+    "src/panelcast/pipelines/build_features.py": {
+      "arg-type": 2
+    },
+    "src/panelcast/pipelines/compare_baselines.py": {
+      "arg-type": 3
+    },
+    "src/panelcast/pipelines/create_splits.py": {
+      "var-annotated": 1,
+      "arg-type": 1
+    },
+    "src/panelcast/pipelines/evaluate.py": {
+      "arg-type": 1,
+      "union-attr": 1,
+      "attr-defined": 5
+    },
+    "src/panelcast/pipelines/orchestrator.py": {
+      "arg-type": 7,
+      "operator": 2
+    },
+    "src/panelcast/pipelines/predict_next.py": {
+      "attr-defined": 2
+    },
+    "src/panelcast/pipelines/publication.py": {
+      "attr-defined": 2,
+      "arg-type": 4
+    },
+    "src/panelcast/pipelines/sensitivity.py": {
+      "assignment": 20,
+      "operator": 1
+    },
+    "src/panelcast/pipelines/train_bayes.py": {
+      "arg-type": 7
+    },
+    "src/panelcast/preflight/calibrate.py": {
+      "arg-type": 1
+    },
+    "src/panelcast/preflight/check.py": {
+      "arg-type": 3
+    },
+    "src/panelcast/reporting/curves.py": {
+      "arg-type": 2
+    },
+    "src/panelcast/reporting/figures.py": {
+      "attr-defined": 2,
+      "arg-type": 2,
+      "assignment": 1
+    },
+    "src/panelcast/reporting/tables.py": {
+      "attr-defined": 1
+    },
+    "src/panelcast/select/confirmation.py": {
+      "union-attr": 1,
+      "index": 1,
+      "arg-type": 1,
+      "type-var": 1,
+      "operator": 1
+    },
+    "src/panelcast/select/orchestrate.py": {
+      "arg-type": 1,
+      "return-value": 1
+    },
+    "src/panelcast/select/prior_screen.py": {
+      "arg-type": 2
+    },
+    "src/panelcast/select/rules.py": {
+      "operator": 1
+    },
+    "src/panelcast/select/runner.py": {
+      "dict-item": 1,
+      "return-value": 1,
+      "var-annotated": 1
+    },
+    "src/panelcast/select/scoring.py": {
+      "operator": 4
+    },
+    "src/panelcast/select/stacking.py": {
+      "assignment": 1,
+      "misc": 1
+    },
+    "src/panelcast/utils/logging.py": {
+      "arg-type": 1
+    },
+    "src/panelcast/visualization/dashboard.py": {
+      "arg-type": 4
+    }
+  }
+}
