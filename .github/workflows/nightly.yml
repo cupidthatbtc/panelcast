@@ -31,3 +31,26 @@ jobs:
 
       - name: Run slow + e2e + domain-portability suite
         run: pixi run pytest tests/ -m "slow or e2e" -q
+
+  quickstart-notebook:
+    # The Colab quickstart is a marketing artifact with the same honesty rule
+    # as the smoke marker: if it can't execute end-to-end, the workflow fails.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+
+      - name: Install pixi
+        uses: prefix-dev/setup-pixi@ba3bb36eb2066252b2363392b7739741bb777659  # v0.8.1
+        with:
+          cache: true
+
+      - name: Execute the quickstart notebook
+        run: |
+          pixi run python -m pip install -q nbclient nbformat ipykernel
+          JAX_PLATFORMS=cpu pixi run python scripts/execute_notebook.py examples/quickstart.ipynb 900

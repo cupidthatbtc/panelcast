@@ -158,6 +158,10 @@ pixi run panelcast --help
 
 ## 60-second quickstart (aerospace example)
 
+[![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cupidthatbtc/panelcast/blob/main/examples/quickstart.ipynb)
+— the same quickstart as a zero-install notebook (`examples/quickstart.ipynb`,
+executed nightly in CI so it cannot rot).
+
 Retarget the whole pipeline to a non-music domain with no code changes, using
 the bundled synthetic aerospace dataset (committed under `examples/aerospace/`:
 8 airframes flying ~39 sequential test flights scored 0–10):
