@@ -293,6 +293,11 @@ class RunManifest(BaseModel):
     # (#78): every fit becomes a calibration datapoint for the estimator.
     stage_durations: dict[str, float] = {}
     resources: dict[str, dict[str, Any]] = {}
+    # Canonical experiment identity (#296): config hash over every
+    # output-affecting resolved knob, descriptor hash, source revision/dirty
+    # state, environment fingerprint, lock hash, and package version. Empty on
+    # manifests written by older versions.
+    experiment_identity: dict[str, Any] = {}
 
 
 def generate_run_id() -> str:

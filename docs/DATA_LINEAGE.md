@@ -1464,12 +1464,19 @@ The `--resume {run_id}` flag allows resuming a failed run:
 1. Locate run directory: `outputs/{run_id}/` or `outputs/failed/{run_id}/`
 2. If in `failed/`, move back to `outputs/`
 3. Load existing `manifest.json`
-4. Restore MCMC config from manifest flags (prevents config drift):
-   - Keys restored: `target_accept`, `max_tree_depth`, `num_chains`, `num_samples`, `num_warmup`
-   - Missing keys trigger warning with current default used
+4. Restore the complete resolved experiment (#296): every output-affecting
+   config field is restored, preferring the run's `resolved_config.yaml` and
+   falling back to manifest flags. Only execution mechanics (`--verbose`,
+   `--dry-run`, `--skip-existing`, `--strict`, progress bars, `--tag`) keep
+   their CLI values. Missing keys on pre-`resolved_config` runs trigger a
+   warning.
 5. Re-validate config after restoration
-6. Skip already-completed stages (from `manifest.stages_completed`)
-7. Continue from first incomplete stage
+6. Verify experiment identity: the restored config must hash to the recorded
+   `experiment_identity.config_hash`, or the resume is refused with a per-key
+   diff. Source-commit / environment-fingerprint / package-version drift is
+   surfaced as a warning (results may not be bit-identical).
+7. Skip already-completed stages (from `manifest.stages_completed`)
+8. Continue from first incomplete stage
 
 ## 9.4 Environment Verification
 
