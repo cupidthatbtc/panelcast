@@ -23,6 +23,8 @@ bump = "python scripts/bump_version.py"
 typecheck = "mypy src/panelcast/__init__.py src/panelcast/config src/panelcast/features src/panelcast/data/manifests.py src/panelcast/models/bayes/predict.py src/panelcast/models/bayes/fit.py src/panelcast/models/bayes/io.py src/panelcast/models/bayes/likelihoods.py src/panelcast/pipelines/orchestrator.py src/panelcast/pipelines/manifest.py"
 # Whole-package typing ratchet (#302): drift against typing_baseline.json fails.
 typecheck-ratchet = "python scripts/typing_ratchet.py --check"
+# Domain-terminology ratchet (#303): generic modules must not grow album/artist terms.
+terminology-ratchet = "python scripts/terminology_ratchet.py --check"
 
 [dependencies]
 python = ">=3.11"

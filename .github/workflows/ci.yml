@@ -32,6 +32,9 @@ jobs:
       - name: Whole-package typing ratchet
         run: pixi run typecheck-ratchet
 
+      - name: Domain-terminology ratchet
+        run: pixi run terminology-ratchet
+
   test-fast:
     runs-on: ubuntu-latest
     timeout-minutes: 30
