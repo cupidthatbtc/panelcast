@@ -15,8 +15,11 @@ Both are the seed-42, 4-chain, 5,000 warmup + 5,000 draw confirmation
 fits on the same 653-row within-entity holdout. The test-feature hashes match
 the source manifests exactly (`6b2fb5…` primary, `1922e0…` entity-disjoint),
 and the resolved feature input hash is unchanged (`4ec61a…`). Evaluation ran
-on CPU with seed 42 and `PANELCAST_SAVE_LOG_LIKELIHOOD=1`; pointwise
-score-scale log likelihoods were retained for the paired comparison.
+from clean revision `4d1bb116` on CPU with seed 42 and
+`PANELCAST_SAVE_LOG_LIKELIHOOD=1`; pointwise score-scale log likelihoods were
+retained for the paired comparison. Full hashes, resolved configs, row-identity
+hashes, both arms' metrics, and the 653 pointwise ELPD differences are committed
+in `fair_eval.json`; `reproduce.py` is the evaluation driver.
 
 ## Old estimator vs fixed estimator
 
@@ -27,9 +30,13 @@ score-scale log likelihoods were retained for the paired comparison.
 | incumbent | 0.13.0 archived | 5.301650 | 7.649735 | 0.501268 | 3.867142 | 0.852986 | 0.963247 | 31.520517 | -2163.506286 |
 | incumbent | fixed | 5.301651 | 7.649735 | 0.501268 | 3.867142 | 0.852986 | 0.963247 | 31.520517 | -2163.506461 |
 
-The estimator correction is null at published precision. The largest headline
-movement is `4.8e-7` in incumbent MAE/RMSE; coverage and interval widths are
-unchanged; the ELPD shifts are `-1.82e-4` and `-1.75e-4`.
+On the primary promotion holdout, the estimator correction is null at published
+precision. The largest headline movement is `4.8e-7` in incumbent MAE/RMSE;
+coverage and interval widths are unchanged; the ELPD shifts are `-1.82e-4` and
+`-1.75e-4`. Entity-disjoint predictions also remain unchanged at published
+precision, with maximum absolute shifts of `5.7e-5` in MAE and `4.2e-4` in an
+interval width. Those rows use the independently sampled new-entity path and
+reflect rerun-level numerical/Monte Carlo drift, not the known-entity cap fix.
 
 This null is mechanically expected on this holdout. The two exposed entities
 have one test event after 50 training events. The legacy combined-count offset
@@ -43,7 +50,7 @@ is propagated or a domain has a deeper test horizon.
 
 Using the retained pointwise held-out log likelihoods:
 
-- ELPD difference (entity-obs − incumbent): **+29.769968**
+- ELPD difference (entity-obs − incumbent): **+29.769969**
 - paired SE: **6.998596**
 - z: **+4.253706**
 
@@ -59,9 +66,9 @@ with the matching feature stamp. The standardized within-entity ridge row is:
 |---:|---:|---:|---:|---:|---:|---:|
 | 5.39 | 7.71 | 0.494 | 4.06 | 0.884 | 0.962 | 33.27 |
 
-The generated CSV/Markdown/JSON remain reproducible artifacts under
-`fair-eval-0131-entityobs-s42/reports/baselines/`; the curated values and
-interpretation are updated in `docs/BASELINES.md`.
+The exact generated rows are committed as `baseline_comparison.json` and
+`baseline_comparison.csv`; their curated values and interpretation are updated
+in `docs/BASELINES.md`.
 
 ## Verdict
 

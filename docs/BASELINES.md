@@ -52,25 +52,28 @@ Read without flattery:
 - **The GBM's residual intervals remain over-confident** (0.749 / 0.877
   coverage); the model's are modeled, near-nominal (0.830 / 0.968) — with the
   entity-obs re-baseline the 80% interval sits *closer to nominal* than the old
-  0.853 — and are the narrowest of the covariate methods' calibrated bands
-  (31.0 vs ridge's 33.3 and conformal's 32.2). The naive entity-mean band is
+  0.853 — and are the narrowest of the covariate methods at their observed
+  coverage (31.0 vs ridge's 33.3 and conformal's 32.2). The naive entity-mean
+  band is
   narrower still (29.8) at tolerable coverage, but carries none of the point
   accuracy (MAE 6.11, R² 0.322).
 
 The model's justification used to be "not the leaderboard — calibrated
 intervals, variance decomposition, a generative story." Those deliverables all
 still hold; the model now also leads the standardized ridge row on MAE, RMSE,
-R², CRPS, and calibrated interval width, though the point-metric margins are
-narrow.
+R², CRPS, and 95% interval width at near-nominal observed coverage, though the
+point-metric margins are narrow. Ridge's Gaussian interval uses in-sample
+training residuals and is mildly optimistic, not a calibrated forecast.
 
 > The conformal check ([#50](https://github.com/cupidthatbtc/panelcast/issues/50))
-> still stands as the honest control: **conformal GBM** wraps the same GBM in
-> split-conformal calibration and reaches near-nominal coverage (95%: 0.946;
-> 80%: 0.818) — calibration alone is cheap. But it no longer matches the model
-> on anything else: point accuracy (5.64 vs 5.28), CRPS (4.13 vs 3.81), and
-> interval width (32.2 vs 31.0) all favor the model.
-> What conformal cannot produce remains what it could never produce: a
-> generative story you can interrogate (posterior parameters, PPC) and the
+> remains the honest control: **conformal GBM** wraps the same GBM in a
+> residual-resampling approximation to split conformal and reaches near-nominal
+> observed coverage (95%: 0.946; 80%: 0.818). Its Monte Carlo percentile bands
+> are not deterministic finite-sample conformal bounds, so this row is an
+> empirical calibration control rather than an exact coverage guarantee. It no
+> longer matches the model on point accuracy (5.64 vs 5.28), CRPS (4.13 vs
+> 3.81), or interval width (32.2 vs 31.0). What the wrapper cannot produce is a
+> generative story you can interrogate (posterior parameters, PPC) or the
 > entity-vs-residual variance decomposition.
 
 ## Cold-start — a brand-new entity with no history (artist-disjoint, N = 799)
@@ -100,10 +103,11 @@ reception remains close to unpredictable from the available features (the
 covariates-only headroom estimate was ≈ 0.083,
 [`.audit/genre_pooling/`](../.audit/genre_pooling/covariates_only_r2.md), and
 the pooling tier captured essentially all of the genre share of it), and every
-method's MAE sits within ~0.8 of the global mean's. The conformal wrapper's
-exchangeability guarantee is false by construction for never-seen entities and
-degrades accordingly (0.914 at 95%), though it still beats the raw GBM's
-0.765. The multi-seed screening and publication-scale confirmation behind the
+method's MAE sits within ~0.9 of the global mean's. The residual-resampling
+wrapper's exchangeability premise is especially untenable for never-seen
+entities and observed coverage degrades accordingly (0.914 at 95%), though it
+still beats the raw GBM's 0.765. The multi-seed screening and publication-scale
+confirmation behind the
 pooling promotion live in
 [`.audit/genre_pooling/`](../.audit/genre_pooling/gate_on_screening.md);
 domains without a usable group column resolve the gate to off automatically.

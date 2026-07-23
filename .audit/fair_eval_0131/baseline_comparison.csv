@@ -1,0 +1,14 @@
+,Model,Split,N,MAE,RMSE,R²,CRPS,80% Cov,95% Cov,95% Width,PPC skew p,Runtime (s)
+0,global_mean,within_entity_temporal,653,7.23,10.91,-0.015,5.55,0.890,0.956,43.29,1.000,0.01
+1,entity_mean,within_entity_temporal,653,6.11,8.92,0.322,4.59,0.818,0.925,29.84,1.000,0.01
+2,last_score,within_entity_temporal,653,6.10,8.88,0.328,4.71,0.900,0.971,39.36,1.000,0.01
+3,ridge,within_entity_temporal,653,5.39,7.71,0.494,4.06,0.884,0.962,33.27,1.000,0.15
+4,gbm,within_entity_temporal,653,5.62,8.07,0.446,4.18,0.749,0.877,22.07,0.999,0.45
+5,conformal_gbm,within_entity_temporal,653,5.64,8.03,0.450,4.13,0.818,0.946,32.18,0.999,0.35
+6,global_mean,entity_disjoint,799,7.69,10.84,-0.001,5.68,0.901,0.957,44.01,1.000,0.01
+7,entity_mean,entity_disjoint,799,7.69,10.84,-0.001,5.64,0.743,0.900,29.07,1.000,0.01
+8,last_score,entity_disjoint,799,7.69,10.84,-0.001,5.61,0.837,0.947,37.95,1.000,0.01
+9,ridge,entity_disjoint,799,7.21,10.34,0.089,5.31,0.807,0.922,32.65,1.000,0.01
+10,gbm,entity_disjoint,799,7.60,10.79,0.009,5.82,0.598,0.765,20.92,1.000,0.33
+11,conformal_gbm,entity_disjoint,799,7.56,10.76,0.013,5.59,0.723,0.914,32.57,0.904,0.25
+12,bayes (current),within_entity_temporal,653,5.28,7.67,0.498,3.81,0.830,0.968,31.03,0.999,—
