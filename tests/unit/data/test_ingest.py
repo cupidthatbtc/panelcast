@@ -205,6 +205,63 @@ class TestLoadRawAlbums:
         _, meta = load_raw_albums(csv, validate=False)
         assert len(meta.load_timestamp) > 0
 
+    def test_nullable_large_numeric_ids_are_read_exactly(self, tmp_path):
+        from panelcast.config.descriptor import DatasetDescriptor
+
+        csv = self._make_csv(
+            tmp_path,
+            content=(
+                "source_id,event_id,year\n"
+                "9007199254740993,9007199254740995,2020\n"
+                ",9007199254740997,2021\n"
+            ),
+        )
+        descriptor = DatasetDescriptor(
+            name="catalog",
+            entity_col="Source_ID",
+            event_col="Event_ID",
+            year_col="Year",
+            raw_column_map={
+                "source_id": "Source_ID",
+                "event_id": "Event_ID",
+                "year": "Year",
+            },
+            secondary_target_col=None,
+            secondary_prefix=None,
+            secondary_n_obs_col=None,
+        )
+
+        df, _ = load_raw_albums(csv, validate=False, descriptor=descriptor)
+
+        assert df.loc[0, "source_id"] == "9007199254740993"
+        assert df.loc[0, "event_id"] == "9007199254740995"
+        assert df.loc[1, "event_id"] == "9007199254740997"
+        assert pd.isna(df.loc[1, "source_id"])
+        assert pd.api.types.is_integer_dtype(df["year"])
+
+    def test_event_column_shared_with_year_stays_numeric(self, tmp_path):
+        from panelcast.config.descriptor import DatasetDescriptor
+
+        csv = self._make_csv(
+            tmp_path,
+            content="source_id,year\n9007199254740993,2020\n9007199254740995,2021\n",
+        )
+        descriptor = DatasetDescriptor(
+            name="catalog",
+            entity_col="Source_ID",
+            event_col="Year",
+            year_col="Year",
+            raw_column_map={"source_id": "Source_ID", "year": "Year"},
+            secondary_target_col=None,
+            secondary_prefix=None,
+            secondary_n_obs_col=None,
+        )
+
+        df, _ = load_raw_albums(csv, validate=False, descriptor=descriptor)
+
+        assert df["source_id"].tolist() == ["9007199254740993", "9007199254740995"]
+        assert df["year"].tolist() == [2020, 2021]
+
     def test_file_not_found_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             load_raw_albums(tmp_path / "nonexistent.csv")

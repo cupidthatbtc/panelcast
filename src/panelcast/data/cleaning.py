@@ -117,10 +117,9 @@ def coerce_identifier_columns(
     entity/event columns are already strings, so this is a no-op for the
     default path.
 
-    Caveat: if a numeric ID column contains any missing value, pandas has
-    already parsed it as float64 before this runs, and IDs beyond 2**53 (e.g.
-    full-precision Gaia source_ids) were rounded at read time. Exactness for
-    such columns requires reading them as strings at CSV ingest.
+    Callers that bypass :func:`load_raw_albums` must read nullable numeric IDs
+    as strings; once pandas has parsed them as float64, values beyond 2**53
+    cannot be recovered here.
     """
     df = df.copy()
     for col in (entity_col, event_col):
