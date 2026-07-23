@@ -280,6 +280,86 @@ def load_training_data(
     return model_args, feature_cols, train_df, imputation
 
 
+def _build_basis_model_provenance(
+    features_path: Path,
+    feature_cols: list[str],
+    feature_mean: np.ndarray,
+    feature_std: np.ndarray,
+) -> dict | None:
+    """Bind feature-stage basis state to the fitted model's exact scaler."""
+    candidates = [features_path.parent / "manifest.json"]
+    parent_candidate = features_path.parent.parent / "manifest.json"
+    if parent_candidate not in candidates:
+        candidates.append(parent_candidate)
+    manifest_path = next((path for path in candidates if path.exists()), None)
+    if manifest_path is None:
+        return None
+    with open(manifest_path, encoding="utf-8") as f:
+        manifest = json.load(f)
+    basis = manifest.get("basis_curves")
+    if not basis:
+        return None
+    fitted_by_split = basis.get("fitted_by_split", {})
+    split_name = features_path.parent.name
+    if split_name not in fitted_by_split:
+        split_name = manifest.get("legacy_primary_split")
+    if split_name not in fitted_by_split:
+        raise ValueError(
+            f"Feature manifest {manifest_path} has no fitted basis state for "
+            f"training feature path {features_path}."
+        )
+    if len(feature_cols) != len(set(feature_cols)):
+        raise ValueError("Model feature names must be unique to map basis standardization.")
+    if feature_mean.shape != (len(feature_cols),) or feature_std.shape != (len(feature_cols),):
+        raise ValueError("Model feature scaler dimension does not match feature_cols.")
+    index_by_name = {name: index for index, name in enumerate(feature_cols)}
+    curves = json.loads(json.dumps(fitted_by_split[split_name]))
+    for curve_name, state in curves.items():
+        names = list(state.get("feature_names", []))
+        missing = [name for name in names if name not in index_by_name]
+        if missing:
+            raise ValueError(
+                f"Basis curve {curve_name!r} columns are missing from the fitted model: {missing}."
+            )
+        indices = [index_by_name[name] for name in names]
+        means = np.asarray(feature_mean[indices], dtype=float)
+        stds = np.asarray(feature_std[indices], dtype=float)
+        if not np.isfinite(means).all() or not np.isfinite(stds).all() or np.any(stds <= 0.0):
+            raise ValueError(f"Basis curve {curve_name!r} has an invalid fitted feature scaler.")
+        state["standardization"] = {
+            "feature_names": names,
+            "feature_indices": indices,
+            "mean": means.tolist(),
+            "std": stds.tolist(),
+        }
+    return {
+        "schema_version": 1,
+        "split": split_name,
+        "feature_manifest_path": str(manifest_path),
+        "curves": curves,
+    }
+
+
+def _resolve_basis_model_provenance(
+    descriptor: DatasetDescriptor,
+    features_path: Path,
+    feature_cols: list[str],
+    feature_mean: np.ndarray,
+    feature_std: np.ndarray,
+) -> dict | None:
+    if not descriptor.basis_curves:
+        return None
+    provenance = _build_basis_model_provenance(
+        features_path, feature_cols, feature_mean, feature_std
+    )
+    if provenance is None:
+        raise ValueError(
+            "Basis curves are configured but their fitted feature manifest could not be "
+            f"found beside {features_path}; model provenance would be incomplete."
+        )
+    return provenance
+
+
 def resolve_entity_group_pooling(
     configured: bool | None,
     descriptor: DatasetDescriptor,
@@ -330,8 +410,7 @@ def _build_entity_groups(
     counts = modal.value_counts()
     small = set(counts[counts < 2].index)
     bucketed = {
-        a: ("__rest__" if (g is None or pd.isna(g) or g in small) else g)
-        for a, g in modal.items()
+        a: ("__rest__" if (g is None or pd.isna(g) or g in small) else g) for a, g in modal.items()
     }
     groups_sorted = sorted({g for g in bucketed.values() if g != "__rest__"})
     group_to_idx = {"__rest__": 0, **{g: i + 1 for i, g in enumerate(groups_sorted)}}
@@ -906,8 +985,7 @@ def _resolve_chain_method(requested: str, estimate_inputs: dict) -> tuple[str, s
             f"{_AUTO_VRAM_HEADROOM:.0%} of {budget_gb:.2f} GB allocatable)"
         )
     return "sequential", (
-        f"auto: vectorized would need {estimate.total_gb:.2f} GB vs "
-        f"{budget_gb:.2f} GB allocatable"
+        f"auto: vectorized would need {estimate.total_gb:.2f} GB vs {budget_gb:.2f} GB allocatable"
     )
 
 
@@ -959,15 +1037,11 @@ def _build_resource_usage(
     # so calibration records from structurally different fits don't collide.
     # Added AFTER the estimate call — the estimator doesn't consume them.
     priors = model_args.get("priors")
-    estimate_inputs["errors_in_variables"] = bool(
-        getattr(priors, "errors_in_variables", False)
-    )
+    estimate_inputs["errors_in_variables"] = bool(getattr(priors, "errors_in_variables", False))
     estimate_inputs["heteroscedastic_entity_obs"] = bool(
         getattr(priors, "heteroscedastic_entity_obs", False)
     )
-    estimate_inputs["entity_group_pooling"] = bool(
-        getattr(priors, "entity_group_pooling", False)
-    )
+    estimate_inputs["entity_group_pooling"] = bool(getattr(priors, "entity_group_pooling", False))
     if estimate_inputs["entity_group_pooling"]:
         estimate_inputs["n_groups"] = int(model_args["n_groups"])
     peak = fit_result.peak_gpu_memory_bytes
@@ -1359,6 +1433,9 @@ def train_models(  # noqa: C901  # tracked complexity debt
     }
     if imputation is not None:
         feature_scaler["imputation"] = imputation
+    basis_model_provenance = _resolve_basis_model_provenance(
+        descriptor, features_path, feature_cols, X_mean, X_std_safe
+    )
 
     log.info(
         "model_data_prepared",
@@ -1620,6 +1697,12 @@ def train_models(  # noqa: C901  # tracked complexity debt
     # Compute data hash for reproducibility
     data_hash = hash_dataframe(train_df)
 
+    # Keep reporting provenance with both durable model artifacts.
+    if basis_model_provenance is not None:
+        fit_result.idata.attrs["basis_curves"] = json.dumps(
+            basis_model_provenance, sort_keys=True, separators=(",", ":")
+        )
+
     # Save model
     model_dir = Path(paths.models)
     model_path, manifest = save_model(
@@ -1755,6 +1838,8 @@ def train_models(  # noqa: C901  # tracked complexity debt
         summary["group_idx_by_artist"] = [int(g) for g in model_args["group_idx_by_artist"]]
         summary["n_groups"] = int(model_args["n_groups"])
     summary["resource_usage"] = resource_usage
+    if basis_model_provenance is not None:
+        summary["basis_curves"] = basis_model_provenance
     summary = TrainingSummary(**summary).to_json_dict()
 
     summary_path = model_dir / "training_summary.json"

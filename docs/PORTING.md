@@ -189,6 +189,36 @@ entity names regardless of domain), and the split directories are always
 values and behavior are correct for any domain; making them descriptor-driven is
 future work.
 
+## Covariate curves
+
+Descriptors can opt into reproducible cubic B-spline columns without writing a
+feature pack:
+
+```yaml
+basis_curves:
+  age_curve:
+    col: age
+    type: spline
+    df: 5
+    center: 27
+```
+
+The capability is off when `basis_curves` is omitted or empty. `df` requests the
+maximum number of emitted columns (`age_curve__basis_00` onward) and must be at
+least 4. The complete partition-of-unity basis is reference-coded by dropping
+one recorded column so model mean-centering remains identifiable. Repeated
+boundary or interior quantiles deterministically reduce the emitted dimension
+until the centered training design is full rank; training fails clearly when no
+identifiable cubic basis is possible. Only `type: spline` is currently supported.
+Knots are fitted from each training split's centered source values and reused
+unchanged for validation and test, including out-of-range values. The feature
+manifest records the per-split knot state. Training then binds each basis name
+and model index to the exact fitted feature mean and standard deviation in both
+`training_summary.json` and the NetCDF model attributes. Pass that durable
+training-summary curve state to `panelcast.reporting.extract_posterior_curve`;
+it applies the model standardizer before `summarize_curve_peak` reports posterior
+peak/vertex intervals.
+
 ## Custom feature blocks
 
 If your domain has analogues of genres/collaborations, write a feature pack:
