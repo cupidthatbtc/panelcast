@@ -471,6 +471,140 @@ class TestBuildFeatures:
         assert "test" in lp["applies_to_splits"]
 
 
+class TestFeatureSchemas:
+    """Per-split, per-partition schema recording and drift enforcement (#295)."""
+
+    def _setup_splits(self, tmp_path, monkeypatch, entity_disjoint_train=None):
+        train, val, test = _make_split_dfs()
+        splits_root = tmp_path / "data" / "splits"
+        for split_name in ["within_entity_temporal", "entity_disjoint"]:
+            split_dir = splits_root / split_name
+            split_dir.mkdir(parents=True, exist_ok=True)
+            split_train = train
+            if split_name == "entity_disjoint" and entity_disjoint_train is not None:
+                split_train = entity_disjoint_train
+            split_train.to_parquet(split_dir / "train.parquet")
+            val.to_parquet(split_dir / "validation.parquet")
+            test.to_parquet(split_dir / "test.parquet")
+        monkeypatch.setattr(
+            "panelcast.pipelines.build_features.Path",
+            lambda p: tmp_path / p,
+        )
+        return train
+
+    def test_manifest_records_per_split_partition_schemas(self, tmp_path, monkeypatch):
+        self._setup_splits(tmp_path, monkeypatch)
+        manifest = build_features(_make_ctx(enable_genre=False))
+
+        for split_name in ["within_entity_temporal", "entity_disjoint"]:
+            schemas = manifest["feature_schemas"][split_name]
+            for partition in ["train", "validation", "test"]:
+                schema = schemas[partition]
+                assert schema["columns"], (split_name, partition)
+                assert len(schema["hash"]) == 64
+                assert all({"name", "dtype"} <= set(c) for c in schema["columns"])
+
+        identity = manifest["feature_schema_identity"]
+        assert identity["identical_across_splits"] is True
+        assert identity["canonical_split"] == "within_entity_temporal"
+        assert set(identity["train_schema_hashes"]) == {
+            "within_entity_temporal",
+            "entity_disjoint",
+        }
+
+    def test_feature_names_is_projection_of_primary_train_schema(
+        self, tmp_path, monkeypatch
+    ):
+        self._setup_splits(tmp_path, monkeypatch)
+        manifest = build_features(_make_ctx(enable_genre=False))
+        primary_train = manifest["feature_schemas"]["within_entity_temporal"]["train"]
+        expected = [
+            c["name"] for c in primary_train["columns"] if c["name"] != "original_row_id"
+        ]
+        assert manifest["feature_names"] == expected
+
+    def _drifting_transform(self, mutate):
+        from panelcast.pipelines.build_features import _transform_with_train_history
+
+        def fake(pipeline, train_df, target_df, feature_ctx, mask_target_score_cols=()):
+            out = _transform_with_train_history(
+                pipeline,
+                train_df,
+                target_df,
+                feature_ctx,
+                mask_target_score_cols=mask_target_score_cols,
+            )
+            return mutate(out)
+
+        return fake
+
+    def test_missing_column_fails_before_training(self, tmp_path, monkeypatch):
+        self._setup_splits(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            "panelcast.pipelines.build_features._transform_with_train_history",
+            self._drifting_transform(lambda out: out.drop(columns=[out.columns[0]])),
+        )
+        with pytest.raises(ValueError, match="schema drift.*missing columns"):
+            build_features(_make_ctx(enable_genre=False))
+
+    def test_extra_column_fails_before_training(self, tmp_path, monkeypatch):
+        self._setup_splits(tmp_path, monkeypatch)
+
+        def add_column(out):
+            out = out.copy()
+            out["sneaky_extra"] = 1.0
+            return out
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.build_features._transform_with_train_history",
+            self._drifting_transform(add_column),
+        )
+        with pytest.raises(ValueError, match="schema drift.*unexpected columns"):
+            build_features(_make_ctx(enable_genre=False))
+
+    def test_reordered_columns_fail_before_training(self, tmp_path, monkeypatch):
+        self._setup_splits(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            "panelcast.pipelines.build_features._transform_with_train_history",
+            self._drifting_transform(lambda out: out[list(reversed(out.columns))]),
+        )
+        with pytest.raises(ValueError, match="schema drift.*reordered"):
+            build_features(_make_ctx(enable_genre=False))
+
+    def test_drift_fails_before_artifacts_are_written(self, tmp_path, monkeypatch):
+        self._setup_splits(tmp_path, monkeypatch)
+        monkeypatch.setattr(
+            "panelcast.pipelines.build_features._transform_with_train_history",
+            self._drifting_transform(lambda out: out.drop(columns=[out.columns[0]])),
+        )
+        with pytest.raises(ValueError, match="schema drift"):
+            build_features(_make_ctx(enable_genre=False))
+        features_dir = tmp_path / "data" / "features"
+        assert not (features_dir / "manifest.json").exists()
+        assert not list(features_dir.rglob("*.parquet"))
+
+    def test_cross_split_difference_is_recorded_with_reason(self, tmp_path, monkeypatch):
+        train, _, _ = _make_split_dfs()
+        disjoint_train = train.copy()
+        # A different album-type vocabulary in this split's training rows
+        # legitimately derives different one-hot columns.
+        disjoint_train["Album_Type"] = "EP"
+        self._setup_splits(tmp_path, monkeypatch, entity_disjoint_train=disjoint_train)
+
+        manifest = build_features(_make_ctx(enable_genre=False))
+
+        identity = manifest["feature_schema_identity"]
+        assert identity["identical_across_splits"] is False
+        assert "reason" in identity
+        hashes = identity["train_schema_hashes"]
+        assert hashes["within_entity_temporal"] != hashes["entity_disjoint"]
+        # The legacy projection follows the canonical (primary) split.
+        primary_train = manifest["feature_schemas"]["within_entity_temporal"]["train"]
+        assert manifest["feature_names"] == [
+            c["name"] for c in primary_train["columns"] if c["name"] != "original_row_id"
+        ]
+
+
 class TestTransformWithTrainHistoryNew:
     """Additional tests for _transform_with_train_history."""
 
