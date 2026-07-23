@@ -166,7 +166,10 @@ class TestResumeRestoresCompleteExperiment:
         # min_ratings pinned: a real run records the hash after the orchestrator
         # resolves it from the descriptor.
         original = PipelineConfig(num_samples=1234, min_ratings=10)
-        identity = {"config_hash": experiment_config_hash(original)}
+        identity = {
+            "config_hash": experiment_config_hash(original),
+            "config_payload": experiment_config_payload(original),
+        }
 
         def tamper(run_dir):
             path = run_dir / "resolved_config.yaml"
@@ -179,7 +182,10 @@ class TestResumeRestoresCompleteExperiment:
 
     def test_resume_proceeds_when_identity_matches(self, tmp_path):
         original = PipelineConfig(num_samples=1234, enable_artist=False, min_ratings=10)
-        identity = {"config_hash": experiment_config_hash(original)}
+        identity = {
+            "config_hash": experiment_config_hash(original),
+            "config_payload": experiment_config_payload(original),
+        }
         config = self._resume(tmp_path, original, identity=identity)
         assert config.num_samples == 1234
         assert config.enable_artist is False

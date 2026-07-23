@@ -799,7 +799,10 @@ class PipelineOrchestrator:
             flags[f.name] = list(value) if isinstance(value, tuple) else value
         flags["dataset_descriptor_hash"] = self.descriptor.descriptor_hash()
 
-        from panelcast.config.pipeline_yaml import experiment_config_hash
+        from panelcast.config.pipeline_yaml import (
+            experiment_config_hash,
+            experiment_config_payload,
+        )
 
         self.manifest = RunManifest(
             run_id=run_id,
@@ -810,6 +813,9 @@ class PipelineOrchestrator:
             flags=flags,
             experiment_identity={
                 "config_hash": experiment_config_hash(self.config),
+                # The hashed payload itself, so an identity mismatch on resume
+                # can name the differing keys instead of two opaque hashes.
+                "config_payload": experiment_config_payload(self.config),
                 "descriptor_hash": self.descriptor.descriptor_hash(),
                 "source": {"commit": git_state.commit, "dirty": git_state.dirty},
                 "environment_fingerprint": environment.fingerprint,
@@ -999,7 +1005,6 @@ class PipelineOrchestrator:
     def _verify_experiment_identity(self) -> None:
         """Prove the resumed config is the recorded experiment, or refuse (#296)."""
         from panelcast.config.pipeline_yaml import (
-            EXPERIMENT_EXCLUDED_KEYS,
             experiment_config_hash,
             experiment_config_payload,
         )
@@ -1019,18 +1024,7 @@ class PipelineOrchestrator:
         recorded_hash = recorded.get("config_hash")
         if recorded_hash and current_hash != recorded_hash:
             current_payload = experiment_config_payload(self.config)
-            recorded_payload: dict[str, Any] = {}
-            resolved_path = self.run_dir / "resolved_config.yaml" if self.run_dir else None
-            if resolved_path is not None and resolved_path.exists():
-                import yaml  # type: ignore[import-untyped]
-
-                recorded_payload = {
-                    key: value
-                    for key, value in (
-                        yaml.safe_load(resolved_path.read_text(encoding="utf-8")) or {}
-                    ).items()
-                    if key not in EXPERIMENT_EXCLUDED_KEYS
-                }
+            recorded_payload: dict[str, Any] = recorded.get("config_payload") or {}
             diff = [
                 f"  {key}: recorded {recorded_payload.get(key)!r} != "
                 f"requested {current_payload.get(key)!r}"
