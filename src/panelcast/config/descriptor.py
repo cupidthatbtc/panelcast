@@ -204,8 +204,11 @@ class DatasetDescriptor(BaseModel):
         return self.processed_name_template.format(min_ratings=value)
 
     def descriptor_hash(self) -> str:
-        """Stable content hash for resume-drift detection."""
-        payload = json.dumps(self.model_dump(mode="json"), sort_keys=True)
+        """Stable fit/data hash; presentation-only fields do not invalidate runs."""
+        payload = json.dumps(
+            self.model_dump(mode="json", exclude={"invert_target_axis"}),
+            sort_keys=True,
+        )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def to_summary_block(self) -> dict[str, Any]:

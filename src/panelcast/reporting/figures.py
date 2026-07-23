@@ -371,6 +371,7 @@ def save_predictions_plot(
     figsize: tuple[float, float] = (6, 6),
     target_label: str = "Score",
     axis_padding: float | None = 2.0,
+    invert_axes: bool = False,
 ) -> tuple[Path, Path]:
     """Generate and save predicted vs actual scatter plot with uncertainty bands.
 
@@ -399,6 +400,8 @@ def save_predictions_plot(
         Domain-specific target name used on both axes.
     axis_padding : float | None, default 2.0
         Fixed axis padding, or None for scale-relative padding.
+    invert_axes : bool, default False
+        Invert both target axes for magnitude-like domains.
 
     Returns
     -------
@@ -458,6 +461,9 @@ def save_predictions_plot(
         )
         ax.set_xlim(lims)
         ax.set_ylim(lims)
+        if invert_axes:
+            ax.invert_xaxis()
+            ax.invert_yaxis()
 
         # Labels
         ax.set_xlabel(f"Predicted {target_label}")
@@ -694,9 +700,7 @@ def save_slice_coverage_plot(
                         capsize=2,
                     )
                     ax.scatter(x[mask], emp[mask], s=18, color=color, zorder=3)
-                ax.axhline(
-                    float(level), linestyle="--", linewidth=0.8, color="grey", alpha=0.6
-                )
+                ax.axhline(float(level), linestyle="--", linewidth=0.8, color="grey", alpha=0.6)
             ax.set_xticks(xs)
             ax.set_xticklabels(
                 [f"{s['label']}\n(n={s['n']})" for s in dim_slices],
@@ -1046,6 +1050,7 @@ def save_artist_prediction_plot(
     target_label: str = "User Score",
     y_limits: tuple[float, float] | None = (0.0, 100.0),
     invert_y_axis: bool = False,
+    max_x_ticks: int | None = None,
 ) -> tuple[Path, Path]:
     """Generate and save a per-artist prediction fan chart.
 
@@ -1081,6 +1086,8 @@ def save_artist_prediction_plot(
         Fixed limits, or None to derive padded limits from the plotted data.
     invert_y_axis : bool
         Invert the target axis for domains such as astronomical magnitudes.
+    max_x_ticks : int | None
+        Maximum labeled event ticks; None preserves every legacy tick.
 
     Returns
     -------
@@ -1146,7 +1153,9 @@ def save_artist_prediction_plot(
         if invert_y_axis:
             ax.invert_yaxis()
 
-        tick_step = max(1, int(np.ceil(n_albums / 20)))
+        tick_step = (
+            1 if max_x_ticks is None else max(1, int(np.ceil(n_albums / max(1, max_x_ticks))))
+        )
         ticks = np.arange(0, n_albums, tick_step, dtype=int)
         if n_albums and ticks[-1] != n_albums - 1:
             ticks = np.append(ticks, n_albums - 1)

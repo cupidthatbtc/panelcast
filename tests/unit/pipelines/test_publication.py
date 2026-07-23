@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.pipelines.publication import (
     SECONDARY_SPLIT,
     _build_publication_readiness,
@@ -29,6 +30,7 @@ from panelcast.pipelines.publication import (
     _resolve_primary_metrics,
     _safe_float,
     _safe_int,
+    _uses_default_plot_presentation,
     generate_publication_artifacts,
 )
 
@@ -2053,6 +2055,16 @@ class TestParseCoverageResultsLegacySkip:
         assert prob in result
 
 
+class TestPlotPresentationSelection:
+    def test_unrelated_descriptor_override_keeps_default_axes(self):
+        descriptor = DatasetDescriptor(raw_path_default="data/raw/alternate.csv")
+        assert _uses_default_plot_presentation(descriptor) is True
+
+    def test_target_presentation_override_uses_portable_axes(self):
+        descriptor = DatasetDescriptor(target_col="g_mag")
+        assert _uses_default_plot_presentation(descriptor) is False
+
+
 class TestPredictionsScatterPlot:
     def _write_predictions_json(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -2078,9 +2090,17 @@ class TestPredictionsScatterPlot:
         saved = {}
 
         def _fake_pred_plot(
-            y_true, y_pred_mean, y_pred_lower, y_pred_upper, output_dir, filename_base, ci_label=""
+            y_true,
+            y_pred_mean,
+            y_pred_lower,
+            y_pred_upper,
+            output_dir,
+            filename_base,
+            ci_label="",
+            **kwargs,
         ):
             saved["called"] = True
+            saved.update(kwargs)
             pdf = output_dir / f"{filename_base}.pdf"
             png = output_dir / f"{filename_base}.png"
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -2089,6 +2109,14 @@ class TestPredictionsScatterPlot:
             return pdf, png
 
         ctx = _setup_ctx_more(strict=False)
+        ctx.descriptor = DatasetDescriptor(
+            name="magnitude",
+            target_col="g_mag",
+            invert_target_axis=True,
+            secondary_target_col=None,
+            secondary_prefix=None,
+            secondary_n_obs_col=None,
+        )
         patches = _base_patches_more(
             tmp_path,
             save_predictions_plot=patch(
@@ -2098,6 +2126,9 @@ class TestPredictionsScatterPlot:
         )
         artifacts = _run_with_patches_more(tmp_path, ctx, patches)
         assert saved.get("called") is True
+        assert saved["target_label"] == "g mag"
+        assert saved["axis_padding"] is None
+        assert saved["invert_axes"] is True
         pred_figs = [p for p in artifacts["figures"] if "predictions_primary" in p]
         assert len(pred_figs) == 2  # pdf + png
 
@@ -2281,6 +2312,7 @@ class TestArtistFanCharts:
 
         fan_calls = []
         fan_quantiles = {}
+        fan_kwargs = {}
 
         def _fake_fan(
             artist,
@@ -2291,9 +2323,11 @@ class TestArtistFanCharts:
             filename_base,
             categories=None,
             forecast_quantiles=None,
+            **kwargs,
         ):
             fan_calls.append(artist)
             fan_quantiles[artist] = forecast_quantiles
+            fan_kwargs[artist] = kwargs
             pdf = output_dir / f"{filename_base}.pdf"
             png = output_dir / f"{filename_base}.png"
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -2302,6 +2336,7 @@ class TestArtistFanCharts:
             return pdf, png
 
         ctx = _setup_ctx_more(strict=False)
+        ctx.descriptor = DatasetDescriptor(name="magnitude", invert_target_axis=True)
         patches = _base_patches_more(
             tmp_path,
             save_artist_prediction_plot=patch(
@@ -2318,6 +2353,13 @@ class TestArtistFanCharts:
         assert len(fan_calls) >= 1
         # The stored CSV quantiles pass through unmodified for the forecast point.
         assert np.allclose(fan_quantiles["ArtistA"], [65.0, 72.0, 78.0, 84.0, 90.0])
+        assert fan_kwargs["ArtistA"] == {
+            "event_label": "Album",
+            "target_label": "User Score",
+            "y_limits": None,
+            "invert_y_axis": True,
+            "max_x_ticks": 20,
+        }
         # No outer error
         error_names = [e["artifact"] for e in artifacts["errors"]]
         assert "artist_fan_charts" not in error_names

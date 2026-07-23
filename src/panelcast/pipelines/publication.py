@@ -53,6 +53,16 @@ log = structlog.get_logger()
 SECONDARY_SPLIT = str(SplitType.ENTITY_DISJOINT.value)
 
 
+def _uses_default_plot_presentation(descriptor: DatasetDescriptor) -> bool:
+    default = DatasetDescriptor()
+    return (
+        descriptor.event_col == default.event_col
+        and descriptor.target_col == default.target_col
+        and descriptor.target_bounds == default.target_bounds
+        and not descriptor.invert_target_axis
+    )
+
+
 @dataclass(frozen=True)
 class _CoverageLike:
     empirical: float
@@ -759,10 +769,11 @@ def _save_predictions_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -
             interval_level = pred_data.get("interval_level", 0.90)
             descriptor = getattr(inp.ctx, "descriptor", None) or DatasetDescriptor()
             label_kwargs = {}
-            if descriptor != DatasetDescriptor():
+            if not _uses_default_plot_presentation(descriptor):
                 label_kwargs = {
                     "target_label": descriptor.target_col.replace("_", " "),
                     "axis_padding": None,
+                    "invert_axes": descriptor.invert_target_axis,
                 }
             pdf_path, png_path = save_predictions_plot(
                 y_true=np.array(pred_data["y_true"]),
@@ -887,12 +898,13 @@ def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) 
             sort_cols_fans.append(fan_descriptor.parsed_date_col)
         train_for_fans = train_for_fans.sort_values(sort_cols_fans)
         fan_plot_kwargs = {}
-        if fan_descriptor != DatasetDescriptor():
+        if not _uses_default_plot_presentation(fan_descriptor):
             fan_plot_kwargs = {
                 "event_label": fan_descriptor.event_col.replace("_", " "),
                 "target_label": fan_descriptor.target_col.replace("_", " "),
                 "y_limits": None,
                 "invert_y_axis": fan_descriptor.invert_target_axis,
+                "max_x_ticks": 20,
             }
 
         def _fan_chart_for_artist(artist: str, categories: list[str]) -> None:
@@ -1091,9 +1103,7 @@ def _generate_model_card(inp: _PublicationInputs, artifacts: dict[str, Any]) -> 
         ranking = inp.primary_metrics.get("ranking") or {}
         if ranking.get("spearman") is not None:
             parts = [f"Spearman {ranking['spearman']:.3f}", f"Kendall {ranking['kendall_tau']:.3f}"]
-            for k, block in sorted(
-                (ranking.get("top_k") or {}).items(), key=lambda kv: int(kv[0])
-            ):
+            for k, block in sorted((ranking.get("top_k") or {}).items(), key=lambda kv: int(kv[0])):
                 if block is not None:
                     parts.append(f"precision@{k} {block['precision']:.2f}")
             model_card_data.ranking_summary = ", ".join(parts) + " (single-slate, descriptive)."

@@ -95,9 +95,7 @@ class TestPlotPresentation:
 class TestAggregationCountFlag:
     def test_yaml_can_disable_aggregation_count(self, tmp_path):
         yaml_path = tmp_path / "noagg.yaml"
-        yaml_path.write_text(
-            "name: noagg\nn_obs_is_aggregation_count: false\n", encoding="utf-8"
-        )
+        yaml_path.write_text("name: noagg\nn_obs_is_aggregation_count: false\n", encoding="utf-8")
         assert load_descriptor(yaml_path).n_obs_is_aggregation_count is False
 
     def test_aero_example_disables_aggregation_count(self):
@@ -139,6 +137,18 @@ class TestDescriptorHash:
         a = DatasetDescriptor()
         b = DatasetDescriptor(entity_col="Airframe")
         assert a.descriptor_hash() != b.descriptor_hash()
+
+    def test_default_hash_matches_pre_presentation_schema(self):
+        assert (
+            DatasetDescriptor().descriptor_hash()
+            == "a9e3e20540b1dcb5d6253bd342cff6fd73ed823597428f4e94abd51f8b67b8ec"
+        )
+
+    def test_presentation_inversion_does_not_invalidate_fit_hash(self):
+        assert (
+            DatasetDescriptor(invert_target_axis=True).descriptor_hash()
+            == DatasetDescriptor().descriptor_hash()
+        )
 
     def test_summary_block_keys(self):
         block = DatasetDescriptor().to_summary_block()
