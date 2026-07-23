@@ -1,4 +1,9 @@
-> **STATUS — real-data subset validated; full corpus still pending**
+> **STATUS — software validation complete; domain-model research open**
+>
+> The package claim — feature-complete infrastructure for specifying, fitting,
+> evaluating, and auditing hierarchical panel models — is validated end-to-end
+> on real data. The items below track the *AOTY domain model*, which is
+> research in progress, not a package-completeness prerequisite.
 >
 > - **Convergence is now demonstrated on real data.** A representative subset of
 >   the AOTY corpus (~800 artists / 5,182 albums, user-score skewness −2.08)
