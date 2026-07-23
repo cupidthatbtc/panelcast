@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -181,6 +182,10 @@ class PipelineConfig:
     init_strategy: InitStrategy = "uniform"
     chain_method: ChainMethod = "sequential"
     checkpoint_every_draws: int | None = None
+    caged_chain_retries: int = 0
+    caged_chain_tree_depth_fraction: float = 0.95
+    caged_chain_boundary_sigma: float = 0.005
+    caged_chain_consensus_ratio: float = 5.0
     # Warmup-transfer seams (YAML-only; the select runner writes them per arm).
     warmup_export_path: str | None = None
     warmup_import_path: str | None = None
@@ -416,6 +421,29 @@ class PipelineConfig:
             raise ValueError("target_accept must be in (0, 1).")
         if self.checkpoint_every_draws is not None and self.checkpoint_every_draws < 1:
             raise ValueError("checkpoint_every_draws must be >= 1 when set.")
+        if type(self.caged_chain_retries) is not int:
+            raise ValueError("caged_chain_retries must be an integer.")
+        if not 0 <= self.caged_chain_retries <= 10:
+            raise ValueError("caged_chain_retries must be between 0 and 10.")
+        for name, value in (
+            ("caged_chain_tree_depth_fraction", self.caged_chain_tree_depth_fraction),
+            ("caged_chain_boundary_sigma", self.caged_chain_boundary_sigma),
+            ("caged_chain_consensus_ratio", self.caged_chain_consensus_ratio),
+        ):
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must be a finite number.")
+            try:
+                finite = math.isfinite(value)
+            except TypeError as exc:
+                raise ValueError(f"{name} must be a finite number.") from exc
+            if not finite:
+                raise ValueError(f"{name} must be a finite number.")
+        if not 0.0 < self.caged_chain_tree_depth_fraction <= 1.0:
+            raise ValueError("caged_chain_tree_depth_fraction must be in (0, 1].")
+        if self.caged_chain_boundary_sigma <= 0.0:
+            raise ValueError("caged_chain_boundary_sigma must be > 0.")
+        if self.caged_chain_consensus_ratio <= 1.0:
+            raise ValueError("caged_chain_consensus_ratio must be > 1.")
         if self.ess_threshold < 1:
             raise ValueError("ess_threshold must be >= 1.")
         if self.strict and self.num_chains < 2:
@@ -774,6 +802,10 @@ class PipelineOrchestrator:
                 "init_strategy": self.config.init_strategy,
                 "chain_method": self.config.chain_method,
                 "checkpoint_every_draws": self.config.checkpoint_every_draws,
+                "caged_chain_retries": self.config.caged_chain_retries,
+                "caged_chain_tree_depth_fraction": self.config.caged_chain_tree_depth_fraction,
+                "caged_chain_boundary_sigma": self.config.caged_chain_boundary_sigma,
+                "caged_chain_consensus_ratio": self.config.caged_chain_consensus_ratio,
                 # Convergence thresholds
                 "rhat_threshold": self.config.rhat_threshold,
                 "ess_threshold": self.config.ess_threshold,
@@ -872,6 +904,10 @@ class PipelineOrchestrator:
         "num_warmup",
         # Resume must reuse the checkpoint identity, which hashes the MCMC config.
         "checkpoint_every_draws",
+        "caged_chain_retries",
+        "caged_chain_tree_depth_fraction",
+        "caged_chain_boundary_sigma",
+        "caged_chain_consensus_ratio",
         "n_exponent",
         "learn_n_exponent",
         "n_exponent_prior",
@@ -1081,6 +1117,16 @@ class PipelineOrchestrator:
             parts.append(f"--chain-method {self.config.chain_method}")
         if self.config.checkpoint_every_draws is not None:
             parts.append(f"--checkpoint-every {self.config.checkpoint_every_draws}")
+        if self.config.caged_chain_retries:
+            parts.append(f"--caged-chain-retries {self.config.caged_chain_retries}")
+        if self.config.caged_chain_tree_depth_fraction != defaults.caged_chain_tree_depth_fraction:
+            parts.append(
+                f"--caged-chain-tree-depth-fraction {self.config.caged_chain_tree_depth_fraction}"
+            )
+        if self.config.caged_chain_boundary_sigma != defaults.caged_chain_boundary_sigma:
+            parts.append(f"--caged-chain-boundary-sigma {self.config.caged_chain_boundary_sigma}")
+        if self.config.caged_chain_consensus_ratio != defaults.caged_chain_consensus_ratio:
+            parts.append(f"--caged-chain-consensus-ratio {self.config.caged_chain_consensus_ratio}")
         # Convergence thresholds
         if self.config.rhat_threshold != defaults.rhat_threshold:
             parts.append(f"--rhat-threshold {self.config.rhat_threshold}")
@@ -1454,6 +1500,10 @@ class PipelineOrchestrator:
             init_strategy=self.config.init_strategy,
             chain_method=self.config.chain_method,
             checkpoint_every_draws=self.config.checkpoint_every_draws,
+            caged_chain_retries=self.config.caged_chain_retries,
+            caged_chain_tree_depth_fraction=self.config.caged_chain_tree_depth_fraction,
+            caged_chain_boundary_sigma=self.config.caged_chain_boundary_sigma,
+            caged_chain_consensus_ratio=self.config.caged_chain_consensus_ratio,
             # Convergence thresholds
             rhat_threshold=self.config.rhat_threshold,
             ess_threshold=self.config.ess_threshold,

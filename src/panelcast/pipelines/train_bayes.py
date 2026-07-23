@@ -9,9 +9,10 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import arviz as az
 import jax.numpy as jnp
@@ -25,7 +26,7 @@ from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
 from panelcast.data.imputation import apply_imputation, fit_imputation
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.gpu_memory import estimate_memory_gb
-from panelcast.models.bayes.diagnostics import check_convergence
+from panelcast.models.bayes.diagnostics import check_convergence, detect_caged_chains
 from panelcast.models.bayes.fit import MCMCConfig, fit_model, resolve_progress_bar
 from panelcast.models.bayes.io import save_model
 from panelcast.models.bayes.model import compute_sigma_scaled, make_score_model
@@ -997,7 +998,212 @@ def _build_resource_usage(
     return usage
 
 
-def train_models(
+def _fit_diagnostics(
+    fit_result,
+    *,
+    scale_parameter: str,
+    max_tree_depth: int,
+    tree_depth_fraction: float,
+    boundary_sigma: float,
+    consensus_ratio: float,
+    rhat_threshold: float,
+    ess_threshold: int,
+    allow_divergences: bool,
+):
+    caged = detect_caged_chains(
+        fit_result.idata,
+        scale_parameter=scale_parameter,
+        max_tree_depth=max_tree_depth,
+        tree_depth_fraction=tree_depth_fraction,
+        boundary_sigma=boundary_sigma,
+        consensus_ratio=consensus_ratio,
+    )
+    diagnostics = check_convergence(
+        fit_result.idata,
+        rhat_threshold=rhat_threshold,
+        ess_threshold=ess_threshold,
+        allow_divergences=allow_divergences,
+    )
+    survivor_diagnostics = None
+    if caged.chains:
+        survivor_ids = [
+            chain.item() if isinstance(chain, np.generic) else chain
+            for chain in fit_result.idata.posterior.coords["chain"].values
+            if chain not in caged.chain_ids
+        ]
+        if len(survivor_ids) >= 2:
+            survivor_diagnostics = check_convergence(
+                fit_result.idata.sel(chain=survivor_ids),
+                rhat_threshold=rhat_threshold,
+                ess_threshold=ess_threshold,
+                allow_divergences=allow_divergences,
+            )
+    return diagnostics, caged, survivor_diagnostics
+
+
+def _fit_with_caged_chain_retries(
+    initial_result,
+    initial_config: MCMCConfig,
+    *,
+    fit_once: Callable[[MCMCConfig, int], Any],
+    max_retries: int,
+    scale_parameter: str,
+    tree_depth_fraction: float,
+    boundary_sigma: float,
+    consensus_ratio: float,
+    rhat_threshold: float,
+    ess_threshold: int,
+    allow_divergences: bool,
+):
+    """Return the first all-consensus fit, or the original fit after bounded retries."""
+
+    def assess(result, config):
+        return _fit_diagnostics(
+            result,
+            scale_parameter=scale_parameter,
+            max_tree_depth=config.max_tree_depth,
+            tree_depth_fraction=tree_depth_fraction,
+            boundary_sigma=boundary_sigma,
+            consensus_ratio=consensus_ratio,
+            rhat_threshold=rhat_threshold,
+            ess_threshold=ess_threshold,
+            allow_divergences=allow_divergences,
+        )
+
+    def diagnostics_record(value):
+        if value is None:
+            return None
+        return {
+            "passed": value.passed,
+            "rhat_max": value.rhat_max,
+            "ess_bulk_min": value.ess_bulk_min,
+            "divergences": value.divergences,
+        }
+
+    initial_assessment = assess(initial_result, initial_config)
+    diagnostics, caged, survivors = initial_assessment
+    attempts = [
+        {
+            "attempt": 0,
+            "seed": initial_config.seed,
+            "caged_chain_ids": caged.chain_ids,
+            "diagnostics": diagnostics_record(diagnostics),
+            "survivor_diagnostics": diagnostics_record(survivors),
+        }
+    ]
+    if max_retries == 0 or not caged.chains:
+        return initial_result, initial_config, diagnostics, caged, attempts
+
+    current_assessment = initial_assessment
+    for retry in range(1, max_retries + 1):
+        _, current_caged, current_survivors = current_assessment
+        if current_survivors is None or not current_survivors.passed:
+            log.warning(
+                "caged_chain_retry_skipped",
+                attempt=retry - 1,
+                chain_ids=current_caged.chain_ids,
+                reason="survivor chains failed diagnostics",
+            )
+            return initial_result, initial_config, diagnostics, caged, attempts
+        log.warning(
+            "caged_chains_excluded",
+            attempt=retry - 1,
+            chain_ids=current_caged.chain_ids,
+            criterion=current_caged.to_dict()["criterion"],
+            survivor_diagnostics=diagnostics_record(current_survivors),
+        )
+        retry_config = dataclasses.replace(initial_config, seed=initial_config.seed + retry)
+        log.warning(
+            "caged_chain_retry",
+            attempt=retry,
+            seed=retry_config.seed,
+            max_retries=max_retries,
+        )
+        candidate = fit_once(retry_config, retry)
+        current_assessment = assess(candidate, retry_config)
+        candidate_diagnostics, candidate_caged, candidate_survivors = current_assessment
+        attempts.append(
+            {
+                "attempt": retry,
+                "seed": retry_config.seed,
+                "caged_chain_ids": candidate_caged.chain_ids,
+                "diagnostics": diagnostics_record(candidate_diagnostics),
+                "survivor_diagnostics": diagnostics_record(candidate_survivors),
+            }
+        )
+        if not candidate_caged.chains:
+            log.info("caged_chain_retry_succeeded", attempt=retry, seed=retry_config.seed)
+            return candidate, retry_config, candidate_diagnostics, candidate_caged, attempts
+
+    log.warning(
+        "caged_chain_retry_exhausted",
+        retries=len(attempts) - 1,
+        max_retries=max_retries,
+        retained_seed=initial_config.seed,
+    )
+    return initial_result, initial_config, diagnostics, caged, attempts
+
+
+def _passes_convergence_gate(diagnostics, caged_chains, *, retry_limit: int) -> bool:
+    """Cage classification gates acceptance only when retries were requested."""
+    return diagnostics.passed and (retry_limit == 0 or not caged_chains.chains)
+
+
+def _retry_warmup_export_path(
+    target: Path | None,
+    *,
+    retry_limit: int,
+    attempt: int,
+) -> Path | None:
+    if target is None or retry_limit == 0:
+        return target
+    return target.with_name(f"{target.stem}.attempt_{attempt}{target.suffix}")
+
+
+def _finalize_retry_warmup_export(
+    target: Path | None,
+    *,
+    retry_limit: int,
+    selected_seed: int,
+    initial_seed: int,
+    attempts: int,
+) -> None:
+    if target is None or retry_limit == 0:
+        return
+    import shutil
+
+    selected = _retry_warmup_export_path(
+        target,
+        retry_limit=retry_limit,
+        attempt=selected_seed - initial_seed,
+    )
+    if selected is not None and selected.exists():
+        shutil.copy2(selected, target)
+    for attempt in range(attempts):
+        export = _retry_warmup_export_path(target, retry_limit=retry_limit, attempt=attempt)
+        if export is not None:
+            export.unlink(missing_ok=True)
+
+
+def _prepare_retry_attempt_io(
+    checkpoint_dir: Path | None,
+    warmup_import_path: Path | None,
+    *,
+    retry_limit: int,
+    attempt: int,
+) -> tuple[Path | None, Path | None]:
+    attempt_checkpoint = checkpoint_dir
+    if checkpoint_dir is not None and retry_limit:
+        attempt_checkpoint = checkpoint_dir / f"attempt_{attempt}"
+        if attempt > 0 and attempt_checkpoint.exists():
+            import shutil
+
+            shutil.rmtree(attempt_checkpoint)
+    attempt_warmup_import = warmup_import_path if attempt == 0 else None
+    return attempt_checkpoint, attempt_warmup_import
+
+
+def train_models(  # noqa: C901  # tracked complexity debt
     ctx: StageContext,
     features_path: Path | None = None,
     splits_path: Path | None = None,
@@ -1296,20 +1502,55 @@ def train_models(
     )
     warmup_export = getattr(ctx, "warmup_export_path", None)
     warmup_import = getattr(ctx, "warmup_import_path", None)
-    fit_result = fit_model(
-        model=make_score_model(prefix),
-        model_args=model_args,
-        config=mcmc_config,
-        progress_bar=resolve_progress_bar(getattr(ctx, "progress_bar", None)),
-        # Large tensors, exclude to prevent OOM
-        exclude_from_idata=tuple(idata_excludes),
-        # Opt-in in-sampler exclusion: never store these draws on device
-        # (~96% peak-GPU cut at production settings; posterior parity for all
-        # other sites is guarded by tests).
-        exclude_from_collection=(tuple(collection_excludes) or None),
-        checkpoint_dir=checkpoint_dir,
-        warmup_export_path=Path(warmup_export) if warmup_export else None,
-        warmup_import_path=Path(warmup_import) if warmup_import else None,
+    retry_limit = int(getattr(ctx, "caged_chain_retries", 0))
+    warmup_export_target = Path(warmup_export) if warmup_export else None
+    warmup_import_target = Path(warmup_import) if warmup_import else None
+
+    def _run_fit(config: MCMCConfig, attempt: int):
+        attempt_checkpoint, attempt_warmup_import = _prepare_retry_attempt_io(
+            checkpoint_dir,
+            warmup_import_target,
+            retry_limit=retry_limit,
+            attempt=attempt,
+        )
+        return fit_model(
+            model=make_score_model(prefix),
+            model_args=model_args,
+            config=config,
+            progress_bar=resolve_progress_bar(getattr(ctx, "progress_bar", None)),
+            exclude_from_idata=tuple(idata_excludes),
+            exclude_from_collection=(tuple(collection_excludes) or None),
+            checkpoint_dir=attempt_checkpoint,
+            warmup_export_path=_retry_warmup_export_path(
+                warmup_export_target,
+                retry_limit=retry_limit,
+                attempt=attempt,
+            ),
+            warmup_import_path=attempt_warmup_import,
+        )
+
+    fit_result = _run_fit(mcmc_config, 0)
+    fit_result, mcmc_config, diagnostics, caged_chains, retry_attempts = (
+        _fit_with_caged_chain_retries(
+            fit_result,
+            mcmc_config,
+            fit_once=_run_fit,
+            max_retries=retry_limit,
+            scale_parameter=f"{prefix}_sigma_artist",
+            tree_depth_fraction=float(getattr(ctx, "caged_chain_tree_depth_fraction", 0.95)),
+            boundary_sigma=float(getattr(ctx, "caged_chain_boundary_sigma", 0.005)),
+            consensus_ratio=float(getattr(ctx, "caged_chain_consensus_ratio", 5.0)),
+            rhat_threshold=ctx.rhat_threshold,
+            ess_threshold=ctx.ess_threshold,
+            allow_divergences=ctx.allow_divergences,
+        )
+    )
+    _finalize_retry_warmup_export(
+        warmup_export_target,
+        retry_limit=retry_limit,
+        selected_seed=mcmc_config.seed,
+        initial_seed=ctx.seed,
+        attempts=len(retry_attempts),
     )
 
     log.info(
@@ -1341,23 +1582,19 @@ def train_models(
         resource_usage["predicted_seconds"] = round(prediction.seconds, 1)
     log.info("resource_usage", **resource_usage)
 
-    # Check convergence using CLI-provided thresholds
-    diagnostics = check_convergence(
-        fit_result.idata,
-        rhat_threshold=ctx.rhat_threshold,
-        ess_threshold=ctx.ess_threshold,
-        allow_divergences=ctx.allow_divergences,
+    convergence_passed = _passes_convergence_gate(
+        diagnostics, caged_chains, retry_limit=retry_limit
     )
-
     log.info(
         "convergence_check",
-        passed=diagnostics.passed,
+        passed=convergence_passed,
         rhat_max=diagnostics.rhat_max,
         rhat_threshold=ctx.rhat_threshold,
         ess_bulk_min=diagnostics.ess_bulk_min,
         ess_threshold=ctx.ess_threshold,
         divergences=diagnostics.divergences,
         allow_divergences=ctx.allow_divergences,
+        caged_chains=caged_chains.to_dict(),
     )
 
     # Handle strict mode
@@ -1371,12 +1608,12 @@ def train_models(
             stage="train",
         )
 
-    if ctx.strict and not diagnostics.passed:
-        # The gate is a TOTAL ESS floor (summed across chains) — report it as-is.
+    if ctx.strict and not convergence_passed:
+        caged_text = f", caged_chains={caged_chains.chain_ids}" if caged_chains.chains else ""
         raise ConvergenceError(
             f"Convergence failed: rhat_max={diagnostics.rhat_max:.4f} "
             f"(thresh {ctx.rhat_threshold}), ess_min={diagnostics.ess_bulk_min:.0f} "
-            f"(thresh {ctx.ess_threshold})",
+            f"(thresh {ctx.ess_threshold}){caged_text}",
             stage="train",
         )
 
@@ -1418,6 +1655,9 @@ def train_models(
             "rhat_threshold": ctx.rhat_threshold,
             "ess_threshold": ctx.ess_threshold,
             "allow_divergences": ctx.allow_divergences,
+            "caged_chain_tree_depth_fraction": caged_chains.tree_depth_fraction,
+            "caged_chain_boundary_sigma": caged_chains.boundary_sigma,
+            "caged_chain_consensus_ratio": caged_chains.consensus_ratio,
         },
         "min_albums_filter": ctx.min_albums_filter,
         "n_artists_below_threshold": int(n_below_threshold),
@@ -1469,13 +1709,19 @@ def train_models(
         "heteroscedastic_entity_obs": entity_obs_on,
         "tau_entity_scale": float(getattr(ctx, "tau_entity_scale", 0.25)),
         "diagnostics": {
-            "passed": diagnostics.passed,
+            "passed": convergence_passed,
             "rhat_max": float(diagnostics.rhat_max),
             "ess_bulk_min": float(diagnostics.ess_bulk_min),
             "ess_tail_min": float(diagnostics.ess_tail_min),
             "rhat_threshold": float(diagnostics.rhat_threshold),
             "ess_threshold": int(diagnostics.ess_threshold),
             "failing_params": [str(p) for p in diagnostics.failing_params],
+            "caged_chains": caged_chains.to_dict(),
+            "caged_chain_retry": {
+                "configured_retries": retry_limit,
+                "attempts": retry_attempts,
+                "selected_seed": mcmc_config.seed,
+            },
         },
     }
 

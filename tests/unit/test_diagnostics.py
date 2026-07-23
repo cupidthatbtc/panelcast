@@ -21,6 +21,7 @@ import xarray as xr
 from panelcast.models.bayes.diagnostics import (
     ConvergenceDiagnostics,
     check_convergence,
+    detect_caged_chains,
     get_divergence_info,
 )
 
@@ -916,3 +917,84 @@ class TestGetDivergenceInfoWithDivergences:
         assert info["total"] == 0
         assert info["rate"] == 0.0
         assert info["locations"] == {}
+
+
+def _caged_idata(step_means, sigma_means):
+    draws = 20
+    posterior = xr.Dataset(
+        {
+            "user_sigma_artist": xr.DataArray(
+                np.repeat(np.asarray(sigma_means)[:, None], draws, axis=1),
+                dims=["chain", "draw"],
+                coords={"chain": [10, 11, 12, 13], "draw": range(draws)},
+            )
+        }
+    )
+    sample_stats = xr.Dataset(
+        {
+            "num_steps": xr.DataArray(
+                np.repeat(np.asarray(step_means)[:, None], draws, axis=1),
+                dims=["chain", "draw"],
+                coords={"chain": [10, 11, 12, 13], "draw": range(draws)},
+            )
+        }
+    )
+    return az.InferenceData(posterior=posterior, sample_stats=sample_stats)
+
+
+class TestDetectCagedChains:
+    def test_requires_tree_depth_and_relative_boundary_sigma(self):
+        result = detect_caged_chains(
+            _caged_idata([1000, 63, 64, 62], [0.001, 0.08, 0.09, 0.10]),
+            scale_parameter="user_sigma_artist",
+            max_tree_depth=10,
+        )
+
+        assert result.chain_ids == [10]
+        assert result.chains[0].mean_num_steps == 1000
+        assert result.to_dict()["criterion"] == {
+            "mean_num_steps_gte": pytest.approx(0.95 * 1023),
+            "max_num_steps": 1023,
+            "posterior_mean_sigma_lte": 0.005,
+            "other_chain_median_ratio_gte": 5.0,
+        }
+
+    @pytest.mark.parametrize(
+        ("steps", "sigmas"),
+        [
+            ([900, 63, 64, 62], [0.001, 0.08, 0.09, 0.10]),
+            ([1000, 63, 64, 62], [0.02, 0.08, 0.09, 0.10]),
+            ([1000, 63, 64, 62], [0.001, 0.003, 0.004, 0.004]),
+        ],
+    )
+    def test_avoids_single_criterion_and_all_boundary_false_positives(self, steps, sigmas):
+        result = detect_caged_chains(
+            _caged_idata(steps, sigmas),
+            scale_parameter="user_sigma_artist",
+            max_tree_depth=10,
+        )
+
+        assert result.chain_ids == []
+
+    def test_single_chain_has_no_cross_chain_consensus(self):
+        idata = _caged_idata([1000, 63, 64, 62], [0.001, 0.08, 0.09, 0.10]).sel(
+            chain=[10]
+        )
+        result = detect_caged_chains(
+            idata,
+            scale_parameter="user_sigma_artist",
+            max_tree_depth=10,
+        )
+        assert result.chain_ids == []
+
+    def test_missing_scale_or_num_steps_is_not_caged(self):
+        idata = _caged_idata([1000, 63, 64, 62], [0.001, 0.08, 0.09, 0.10])
+
+        assert (
+            detect_caged_chains(
+                idata,
+                scale_parameter="other_sigma_artist",
+                max_tree_depth=10,
+            ).chain_ids
+            == []
+        )
