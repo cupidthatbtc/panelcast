@@ -19,7 +19,10 @@ from clean revision `4d1bb116` on CPU with seed 42 and
 `PANELCAST_SAVE_LOG_LIKELIHOOD=1`; pointwise score-scale log likelihoods were
 retained for the paired comparison. Full hashes, resolved configs, row-identity
 hashes, both arms' metrics, and the 653 pointwise ELPD differences are committed
-in `fair_eval.json`; `reproduce.py` is the evaluation driver.
+in `fair_eval.json`. `reproduce.py` evaluates each archived arm;
+`build_evidence.py` binds both arms to the canonical ordered split, derives the
+paired comparison from both NetCDF files, validates the baseline JSON,
+regenerates and hashes its CSV, and emits the record.
 
 ## Old estimator vs fixed estimator
 
