@@ -20,10 +20,10 @@
 > configuration with the 0.13.0 entity-obs default (R-hat 1.00, bulk ESS
 > 1,119, 0 divergences), and the baseline benchmark runs on the same real
 > splits. Two items remain open **as domain-model research, not
-> package-completeness prerequisites**: the **skewness and max**
+> package-completeness prerequisites**: (1) the **skewness and max**
 > posterior-predictive p-values stay pinned by a bounded-skew mismatch — six
 > likelihood families plus a dequantization toggle were tried with **none
-> resolving them**, though the entity-obs default cleared q10 and q90 — and
+> resolving them**, though the entity-obs default cleared q10 and q90; (2)
 > the numbers come from the validated subset, not the full eligible corpus
 > (~62k albums with ≥10 ratings; #15). See [`MODEL_CARD.md`](MODEL_CARD.md)
 > and [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md). Treat
