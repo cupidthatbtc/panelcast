@@ -106,6 +106,8 @@ def get_feature_blocks(
                 list(blocks),
                 target_col=descriptor.target_col,
                 entity_col=descriptor.entity_col,
+                date_col=descriptor.parsed_date_col,
+                event_col=descriptor.event_col,
             )
         )
     return blocks
@@ -350,6 +352,13 @@ def build_features(ctx: StageContext) -> dict:
             "validation": _safe_split_stats(val_features, val_path),
             "test": _safe_split_stats(test_features, test_path),
         }
+        gbm_block = next((block for block in blocks if block.name == "gbm_offset"), None)
+        if gbm_block is not None:
+            split_manifests[split_name]["gbm_oof_folds"] = gbm_block._fold_manifest_
+            split_manifests[split_name]["gbm_deployment_refit"] = {
+                "protocol": "all_training_rows_admissible_before_held_out_prediction",
+                "n_rows": len(train_df),
+            }
 
     # Save manifest
     block_names = [
