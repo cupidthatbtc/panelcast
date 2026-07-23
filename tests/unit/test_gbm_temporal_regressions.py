@@ -50,11 +50,26 @@ def test_temporal_oof_accepts_missing_training_dates_and_bounds_fit_count(monkey
     block = _pipeline(_frame())
     assert count <= 1 + 2 * block.n_splits
     assert np.isfinite(list(block._oof_by_row_id_.values())).all()
-    missing_folds = [record for record in block._fold_manifest_ if record["held_date_missing"]]
+    missing_folds = [record for record in block.fold_manifest if record["held_date_missing"]]
     assert len(missing_folds) == 1
     assert missing_folds[0]["effective_date_cutoff"] is None
     assert missing_folds[0]["n_fit_missing_dates"] == 0
     assert missing_folds[0]["max_fit_rank"] < missing_folds[0]["min_held_rank"]
+
+
+def test_all_missing_dates_fail_with_the_configured_column():
+    frame = _frame()
+    frame["date"] = None
+    with pytest.raises(ValueError, match="date_col 'date' has no parseable dates"):
+        _pipeline(frame)
+
+
+def test_single_entity_panel_rejects_the_unidentified_cold_start_estimand():
+    frame = _frame()
+    frame["entity"] = "only"
+    frame["date"] = pd.date_range("2020-01-01", periods=len(frame))
+    with pytest.raises(ValueError, match="single-entity panel"):
+        _pipeline(frame)
 
 
 @pytest.mark.parametrize("invalid", [None, np.nan, np.inf])

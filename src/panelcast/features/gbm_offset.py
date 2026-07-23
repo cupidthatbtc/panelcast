@@ -88,13 +88,20 @@ class GbmOffsetBlock(BaseFeatureBlock):
         if self.date_col not in df.columns:
             raise ValueError(f"gbm_offset: configured date_col '{self.date_col}' is absent")
 
-        try:
-            dates = pd.to_datetime(
-                df[self.date_col], errors="coerce", format="mixed", utc=True
-            ).dt.tz_convert(None)
-        except TypeError:  # pandas < 2.0
-            dates = pd.to_datetime(df[self.date_col], errors="coerce", utc=True).dt.tz_convert(
-                None
+        date_values = df[self.date_col]
+        if pd.api.types.is_datetime64_any_dtype(date_values.dtype):
+            dates = pd.to_datetime(date_values, errors="coerce", utc=True).dt.tz_convert(None)
+        else:
+            try:
+                dates = pd.to_datetime(
+                    date_values, errors="coerce", format="mixed", utc=True
+                ).dt.tz_convert(None)
+            except TypeError:  # pandas < 2.0
+                dates = pd.to_datetime(date_values, errors="coerce", utc=True).dt.tz_convert(None)
+        if not bool(dates.notna().any()):
+            raise ValueError(
+                f"gbm_offset: date_col '{self.date_col}' has no parseable dates; "
+                "temporal OOF cannot establish an admissible history"
             )
         event = (
             df[self.event_col].astype("string").fillna("")
@@ -152,6 +159,15 @@ class GbmOffsetBlock(BaseFeatureBlock):
             if estimand == "prospective_within_entity" and max_fit_rank >= min_held_rank:
                 raise AssertionError("gbm_offset prospective fold includes future observations")
             fit_date_max = dates.iloc[fit_positions].max()
+            held_date_min = dates.iloc[held_positions].min()
+            if (
+                estimand == "prospective_within_entity"
+                and not pd.isna(held_date_min)
+                and (pd.isna(fit_date_max) or fit_date_max >= held_date_min)
+            ):
+                raise AssertionError(
+                    "gbm_offset prospective fold includes contemporaneous observations"
+                )
             manifest.append(
                 {
                     "protocol": "entity_aware_temporal_v1",
@@ -178,7 +194,10 @@ class GbmOffsetBlock(BaseFeatureBlock):
             unique_entities = pd.unique(cold_entities)
             n_entity_folds = min(self.n_splits, len(unique_entities))
             if n_entity_folds < 2:
-                raise ValueError("gbm_offset: cold-start OOF requires at least two entities")
+                raise ValueError(
+                    "gbm_offset: cold-start OOF requires at least two entities; "
+                    "a single-entity panel cannot identify the cold-start estimand"
+                )
             for _, held_local in GroupKFold(n_splits=n_entity_folds).split(
                 cold_positions, groups=cold_entities
             ):
@@ -196,10 +215,14 @@ class GbmOffsetBlock(BaseFeatureBlock):
             dated_fold_limit = self.n_splits - int(bool(len(undated)))
             if len(dated):
                 for held in np.array_split(dated, min(max(1, dated_fold_limit), len(dated))):
-                    cutoff_rank = int(rank.iloc[held].min())
-                    fit = np.flatnonzero((rank < cutoff_rank).to_numpy())
-                    cutoff = dates.iloc[held].min().isoformat()
-                    fit_fold(fit, held, "prospective_within_entity", cutoff)
+                    cutoff_date = dates.iloc[held].min()
+                    fit = np.flatnonzero((dates < cutoff_date).to_numpy())
+                    fit_fold(
+                        fit,
+                        held,
+                        "prospective_within_entity",
+                        cutoff_date.isoformat(),
+                    )
             if len(undated):
                 fit = np.flatnonzero(dates.notna().to_numpy())
                 fit_fold(fit, undated, "prospective_within_entity", None)
@@ -275,6 +298,11 @@ class GbmOffsetBlock(BaseFeatureBlock):
         )
         self._fitted_ = True
         return self
+
+    @property
+    def fold_manifest(self) -> list[dict[str, object]]:
+        self._check_is_fitted()
+        return [dict(record) for record in self._fold_manifest_]
 
     def transform(self, df: pd.DataFrame, ctx: FeatureContext) -> FeatureOutput:
         self._check_is_fitted()

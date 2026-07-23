@@ -15,8 +15,17 @@ def test_temporal_oof_never_fits_future_same_entity(monkeypatch):
         {
             "x": np.arange(6, dtype=float),
             "target": np.arange(6, dtype=float),
-            "entity": ["a", "b", "a", "b", "a", "c"],
-            "date": pd.date_range("2020-01-01", periods=6),
+            "entity": ["c", "a", "b", "a", "b", "c"],
+            "date": pd.to_datetime(
+                [
+                    "2019-12-31",
+                    "2020-01-01",
+                    "2020-01-01",
+                    "2020-01-01",
+                    "2020-01-02",
+                    "2020-01-03",
+                ]
+            ),
             "event": [f"e{i}" for i in range(6)],
             ROW_ID_COL: np.arange(6, dtype=np.int64),
         }
@@ -50,9 +59,9 @@ def test_temporal_oof_never_fits_future_same_entity(monkeypatch):
     FeaturePipeline([*block.base_blocks, block]).fit(frame, FeatureContext({}, 7))
 
     assert len(fits) <= 1 + 2 * block.n_splits
-    assert len(fold_calls) == len(block._fold_manifest_)
+    assert len(fold_calls) == len(block.fold_manifest)
     for (fit_indices, held_indices), record in zip(
-        fold_calls, block._fold_manifest_, strict=True
+        fold_calls, block.fold_manifest, strict=True
     ):
         assert not set(fit_indices) & set(held_indices)
         if record["estimand"] == "cold_start":
@@ -64,13 +73,16 @@ def test_temporal_oof_never_fits_future_same_entity(monkeypatch):
             assert frame.loc[fit_indices, "date"].max() < frame.loc[held_indices, "date"].min()
             assert record["max_fit_rank"] < record["min_held_rank"]
 
-    assert {record["protocol"] for record in block._fold_manifest_} == {
+    same_date_fit, _ = next(call for call in fold_calls if 3 in call[1])
+    assert 1 not in same_date_fit
+
+    assert {record["protocol"] for record in block.fold_manifest} == {
         "entity_aware_temporal_v1"
     }
-    assert {record["estimand"] for record in block._fold_manifest_} == {
+    assert {record["estimand"] for record in block.fold_manifest} == {
         "cold_start",
         "prospective_within_entity",
     }
     assert {"fit_row_hash", "held_row_hash", "effective_date_cutoff"} <= set(
-        block._fold_manifest_[-1]
+        block.fold_manifest[-1]
     )

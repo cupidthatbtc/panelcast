@@ -354,7 +354,7 @@ def build_features(ctx: StageContext) -> dict:
         }
         gbm_block = next((block for block in blocks if block.name == "gbm_offset"), None)
         if gbm_block is not None:
-            split_manifests[split_name]["gbm_oof_folds"] = gbm_block._fold_manifest_
+            split_manifests[split_name]["gbm_oof_folds"] = gbm_block.fold_manifest
             split_manifests[split_name]["gbm_deployment_refit"] = {
                 "protocol": "all_training_rows_admissible_before_held_out_prediction",
                 "n_rows": len(train_df),

@@ -46,19 +46,13 @@ def _stable_feature_hash(df: pd.DataFrame) -> str:
 # rounded feature matrices (see _stable_feature_hash); the pre-0.6.0 values
 # were frozen on the pre-descriptor implementation (2026-06-10).
 #
-# The two ``/train`` digests were regenerated again (#230) when gbm_offset's
-# out-of-fold pass moved from an entity-blind random KFold to entity-grouped
-# GroupKFold: only train rows carry OOF offsets, so their offset column shifts
-# while every held-out (validation/test) offset — produced by the full-train
-# model — is byte-identical, which is why those four digests are unchanged.
-# The same change also moved the full-train model's seed 0->42; the held-out
-# digests stay stable only because HistGradientBoostingRegressor is
-# seed-invariant at this fixture size (early stopping off, no subsampling). If
-# the fixture grows past the early-stopping threshold, expect the held-out
-# digests to move too — that would be the seed change, not a regression.
+# The two ``/train`` digests were regenerated for #293 when gbm_offset OOF
+# moved from GroupKFold to the entity-aware temporal/cold-start protocol. Only
+# train rows carry OOF offsets; held-out validation/test rows still use the
+# same full-train deployment refit, so their four digests remain unchanged.
 GOLDEN_FEATURE_HASHES = {
     "within_entity_temporal/train": (
-        "47de5b4b13e20b6a3dc5e031659df08268896a625f4e3329f78aae12479006e3"
+        "b6762fc0c26ce30a03b2257b78886e5c2d9bce469d78b9a6e6ef85557f921575"
     ),
     "within_entity_temporal/validation": (
         "6cd73a3fb0ce81ab75630ddd8ddcee40471554a98c48eee4a496ed3881dbee7d"
@@ -66,7 +60,7 @@ GOLDEN_FEATURE_HASHES = {
     "within_entity_temporal/test": (
         "59ad6ec23443101aaf4da9f33e7bb651a0b83bbb64793e6a0af5e7493beac539"
     ),
-    "entity_disjoint/train": ("dff499004404ef4c1217780bcf5f1cc1be493c571c9243df72780d2ad237ed12"),
+    "entity_disjoint/train": ("c600f28eb6a04e043132d15268530817e5ea63b559a0f160d97d417900047b55"),
     "entity_disjoint/validation": (
         "6981f543faaa714f1d4c8e389cdba2034aa26cf76f7323ecd56cf732591d9ae5"
     ),

@@ -15,8 +15,10 @@ Mandatory rules
 - Category vocabularies must be fit on train only.
 - CV folds must be group-aware and nested when tuning.
 - `gbm_offset` uses `entity_aware_temporal_v1` by default for panel data. A
-  prospective row is trained only from observations before its canonical cutoff;
-  a cold-start row excludes its entity entirely. The deployment GBM is refit on
+  prospective row is trained only from observations at strictly earlier timestamps;
+  same-timestamp tie breakers never make a row admissible history. A cold-start
+  row excludes its entity entirely and therefore requires at least two entities.
+  The deployment GBM is refit on
   all training observations admissible before held-out prediction. Feature
   manifests retain each OOF row's protocol, cutoff, entity overlap, and hashes of
   fit/held rows. Missing dates sort after dated observations and are scored
