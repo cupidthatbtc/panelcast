@@ -83,7 +83,11 @@ def pointwise_elpd(path: Path) -> np.ndarray:
 
 
 def paired_elpd(entity_path: Path, incumbent_path: Path) -> dict:
-    difference = pointwise_elpd(entity_path) - pointwise_elpd(incumbent_path)
+    entity = pointwise_elpd(entity_path)
+    incumbent = pointwise_elpd(incumbent_path)
+    if entity.shape != incumbent.shape:
+        raise ValueError("pointwise log-likelihood arrays must have identical shapes")
+    difference = entity - incumbent
     paired_se = float(math.sqrt(difference.size * np.var(difference, ddof=1)))
     total = float(difference.sum())
     return {
@@ -96,16 +100,53 @@ def paired_elpd(entity_path: Path, incumbent_path: Path) -> dict:
     }
 
 
-def validate_pairing(entity_fixed: Path, incumbent_fixed: Path, identity: dict) -> None:
+def validate_pairing(
+    entity_fixed: Path,
+    incumbent_fixed: Path,
+    canonical_split: Path,
+) -> None:
     relative = Path("evaluation/within_entity_temporal/predictions.json")
-    entity = load_json(entity_fixed / relative)
-    incumbent = load_json(incumbent_fixed / relative)
-    entity_y = np.asarray(entity["y_true"], dtype=float)
-    incumbent_y = np.asarray(incumbent["y_true"], dtype=float)
-    if entity_y.shape != incumbent_y.shape or not np.array_equal(entity_y, incumbent_y):
-        raise ValueError("fixed evaluation arms do not contain the same ordered outcomes")
-    if entity_y.size != identity["rows"]:
-        raise ValueError("fixed evaluation rows do not match the split row identity")
+    canonical = pd.read_parquet(canonical_split)
+    expected = {
+        "y_true": canonical["User_Score"].to_numpy(dtype=float),
+        "entity": canonical["Artist"].astype(str).to_numpy(),
+        "event": canonical["Album"].astype(str).to_numpy(),
+    }
+    for label, fixed in (("entity_obs", entity_fixed), ("incumbent", incumbent_fixed)):
+        predictions = load_json(fixed / relative)
+        actual = {
+            "y_true": np.asarray(predictions["y_true"], dtype=float),
+            "entity": np.asarray(predictions["entity"], dtype=str),
+            "event": np.asarray(predictions["event"], dtype=str),
+        }
+        for field, expected_values in expected.items():
+            if actual[field].shape != expected_values.shape or not np.array_equal(
+                actual[field], expected_values
+            ):
+                raise ValueError(f"{label} {field} does not match the canonical ordered split")
+
+
+def write_baseline_csv(rows: list[dict], path: Path) -> None:
+    table = []
+    for row in rows:
+        runtime = row["runtime_s"]
+        table.append(
+            {
+                "Model": row["model"],
+                "Split": row["split"],
+                "N": row["n_obs"],
+                "MAE": f"{row['mae']:.2f}",
+                "RMSE": f"{row['rmse']:.2f}",
+                "R²": f"{row['r2']:.3f}",
+                "CRPS": f"{row['crps']:.2f}",
+                "80% Cov": f"{row['cov80']:.3f}",
+                "95% Cov": f"{row['cov95']:.3f}",
+                "95% Width": f"{row['width95']:.2f}",
+                "PPC skew p": f"{row['ppc_skew_p']:.3f}",
+                "Runtime (s)": "—" if runtime is None else f"{runtime:.2f}",
+            }
+        )
+    pd.DataFrame(table).to_csv(path)
 
 
 def arm_record(source: Path, fixed: Path, model_file: str) -> dict:
@@ -152,7 +193,11 @@ def build(args: argparse.Namespace) -> dict:
         files[f"splits/{split}/test.parquet"] = sha256(split_path)
         identities[split] = row_identity(split_path)
 
-    validate_pairing(args.entity_fixed, args.incumbent_fixed, identities[SPLITS[0]])
+    validate_pairing(
+        args.entity_fixed,
+        args.incumbent_fixed,
+        data_root / "splits" / SPLITS[0] / "test.parquet",
+    )
     paired = paired_elpd(
         args.entity_fixed / "evaluation/log_likelihood.nc",
         args.incumbent_fixed / "evaluation/log_likelihood.nc",
@@ -162,12 +207,12 @@ def build(args: argparse.Namespace) -> dict:
 
     baseline_dir = args.entity_fixed / "reports" / "baselines"
     baseline_json = baseline_dir / "baseline_comparison.json"
-    baseline_csv = baseline_dir / "baseline_comparison.csv"
+    baseline_csv = output / "baseline_comparison.csv"
     baseline_rows = load_json(baseline_json)
     if len(baseline_rows) != 13 or not any(row.get("model") == "ridge" for row in baseline_rows):
         raise ValueError("baseline comparison is incomplete")
     shutil.copy2(baseline_json, output / baseline_json.name)
-    shutil.copy2(baseline_csv, output / baseline_csv.name)
+    write_baseline_csv(baseline_rows, baseline_csv)
 
     stamp = load_json(data_root / "features/.stamp.json")
     return {
@@ -188,7 +233,17 @@ def build(args: argparse.Namespace) -> dict:
             "panelcast compare --baselines --metrics "
             "<entity-fixed>/evaluation/metrics.json "
             "--output <entity-fixed>/reports/baselines",
-            "python .audit/fair_eval_0131/build_evidence.py --help",
+            "python .audit/fair_eval_0131/build_evidence.py "
+            f"--entity-source <outputs>/{args.entity_source.name} "
+            f"--entity-fixed <outputs>/{args.entity_fixed.name} "
+            f"--entity-model {args.entity_model} "
+            f"--incumbent-source <outputs>/{args.incumbent_source.name} "
+            f"--incumbent-fixed <outputs>/{args.incumbent_fixed.name} "
+            f"--incumbent-model {args.incumbent_model} "
+            "--data-root <data-root> --output .audit/fair_eval_0131 "
+            f"--evaluated-at {args.evaluated_at} "
+            f"--evaluator-revision {args.evaluator_revision} "
+            f"--code-base-revision {args.code_base_revision}",
         ],
         "data": {
             "feature_input_hash": stamp["input_hash"],
@@ -205,6 +260,7 @@ def build(args: argparse.Namespace) -> dict:
         },
         "paired_elpd": paired,
         "baseline_comparison_sha256": sha256(output / baseline_json.name),
+        "baseline_comparison_csv_sha256": sha256(baseline_csv),
     }
 
 

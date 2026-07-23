@@ -14,7 +14,7 @@
   "commands": [
     "JAX_PLATFORMS=cpu python .audit/fair_eval_0131/reproduce.py <source-run> <fixed-run>",
     "panelcast compare --baselines --metrics <entity-fixed>/evaluation/metrics.json --output <entity-fixed>/reports/baselines",
-    "python .audit/fair_eval_0131/build_evidence.py --help"
+    "python .audit/fair_eval_0131/build_evidence.py --entity-source <outputs>/sel_aoty-entityobs-s42_2fee043e3e62_20260711T132510220130 --entity-fixed <outputs>/fair-eval-0131-entityobs-s42 --entity-model user_score_20260712_014147.nc --incumbent-source <outputs>/sel_aoty-entityobs-s42_750f957a8c71_20260711T061249536771 --incumbent-fixed <outputs>/fair-eval-0131-incumbent-s42 --incumbent-model user_score_20260711_172330.nc --data-root <data-root> --output .audit/fair_eval_0131 --evaluated-at 2026-07-22 --evaluator-revision 4d1bb116e40fdb99577b35dba9d0efda911e107a --code-base-revision 26f907bd6d4af7fec68bec39d9662134b0c4e187"
   ],
   "data": {
     "feature_input_hash": "4ec61a13ab1b6f2007600ac50235e959a1c84610a7ef05bc46f3e7ed3d75d780",
@@ -1066,5 +1066,6 @@
       -0.13911676406860352
     ]
   },
-  "baseline_comparison_sha256": "dd7767f68ed260f43c452617f361f685239acfcc582510828a8d98f9b5061570"
+  "baseline_comparison_sha256": "dd7767f68ed260f43c452617f361f685239acfcc582510828a8d98f9b5061570",
+  "baseline_comparison_csv_sha256": "6f2deef7721d8e5f9127aa8e85d5a6520492e2c2533f01c4bfe455baf23a1932"
 }
