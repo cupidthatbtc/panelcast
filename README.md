@@ -6,25 +6,28 @@
 ![Python](https://img.shields.io/badge/python-%3E%3D3.11-blue)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![pixi](https://img.shields.io/badge/pixi-package%20manager-brightgreen)](https://pixi.sh)
-![Status: experimental](https://img.shields.io/badge/status-experimental-orange)
+![Status: beta](https://img.shields.io/badge/status-beta-blue)
 
-> **⚠️ Experimental — real-data validated on a subset; full corpus pending.**
+> **Scope — finished software; open domain-model research.**
 >
-> The reproducibility, diagnostics, and domain-portability scaffolding is the
-> finished part. The headline *statistical* result is now **partially
-> established on real data**: on a representative ~800-artist / ~5,182-album
-> AOTY subset (skewness −2.08), the published fit **passes the convergence
-> gate** at the amended publication configuration with the 0.13.0 entity-obs
-> default (R-hat 1.00, bulk ESS 1,119, 0 divergences), and the baseline
-> benchmark runs on the same real splits. Still open: the **skewness and max**
+> The *software* claim is complete: panelcast is feature-complete
+> infrastructure for specifying, fitting, evaluating, and auditing
+> hierarchical panel models — reproducibility, leakage controls, diagnostics,
+> and domain portability are the finished, tested deliverable. The
+> *statistical* claim for the flagship AOTY domain is partially established:
+> on a representative ~800-artist / ~5,182-album AOTY subset (skewness −2.08),
+> the published fit **passes the convergence gate** at the amended publication
+> configuration with the 0.13.0 entity-obs default (R-hat 1.00, bulk ESS
+> 1,119, 0 divergences), and the baseline benchmark runs on the same real
+> splits. Two items remain open **as domain-model research, not
+> package-completeness prerequisites**: the **skewness and max**
 > posterior-predictive p-values stay pinned by a bounded-skew mismatch — six
 > likelihood families plus a dequantization toggle were tried with **none
-> resolving them**, though the entity-obs default cleared q10 and q90, the
-> first movement on those tails — and this is the validated subset, not the
-> full eligible corpus (~62k albums with ≥10 ratings; #15). See
-> [`MODEL_CARD.md`](MODEL_CARD.md) and
-> [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md). Treat the
-> subset numbers as real but not final. Canonical numbers:
+> resolving them**, though the entity-obs default cleared q10 and q90 — and
+> the numbers come from the validated subset, not the full eligible corpus
+> (~62k albums with ≥10 ratings; #15). See [`MODEL_CARD.md`](MODEL_CARD.md)
+> and [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md). Treat
+> the subset numbers as real but not final. Canonical numbers:
 > [`.audit/release_results.json`](.audit/release_results.json).
 
 **Hierarchical Bayesian prediction for bounded scores of events nested in entities over time — configured by one YAML descriptor.**
@@ -223,19 +226,28 @@ panelcast diagnose                        # convergence + PPC of that run
 panelcast compare --baselines             # the model vs. simple baselines
 ```
 
-What's resolved: leak-safe splits with role-based names, an honest baseline
-comparison (`panelcast compare`) on the same real splits, and a convergent
-publication-scale fit on real data. Still open: the **skewness and max**
-posterior-predictive p-values stay pinned at the extremes from a
-symmetric-likelihood / left-skewed-target mismatch — six likelihood families
-(`beta`, `skew_studentt`, `skew_normal`, `split_normal`, `beta_binomial`,
-`mixture`) plus a dequantization toggle were tried and **none resolves them**,
-though the entity-obs default cleared the q10 and q90 pins (see
+What the subset validates: leak-safe splits with role-based names, an honest
+baseline comparison (`panelcast compare`) on the same real splits, and a
+convergent publication-scale fit on real, strongly left-skewed data — the
+software behaves end-to-end under production settings. What convergence does
+*not* establish: that the likelihood is correctly specified (the PPC pins say
+it is not), or that subset results transfer to the full corpus. Both remain
+open as domain-model research: the **skewness and max** posterior-predictive
+p-values stay pinned at the extremes from a symmetric-likelihood /
+left-skewed-target mismatch — six likelihood families (`beta`,
+`skew_studentt`, `skew_normal`, `split_normal`, `beta_binomial`, `mixture`)
+plus a dequantization toggle were tried and **none resolves them**, though the
+entity-obs default cleared the q10 and q90 pins (see
 [`docs/LIKELIHOOD_CANDIDATES.md`](docs/LIKELIHOOD_CANDIDATES.md)) — and this is
 the validated subset, not the full eligible corpus (~62k albums with ≥10 user
-ratings), which needs the full dataset and a GPU (#15). The code, the
-diagnostics, and the honest naming of what is and isn't resolved are the point.
-Every headline number here derives from the canonical release-result manifest,
+ratings), which needs the full dataset and a GPU (#15).
+
+Intentionally out of scope for the package claim: a resolved AOTY likelihood
+(that is the open research above), full-corpus results (#15), and predictive
+accuracy on non-flagship domains (portability is structural — the pipeline
+runs — not a transferred accuracy claim). The code, the diagnostics, and the
+honest naming of what is and isn't resolved are the point. Every headline
+number here derives from the canonical release-result manifest,
 [`.audit/release_results.json`](.audit/release_results.json), and drift fails CI.
 
 ## License
