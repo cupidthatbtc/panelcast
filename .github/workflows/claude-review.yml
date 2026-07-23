@@ -39,7 +39,8 @@ jobs:
           plugins: "code-review@claude-code-plugins"
           prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
           claude_args: |
-            --model sol
+            --model claude-opus-4-8
+            --fallback-model sol
             --effort xhigh
             --allowedTools "Bash(pixi run *),Read,Grep,Glob"
           # display_report only surfaces the report on the Actions job
