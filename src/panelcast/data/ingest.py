@@ -41,6 +41,16 @@ class DataDimensions:
         )
 
 
+def _raw_identifier_dtypes(descriptor: DatasetDescriptor | None) -> dict[str, type[str]]:
+    descriptor = descriptor or DatasetDescriptor()
+    canonical_to_raw = {v: k for k, v in descriptor.raw_column_map.items()}
+    return {
+        canonical_to_raw.get(column, column): str
+        for column in (descriptor.entity_col, descriptor.event_col)
+        if column != descriptor.year_col
+    }
+
+
 def extract_data_dimensions(
     csv_path: Path | str = "data/raw/all_albums_full.csv",
     min_ratings: int = 10,
@@ -82,7 +92,11 @@ def extract_data_dimensions(
 
     try:
         # Only load the two columns needed for counting.
-        df = read_csv(path, usecols=[entity_raw, n_obs_raw])
+        df = read_csv(
+            path,
+            usecols=[entity_raw, n_obs_raw],
+            dtype={entity_raw: str},
+        )
 
         # Apply the same observation-count filter as the training pipeline.
         df = df[df[n_obs_raw] >= min_ratings]
@@ -146,9 +160,10 @@ def load_raw_albums(
     # Compute hash before loading for reproducibility
     file_hash = sha256_file(path)
 
-    # Load with the descriptor's encoding (AOTY default handles a BOM)
+    # Load with the descriptor's encoding (AOTY default handles a BOM).
+    # ID dtype must be fixed before pandas can round nullable integers via float64.
     encoding = descriptor.encoding if descriptor is not None else "utf-8-sig"
-    df = read_csv(path, encoding=encoding)
+    df = read_csv(path, encoding=encoding, dtype=_raw_identifier_dtypes(descriptor))
 
     # Preserve original row IDs for audit trail (before any filtering)
     df["original_row_id"] = df.index
