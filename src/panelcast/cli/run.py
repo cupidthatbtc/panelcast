@@ -592,7 +592,7 @@ def run(
         float,
         typer.Option(
             "--caged-chain-tree-depth-fraction",
-            min=0.01,
+            min=0.0,
             max=1.0,
             help="Mean NUTS step-budget fraction used to identify a caged chain",
         ),
@@ -601,7 +601,7 @@ def run(
         float,
         typer.Option(
             "--caged-chain-boundary-sigma",
-            min=1e-12,
+            min=0.0,
             help="Maximum posterior-mean entity sigma for a caged chain",
         ),
     ] = 0.005,
@@ -609,7 +609,7 @@ def run(
         float,
         typer.Option(
             "--caged-chain-consensus-ratio",
-            min=1.000001,
+            min=1.0,
             help="Minimum other-chain median/entity-sigma ratio for a caged chain",
         ),
     ] = 5.0,

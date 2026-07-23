@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import shutil
 import subprocess
@@ -420,8 +421,23 @@ class PipelineConfig:
             raise ValueError("target_accept must be in (0, 1).")
         if self.checkpoint_every_draws is not None and self.checkpoint_every_draws < 1:
             raise ValueError("checkpoint_every_draws must be >= 1 when set.")
+        if type(self.caged_chain_retries) is not int:
+            raise ValueError("caged_chain_retries must be an integer.")
         if not 0 <= self.caged_chain_retries <= 10:
             raise ValueError("caged_chain_retries must be between 0 and 10.")
+        for name, value in (
+            ("caged_chain_tree_depth_fraction", self.caged_chain_tree_depth_fraction),
+            ("caged_chain_boundary_sigma", self.caged_chain_boundary_sigma),
+            ("caged_chain_consensus_ratio", self.caged_chain_consensus_ratio),
+        ):
+            if isinstance(value, bool):
+                raise ValueError(f"{name} must be a finite number.")
+            try:
+                finite = math.isfinite(value)
+            except TypeError as exc:
+                raise ValueError(f"{name} must be a finite number.") from exc
+            if not finite:
+                raise ValueError(f"{name} must be a finite number.")
         if not 0.0 < self.caged_chain_tree_depth_fraction <= 1.0:
             raise ValueError("caged_chain_tree_depth_fraction must be in (0, 1].")
         if self.caged_chain_boundary_sigma <= 0.0:
