@@ -20,7 +20,7 @@ import structlog
 from jax import random
 from numpyro.infer import Predictive
 
-from panelcast.data.alignment import join_splits_with_features
+from panelcast.data.alignment import ROW_ID_COL, join_splits_with_features
 from panelcast.data.chronology import normalize_chronology
 from panelcast.data.imputation import apply_imputation
 from panelcast.data.split_types import SplitType, resolve_split_dir
@@ -604,9 +604,17 @@ def _normalize_training_chronology(
     if date_col is None:
         return frame
     event_col = dataset.get("event_col", "Album")
-    return normalize_chronology(
-        frame, entity_col=entity_col, date_col=date_col, event_col=event_col
-    )
+    try:
+        return normalize_chronology(
+            frame, entity_col=entity_col, date_col=date_col, event_col=event_col
+        )
+    except ValueError as exc:
+        if ROW_ID_COL not in frame.columns and "ties require immutable row identity" in str(exc):
+            raise ValueError(
+                "Legacy prediction data has tied chronology without original_row_id; "
+                "rerun data, splits, and features before predicting."
+            ) from exc
+        raise
 
 
 def predict_next_events(ctx: StageContext) -> dict:

@@ -22,6 +22,7 @@ from panelcast.pipelines.predict_next import (
     SCENARIOS_NEW,
     _extract_posterior_samples,
     _group_pooling_args,
+    _normalize_training_chronology,
     _predict_known_entities,
     _predict_new_entities,
     predict_entity_next,
@@ -36,6 +37,22 @@ assert _SCRIPT_SPEC is not None and _SCRIPT_SPEC.loader is not None
 _SCRIPT_MODULE = importlib.util.module_from_spec(_SCRIPT_SPEC)
 _SCRIPT_SPEC.loader.exec_module(_SCRIPT_MODULE)
 predict_new_entity_score = _SCRIPT_MODULE.predict_new_entity_score
+
+
+def test_legacy_tied_chronology_requests_artifact_rebuild():
+    frame = pd.DataFrame(
+        {
+            "entity": ["a", "a"],
+            "event": ["same", "same"],
+            "date": ["2020-01-01", "2020-01-01"],
+        }
+    )
+    with pytest.raises(ValueError, match="rerun data, splits, and features"):
+        _normalize_training_chronology(
+            frame,
+            "entity",
+            {"parsed_date_col": "date", "event_col": "event"},
+        )
 
 
 class TestGroupPoolingArgs:

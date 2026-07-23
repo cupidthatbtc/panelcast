@@ -58,6 +58,8 @@ def within_entity_temporal_split(
     """
     if date_col not in df.columns:
         raise ValueError(f"Missing required date column for temporal split: '{date_col}'")
+    if origin_offset < 0:
+        raise ValueError(f"origin_offset must be >= 0, got {origin_offset}")
 
     # Sort by entity and date to ensure temporal ordering.
     # Add deterministic tie-breakers to avoid split drift when dates tie.
@@ -79,9 +81,6 @@ def within_entity_temporal_split(
             assumption="missing/invalid dates sorted earliest-in-history (train side)",
             rationale="unknown chronology must never be treated as the latest event",
         )
-
-    if origin_offset < 0:
-        raise ValueError(f"origin_offset must be >= 0, got {origin_offset}")
 
     # Count events per entity
     album_counts = df_sorted.groupby(entity_col).size()

@@ -38,7 +38,7 @@ def normalize_chronology(
     else:
         try:
             parsed = pd.to_datetime(out[date_col], errors="coerce", format="mixed", utc=True)
-        except TypeError:  # pandas < 2.0
+        except (TypeError, ValueError):  # pandas < 2.0
             parsed = pd.to_datetime(out[date_col], errors="coerce", utc=True)
     out[date_col] = parsed.dt.tz_convert(None)
     out[DATE_MISSING_COL] = out[date_col].isna().astype("int8")
