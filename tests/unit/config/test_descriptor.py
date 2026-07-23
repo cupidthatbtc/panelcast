@@ -206,6 +206,15 @@ class TestLoadDescriptor:
         d = load_descriptor(yaml_path)
         assert d.raw_path_default == "/data/somewhere.csv"
 
+    def test_raw_path_environment_override_wins(self, tmp_path, monkeypatch):
+        override = tmp_path / "override.csv"
+        monkeypatch.setenv("CUSTOM_DATA_PATH", str(override))
+        descriptor = DatasetDescriptor(
+            raw_path_env="CUSTOM_DATA_PATH",
+            raw_path_default="bundled.csv",
+        )
+        assert descriptor.resolve_raw_path() == override
+
     def test_raw_path_falls_back_to_descriptor_directory(self, tmp_path, monkeypatch):
         descriptor_dir = tmp_path / "domain"
         descriptor_dir.mkdir()
