@@ -380,3 +380,23 @@ class TestDemoDatasetAlias:
         output = strip_ansi(result.output)
         assert "--descriptor" in output
         assert "--dataset" in output
+
+
+class TestArtifactMarkers:
+    """Non-UTF-8 consoles get ASCII markers instead of a UnicodeEncodeError."""
+
+    def test_utf8_console_keeps_the_check_mark(self):
+        from panelcast.cli.commands import _artifact_markers
+
+        assert _artifact_markers("utf-8") == ("✓", "·")
+        assert _artifact_markers(None) == ("✓", "·")
+
+    def test_cp1252_console_falls_back_to_ascii(self):
+        from panelcast.cli.commands import _artifact_markers
+
+        assert _artifact_markers("cp1252") == ("OK", "--")
+
+    def test_unknown_codec_falls_back_to_ascii(self):
+        from panelcast.cli.commands import _artifact_markers
+
+        assert _artifact_markers("not-a-codec") == ("OK", "--")
