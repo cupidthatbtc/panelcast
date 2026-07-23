@@ -4,6 +4,63 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] — 2026-07-22
+
+Portability and evaluation hardening. The capped-horizon estimator is corrected
+and both 0.13.0 comparison arms are re-evaluated under it; the published
+entity-overdispersion conclusion stands (+29.77 ± 7.00 paired held-out ELPD).
+External-domain first fits now fail earlier on invalid scale/configuration, and
+reporting, identifiers, and cold-start prediction follow descriptor semantics.
+
+### Added
+
+- **Pre-fit statistical preflight** (#265, #263): `panelcast preflight` checks
+  prior/data scale, within-entity covariate collinearity, and Beta-Binomial trial
+  scale before MCMC. Strict mode turns statistical failures into CI failures.
+- **External-domain first-fit checklist** (#264): the porting guide now covers
+  provenance, identifier/count semantics, true-proportion scaling, feature
+  identities, prior sizing, exact-config preflight, sampler settings, resolved
+  configuration, and per-chain posterior autopsy in execution order.
+- **Config plumbing for external-domain priors and initialization** (#256, #259,
+  #260): initialization strategy, artist-effect parameterization, sigma prior
+  families/locations, and AR prior parameters now flow through run YAML.
+
+### Changed
+
+- **Descriptor-driven report axes** (#254): target/event labels, relative plot
+  scales, magnitude inversion, and bounded long-history tick rosters follow the
+  active domain while preserving AOTY presentation and legacy resume hashes.
+  Data-stage skip detection hashes semantic descriptor content rather than raw
+  YAML presentation edits.
+- **Fair evaluation and baseline regeneration** (#247): both archived seed-42
+  arms were rescored under the corrected estimator without refitting. The cap
+  fix is null at published precision; paired ELPD remains +29.77 ± 7.00 (z
+  +4.25). The audit now records both arms, pointwise differences, canonical row
+  identities, artifact hashes, and an executable evidence builder; standardized
+  baseline tables and their interpretation are regenerated.
+- Linked the public `panelcast-replications` companion repository (#275) and
+  added per-batch progress telemetry to primary posterior prediction (#277).
+
+### Fixed
+
+- **Capped-horizon evaluation uses train-only offsets** (#252): test rows past
+  `max_albums` now share training's coordinate frame, validity filtering, clamp,
+  and strict/propagated-horizon behavior.
+- **Identifier ingestion preserves exact values** (#253, #255, #258): entity and
+  event IDs are coerced at the CSV parser boundary, nullable numeric descriptor
+  columns remain numeric, and integer identifiers above `2**53` no longer round
+  through float64.
+- **Beta-Binomial cold-start counts reach every prediction surface** (#261):
+  evaluation, `predict-next`, and the standalone entity predictor now pass the
+  exact observed or fitted-domain aggregation counts even with a zero noise
+  exponent.
+- **Beta-Binomial non-unit trial spans are detected exactly** (#263): fractional
+  spans no longer pass via integer rounding; runtime and preflight share one
+  tolerance-aware predicate and report the true multiplier.
+- Split-seed sensitivity now scores through the trained observation model
+  (#242), and publication-table status coverage includes the remaining NaN R-hat
+  branch (#251).
+
 ## [0.13.0] — 2026-07-18
 
 The `heteroscedastic_entity_obs` per-entity overdispersion factor becomes the
