@@ -266,6 +266,19 @@ def resolve_descriptor_path(ref: str | Path | None) -> Path | None:
     return packaged_path if packaged_path.exists() else checkout_path
 
 
+def resolve_demo_descriptor_path(ref: str | Path) -> Path:
+    """Resolve the demo's bundled descriptor consistently in checkouts and wheels."""
+    if str(ref) != "aero":
+        resolved = resolve_descriptor_path(ref)
+        assert resolved is not None
+        return resolved
+
+    checkout_path = Path("examples/aerospace/descriptor.yaml")
+    if checkout_path.exists():
+        return checkout_path
+    return _packaged_data_root() / "examples" / "aerospace" / "descriptor.yaml"
+
+
 def load_descriptor(ref: str | Path | None) -> DatasetDescriptor:
     """Resolve a descriptor reference to a :class:`DatasetDescriptor`.
 
@@ -302,4 +315,9 @@ def load_descriptor(ref: str | Path | None) -> DatasetDescriptor:
     package_root = _packaged_data_root().resolve()
     if descriptor._source_path.is_relative_to(package_root):
         descriptor._source_root = package_root
+    else:
+        for parent in descriptor._source_path.parents:
+            if (parent / "pyproject.toml").is_file():
+                descriptor._source_root = parent
+                break
     return descriptor

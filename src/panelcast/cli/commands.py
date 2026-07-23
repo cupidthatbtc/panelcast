@@ -204,11 +204,11 @@ def demo(
     """
     from pathlib import Path
 
-    from panelcast.config.descriptor import resolve_descriptor_path
+    from panelcast.config.descriptor import resolve_demo_descriptor_path
     from panelcast.pipelines.orchestrator import PipelineConfig, run_pipeline
 
-    resolved_descriptor = resolve_descriptor_path(descriptor_path)
-    if resolved_descriptor is None or not resolved_descriptor.exists():
+    resolved_descriptor = resolve_demo_descriptor_path(descriptor_path)
+    if not resolved_descriptor.exists():
         typer.echo(f"Error: demo descriptor not found at {descriptor_path}.")
         raise typer.Exit(code=1)
     descriptor_path = str(resolved_descriptor)

@@ -906,11 +906,18 @@ class TestDemoCommand:
         assert "demo descriptor not found" in strip_ansi(result.output)
 
     def test_demo_happy_path(self, monkeypatch):
-        """The demo runs the pipeline and reports artifacts on success."""
-        monkeypatch.setattr("panelcast.pipelines.orchestrator.run_pipeline", lambda config: 0)
+        """A checkout demo explicitly uses the committed worked example."""
+        captured = {}
+
+        def run(config):
+            captured["config"] = config
+            return 0
+
+        monkeypatch.setattr("panelcast.pipelines.orchestrator.run_pipeline", run)
         result = runner.invoke(app, ["demo"])
         assert result.exit_code == 0
         assert "Demo complete" in strip_ansi(result.output)
+        assert captured["config"].dataset == "examples/aerospace/descriptor.yaml"
 
     def test_demo_uses_packaged_descriptor_outside_checkout(self, tmp_path, monkeypatch):
         captured = {}
@@ -925,7 +932,9 @@ class TestDemoCommand:
         result = runner.invoke(app, ["demo"])
 
         assert result.exit_code == 0
-        assert "_data/datasets/aero.yaml" in captured["config"].dataset.replace("\\", "/")
+        assert "_data/examples/aerospace/descriptor.yaml" in captured[
+            "config"
+        ].dataset.replace("\\", "/")
 
 
 class TestCompareCommand:

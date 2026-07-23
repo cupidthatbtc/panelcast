@@ -1,9 +1,9 @@
 # Aerospace worked example — a self-contained, non-music domain.
 #
-# Airframes fly sequential test flights, each scored 0-10. This descriptor is a
-# copy of configs/datasets/aero.yaml pointed at the committed example CSV in
-# this directory, so `panelcast demo` and the README quickstart run end-to-end
-# with no test-suite imports and no external data.
+# Airframes fly sequential test flights, each scored 0-10. Identical copies of
+# this descriptor ship in the checkout and wheel; the raw path is anchored at
+# the checkout or package-data root so `panelcast demo` runs with no external
+# data.
 #
 # Every key omitted here keeps its AOTY default — see
 # src/panelcast/config/descriptor.py. Walkthrough: docs/PORTING.md.

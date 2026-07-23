@@ -23,10 +23,9 @@ import pytest
 from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
 from panelcast.utils.hashing import hash_dataframe
 from tests.e2e.conftest import create_minimal_dataset
-from tests.helpers.aero_data import make_aero_dataset
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-AERO_DESCRIPTOR = REPO_ROOT / "configs" / "datasets" / "aero.yaml"
+AERO_DESCRIPTOR = REPO_ROOT / "examples" / "aerospace" / "descriptor.yaml"
 AOTY_DESCRIPTOR = REPO_ROOT / "configs" / "datasets" / "aoty_full.yaml"
 
 
@@ -52,12 +51,6 @@ def _run_pipeline_in(workdir: Path, output_base: Path, **config_kwargs):
     return exit_code, orchestrator
 
 
-def _write_aero_raw(workdir: Path) -> None:
-    raw_dir = workdir / "data" / "raw"
-    raw_dir.mkdir(parents=True, exist_ok=True)
-    make_aero_dataset(seed=42).to_csv(raw_dir / "test_flights.csv", index=False, encoding="utf-8")
-
-
 MUSIC_FEATURE_COLUMNS = (
     "user_prior_mean",
     "critic_prior_mean",
@@ -77,7 +70,6 @@ MUSIC_FEATURE_COLUMNS = (
 @pytest.fixture(scope="module")
 def aero_stages_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
     tmp = tmp_path_factory.mktemp("aero_stages")
-    _write_aero_raw(tmp)
     exit_code, _ = _run_pipeline_in(
         tmp,
         tmp / "outputs",
@@ -170,7 +162,6 @@ class TestAeroTinyMcmc:
     def aero_full_run(self, tmp_path_factory: pytest.TempPathFactory) -> Path:
         """Returns the run dir: mutable products are run-scoped (#81)."""
         tmp = tmp_path_factory.mktemp("aero_full")
-        _write_aero_raw(tmp)
         exit_code, orchestrator = _run_pipeline_in(
             tmp,
             tmp / "outputs",

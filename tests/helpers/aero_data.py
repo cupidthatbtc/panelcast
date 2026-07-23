@@ -19,7 +19,7 @@ def make_aero_descriptor(**overrides) -> DatasetDescriptor:
     fields: dict = dict(
         name="aero",
         raw_path_env="AERO_DATASET_PATH",
-        raw_path_default="data/raw/test_flights.csv",
+        raw_path_default="examples/aerospace/flights.csv",
         encoding="utf-8",
         raw_column_map={
             "Flight Date": "Flight_Date",

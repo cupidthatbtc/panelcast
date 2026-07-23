@@ -10,9 +10,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
 from panelcast.config.descriptor import load_descriptor, resolve_descriptor_path
+from panelcast.pipelines.prepare_dataset import PrepareConfig, prepare_datasets
 from tests.helpers.aero_data import make_aero_dataset
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -27,26 +27,24 @@ def test_example_csv_exists():
 
 
 def test_packaged_data_matches_checkout_copies():
-    pairs = [
-        (DESCRIPTOR, PACKAGE_DATA / "examples" / "aerospace" / "descriptor.yaml"),
-        (EXAMPLE_CSV, PACKAGE_DATA / "examples" / "aerospace" / "flights.csv"),
-        (
-            REPO_ROOT / "configs" / "datasets" / "aoty_full.yaml",
-            PACKAGE_DATA / "datasets" / "aoty_full.yaml",
-        ),
+    packaged_descriptor = PACKAGE_DATA / "examples" / "aerospace" / "descriptor.yaml"
+    aero_descriptors = [
+        DESCRIPTOR,
+        REPO_ROOT / "configs" / "datasets" / "aero.yaml",
+        PACKAGE_DATA / "datasets" / "aero.yaml",
+        packaged_descriptor,
     ]
-    for checkout, packaged in pairs:
-        assert packaged.read_bytes() == checkout.read_bytes()
+    expected = DESCRIPTOR.read_bytes()
+    assert all(path.read_bytes() == expected for path in aero_descriptors)
+    assert (PACKAGE_DATA / "examples" / "aerospace" / "flights.csv").read_bytes() == (
+        EXAMPLE_CSV.read_bytes()
+    )
+    assert (PACKAGE_DATA / "datasets" / "aoty_full.yaml").read_bytes() == (
+        REPO_ROOT / "configs" / "datasets" / "aoty_full.yaml"
+    ).read_bytes()
 
-    checkout_aero = yaml.safe_load(
-        (REPO_ROOT / "configs" / "datasets" / "aero.yaml").read_text(encoding="utf-8")
-    )
-    packaged_aero = yaml.safe_load(
-        (PACKAGE_DATA / "datasets" / "aero.yaml").read_text(encoding="utf-8")
-    )
-    assert packaged_aero.pop("raw_path_default") == "examples/aerospace/flights.csv"
-    checkout_aero.pop("raw_path_default")
-    assert packaged_aero == checkout_aero
+    hashes = {load_descriptor(path).descriptor_hash() for path in aero_descriptors}
+    assert len(hashes) == 1
 
 
 def test_bare_aero_descriptor_works_outside_checkout(tmp_path, monkeypatch):
@@ -57,6 +55,24 @@ def test_bare_aero_descriptor_works_outside_checkout(tmp_path, monkeypatch):
 
     assert path == PACKAGE_DATA / "datasets" / "aero.yaml"
     assert descriptor.resolve_raw_path() == PACKAGE_DATA / "examples" / "aerospace" / "flights.csv"
+
+
+def test_repository_demo_descriptor_prepares_committed_data(tmp_path, monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+    monkeypatch.delenv("AERO_DATASET_PATH", raising=False)
+    descriptor = load_descriptor(Path("examples/aerospace/descriptor.yaml"))
+
+    result = prepare_datasets(
+        PrepareConfig(
+            descriptor=descriptor,
+            output_dir=str(tmp_path / "processed"),
+            audit_dir=str(tmp_path / "audit"),
+        )
+    )
+
+    assert result.load_metadata.row_count == len(pd.read_csv(EXAMPLE_CSV))
+    assert result.datasets_created["perf_minobs_5"].exists()
+    assert descriptor.resolve_raw_path().resolve() == EXAMPLE_CSV
 
 
 def test_example_csv_matches_generator():
