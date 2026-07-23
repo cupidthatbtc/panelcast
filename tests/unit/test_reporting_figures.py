@@ -249,6 +249,36 @@ class TestSavePredictionsPlot:
         )
         assert pdf_path.exists()
 
+    def test_uses_domain_target_label(self, tmp_path, mock_predictions, monkeypatch):
+        captured = {}
+
+        def capture(fig, output_dir, filename_base):
+            axis = fig.axes[0]
+            captured["x"] = axis.get_xlabel()
+            captured["y"] = axis.get_ylabel()
+            captured["limits"] = axis.get_xlim()
+            captured["y_limits"] = axis.get_ylim()
+            return output_dir / f"{filename_base}.pdf", output_dir / f"{filename_base}.png"
+
+        monkeypatch.setattr("panelcast.reporting.figures._save_dual_format", capture)
+        save_predictions_plot(
+            *mock_predictions,
+            tmp_path,
+            "pred_domain",
+            target_label="g magnitude",
+            axis_padding=None,
+            invert_axes=True,
+        )
+
+        assert captured["x"] == "Predicted g magnitude"
+        assert captured["y"] == "Actual g magnitude"
+        assert captured["limits"][0] > captured["limits"][1]
+        assert captured["y_limits"][0] > captured["y_limits"][1]
+        all_values = np.concatenate(mock_predictions)
+        assert abs(captured["limits"][1] - captured["limits"][0]) == pytest.approx(
+            1.1 * np.ptp(all_values)
+        )
+
 
 class TestSaveReliabilityPlot:
     """Tests for save_reliability_plot function."""
@@ -501,6 +531,89 @@ class TestSaveArtistPredictionPlot:
         )
         assert pdf_path.exists()
         assert png_path.exists()
+
+    def test_domain_axes_autoscale_invert_and_thin_ticks(self, tmp_path, monkeypatch):
+        actual = np.linspace(16.45, 16.55, 30)
+        pred_samples = np.tile(actual, (20, 1))
+        labels = [f"obs-{i}" for i in range(30)]
+        captured = {}
+
+        def capture(fig, output_dir, filename_base):
+            axis = fig.axes[0]
+            captured["xlabel"] = axis.get_xlabel()
+            captured["ylabel"] = axis.get_ylabel()
+            captured["ylim"] = axis.get_ylim()
+            captured["ticks"] = axis.get_xticks()
+            return output_dir / f"{filename_base}.pdf", output_dir / f"{filename_base}.png"
+
+        monkeypatch.setattr("panelcast.reporting.figures._save_dual_format", capture)
+        save_artist_prediction_plot(
+            artist="ZTF object",
+            actual_scores=actual,
+            pred_samples=pred_samples,
+            album_labels=labels,
+            output_dir=tmp_path,
+            filename_base="ztf_fan",
+            event_label="observation",
+            target_label="g magnitude",
+            y_limits=None,
+            invert_y_axis=True,
+            max_x_ticks=20,
+        )
+
+        assert captured["xlabel"] == "observation"
+        assert captured["ylabel"] == "g magnitude"
+        assert captured["ylim"][0] > captured["ylim"][1]
+        assert 16.4 < captured["ylim"][1] < 16.5
+        assert 16.5 < captured["ylim"][0] < 16.6
+        assert len(captured["ticks"]) <= 20
+
+    def test_default_mode_keeps_every_legacy_tick(self, tmp_path, monkeypatch):
+        actual = np.linspace(60.0, 80.0, 30)
+        captured = {}
+
+        def capture(fig, output_dir, filename_base):
+            axis = fig.axes[0]
+            captured["ticks"] = axis.get_xticks()
+            captured["labels"] = [label.get_text() for label in axis.get_xticklabels()]
+            return output_dir / f"{filename_base}.pdf", output_dir / f"{filename_base}.png"
+
+        monkeypatch.setattr("panelcast.reporting.figures._save_dual_format", capture)
+        save_artist_prediction_plot(
+            artist="Test Artist",
+            actual_scores=actual,
+            pred_samples=np.tile(actual, (5, 1)),
+            album_labels=[f"event-{i}" for i in range(30)],
+            output_dir=tmp_path,
+            filename_base="legacy_ticks",
+        )
+
+        np.testing.assert_array_equal(captured["ticks"], np.arange(30))
+        assert captured["labels"] == [str(i) for i in range(1, 31)]
+
+    @pytest.mark.parametrize("n_events", [40, 60])
+    def test_portable_tick_cap_includes_endpoints(self, tmp_path, monkeypatch, n_events):
+        actual = np.linspace(60.0, 80.0, n_events)
+        captured = {}
+
+        def capture(fig, output_dir, filename_base):
+            captured["ticks"] = fig.axes[0].get_xticks()
+            return output_dir / f"{filename_base}.pdf", output_dir / f"{filename_base}.png"
+
+        monkeypatch.setattr("panelcast.reporting.figures._save_dual_format", capture)
+        save_artist_prediction_plot(
+            artist="Test Entity",
+            actual_scores=actual,
+            pred_samples=np.tile(actual, (5, 1)),
+            album_labels=[f"event-{i}" for i in range(n_events)],
+            output_dir=tmp_path,
+            filename_base=f"portable_ticks_{n_events}",
+            max_x_ticks=20,
+        )
+
+        assert len(captured["ticks"]) <= 20
+        assert captured["ticks"][0] == 0
+        assert captured["ticks"][-1] == n_events - 1
 
     def test_mismatched_dimensions_raise(self, tmp_path):
         """Guard the contract: N actual vs N+1 prediction columns is invalid.
@@ -762,6 +875,7 @@ class TestSavePredictionsPlotEdgeCases:
             y_pred_upper=val + 1,
             output_dir=tmp_path,
             filename_base="pred_identical",
+            axis_padding=None,
         )
         assert pdf.exists()
         plt.close("all")
@@ -1071,9 +1185,12 @@ class TestSaveSliceCoveragePlot:
                     "n": 120,
                     "levels": {
                         "0.80": {
-                            "nominal": 0.8, "empirical": 0.78,
-                            "wilson_lo": 0.70, "wilson_hi": 0.85,
-                            "mean_interval_width": 12.0, "flagged": False,
+                            "nominal": 0.8,
+                            "empirical": 0.78,
+                            "wilson_lo": 0.70,
+                            "wilson_hi": 0.85,
+                            "mean_interval_width": 12.0,
+                            "flagged": False,
                         },
                     },
                     "pit_max_abs_dev": 0.03,
@@ -1085,9 +1202,12 @@ class TestSaveSliceCoveragePlot:
                     "n": 60,
                     "levels": {
                         "0.80": {
-                            "nominal": 0.8, "empirical": 0.55,
-                            "wilson_lo": 0.42, "wilson_hi": 0.67,
-                            "mean_interval_width": 8.0, "flagged": True,
+                            "nominal": 0.8,
+                            "empirical": 0.55,
+                            "wilson_lo": 0.42,
+                            "wilson_hi": 0.67,
+                            "mean_interval_width": 8.0,
+                            "flagged": True,
                         },
                     },
                     "pit_max_abs_dev": 0.2,

@@ -138,6 +138,7 @@ class DatasetDescriptor(BaseModel):
     # --- targets ----------------------------------------------------------
     target_col: str = "User_Score"
     target_bounds: tuple[float, float] = (0.0, 100.0)
+    invert_target_axis: bool = False
     model_prefix: str = "user"
     n_obs_col: str = "User_Ratings"
     # Whether n_obs_col counts independent raters whose mean IS the target (AOTY:
@@ -203,8 +204,11 @@ class DatasetDescriptor(BaseModel):
         return self.processed_name_template.format(min_ratings=value)
 
     def descriptor_hash(self) -> str:
-        """Stable content hash for resume-drift detection."""
-        payload = json.dumps(self.model_dump(mode="json"), sort_keys=True)
+        """Stable fit/data hash; presentation-only fields do not invalidate runs."""
+        payload = json.dumps(
+            self.model_dump(mode="json", exclude={"invert_target_axis"}),
+            sort_keys=True,
+        )
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def to_summary_block(self) -> dict[str, Any]:
@@ -215,6 +219,7 @@ class DatasetDescriptor(BaseModel):
             "event_col": self.event_col,
             "target_col": self.target_col,
             "target_bounds": list(self.target_bounds),
+            "invert_target_axis": self.invert_target_axis,
             "model_prefix": self.model_prefix,
             "n_obs_col": self.n_obs_col,
             "secondary_target_col": self.secondary_target_col,

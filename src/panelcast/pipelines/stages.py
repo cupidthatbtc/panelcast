@@ -204,6 +204,7 @@ class PipelineStage:
         input_paths: List of file paths this stage reads from
         output_paths: List of file paths this stage creates
         depends_on: List of stage names that must run before this stage
+        input_values: Semantic values included in incremental-run hashes
 
     Example:
         >>> stage = PipelineStage(
@@ -223,6 +224,7 @@ class PipelineStage:
     input_paths: list[Path] = field(default_factory=list)
     output_paths: list[Path] = field(default_factory=list)
     depends_on: list[str] = field(default_factory=list)
+    input_values: list[str] = field(default_factory=list)
 
     def compute_input_hash(self) -> str:
         """Compute combined hash of all input files.
@@ -246,6 +248,7 @@ class PipelineStage:
         for path in sorted(self.input_paths):
             if path.exists():
                 pairs.append(f"{path.as_posix()}:{sha256_path(path)}")
+        pairs.extend(f"value:{value}" for value in sorted(self.input_values))
 
         if not pairs:
             return ""
@@ -469,15 +472,11 @@ def _resolve_raw_dataset_path(descriptor: DatasetDescriptor | None = None) -> Pa
 
 def make_stage_data(
     descriptor: DatasetDescriptor | None = None,
-    descriptor_path: Path | None = None,
 ) -> PipelineStage:
     """Create data preparation stage.
 
     Args:
         descriptor: Dataset descriptor (None = AOTY defaults).
-        descriptor_path: YAML path the descriptor was loaded from, if any.
-            Included in input_paths so the skip cache invalidates when the
-            descriptor file changes.
     """
     descriptor = descriptor or DatasetDescriptor()
     output_paths = [Path("data/processed/cleaned_all.parquet")]
@@ -488,16 +487,14 @@ def make_stage_data(
     if descriptor.secondary_target_col is not None:
         secondary_name = f"{descriptor.secondary_prefix}_score.parquet"
         output_paths.append(Path("data/processed") / secondary_name)
-    input_paths = [_resolve_raw_dataset_path(descriptor)]
-    if descriptor_path is not None:
-        input_paths.append(descriptor_path)
     return PipelineStage(
         name="data",
         description="Prepare and clean raw album data",
         run_fn=_run_data_stage,
-        input_paths=input_paths,
+        input_paths=[_resolve_raw_dataset_path(descriptor)],
         output_paths=output_paths,
         depends_on=[],
+        input_values=[descriptor.descriptor_hash()],
     )
 
 
@@ -693,7 +690,8 @@ def build_pipeline_stages(
         min_ratings: Minimum user ratings per album. Passed to make_stage_splits()
             to ensure input_paths point to the correct parquet file.
         descriptor: Dataset descriptor (None = AOTY defaults).
-        descriptor_path: YAML path the descriptor was loaded from, if any.
+        descriptor_path: Retained for caller compatibility; the semantic
+            descriptor hash controls stage invalidation.
         paths: Artifact roots for the mutable-product stages (None = legacy
             flat layout). Data stages always declare flat paths.
 
@@ -703,7 +701,7 @@ def build_pipeline_stages(
         build_optional_stages().
     """
     return [
-        make_stage_data(descriptor=descriptor, descriptor_path=descriptor_path),
+        make_stage_data(descriptor=descriptor),
         make_stage_splits(min_ratings=min_ratings, descriptor=descriptor),
         make_stage_features(),
         make_stage_train(paths=paths),

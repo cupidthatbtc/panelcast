@@ -40,6 +40,7 @@ class DatasetSummaryBlock(BaseModel):
     event_col: str = "Album"
     target_col: str = "User_Score"
     target_bounds: list[float] = Field(default_factory=lambda: [0.0, 100.0])
+    invert_target_axis: bool = False
     model_prefix: str = "user"
     n_obs_col: str = "User_Ratings"
     secondary_target_col: str | None = "Critic_Score"

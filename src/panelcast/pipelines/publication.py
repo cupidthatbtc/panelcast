@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import structlog
 
+from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.evaluation.calibration import ReliabilityData
 from panelcast.models.bayes.io import load_manifest, load_model
@@ -50,6 +51,30 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 SECONDARY_SPLIT = str(SplitType.ENTITY_DISJOINT.value)
+
+
+def _uses_default_plot_presentation(descriptor: DatasetDescriptor) -> bool:
+    default = DatasetDescriptor()
+    return (
+        descriptor.event_col == default.event_col
+        and descriptor.target_col == default.target_col
+        and descriptor.target_bounds == default.target_bounds
+        and not descriptor.invert_target_axis
+    )
+
+
+def _fan_plot_kwargs(descriptor: DatasetDescriptor) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    if not _uses_default_plot_presentation(descriptor):
+        kwargs.update(
+            event_label=descriptor.event_col.replace("_", " "),
+            target_label=descriptor.target_col.replace("_", " "),
+            y_limits=None,
+            invert_y_axis=descriptor.invert_target_axis,
+        )
+    if descriptor.name != "aoty":
+        kwargs["max_x_ticks"] = 20
+    return kwargs
 
 
 @dataclass(frozen=True)
@@ -756,6 +781,14 @@ def _save_predictions_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -
             with open(pred_path, encoding="utf-8") as f:
                 pred_data = json.load(f)
             interval_level = pred_data.get("interval_level", 0.90)
+            descriptor = getattr(inp.ctx, "descriptor", None) or DatasetDescriptor()
+            label_kwargs = {}
+            if not _uses_default_plot_presentation(descriptor):
+                label_kwargs = {
+                    "target_label": descriptor.target_col.replace("_", " "),
+                    "axis_padding": None,
+                    "invert_axes": descriptor.invert_target_axis,
+                }
             pdf_path, png_path = save_predictions_plot(
                 y_true=np.array(pred_data["y_true"]),
                 y_pred_mean=np.array(pred_data["y_pred_mean"]),
@@ -764,6 +797,7 @@ def _save_predictions_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -
                 output_dir=inp.figures_dir,
                 filename_base="predictions_primary",
                 ci_label=f"{interval_level * 100:.0f}% CI",
+                **label_kwargs,
             )
             artifacts["figures"].append(str(pdf_path))
             artifacts["figures"].append(str(png_path))
@@ -871,14 +905,13 @@ def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) 
             log.warning("artist_fan_charts_skipped", reason="train.parquet not found")
             return
 
-        from panelcast.config.descriptor import DatasetDescriptor
-
         fan_descriptor = getattr(inp.ctx, "descriptor", None) or DatasetDescriptor()
         train_for_fans = pd.read_parquet(train_path)
         sort_cols_fans = [fan_descriptor.entity_col]
         if fan_descriptor.parsed_date_col in train_for_fans.columns:
             sort_cols_fans.append(fan_descriptor.parsed_date_col)
         train_for_fans = train_for_fans.sort_values(sort_cols_fans)
+        fan_plot_kwargs = _fan_plot_kwargs(fan_descriptor)
 
         def _fan_chart_for_artist(artist: str, categories: list[str]) -> None:
             artist_train = train_for_fans[train_for_fans[fan_descriptor.entity_col] == artist]
@@ -917,6 +950,7 @@ def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) 
                     filename_base=f"artist_{safe_name}",
                     categories=categories,
                     forecast_quantiles=pred_quantiles,
+                    **fan_plot_kwargs,
                 )
                 artifacts["figures"].append(str(pdf_path))
                 artifacts["figures"].append(str(png_path))
@@ -1075,9 +1109,7 @@ def _generate_model_card(inp: _PublicationInputs, artifacts: dict[str, Any]) -> 
         ranking = inp.primary_metrics.get("ranking") or {}
         if ranking.get("spearman") is not None:
             parts = [f"Spearman {ranking['spearman']:.3f}", f"Kendall {ranking['kendall_tau']:.3f}"]
-            for k, block in sorted(
-                (ranking.get("top_k") or {}).items(), key=lambda kv: int(kv[0])
-            ):
+            for k, block in sorted((ranking.get("top_k") or {}).items(), key=lambda kv: int(kv[0])):
                 if block is not None:
                     parts.append(f"precision@{k} {block['precision']:.2f}")
             model_card_data.ranking_summary = ", ".join(parts) + " (single-slate, descriptive)."
