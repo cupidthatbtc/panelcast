@@ -16,6 +16,7 @@ from panelcast.config.descriptor import DatasetDescriptor
 
 from .artist import ArtistHistoryBlock, ArtistReputationBlock
 from .base import FeatureBlock
+from .basis import BasisBlock
 from .core import CoreNumericBlock
 from .history import EntityHistoryBlock
 from .temporal import TemporalBlock
@@ -88,6 +89,7 @@ def build_default_registry(descriptor: DatasetDescriptor | None = None) -> Featu
     # Generic numeric pass-through; columns come from params, not the
     # descriptor, so a domain YAML names them per-block.
     registry.register("core_numeric", lambda params: CoreNumericBlock(params))
+    registry.register("basis", lambda params: BasisBlock(params))
     registry.register(
         "entity_history",
         lambda params: EntityHistoryBlock(

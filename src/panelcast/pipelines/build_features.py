@@ -83,6 +83,18 @@ def get_feature_blocks(
         for spec in descriptor.feature_blocks
         if spec.name not in disabled
     ]
+    if descriptor.basis_curves:
+        specs.append(
+            FeatureSpec(
+                name="basis",
+                params={
+                    "curves": {
+                        name: curve.model_dump(mode="json")
+                        for name, curve in descriptor.basis_curves.items()
+                    }
+                },
+            )
+        )
     blocks = registry.build_all(specs)
     if gbm_offset:
         from panelcast.features.gbm_offset import GbmOffsetBlock
@@ -248,6 +260,7 @@ def build_features(ctx: StageContext) -> dict:
     )
 
     split_manifests: dict[str, dict] = {}
+    basis_states: dict[str, dict] = {}
     feature_names: list[str] = []
 
     for split_name in split_names:
@@ -294,7 +307,11 @@ def build_features(ctx: StageContext) -> dict:
         )
         pipeline.fit(train_df, feature_ctx)
 
-        train_features = pipeline.transform(train_df, feature_ctx).data
+        train_output = pipeline.transform(train_df, feature_ctx)
+        train_features = train_output.data
+        for block_metadata in train_output.metadata["blocks"]:
+            if block_metadata.get("name") == "basis":
+                basis_states[split_name] = block_metadata["curves"]
         val_features = _transform_with_train_history(
             pipeline, train_df, val_df, feature_ctx, mask_target_score_cols=mask_score_cols
         )
@@ -361,6 +378,15 @@ def build_features(ctx: StageContext) -> dict:
         "split_features": split_manifests,
         "legacy_primary_split": str(SplitType.WITHIN_ENTITY_TEMPORAL.value),
     }
+
+    if descriptor.basis_curves:
+        manifest["basis_curves"] = {
+            "specs": {
+                name: curve.model_dump(mode="json")
+                for name, curve in descriptor.basis_curves.items()
+            },
+            "fitted_by_split": basis_states,
+        }
 
     manifest_path = features_dir / "manifest.json"
     with open(manifest_path, "w", encoding="utf-8") as f:
