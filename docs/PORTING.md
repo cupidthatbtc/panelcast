@@ -189,6 +189,30 @@ entity names regardless of domain), and the split directories are always
 values and behavior are correct for any domain; making them descriptor-driven is
 future work.
 
+## Covariate curves
+
+Descriptors can opt into reproducible cubic B-spline columns without writing a
+feature pack:
+
+```yaml
+basis_curves:
+  age_curve:
+    col: age
+    type: spline
+    df: 5
+    center: 27
+```
+
+The capability is off when `basis_curves` is omitted or empty. `df` is the
+number of emitted columns (`age_curve__basis_00` through
+`age_curve__basis_04`) and must be at least 4. Only `type: spline` is currently
+supported. Knots are fitted from each training split's centered source values;
+the fitted knots are then reused unchanged for validation and test, including
+out-of-range values. The feature manifest records both the descriptor specs and
+the per-split fitted knot state. Use `panelcast.reporting.extract_posterior_curve`
+and `summarize_curve_peak` to evaluate coefficient draws and report posterior
+peak/vertex intervals from that state.
+
 ## Custom feature blocks
 
 If your domain has analogues of genres/collaborations, write a feature pack:

@@ -25,6 +25,14 @@ Usage:
     >>> export_table(coef_df, "reports/coefficients", caption="Model coefficients")
 """
 
+from .curves import (
+    CurvePeakSummary,
+    PosteriorCurve,
+    basis_matrix,
+    extract_curve_draws,
+    extract_posterior_curve,
+    summarize_curve_peak,
+)
 from .tables import (
     create_coefficient_table,
     create_comparison_table,
@@ -33,6 +41,12 @@ from .tables import (
 )
 
 __all__ = [
+    "PosteriorCurve",
+    "CurvePeakSummary",
+    "basis_matrix",
+    "extract_curve_draws",
+    "extract_posterior_curve",
+    "summarize_curve_peak",
     # Tables
     "create_coefficient_table",
     "create_diagnostics_table",

@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # Default raw->canonical column mapping (mirrors data.cleaning.RAW_TO_CANONICAL;
 # kept as a literal here so the descriptor module has no panelcast imports and
@@ -69,6 +71,24 @@ class FeatureBlockSpec(BaseModel):
 
     name: str
     params: dict[str, Any] = Field(default_factory=dict)
+
+
+class BasisCurveSpec(BaseModel):
+    """A reproducible cubic B-spline expansion declared by a descriptor."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    col: str = Field(min_length=1)
+    type: Literal["spline"] = "spline"
+    df: int = Field(ge=4, strict=True)
+    center: float = 0.0
+
+    @field_validator("center")
+    @classmethod
+    def _finite_center(cls, value: float) -> float:
+        if not math.isfinite(value):
+            raise ValueError("center must be finite")
+        return value
 
 
 def _default_feature_blocks() -> list[FeatureBlockSpec]:
@@ -167,9 +187,20 @@ class DatasetDescriptor(BaseModel):
     feature_packs: list[str] = Field(default_factory=lambda: ["aoty"])
     feature_blocks: list[FeatureBlockSpec] = Field(default_factory=_default_feature_blocks)
     ablation_groups: dict[str, list[str]] = Field(default_factory=_default_ablation_groups)
+    basis_curves: dict[str, BasisCurveSpec] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate(self) -> DatasetDescriptor:
+        invalid_curve_names = [
+            name
+            for name in self.basis_curves
+            if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", name) is None
+        ]
+        if invalid_curve_names:
+            raise ValueError(
+                "basis_curves names must start with a letter and contain only letters, "
+                f"digits, and underscores; invalid: {invalid_curve_names}."
+            )
         if self.primary_min_obs not in self.min_obs_thresholds:
             raise ValueError(
                 f"primary_min_obs={self.primary_min_obs} is not one of "
@@ -205,15 +236,15 @@ class DatasetDescriptor(BaseModel):
 
     def descriptor_hash(self) -> str:
         """Stable fit/data hash; presentation-only fields do not invalidate runs."""
-        payload = json.dumps(
-            self.model_dump(mode="json", exclude={"invert_target_axis"}),
-            sort_keys=True,
-        )
+        fields = self.model_dump(mode="json", exclude={"invert_target_axis"})
+        if not fields["basis_curves"]:
+            fields.pop("basis_curves")
+        payload = json.dumps(fields, sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
     def to_summary_block(self) -> dict[str, Any]:
         """Compact provenance block embedded in training summaries."""
-        return {
+        summary = {
             "name": self.name,
             "entity_col": self.entity_col,
             "event_col": self.event_col,
@@ -226,6 +257,11 @@ class DatasetDescriptor(BaseModel):
             "secondary_prefix": self.secondary_prefix,
             "descriptor_hash": self.descriptor_hash(),
         }
+        if self.basis_curves:
+            summary["basis_curves"] = {
+                name: spec.model_dump(mode="json") for name, spec in self.basis_curves.items()
+            }
+        return summary
 
 
 DEFAULT_DESCRIPTOR = DatasetDescriptor()
