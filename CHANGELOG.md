@@ -4,6 +4,68 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] — 2026-07-23
+
+Distribution, robustness, and the JOSS-readiness hardening batch. panelcast
+now publishes to PyPI with a self-contained demo, survives caged chains and
+non-UTF-8 consoles, refuses silently-drifting configurations and resumes, and
+backs every publication claim with one canonical, CI-guarded manifest.
+
+### Added
+
+- **PyPI trusted publishing and a packaged demo** (#171): tagged releases
+  build, validate, wheel-smoke-test, and publish automatically; the aerospace
+  example ships inside the wheel so `panelcast demo` runs from an empty
+  directory with no checkout.
+- **Caged-chain detection and bounded automatic reseeds** (#262): fits detect
+  chains trapped at a boundary via a consensus test and retry with a reduced
+  tree depth, with strict numeric validation and retry provenance recorded.
+- **Descriptor-declared spline basis curves** (#270): a descriptor can expand a
+  column into a reproducible cubic B-spline block, reference-coded before model
+  centering and bound to the fitted feature scaling in model provenance.
+- **Per-split feature schemas** (#295): every split records per-partition
+  column/dtype/order schemas with stable hashes; a train/validation/test drift
+  fails feature building before any artifact is written, and cross-split
+  differences are recorded with an explicit reason.
+- **Canonical experiment identity** (#296): manifests record a config hash
+  over every output-affecting resolved knob plus descriptor hash, source
+  revision, environment fingerprint, lock hash, and version. Resume restores
+  the complete resolved experiment and refuses a mismatch with a per-key diff.
+- **Canonical release-result manifest** (#298): `.audit/release_results.json`
+  holds the dataset flow (raw/eligible/validated tiers), fit identity,
+  convergence gate, headline metrics, and PPC pin classification; CI fails
+  when README/MODEL_CARD claims drift from it or it drifts from the metrics
+  snapshot.
+- **Wheel-install CI matrix** (#299): the built wheel installs into a fresh
+  environment and runs the CPU demo on Linux/macOS/Windows for Python
+  3.11–3.13 (3.14 as an expected lane), separate from the pixi path.
+- **Repository lineage page** (#301): `docs/LINEAGE.md` documents the private
+  predecessor, the 2026-06-20 migration boundary, and JOSS submission timing,
+  with link/claim guards.
+
+### Changed
+
+- **Unknown configuration fields are fatal** (#297): unknown pipeline-YAML
+  keys and descriptor fields error with the offending path and nearest known
+  keys instead of warning; `--allow-unknown-config-keys` downgrades to a
+  prominent warning and preserves the ignored keys in the run manifest.
+- **GBM offsets are entity-aware and temporal** (#293): out-of-fold offsets
+  respect entity boundaries and time order instead of GroupKFold.
+- **One canonical event chronology** (#294): all temporal/history consumers
+  share a single missing/tied-date ordering.
+- **Software claim separated from domain-model research** (#300): the README
+  scope block and model-card status header lead with the finished
+  infrastructure claim; the skewness/max PPC pins and full-corpus scale are
+  framed as open research, and the status badge moves to beta.
+- Publication-surface corrections (#298): the stale q90-pinned and
+  pre-entity-obs ESS claims are fixed and the raw/eligible/validated data
+  scales are distinguished explicitly.
+
+### Fixed
+
+- `panelcast demo` no longer crashes printing artifact markers on non-UTF-8
+  consoles (Windows cp1252); it falls back to ASCII (#299).
+
 ## [0.13.1] — 2026-07-22
 
 Portability and evaluation hardening. The capped-horizon estimator is corrected
