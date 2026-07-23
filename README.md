@@ -147,6 +147,11 @@ pixi run panelcast --help
 > the tightly coupled JAX/NumPyro pair. A plain pip installation obeys the tested
 > dependency bounds but does not promise an identical solver result. Use pixi
 > for publication or reproduction work.
+>
+> **Tested platforms:** the wheel-install CI matrix installs the built wheel
+> into a fresh environment and runs the CPU demo on Linux, macOS, and Windows
+> for Python 3.11–3.13. Python 3.14 is expected to work (the pixi environment
+> runs it) but is not yet part of the pip matrix.
 
 ## 60-second quickstart (aerospace example)
 

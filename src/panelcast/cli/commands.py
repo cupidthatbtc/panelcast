@@ -11,6 +11,16 @@ from panelcast.cli import app, runs_app
 logger = logging.getLogger(__name__)
 
 
+def _artifact_markers(encoding: str | None) -> tuple[str, str]:
+    """Found/missing artifact markers, ASCII when the console can't encode them
+    (Windows cp1252 stdout crashed on the check mark after a successful demo)."""
+    try:
+        "✓".encode(encoding or "utf-8")
+        return "✓", "·"
+    except (UnicodeEncodeError, LookupError):
+        return "OK", "--"
+
+
 def _coefficient_columns(coefficients) -> tuple[str, str, str, str] | None:
     """Resolve (estimate, lower, upper, label) columns of a coefficient table.
 
@@ -252,9 +262,14 @@ def demo(
                 Path("reports/tables/metrics_summary.csv"),
                 Path("outputs/evaluation/metrics.json"),
             )
+        import sys
+
         typer.echo("\nDemo complete. Generated artifacts:")
+        found_marker, missing_marker = _artifact_markers(
+            getattr(sys.stdout, "encoding", None)
+        )
         for artifact in artifacts:
-            marker = "✓" if artifact.exists() else "·"
+            marker = found_marker if artifact.exists() else missing_marker
             typer.echo(f"  {marker} {artifact}")
     raise typer.Exit(code=exit_code)
 
