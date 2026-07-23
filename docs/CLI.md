@@ -135,8 +135,9 @@ These features are **enabled by default**. Use these flags to disable them:
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--config` / `-c` | | YAML config file(s) with `PipelineConfig` keys; repeatable, later files win. Explicit CLI options always win over YAML. |
-| `--dataset` | built-in AOTY | Dataset descriptor: bare name (resolves to `configs/datasets/{name}.yaml`) or YAML path |
+| `--config` / `-c` | | YAML config file(s) with `PipelineConfig` keys; repeatable, later files win. Explicit CLI options always win over YAML. Unknown keys are a hard error with nearest-key suggestions. |
+| `--allow-unknown-config-keys` | `false` | Migration escape: load configs despite unknown keys — they are ignored (not applied) and preserved in the run manifest under `unknown_config_keys` |
+| `--dataset` | built-in AOTY | Dataset descriptor: bare name (resolves to `configs/datasets/{name}.yaml`) or YAML path. Unknown descriptor fields are a hard error |
 | `--debut-prev-score-source` | `train_mean` | Debut `prev_score` fill: `train_mean` or `dataset_stats` (legacy; mild leakage) |
 | `--target-transform` | `offset_logit` | Score-scale transform: `offset_logit` (default since 0.5.0; the model runs on the Smithson-Verkuilen logit scale, bounds hold by construction) or `identity` (soft-clip; the former default, still selectable) |
 | `--ar-center` | `global` | AR(1) centering: `global`, `none` (legacy), or `artist_running` (sensitivity only) |

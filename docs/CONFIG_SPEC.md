@@ -10,9 +10,13 @@ config files layered first.
 Precedence: built-in defaults < preset < `--config` files (later files win) <
 options given explicitly on the command line.
 
-**Unknown keys are warned about and ignored** (one structured warning per key),
-so a typo'd or nested key silently falls back to the default — check the log
-for unknown-key warnings when a setting doesn't seem to take.
+**Unknown keys are a hard error** with the offending path and nearest known
+keys, so a typo'd or nested key cannot silently fall back to the default. The
+`--allow-unknown-config-keys` escape downgrades the error to a warning for
+migrating old configs; ignored keys are then preserved in the run manifest
+under `unknown_config_keys` (their intended effect is still not applied). The
+same strictness applies to dataset descriptors: unknown descriptor fields are
+fatal.
 
 Domain/dataset settings (column names, score bounds, feature blocks, file
 paths) do **not** live here — they belong to a dataset descriptor under

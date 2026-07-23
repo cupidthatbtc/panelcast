@@ -256,3 +256,33 @@ class TestFeatureBlockSpec:
     def test_defaults(self):
         spec = FeatureBlockSpec(name="temporal")
         assert spec.params == {}
+
+
+class TestUnknownFieldsAreFatal:
+    def test_unknown_top_level_field_raises_with_suggestion(self, tmp_path):
+        yaml_path = tmp_path / "typo.yaml"
+        yaml_path.write_text("name: typo\ntargt_col: Perf_Score\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="did you mean: target_col"):
+            load_descriptor(yaml_path)
+
+    def test_unknown_nested_feature_block_field_raises_with_path(self, tmp_path):
+        yaml_path = tmp_path / "nested.yaml"
+        yaml_path.write_text(
+            "name: nested\n"
+            "feature_blocks:\n"
+            "  - name: temporal\n"
+            "    parms: {x: 1}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match=r"feature_blocks\.0\.parms"):
+            load_descriptor(yaml_path)
+
+    def test_unknown_constructor_field_raises(self):
+        with pytest.raises(ValueError, match="not_a_field"):
+            DatasetDescriptor(not_a_field=1)
+
+    def test_non_extra_validation_errors_pass_through(self, tmp_path):
+        yaml_path = tmp_path / "bad.yaml"
+        yaml_path.write_text("primary_min_obs: 7\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="primary_min_obs"):
+            load_descriptor(yaml_path)

@@ -376,7 +376,7 @@ highlights; this section is the complete inventory.
 
 **YAML (configs/base.yaml)** — The project configuration file. Controls MCMC settings, prior hyperparameters, feature toggles, evaluation thresholds, and output paths. Loaded by `config/loader.py` with environment variable expansion (so secrets stay out of version control).
 
-**Pydantic (config/descriptor.py)** — Validates the dataset descriptor YAML against a typed schema (`DatasetDescriptor`). Catches typos and invalid values before the pipeline runs. Pipeline-config YAML keys are mapped onto `PipelineConfig` by `config/pipeline_yaml.py` (unknown keys warn and are ignored).
+**Pydantic (config/descriptor.py)** — Validates the dataset descriptor YAML against a typed schema (`DatasetDescriptor`). Catches typos and invalid values before the pipeline runs. Pipeline-config YAML keys are mapped onto `PipelineConfig` by `config/pipeline_yaml.py` (unknown keys are a hard error; `--allow-unknown-config-keys` downgrades to a warning and records them in the manifest).
 
 ---
 

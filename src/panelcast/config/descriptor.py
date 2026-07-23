@@ -28,6 +28,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -77,6 +78,8 @@ _AOTY_OPTIONAL_RAW_COLUMNS = [
 
 class FeatureBlockSpec(BaseModel):
     """One feature block to instantiate, by registry name, with params."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     params: dict[str, Any] = Field(default_factory=dict)
@@ -136,6 +139,10 @@ class DatasetDescriptor(BaseModel):
     Field defaults are the AOTY literals they replaced; constructing with no
     arguments reproduces the original hard-coded behavior exactly.
     """
+
+    # Unknown fields are fatal (#297): a typo like "targt_col" silently keeping
+    # the AOTY default would change the experiment, not error.
+    model_config = ConfigDict(extra="forbid")
 
     _source_path: Path | None = PrivateAttr(default=None)
     _source_root: Path | None = PrivateAttr(default=None)
@@ -353,7 +360,24 @@ def load_descriptor(ref: str | Path | None) -> DatasetDescriptor:
     from panelcast.config.loader import _expand_env_vars
 
     data = _expand_env_vars(data)
-    descriptor = DatasetDescriptor(**data)
+    try:
+        descriptor = DatasetDescriptor(**data)
+    except ValidationError as e:
+        unknown = [
+            ".".join(str(part) for part in err["loc"])
+            for err in e.errors()
+            if err["type"] == "extra_forbidden"
+        ]
+        if not unknown:
+            raise
+        from panelcast.config.pipeline_yaml import describe_unknown_keys
+
+        raise ValueError(
+            f"Unknown field(s) in dataset descriptor {path}:\n"
+            f"{describe_unknown_keys(unknown, DatasetDescriptor.model_fields)}\n"
+            "Unknown fields are fatal because a typo would silently keep the "
+            "AOTY default. Field reference: src/panelcast/config/descriptor.py."
+        ) from e
     descriptor._source_path = path.resolve()
     package_root = _packaged_data_root().resolve()
     if descriptor._source_path.is_relative_to(package_root):

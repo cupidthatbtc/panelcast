@@ -18,7 +18,7 @@ import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
 from dataclasses import replace as dataclass_replace
 from datetime import datetime
@@ -319,6 +319,10 @@ class PipelineConfig:
     predict_artist_batch_size: int = 50
     # Dataset descriptor reference (bare name or YAML path; None = AOTY defaults)
     dataset: str | None = None
+    # YAML keys ignored under --allow-unknown-config-keys (#297). Provenance
+    # only: preserved in the run manifest, never applied, never dumped into
+    # resolved_config.yaml.
+    unknown_config_keys: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Validate configuration values."""
@@ -863,6 +867,8 @@ class PipelineOrchestrator:
                 # Dataset descriptor provenance
                 "dataset": self.config.dataset,
                 "dataset_descriptor_hash": self.descriptor.descriptor_hash(),
+                # Keys ignored under --allow-unknown-config-keys (#297).
+                "unknown_config_keys": dict(self.config.unknown_config_keys),
             },
             seed=self.config.seed,
             git=GitStateModel.from_git_state(git_state),
