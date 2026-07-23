@@ -10,7 +10,9 @@ from panelcast.pipelines.train_bayes import _build_basis_model_provenance
 
 
 def test_basis_columns_and_fitted_state_flow_through_feature_stage(tmp_path, monkeypatch):
-    train = pd.DataFrame({"age": [20.0, 24.0, 27.0, 31.0, 38.0], "count": [10] * 5})
+    train = pd.DataFrame(
+        {"age": [20.0, 22.0, 24.0, 27.0, 31.0, 35.0, 38.0], "count": [10] * 7}
+    )
     validation = pd.DataFrame({"age": [19.0, 100.0], "count": [10, 10]})
     test = pd.DataFrame({"age": [25.0, 30.0], "count": [10, 10]})
     splits_root = tmp_path / "data" / "splits"

@@ -14,12 +14,16 @@ from .base import BaseFeatureBlock, FeatureContext, FeatureOutput
 def basis_matrix_from_state(values: np.ndarray, state: dict[str, Any]) -> np.ndarray:
     """Evaluate a fitted basis state on original-scale covariate values."""
     center = float(state["spec"].get("center", 0.0))
-    return BSpline.design_matrix(
+    matrix = BSpline.design_matrix(
         values - center,
         state["knots"],
         int(state["degree"]),
         extrapolate=True,
     ).toarray()
+    retained = state.get("retained_basis_indices")
+    if retained is not None:
+        matrix = matrix[:, np.asarray(retained, dtype=int)]
+    return matrix
 
 
 class BasisBlock(BaseFeatureBlock):
@@ -61,40 +65,53 @@ class BasisBlock(BaseFeatureBlock):
                 )
             degree = 3
             requested_df = int(spec["df"])
-            fitted: tuple[list[float], np.ndarray] | None = None
+            fitted: tuple[list[float], np.ndarray, list[int], int] | None = None
             seen_interiors: set[tuple[float, ...]] = set()
-            for interior_count in range(requested_df - degree - 1, -1, -1):
-                if interior_count:
-                    probs = np.arange(1, interior_count + 1) / (interior_count + 1)
-                    quantiles = np.quantile(centered, probs).astype(float)
-                    interior = sorted({float(v) for v in quantiles if lower < v < upper})
-                else:
-                    interior = []
+            for interior_count in range(requested_df - degree, 0, -1):
+                probs = np.arange(1, interior_count + 1) / (interior_count + 1)
+                quantiles = np.quantile(centered, probs).astype(float)
+                interior = sorted({float(v) for v in quantiles if lower < v < upper})
                 interior_key = tuple(interior)
                 if interior_key in seen_interiors:
                     continue
                 seen_interiors.add(interior_key)
                 knots = [lower] * (degree + 1) + interior + [upper] * (degree + 1)
-                matrix = BSpline.design_matrix(centered, knots, degree, extrapolate=True).toarray()
-                if np.linalg.matrix_rank(matrix) == matrix.shape[1]:
-                    fitted = (knots, matrix)
+                complete = BSpline.design_matrix(
+                    centered, knots, degree, extrapolate=True
+                ).toarray()
+                for dropped in range(complete.shape[1] - 1, -1, -1):
+                    retained = [index for index in range(complete.shape[1]) if index != dropped]
+                    matrix = complete[:, retained]
+                    std = np.std(matrix, axis=0)
+                    centered_matrix = matrix - np.mean(matrix, axis=0)
+                    if (
+                        matrix.shape[1] >= degree + 1
+                        and np.all(np.isfinite(std))
+                        and np.all(std > 0.0)
+                        and np.linalg.matrix_rank(centered_matrix) == matrix.shape[1]
+                    ):
+                        fitted = (knots, matrix, retained, dropped)
+                        break
+                if fitted is not None:
                     break
             if fitted is None:
                 raise ValueError(
-                    f"Basis curve {name!r} cannot produce a full-rank cubic spline "
-                    f"from training column {spec['col']!r}; provide at least four "
-                    "distinct, adequately supported values or request a different basis."
+                    f"Basis curve {name!r} cannot produce an identifiable cubic spline "
+                    f"from training column {spec['col']!r} after feature centering; "
+                    "provide more distinct, adequately supported values or lower df."
                 )
-            knots, matrix = fitted
+            knots, matrix, retained, dropped = fitted
             fitted_df = int(matrix.shape[1])
             feature_names = [f"{name}__basis_{i:02d}" for i in range(fitted_df)]
             self.fitted_state[name] = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "spec": dict(spec),
                 "degree": degree,
                 "knots": knots,
                 "requested_df": requested_df,
                 "fitted_df": fitted_df,
+                "retained_basis_indices": retained,
+                "dropped_basis_index": dropped,
                 "train_min": float(values.min()),
                 "train_max": float(values.max()),
                 "feature_names": feature_names,

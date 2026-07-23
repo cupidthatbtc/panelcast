@@ -18,7 +18,7 @@ def _state():
         {"curves": {"age_curve": {"col": "age", "type": "spline", "df": 5, "center": 27.0}}}
     )
     block.fit(
-        pd.DataFrame({"age": [18.0, 22.0, 27.0, 33.0, 40.0]}),
+        pd.DataFrame({"age": [18.0, 20.0, 22.0, 27.0, 33.0, 36.0, 40.0]}),
         FeatureContext(config={}, random_state=42),
     )
     state = block.fitted_state["age_curve"]
