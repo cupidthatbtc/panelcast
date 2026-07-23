@@ -41,7 +41,35 @@ def test_same_values_transform_identically_across_splits():
     np.testing.assert_allclose(left.to_numpy(), right.to_numpy())
 
 
-@pytest.mark.parametrize("values", [[1.0, np.nan], [1.0, np.inf], [2.0, 2.0]])
+def test_repeated_boundary_quantile_adapts_dimension_to_full_rank():
+    values = [0.0] * 8 + [1.0, 2.0, 3.0, 4.0]
+    block = BasisBlock(SPEC).fit(pd.DataFrame({"age": values}), CTX)
+    state = block.fitted_state["age_curve"]
+    matrix = block.transform(pd.DataFrame({"age": values}), CTX).data.to_numpy()
+
+    assert state["requested_df"] == 5
+    assert state["fitted_df"] == 4
+    assert state["feature_names"] == [f"age_curve__basis_{i:02d}" for i in range(4)]
+    assert matrix.shape[1] == len(state["feature_names"])
+    assert np.linalg.matrix_rank(matrix) == matrix.shape[1]
+    assert not np.any(np.all(matrix == 0.0, axis=0))
+
+
+def test_repeated_interior_quantiles_adapt_dimension_and_order():
+    spec = {"curves": {"age_curve": {"col": "age", "type": "spline", "df": 6, "center": 0.0}}}
+    values = [0.0, 1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 3.0, 4.0]
+    block = BasisBlock(spec).fit(pd.DataFrame({"age": values}), CTX)
+    state = block.fitted_state["age_curve"]
+    output = block.transform(pd.DataFrame({"age": values}), CTX)
+
+    assert state["requested_df"] == 6
+    assert state["fitted_df"] == 5
+    assert output.feature_names == state["feature_names"]
+    assert list(output.data.columns) == state["feature_names"]
+    assert np.linalg.matrix_rank(output.data.to_numpy()) == state["fitted_df"]
+
+
+@pytest.mark.parametrize("values", [[1.0, np.nan], [1.0, np.inf], [2.0, 2.0], [0.0, 0.0, 1.0, 1.0]])
 def test_rejects_unusable_training_values(values):
-    with pytest.raises(ValueError, match="finite|constant"):
+    with pytest.raises(ValueError, match="finite|constant|full-rank"):
         BasisBlock(SPEC).fit(pd.DataFrame({"age": values}), CTX)

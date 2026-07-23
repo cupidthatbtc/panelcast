@@ -96,6 +96,23 @@ class TestKeyOrderRegression:
         # New keys append strictly after.
         assert dumped_keys[len(LEGACY_KEY_ORDER) :] == ["schema_version", "dataset"]
 
+    def test_basis_model_provenance_is_retained(self):
+        provenance = {
+            "split": "within_entity_temporal",
+            "curves": {
+                "age_curve": {
+                    "standardization": {
+                        "feature_names": ["age_curve__basis_00"],
+                        "feature_indices": [2],
+                        "mean": [0.25],
+                        "std": [0.75],
+                    }
+                }
+            },
+        }
+        dumped = TrainingSummary(basis_curves=provenance).to_json_dict()
+        assert dumped["basis_curves"] == provenance
+
     def test_unset_dataset_omitted(self):
         """A summary built without a dataset block must not emit dataset: null."""
         dumped = TrainingSummary(**_legacy_summary_dict()).to_json_dict()

@@ -121,6 +121,8 @@ class TrainingSummary(BaseModel):
     # Expected-vs-actual fit resources (#78): estimator projection, measured
     # peak GPU memory, their ratio, and MCMC wall clock.
     resource_usage: dict[str, Any] | None = None
+    # Train-fitted basis definitions bound to the exact model feature scaler.
+    basis_curves: dict[str, Any] | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
         """Serialize preserving declaration order.

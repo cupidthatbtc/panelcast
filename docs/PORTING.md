@@ -203,15 +203,19 @@ basis_curves:
     center: 27
 ```
 
-The capability is off when `basis_curves` is omitted or empty. `df` is the
-number of emitted columns (`age_curve__basis_00` through
-`age_curve__basis_04`) and must be at least 4. Only `type: spline` is currently
-supported. Knots are fitted from each training split's centered source values;
-the fitted knots are then reused unchanged for validation and test, including
-out-of-range values. The feature manifest records both the descriptor specs and
-the per-split fitted knot state. Use `panelcast.reporting.extract_posterior_curve`
-and `summarize_curve_peak` to evaluate coefficient draws and report posterior
-peak/vertex intervals from that state.
+The capability is off when `basis_curves` is omitted or empty. `df` requests the
+maximum number of emitted columns (`age_curve__basis_00` onward) and must be at
+least 4. Repeated boundary or interior quantiles deterministically reduce that
+dimension until the training design is full rank; training fails clearly when no
+full-rank cubic basis is possible. Only `type: spline` is currently supported.
+Knots are fitted from each training split's centered source values and reused
+unchanged for validation and test, including out-of-range values. The feature
+manifest records the per-split knot state. Training then binds each basis name
+and model index to the exact fitted feature mean and standard deviation in both
+`training_summary.json` and the NetCDF model attributes. Pass that durable
+training-summary curve state to `panelcast.reporting.extract_posterior_curve`;
+it applies the model standardizer before `summarize_curve_peak` reports posterior
+peak/vertex intervals.
 
 ## Custom feature blocks
 
