@@ -11,6 +11,12 @@ the same, with that domain's descriptor and dataset path.
 > model card under `outputs/<run_id>/reports/`. Then `panelcast compare
 > --baselines --dataset aero` prints the baseline benchmark table for that run.
 >
+> **Zero-install path:**
+> [![Open in Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/cupidthatbtc/panelcast/blob/main/examples/quickstart.ipynb)
+> — the same demo as a browser notebook (`examples/quickstart.ipynb`) via the
+> public Python API, with the calibrated-interval plot at the end. Executed
+> nightly in CI.
+>
 > For an exact reproducible environment or development checkout, follow the pixi
 > steps below; `pixi.lock` remains the authoritative dependency lock.
 
