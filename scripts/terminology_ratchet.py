@@ -1,6 +1,7 @@
 """Domain-terminology ratchet for generic modules (#303).
 
-Counts album/artist-derived identifiers per source file and compares against
+Counts album/artist-derived occurrences (identifiers, plus the comments and
+docstrings carrying the same coupling) per source file and compares against
 the committed baseline. Generic modules must not grow new domain terminology;
 renames shrink the baseline and are banked with --update. Sanctioned domain
 surfaces (the AOTY feature pack, descriptor defaults, AOTY data plumbing) are
@@ -23,8 +24,10 @@ SRC = REPO_ROOT / "src" / "panelcast"
 BASELINE_PATH = REPO_ROOT / "terminology_baseline.json"
 
 # Any identifier-ish token containing the AOTY domain nouns, case-insensitive
-# (albums, artist_idx, n_artists, AlbumTypeBlock, mu_artist, ...).
-_TERM_RE = re.compile(r"\b\w*(?:album|artist)\w*\b", re.IGNORECASE)
+# (albums, artist_idx, n_artists, AlbumTypeBlock, mu_artist, ...). The
+# negative lookahead keeps unrelated English words (artistic, artistry) out;
+# plurals, snake_case, and CamelCase derivations still match.
+_TERM_RE = re.compile(r"\b\w*(?:album|artist)(?!ic|ry)\w*\b", re.IGNORECASE)
 
 # Sanctioned domain surfaces: intentionally AOTY-specific code whose counts may
 # move freely. Everything else is generic and may only shrink.
@@ -54,7 +57,10 @@ def collect_counts() -> dict[str, int]:
 def load_baseline() -> dict[str, int]:
     if not BASELINE_PATH.exists():
         raise SystemExit(f"{BASELINE_PATH.name} missing — run with --update to create it")
-    return json.loads(BASELINE_PATH.read_text(encoding="utf-8"))["files"]
+    payload = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+    if "files" not in payload:
+        raise SystemExit(f"{BASELINE_PATH.name} is malformed — rebuild it with --update")
+    return payload["files"]
 
 
 def check(current: dict[str, int]) -> int:

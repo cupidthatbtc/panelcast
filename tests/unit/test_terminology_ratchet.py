@@ -42,3 +42,5 @@ def test_pattern_catches_derived_identifiers():
     for token in ("n_artists", "album_seq", "AlbumTypeBlock", "mu_artist", "max_albums"):
         assert ratchet._TERM_RE.search(token), token
     assert not ratchet._TERM_RE.search("entity_idx event_seq")
+    # Unrelated English words must not count as domain coupling.
+    assert not ratchet._TERM_RE.search("an artistic, artistry-heavy layout")
