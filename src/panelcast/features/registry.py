@@ -105,13 +105,49 @@ def build_default_registry(descriptor: DatasetDescriptor | None = None) -> Featu
     registry.register("artist_history", lambda params: ArtistHistoryBlock(params))
 
     for pack_name in descriptor.feature_packs:
-        registrar = _PACK_REGISTRARS.get(pack_name)
+        registrar = _PACK_REGISTRARS.get(pack_name) or _discovered_packs().get(pack_name)
         if registrar is None:
+            available = sorted(set(_PACK_REGISTRARS) | set(_discovered_packs()))
             raise KeyError(
-                f"Unknown feature pack: {pack_name!r}. Available packs: {sorted(_PACK_REGISTRARS)}."
+                f"Unknown feature pack: {pack_name!r}. Available packs "
+                f"(builtin + installed plugins): {available}."
             )
         registrar(registry)
     return registry
+
+
+def _discovered_packs() -> dict[str, Callable[[FeatureRegistry], None]]:
+    """Third-party packs from the ``panelcast.feature_packs`` entry-point group.
+
+    Each entry point loads to a callable with the same contract as
+    ``packs/aoty.py::register(registry)``. Builtins shadow plugins on a name
+    collision so an installed package can never silently replace the shipped
+    behavior. Plugin code runs at import time — the standard entry-point
+    trade-off.
+    """
+    import importlib.metadata
+
+    discovered: dict[str, Callable[[FeatureRegistry], None]] = {}
+    for entry in importlib.metadata.entry_points(group="panelcast.feature_packs"):
+        if entry.name not in discovered:
+            discovered[entry.name] = entry.load()
+    return discovered
+
+
+def discovered_plugins() -> dict[str, dict[str, str]]:
+    """Installed panelcast plugins with dist versions, for run provenance."""
+    import importlib.metadata
+
+    plugins: dict[str, dict[str, str]] = {}
+    for group in ("panelcast.feature_packs", "panelcast.likelihoods"):
+        for entry in importlib.metadata.entry_points(group=group):
+            dist = getattr(entry, "dist", None)
+            plugins[f"{group}:{entry.name}"] = {
+                "value": entry.value,
+                "dist": getattr(dist, "name", "unknown") if dist else "unknown",
+                "version": getattr(dist, "version", "unknown") if dist else "unknown",
+            }
+    return plugins
 
 
 def _register_aoty_pack(registry: FeatureRegistry) -> None:

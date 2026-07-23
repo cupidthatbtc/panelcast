@@ -23,7 +23,7 @@ import jax.numpy as jnp
 from jax import random
 from numpyro.infer import MCMC, Predictive
 
-from panelcast.models.bayes.likelihoods import REGISTRY
+from panelcast.models.bayes.likelihoods import available_families, find_likelihood
 from panelcast.models.bayes.model import compute_sigma_scaled, soft_clip  # noqa: F401
 from panelcast.models.bayes.transforms import get_transform
 
@@ -418,13 +418,12 @@ def predict_new_entity(
     # Resolve the family spec and read its global sample sites generically
     # (present only for the matching family; missing ones surface as None and
     # the spec's predict_draws raises a clear error).
-    try:
-        spec = REGISTRY[likelihood_family]
-    except KeyError:
+    spec = find_likelihood(likelihood_family)
+    if spec is None:
         raise ValueError(
             f"Unknown likelihood_family: '{likelihood_family}'. "
-            f"Registered: {sorted(REGISTRY)}."
-        ) from None
+            f"Registered: {list(available_families())}."
+        )
     family_sites = {
         name: posterior_samples.get(f"{prefix}{name}") for name in spec.required_sites
     }

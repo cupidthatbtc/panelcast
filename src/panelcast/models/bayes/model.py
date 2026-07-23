@@ -513,18 +513,17 @@ def _sample_likelihood(
     """
     # Lazy import breaks the cycle: likelihoods.py imports SinhArcsinhTransform
     # from this module, so this module must not import it at load time.
-    from panelcast.models.bayes.likelihoods import REGISTRY
+    from panelcast.models.bayes.likelihoods import available_families, find_likelihood
 
     family = priors.likelihood_family
     if family == "studentt" and likelihood_df >= 100:
         family = "normal"
-    try:
-        spec = REGISTRY[family]
-    except KeyError:
+    spec = find_likelihood(family)
+    if spec is None:
         raise ValueError(
             f"Unknown likelihood_family: '{priors.likelihood_family}'. "
-            f"Registered: {sorted(REGISTRY)}."
-        ) from None
+            f"Registered: {list(available_families())}."
+        )
     spec.sample_obs(
         prefix,
         mu,
@@ -780,9 +779,9 @@ def make_score_model(score_type: str) -> Callable:
         # sampled: publication tables and cold-start prediction read it. Lazy
         # import for the same cycle reason as _sample_likelihood; sigma-using
         # families keep the exact legacy draw sequence.
-        from panelcast.models.bayes.likelihoods import REGISTRY
+        from panelcast.models.bayes.likelihoods import find_likelihood
 
-        _family_spec = REGISTRY.get(priors.likelihood_family)
+        _family_spec = find_likelihood(priors.likelihood_family)
         family_uses_sigma = _family_spec is None or _family_spec.uses_sigma
 
         heteroscedastic_requested = family_uses_sigma and (

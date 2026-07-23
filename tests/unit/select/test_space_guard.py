@@ -66,6 +66,9 @@ class TestFieldCoverage:
             _gate_literal_alias(HINTS[f.name])
             for f in dataclass_fields(PipelineConfig)
         } - {None}
+        # likelihood_family widened to str for plugin families (#172); the
+        # Literal remains the documented builtin set.
+        used |= {"LikelihoodFamily"}
         orphaned = set(GATE_ALIASES) - used
         assert not orphaned, f"gates.py Literal(s) {orphaned} back no PipelineConfig field"
 

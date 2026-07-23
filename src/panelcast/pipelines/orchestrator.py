@@ -46,7 +46,6 @@ from panelcast.config.gates import (
     DebutPrevScoreSource,
     InitStrategy,
     LatentProcess,
-    LikelihoodFamily,
     NExponentPrior,
     SigmaObsPriorType,
     TargetTransform,
@@ -213,7 +212,10 @@ class PipelineConfig:
     # Likelihood family gate: "studentt" (legacy) | "normal" | "skew_studentt" /
     # "skew_normal" (sinh-arcsinh skew) | "split_normal" (two-piece) | "beta"
     # (bounded mean-precision Beta on [low, high]).
-    likelihood_family: LikelihoodFamily = "studentt"
+    # Builtins are the LikelihoodFamily Literal; entry-point plugin families
+    # (#172) are also legal, so the boundary widens to str and the runtime
+    # registry check in _validate_likelihood is the contract.
+    likelihood_family: str = "studentt"
     # Discretization gate: interval-censor the observation to integers (default
     # off => continuous likelihood). Location-scale families only; not for beta.
     discretize_observation: bool = False
@@ -479,17 +481,16 @@ class PipelineConfig:
 
     def _validate_likelihood(self) -> None:
         """Validate the likelihood family and its structural constraints."""
-        from panelcast.models.bayes.likelihoods import REGISTRY
+        from panelcast.models.bayes.likelihoods import all_likelihoods, find_likelihood
 
-        valid_families = tuple(REGISTRY)
-        if self.likelihood_family not in valid_families:
+        spec = find_likelihood(self.likelihood_family)
+        if spec is None:
             raise ValueError(
                 f"Invalid likelihood_family: '{self.likelihood_family}'. "
-                f"Must be one of: {', '.join(valid_families)}."
+                f"Must be one of: {', '.join(sorted(all_likelihoods()))}."
             )
-        spec = REGISTRY[self.likelihood_family]
         if self.discretize_observation and not spec.supports_discretization:
-            supported = [f for f, s in REGISTRY.items() if s.supports_discretization]
+            supported = [f for f, s in all_likelihoods().items() if s.supports_discretization]
             raise ValueError(
                 f"discretize_observation=True is not supported by likelihood_family "
                 f"'{self.likelihood_family}'. Supported: {', '.join(supported)}."
@@ -535,6 +536,13 @@ class PipelineConfig:
                     f"'{self.likelihood_family}': the family draws its own precision "
                     "and ignores sigma, so these options would be silently inert."
                 )
+
+
+def _installed_plugins() -> dict[str, dict[str, str]]:
+    """Entry-point plugin provenance for the run manifest (#172)."""
+    from panelcast.features.registry import discovered_plugins
+
+    return discovered_plugins()
 
 
 # Execution mechanics and per-invocation provenance excluded from resume
@@ -842,6 +850,7 @@ class PipelineOrchestrator:
                 "pixi_lock_hash": environment.pixi_lock_hash,
                 "package_version": panelcast_version,
             },
+            plugins=_installed_plugins(),
             seed=self.config.seed,
             git=GitStateModel.from_git_state(git_state),
             environment=environment,
