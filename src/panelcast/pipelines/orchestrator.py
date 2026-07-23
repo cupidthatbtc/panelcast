@@ -538,10 +538,12 @@ class PipelineConfig:
 
 
 # Execution mechanics and per-invocation provenance excluded from resume
-# restore (#296); everything else on PipelineConfig is restored.
+# restore (#296); everything else on PipelineConfig is restored. strict stays a
+# per-invocation gate: it aborts on warnings but never changes outputs, and a
+# user resuming with --strict means it.
 _RESUME_EXCLUDED_KEYS = frozenset(
     {"resume", "skip_existing", "dry_run", "verbose", "progress_bar",
-     "tag", "run_id", "unknown_config_keys"}
+     "tag", "run_id", "unknown_config_keys", "strict"}
 )
 _RESUME_CONFIG_KEYS = tuple(
     f.name for f in dataclass_fields(PipelineConfig) if f.name not in _RESUME_EXCLUDED_KEYS

@@ -44,6 +44,7 @@ class TestExperimentConfigHash:
         assert experiment_config_hash(PipelineConfig(verbose=True)) == base
         assert experiment_config_hash(PipelineConfig(skip_existing=True)) == base
         assert experiment_config_hash(PipelineConfig(run_id="named-run")) == base
+        assert experiment_config_hash(PipelineConfig(strict=True)) == base
 
     def test_excluded_keys_are_all_mapped(self):
         assert EXPERIMENT_EXCLUDED_KEYS <= set(PIPELINE_YAML_MAPPING)
@@ -87,12 +88,12 @@ class TestManifestFlagsCompleteness:
 class TestResumeKeyDerivation:
     def test_previously_omitted_controls_are_now_restored(self):
         for key in ("enable_genre", "enable_artist", "enable_temporal", "stages",
-                    "warmup_import_path", "warmup_export_path", "strict"):
+                    "warmup_import_path", "warmup_export_path"):
             assert key in PipelineOrchestrator.RESUME_CONFIG_KEYS, key
 
     def test_execution_mechanics_stay_excluded(self):
         for key in ("resume", "skip_existing", "dry_run", "verbose", "progress_bar",
-                    "tag", "run_id"):
+                    "tag", "run_id", "strict"):
             assert key not in PipelineOrchestrator.RESUME_CONFIG_KEYS, key
 
     def test_every_field_is_restored_or_explicitly_excluded(self):

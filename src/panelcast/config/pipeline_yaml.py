@@ -298,9 +298,10 @@ def load_resolved_config(path: Any) -> dict[str, Any]:
 
 
 # Mapped keys that are execution mechanics, not experiment identity (#296):
-# they never change outputs, so they must not perturb the experiment hash.
+# they never change outputs (strict only aborts on warnings), so they must not
+# perturb the experiment hash.
 EXPERIMENT_EXCLUDED_KEYS = frozenset(
-    {"skip_existing", "dry_run", "verbose", "progress_bar", "run_id"}
+    {"skip_existing", "dry_run", "verbose", "progress_bar", "run_id", "strict"}
 )
 
 

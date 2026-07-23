@@ -1467,8 +1467,9 @@ The `--resume {run_id}` flag allows resuming a failed run:
 4. Restore the complete resolved experiment (#296): every output-affecting
    config field is restored, preferring the run's `resolved_config.yaml` and
    falling back to manifest flags. Only execution mechanics (`--verbose`,
-   `--dry-run`, `--skip-existing`, progress bars, `--tag`) keep their CLI
-   values. Missing keys on pre-`resolved_config` runs trigger a warning.
+   `--dry-run`, `--skip-existing`, `--strict`, progress bars, `--tag`) keep
+   their CLI values. Missing keys on pre-`resolved_config` runs trigger a
+   warning.
 5. Re-validate config after restoration
 6. Verify experiment identity: the restored config must hash to the recorded
    `experiment_identity.config_hash`, or the resume is refused with a per-key
