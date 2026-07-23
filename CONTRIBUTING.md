@@ -73,6 +73,15 @@ everywhere; the goal is a monotonically shrinking baseline until the disable
 list can go entirely. A mypy version bump is expected to shift counts —
 re-bank the baseline in the same PR.
 
+The terminology ratchet (#303, `pixi run terminology-ratchet`) works the same
+way for domain terminology: generic modules must not grow album/artist-derived
+identifiers (domain names belong in the `DatasetDescriptor` and the sanctioned
+AOTY surfaces listed in `scripts/terminology_ratchet.py`). Renames that shrink
+a generic module's count are banked with
+`python scripts/terminology_ratchet.py --update` — but check the serialized
+surfaces first: posterior site names, feature columns, config keys, and
+manifest keys are compatibility contracts, not free renames.
+
 Please run `pre-commit run --all-files` before opening a PR so the hooks have a
 chance to auto-fix formatting and imports.
 
