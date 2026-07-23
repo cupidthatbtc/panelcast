@@ -205,9 +205,11 @@ basis_curves:
 
 The capability is off when `basis_curves` is omitted or empty. `df` requests the
 maximum number of emitted columns (`age_curve__basis_00` onward) and must be at
-least 4. Repeated boundary or interior quantiles deterministically reduce that
-dimension until the training design is full rank; training fails clearly when no
-full-rank cubic basis is possible. Only `type: spline` is currently supported.
+least 4. The complete partition-of-unity basis is reference-coded by dropping
+one recorded column so model mean-centering remains identifiable. Repeated
+boundary or interior quantiles deterministically reduce the emitted dimension
+until the centered training design is full rank; training fails clearly when no
+identifiable cubic basis is possible. Only `type: spline` is currently supported.
 Knots are fitted from each training split's centered source values and reused
 unchanged for validation and test, including out-of-range values. The feature
 manifest records the per-split knot state. Training then binds each basis name
