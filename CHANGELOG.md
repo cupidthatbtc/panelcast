@@ -4,6 +4,52 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] — 2026-07-23
+
+Extensibility and adoption: panelcast becomes a platform you can build on
+without forking, gains a real-data third domain and a zero-install quickstart,
+and puts its remaining typing and terminology debt under shrink-only ratchets.
+
+### Added
+
+- **Entry-point plugin architecture** (#172): feature packs
+  (`panelcast.feature_packs`) and likelihood families
+  (`panelcast.likelihoods`) are discoverable from installed packages via
+  standard entry points. All family resolution goes through plugin-aware
+  accessors (guard-tested — no seam can bypass them), builtins shadow plugins
+  on name collisions, plugin families enter `panelcast select` automatically,
+  and run manifests record discovered plugins with distribution versions.
+- **Bundled elections domain** (#175): US Senate statewide two-party returns
+  (MEDSL via Harvard Dataverse, CC0 1.0 — verified against the record
+  metadata) as a third worked example. Real data in a different bounded-score
+  regime: unit-interval bounds, empty feature packs, and a true aggregation
+  count exercising the `beta_binomial` likelihood end-to-end, with a fast
+  stages-only portability test on every PR and a tiny-MCMC nightly proof.
+- **Colab-able quickstart notebook** (#174): `examples/quickstart.ipynb` runs
+  the aerospace demo through the public Python API and plots calibrated
+  held-out intervals; a nightly CI job executes it so it cannot rot.
+- **Typing ratchet** (#302, closed): mypy runs whole-package with a committed
+  per-file baseline; seven of the ten globally-disabled error codes are now
+  enforced everywhere (several live bugs fixed in the sweep), and the
+  remaining three are baseline-held until zero.
+- **Terminology ratchet** (#303, first stage): generic modules cannot grow
+  album/artist-derived identifiers; 1,897 baselined occurrences can only
+  shrink, with the AOTY surfaces sanctioned.
+
+### Changed
+
+- The feature-block protocol exposes read-only `name`/`requires` properties;
+  `likelihood_family` accepts plugin family names at every boundary (the
+  Literal remains the documented builtin set).
+
+### Fixed
+
+- Horizon rollout resolved likelihoods directly against the builtin registry,
+  crashing plugin families during evaluation.
+- A stdlib logger called with structlog kwargs raised on the trace-plot
+  fallback path; a None-unsafe MAE comparison and None-unsafe auto-timeout
+  max() could raise on edge inputs.
+
 ## [0.14.0] — 2026-07-23
 
 Distribution, robustness, and the JOSS-readiness hardening batch. panelcast
