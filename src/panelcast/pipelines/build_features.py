@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
@@ -39,6 +39,13 @@ def _safe_split_stats(features: pd.DataFrame, path: Path) -> dict:
         "n_reviews_min": int(features["n_reviews"].min()) if has_reviews else 0,
         "n_reviews_max": int(features["n_reviews"].max()) if has_reviews else 0,
         "n_reviews_median": int(features["n_reviews"].median()) if has_reviews else 0,
+    }
+
+
+def _basis_curve_specs(descriptor: DatasetDescriptor) -> dict[str, dict[str, Any]]:
+    return {
+        name: curve.model_dump(mode="json")
+        for name, curve in descriptor.basis_curves.items()
     }
 
 
@@ -87,12 +94,7 @@ def get_feature_blocks(
         specs.append(
             FeatureSpec(
                 name="basis",
-                params={
-                    "curves": {
-                        name: curve.model_dump(mode="json")
-                        for name, curve in descriptor.basis_curves.items()
-                    }
-                },
+                params={"curves": _basis_curve_specs(descriptor)},
             )
         )
     blocks = registry.build_all(specs)
@@ -381,10 +383,7 @@ def build_features(ctx: StageContext) -> dict:
 
     if descriptor.basis_curves:
         manifest["basis_curves"] = {
-            "specs": {
-                name: curve.model_dump(mode="json")
-                for name, curve in descriptor.basis_curves.items()
-            },
+            "specs": _basis_curve_specs(descriptor),
             "fitted_by_split": basis_states,
         }
 

@@ -340,6 +340,26 @@ def _build_basis_model_provenance(
     }
 
 
+def _resolve_basis_model_provenance(
+    descriptor: DatasetDescriptor,
+    features_path: Path,
+    feature_cols: list[str],
+    feature_mean: np.ndarray,
+    feature_std: np.ndarray,
+) -> dict | None:
+    if not descriptor.basis_curves:
+        return None
+    provenance = _build_basis_model_provenance(
+        features_path, feature_cols, feature_mean, feature_std
+    )
+    if provenance is None:
+        raise ValueError(
+            "Basis curves are configured but their fitted feature manifest could not be "
+            f"found beside {features_path}; model provenance would be incomplete."
+        )
+    return provenance
+
+
 def resolve_entity_group_pooling(
     configured: bool | None,
     descriptor: DatasetDescriptor,
@@ -1413,14 +1433,9 @@ def train_models(  # noqa: C901  # tracked complexity debt
     }
     if imputation is not None:
         feature_scaler["imputation"] = imputation
-    basis_model_provenance = _build_basis_model_provenance(
-        features_path, feature_cols, X_mean, X_std_safe
+    basis_model_provenance = _resolve_basis_model_provenance(
+        descriptor, features_path, feature_cols, X_mean, X_std_safe
     )
-    if descriptor.basis_curves and basis_model_provenance is None:
-        raise ValueError(
-            "Basis curves are configured but their fitted feature manifest could not be "
-            f"found beside {features_path}; model provenance would be incomplete."
-        )
 
     log.info(
         "model_data_prepared",

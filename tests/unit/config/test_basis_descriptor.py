@@ -24,7 +24,7 @@ def test_declared_curve_adds_basis_block_and_provenance():
 
 
 @pytest.mark.parametrize(
-    "spec, message",
+    ("spec", "message"),
     [
         ({"col": "age", "type": "natural", "df": 5}, "type"),
         ({"col": "age", "type": "spline", "df": 3}, "greater than or equal"),

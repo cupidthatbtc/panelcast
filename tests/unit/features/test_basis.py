@@ -94,5 +94,5 @@ def test_transform_rejects_inconsistent_persisted_dimension():
 
 @pytest.mark.parametrize("values", [[1.0, np.nan], [1.0, np.inf], [2.0, 2.0], [0.0, 0.0, 1.0, 1.0]])
 def test_rejects_unusable_training_values(values):
-    with pytest.raises(ValueError, match="finite|constant|identifiable"):
+    with pytest.raises(ValueError, match=r"finite|constant|identifiable"):
         BasisBlock(SPEC).fit(pd.DataFrame({"age": values}), CTX)

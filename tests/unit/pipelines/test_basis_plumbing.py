@@ -7,7 +7,10 @@ import pytest
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.pipelines.build_features import build_features
-from panelcast.pipelines.train_bayes import _build_basis_model_provenance
+from panelcast.pipelines.train_bayes import (
+    _build_basis_model_provenance,
+    _resolve_basis_model_provenance,
+)
 
 
 def test_basis_columns_and_fitted_state_flow_through_feature_stage(tmp_path, monkeypatch):
@@ -85,6 +88,38 @@ def test_training_provenance_binds_basis_names_to_actual_scaler(tmp_path):
         "mean": [1.5, -2.0],
         "std": [0.25, 3.5],
     }
+
+
+def test_basis_provenance_is_ignored_when_capability_is_off(tmp_path):
+    feature_dir = tmp_path / "features"
+    feature_dir.mkdir()
+    (feature_dir / "manifest.json").write_text(
+        json.dumps({"basis_curves": {"fitted_by_split": {}}}), encoding="utf-8"
+    )
+    features_path = feature_dir / "train_features.parquet"
+
+    assert (
+        _resolve_basis_model_provenance(
+            DatasetDescriptor(),
+            features_path,
+            ["feature"],
+            np.array([0.0]),
+            np.array([1.0]),
+        )
+        is None
+    )
+
+    descriptor = DatasetDescriptor(
+        basis_curves={"curve": {"col": "x", "type": "spline", "df": 4}}
+    )
+    with pytest.raises(ValueError, match="no fitted basis state"):
+        _resolve_basis_model_provenance(
+            descriptor,
+            features_path,
+            ["feature"],
+            np.array([0.0]),
+            np.array([1.0]),
+        )
 
 
 def test_training_provenance_rejects_incomplete_or_inconsistent_state(tmp_path):
