@@ -537,6 +537,17 @@ class PipelineConfig:
                 )
 
 
+# Execution mechanics and per-invocation provenance excluded from resume
+# restore (#296); everything else on PipelineConfig is restored.
+_RESUME_EXCLUDED_KEYS = frozenset(
+    {"resume", "skip_existing", "dry_run", "verbose", "progress_bar",
+     "tag", "run_id", "unknown_config_keys"}
+)
+_RESUME_CONFIG_KEYS = tuple(
+    f.name for f in dataclass_fields(PipelineConfig) if f.name not in _RESUME_EXCLUDED_KEYS
+)
+
+
 class PipelineOrchestrator:
     """Orchestrates pipeline execution with progress tracking and error handling.
 
@@ -779,96 +790,31 @@ class PipelineOrchestrator:
         # Build command string for manifest
         command = self._build_command_string()
 
-        # Create manifest
+        # Create manifest. Flags are derived from the dataclass fields so a new
+        # config knob cannot be forgotten (#296); the descriptor hash rides
+        # along as provenance.
+        flags = {}
+        for f in dataclass_fields(PipelineConfig):
+            value = getattr(self.config, f.name)
+            flags[f.name] = list(value) if isinstance(value, tuple) else value
+        flags["dataset_descriptor_hash"] = self.descriptor.descriptor_hash()
+
+        from panelcast.config.pipeline_yaml import experiment_config_hash
+
         self.manifest = RunManifest(
             run_id=run_id,
             created_at=datetime.now().isoformat(),
             version=panelcast_version,
             tag=self.config.tag,
             command=command,
-            flags={
-                "seed": self.config.seed,
-                "skip_existing": self.config.skip_existing,
-                "stages": self.config.stages,
-                "dry_run": self.config.dry_run,
-                "strict": self.config.strict,
-                "enforce_lockfile": self.config.enforce_lockfile,
-                "verbose": self.config.verbose,
-                "progress_bar": self.config.progress_bar,
-                "resume": self.config.resume,
-                "max_albums": self.config.max_albums,
-                # MCMC config
-                "num_chains": self.config.num_chains,
-                "num_samples": self.config.num_samples,
-                "num_warmup": self.config.num_warmup,
-                "target_accept": self.config.target_accept,
-                "max_tree_depth": self.config.max_tree_depth,
-                "init_strategy": self.config.init_strategy,
-                "chain_method": self.config.chain_method,
-                "checkpoint_every_draws": self.config.checkpoint_every_draws,
-                "caged_chain_retries": self.config.caged_chain_retries,
-                "caged_chain_tree_depth_fraction": self.config.caged_chain_tree_depth_fraction,
-                "caged_chain_boundary_sigma": self.config.caged_chain_boundary_sigma,
-                "caged_chain_consensus_ratio": self.config.caged_chain_consensus_ratio,
-                # Convergence thresholds
-                "rhat_threshold": self.config.rhat_threshold,
-                "ess_threshold": self.config.ess_threshold,
-                "allow_divergences": self.config.allow_divergences,
-                # Data filtering
-                "min_ratings": self.config.min_ratings,
-                "min_albums_filter": self.config.min_albums_filter,
-                # Feature flags
-                "enable_genre": self.config.enable_genre,
-                "enable_artist": self.config.enable_artist,
-                "enable_temporal": self.config.enable_temporal,
-                # Heteroscedastic noise
-                "n_exponent": self.config.n_exponent,
-                "learn_n_exponent": self.config.learn_n_exponent,
-                "n_exponent_alpha": self.config.n_exponent_alpha,
-                "n_exponent_beta": self.config.n_exponent_beta,
-                "n_exponent_prior": self.config.n_exponent_prior,
-                "likelihood_df": self.config.likelihood_df,
-                "likelihood_family": self.config.likelihood_family,
-                "discretize_observation": self.config.discretize_observation,
-                "debut_prev_score_source": self.config.debut_prev_score_source,
-                "target_transform": self.config.target_transform,
-                "logit_offset": self.config.logit_offset,
-                "ar_center": self.config.ar_center,
-                "latent_process": self.config.latent_process,
-                "sigma_obs_prior_type": self.config.sigma_obs_prior_type,
-                "sigma_artist_prior_type": self.config.sigma_artist_prior_type,
-                "artist_effect_param": self.config.artist_effect_param,
-                "sigma_rw_lognormal_loc": self.config.sigma_rw_lognormal_loc,
-                "sigma_rw_lognormal_sigma": self.config.sigma_rw_lognormal_sigma,
-                "sigma_artist_lognormal_loc": self.config.sigma_artist_lognormal_loc,
-                "sigma_artist_lognormal_sigma": self.config.sigma_artist_lognormal_sigma,
-                "rho_loc": self.config.rho_loc,
-                "rho_scale": self.config.rho_scale,
-                "beta_prior_type": self.config.beta_prior_type,
-                "hs_global_scale": self.config.hs_global_scale,
-                "heteroscedastic_entity_obs": self.config.heteroscedastic_entity_obs,
-                "tau_entity_scale": self.config.tau_entity_scale,
-                "errors_in_variables": self.config.errors_in_variables,
-                "propagate_rw_horizon": self.config.propagate_rw_horizon,
-                "entity_group_pooling": self.config.entity_group_pooling,
-                "impute_missing": self.config.impute_missing,
-                "gbm_offset": self.config.gbm_offset,
-                "exclude_rw_raw_from_collection": self.config.exclude_rw_raw_from_collection,
-                "val_albums": self.config.val_albums,
-                "origin_offset": self.config.origin_offset,
-                "conformal_calibration": self.config.conformal_calibration,
-                "eval_horizon": self.config.eval_horizon,
-                "min_train_albums": self.config.min_train_albums,
-                # Evaluation
-                "calibration_intervals": list(self.config.calibration_intervals),
-                "coverage_tolerance": self.config.coverage_tolerance,
-                "prediction_interval": self.config.prediction_interval,
-                "evaluate_secondary_split": self.config.evaluate_secondary_split,
-                # Dataset descriptor provenance
-                "dataset": self.config.dataset,
-                "dataset_descriptor_hash": self.descriptor.descriptor_hash(),
-                # Keys ignored under --allow-unknown-config-keys (#297).
-                "unknown_config_keys": dict(self.config.unknown_config_keys),
+            flags=flags,
+            experiment_identity={
+                "config_hash": experiment_config_hash(self.config),
+                "descriptor_hash": self.descriptor.descriptor_hash(),
+                "source": {"commit": git_state.commit, "dirty": git_state.dirty},
+                "environment_fingerprint": environment.fingerprint,
+                "pixi_lock_hash": environment.pixi_lock_hash,
+                "package_version": panelcast_version,
             },
             seed=self.config.seed,
             git=GitStateModel.from_git_state(git_state),
@@ -895,80 +841,18 @@ class PipelineOrchestrator:
             dump_resolved_config(self.config), encoding="utf-8"
         )
 
-    # MCMC config keys that should be restored from manifest on resume
-    RESUME_CONFIG_KEYS = (
-        # The RNG seed governs the whole MCMC draw; a resume that reverts to the
-        # CLI default silently re-fits with a different posterior than the run it
-        # claims to continue (and the manifest still records the original seed).
-        "seed",
-        "target_accept",
-        "max_tree_depth",
-        "init_strategy",
-        "chain_method",
-        "num_chains",
-        "num_samples",
-        "num_warmup",
-        # Resume must reuse the checkpoint identity, which hashes the MCMC config.
-        "checkpoint_every_draws",
-        "caged_chain_retries",
-        "caged_chain_tree_depth_fraction",
-        "caged_chain_boundary_sigma",
-        "caged_chain_consensus_ratio",
-        "n_exponent",
-        "learn_n_exponent",
-        "n_exponent_prior",
-        "n_exponent_alpha",
-        "n_exponent_beta",
-        "likelihood_df",
-        "likelihood_family",
-        "discretize_observation",
-        "debut_prev_score_source",
-        "target_transform",
-        "logit_offset",
-        "ar_center",
-        "latent_process",
-        "sigma_obs_prior_type",
-        "sigma_artist_prior_type",
-        "artist_effect_param",
-        "sigma_rw_lognormal_loc",
-        "sigma_rw_lognormal_sigma",
-        "sigma_artist_lognormal_loc",
-        "sigma_artist_lognormal_sigma",
-        "rho_loc",
-        "rho_scale",
-        "beta_prior_type",
-        "hs_global_scale",
-        "heteroscedastic_entity_obs",
-        "tau_entity_scale",
-        "errors_in_variables",
-        "propagate_rw_horizon",
-        "entity_group_pooling",
-        "impute_missing",
-        "gbm_offset",
-        "exclude_rw_raw_from_collection",
-        "max_albums",
-        "min_ratings",
-        "min_albums_filter",
-        "min_train_albums",
-        # Split geometry: a resume that reverts these regenerates different
-        # splits than the run it claims to continue.
-        "val_albums",
-        "origin_offset",
-        "calibration_intervals",
-        "coverage_tolerance",
-        "prediction_interval",
-        "evaluate_secondary_split",
-        "conformal_calibration",
-        "eval_horizon",
-        "enforce_lockfile",
-        "dataset",
-    )
+    # Config fields NOT restored from the manifest on resume: execution
+    # mechanics and per-invocation provenance that never affect outputs. Every
+    # other field — the complete resolved experiment — is restored (#296), so a
+    # hand-maintained key list can no longer silently omit a control.
+    RESUME_EXCLUDED_KEYS = _RESUME_EXCLUDED_KEYS
+    RESUME_CONFIG_KEYS = _RESUME_CONFIG_KEYS
     # Flags that should not invalidate input-hash skip detection.
     # These only affect execution mechanics, not stage outputs.
     SKIP_FLAG_IGNORE = frozenset(
         {"skip_existing", "dry_run", "verbose", "resume", "progress_bar",
-         # Provenance of ignored keys, never applied — must not force reruns.
-         "unknown_config_keys"}
+         # Provenance-only flags — never applied to outputs, must not force reruns.
+         "unknown_config_keys", "tag", "run_id"}
     )
 
     def _skip_flag_differences(self, previous_manifest: RunManifest) -> list[str]:
@@ -1025,21 +909,46 @@ class PipelineOrchestrator:
         )
 
     def _restore_config_from_manifest(self) -> None:
-        """Restore MCMC config values from manifest flags.
+        """Restore the complete resolved experiment on resume (#296).
 
-        For each key in RESUME_CONFIG_KEYS:
-        - If present in manifest flags, restore it to self.config
-        - If missing, emit a warning about potential config drift
+        ``resolved_config.yaml`` is the post-layering truth and covers every
+        output-affecting knob, so it is preferred; manifest flags are the
+        fallback for runs that predate it. Execution mechanics
+        (RESUME_EXCLUDED_KEYS) keep their current CLI values.
         """
         if self.manifest is None:
             return
 
+        resolved_path = self.run_dir / "resolved_config.yaml" if self.run_dir else None
+        restored_from_resolved: set[str] = set()
+        if resolved_path is not None and resolved_path.exists():
+            from panelcast.config.pipeline_yaml import load_resolved_config
+
+            for field_name, value in load_resolved_config(resolved_path).items():
+                if field_name in self.RESUME_EXCLUDED_KEYS:
+                    continue
+                setattr(self.config, field_name, value)
+                restored_from_resolved.add(field_name)
+            log.debug(
+                "resume_config_restored_from_resolved",
+                keys=sorted(restored_from_resolved),
+            )
+
         for key in self.RESUME_CONFIG_KEYS:
+            if key in restored_from_resolved:
+                continue
             if key in self.manifest.flags:
                 manifest_value = self.manifest.flags[key]
+                if isinstance(getattr(self.config, key), tuple) and isinstance(
+                    manifest_value, list
+                ):
+                    manifest_value = tuple(manifest_value)
                 setattr(self.config, key, manifest_value)
                 log.debug("resume_config_restored", key=key, value=manifest_value)
-            else:
+            elif resolved_path is None or not resolved_path.exists():
+                # With a resolved config on disk, absence just means "unset"
+                # (the dump omits None-valued knobs); without one, an absent
+                # flag is genuine provenance loss worth flagging.
                 current_default = getattr(self.config, key)
                 log.warning(
                     "resume_config_missing",
@@ -1084,6 +993,92 @@ class PipelineOrchestrator:
 
         # Re-validate after restoration (catches corrupted/invalid manifest values)
         self.config._validate()
+
+        self._verify_experiment_identity()
+
+    def _verify_experiment_identity(self) -> None:
+        """Prove the resumed config is the recorded experiment, or refuse (#296)."""
+        from panelcast.config.pipeline_yaml import (
+            EXPERIMENT_EXCLUDED_KEYS,
+            experiment_config_hash,
+            experiment_config_payload,
+        )
+
+        recorded = getattr(self.manifest, "experiment_identity", None)
+        if not isinstance(recorded, dict) or not recorded:
+            log.warning(
+                "resume_experiment_identity_missing",
+                message=(
+                    "manifest predates experiment-identity tracking; resuming "
+                    "on the restored flags without a config-hash proof"
+                ),
+            )
+            return
+
+        current_hash = experiment_config_hash(self.config)
+        recorded_hash = recorded.get("config_hash")
+        if recorded_hash and current_hash != recorded_hash:
+            current_payload = experiment_config_payload(self.config)
+            recorded_payload: dict[str, Any] = {}
+            resolved_path = self.run_dir / "resolved_config.yaml" if self.run_dir else None
+            if resolved_path is not None and resolved_path.exists():
+                import yaml  # type: ignore[import-untyped]
+
+                recorded_payload = {
+                    key: value
+                    for key, value in (
+                        yaml.safe_load(resolved_path.read_text(encoding="utf-8")) or {}
+                    ).items()
+                    if key not in EXPERIMENT_EXCLUDED_KEYS
+                }
+            diff = [
+                f"  {key}: recorded {recorded_payload.get(key)!r} != "
+                f"requested {current_payload.get(key)!r}"
+                for key in sorted(set(current_payload) | set(recorded_payload))
+                if recorded_payload.get(key) != current_payload.get(key)
+            ]
+            raise PipelineError(
+                "Resume identity mismatch: the resumed configuration does not "
+                f"hash to the recorded experiment ({recorded_hash[:12]}… vs "
+                f"{current_hash[:12]}…). Differing keys:\n"
+                + ("\n".join(diff) or "  (difference not attributable to a resolved-config key)")
+                + "\nStart a fresh run, or restore the original configuration.",
+                stage="setup",
+            )
+
+        # Source/environment drift is legitimate (bugfix commit, new machine)
+        # but breaks bit-identity — surface it loudly instead of refusing.
+        git_state = capture_git_state()
+        environment = capture_environment()
+        drift: dict[str, Any] = {}
+        recorded_source = recorded.get("source") or {}
+        if recorded_source.get("commit") and recorded_source["commit"] != git_state.commit:
+            drift["source_commit"] = {
+                "recorded": recorded_source["commit"],
+                "current": git_state.commit,
+            }
+        if (
+            recorded.get("environment_fingerprint")
+            and recorded["environment_fingerprint"] != environment.fingerprint
+        ):
+            drift["environment_fingerprint"] = {
+                "recorded": recorded["environment_fingerprint"],
+                "current": environment.fingerprint,
+            }
+        if recorded.get("package_version") and recorded["package_version"] != panelcast_version:
+            drift["package_version"] = {
+                "recorded": recorded["package_version"],
+                "current": panelcast_version,
+            }
+        if drift:
+            log.warning(
+                "resume_experiment_environment_drift",
+                message=(
+                    "resuming under a different source/environment than the "
+                    "recorded run; results may not be bit-identical"
+                ),
+                **drift,
+            )
 
     def _build_command_string(self) -> str:  # noqa: C901  # tracked complexity debt
         """Build command string representation for manifest."""

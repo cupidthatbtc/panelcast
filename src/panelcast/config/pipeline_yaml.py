@@ -15,6 +15,7 @@ warning and preserves the ignored keys in the run manifest.
 from __future__ import annotations
 
 import difflib
+import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -294,3 +295,33 @@ def load_resolved_config(path: Any) -> dict[str, Any]:
 
     yaml_data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     return apply_yaml_overrides({}, yaml_data)
+
+
+# Mapped keys that are execution mechanics, not experiment identity (#296):
+# they never change outputs, so they must not perturb the experiment hash.
+EXPERIMENT_EXCLUDED_KEYS = frozenset(
+    {"skip_existing", "dry_run", "verbose", "progress_bar", "run_id"}
+)
+
+
+def experiment_config_payload(config: Any) -> dict[str, Any]:
+    """The output-affecting resolved config as a canonical JSON-able dict."""
+    payload: dict[str, Any] = {}
+    for yaml_key, spec in PIPELINE_YAML_MAPPING.items():
+        if yaml_key in EXPERIMENT_EXCLUDED_KEYS:
+            continue
+        value = getattr(config, spec.config_field, None)
+        if value is None:
+            continue
+        if isinstance(value, tuple):
+            value = list(value)
+        payload[yaml_key] = value
+    return payload
+
+
+def experiment_config_hash(config: Any) -> str:
+    """Stable hash of the complete output-affecting resolved config (#296)."""
+    import hashlib
+
+    payload = json.dumps(experiment_config_payload(config), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
