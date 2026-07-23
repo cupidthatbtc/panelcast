@@ -1162,10 +1162,7 @@ def save_artist_prediction_plot(
                 np.rint(np.linspace(0, n_albums - 1, max_x_ticks)).astype(int)
             )
         ax.set_xticks(ticks)
-        use_event_labels = album_labels is not None and (
-            max_x_ticks is not None or n_albums <= 20
-        )
-        if use_event_labels:
+        if album_labels is not None and (max_x_ticks is not None or n_albums <= 20):
             ax.set_xticklabels(
                 [str(album_labels[i]) for i in ticks],
                 rotation=45,
