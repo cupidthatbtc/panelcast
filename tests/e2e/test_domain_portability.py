@@ -214,7 +214,54 @@ class TestAeroTinyMcmc:
 
 
 # ============================================================================
-# (c) Elections tiny-MCMC full pipeline (slow; local/nightly): real data,
+# (c) Elections stages-only (fast; every PR): the structural portability
+# contract for the second bundled domain — real data, unit bounds, empty
+# feature packs — without the MCMC cost.
+# ============================================================================
+
+
+@pytest.fixture(scope="module")
+def elections_stages_run(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    tmp = tmp_path_factory.mktemp("elections_stages")
+    exit_code, _ = _run_pipeline_in(
+        tmp,
+        tmp / "outputs",
+        stages=["data", "splits", "features"],
+        dataset=str(ELECTIONS_DESCRIPTOR),
+        min_ratings=1000,
+    )
+    assert exit_code == 0, "Elections stages-only pipeline failed"
+    return tmp
+
+
+class TestElectionsStagesOnly:
+    def test_processed_dataset_named_and_bounded_by_descriptor(self, elections_stages_run):
+        processed = (
+            elections_stages_run / "data" / "processed" / "dem_share_minvotes_1000.parquet"
+        )
+        assert processed.exists()
+        df = pd.read_parquet(processed)
+        for col in ("State", "Election_ID", "Dem_Share", "Two_Party_Votes"):
+            assert col in df.columns, f"missing {col}"
+        assert "Artist" not in df.columns
+        assert df["Dem_Share"].between(0.0, 1.0).all()
+
+    def test_covariate_columns_reach_the_feature_matrix(self, elections_stages_run):
+        features = pd.read_parquet(
+            elections_stages_run
+            / "data"
+            / "features"
+            / "within_entity_temporal"
+            / "train_features.parquet"
+        )
+        for col in ("pct_college", "median_income", "log_pop", "region_south"):
+            assert col in features.columns, f"covariate {col} dropped"
+        for col in MUSIC_FEATURE_COLUMNS:
+            assert col not in features.columns, f"music column {col} leaked in"
+
+
+# ============================================================================
+# (d) Elections tiny-MCMC full pipeline (slow; local/nightly): real data,
 # unit-interval bounds, empty feature packs, and the beta_binomial likelihood
 # path — the surface the synthetic aero example structurally can't exercise.
 # ============================================================================
@@ -287,7 +334,7 @@ class TestElectionsTinyMcmc:
 
 
 # ============================================================================
-# (d) AOTY equivalence: --dataset aoty_full == no flag, byte-identical
+# (e) AOTY equivalence: --dataset aoty_full == no flag, byte-identical
 # ============================================================================
 
 

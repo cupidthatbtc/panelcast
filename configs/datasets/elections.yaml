@@ -8,9 +8,11 @@
 # beta_binomial likelihood meaningful here.
 #
 # Data: MIT Election Data and Science Lab, "U.S. Senate statewide 1976–2020"
-# (Harvard Dataverse, doi:10.7910/DVN/PEJ5QU), CC0 1.0 public-domain
-# dedication, distilled to two-party shares; demographic covariates are ACS
-# figures via the Census Reporter API. See ATTRIBUTION.md.
+# (with subsequent cycle updates; Harvard Dataverse, doi:10.7910/DVN/PEJ5QU),
+# CC0 1.0 public-domain dedication, distilled to two-party shares; demographic
+# covariates are single-vintage ACS figures via the Census Reporter API —
+# constant within each state, so they carry cross-sectional (between-state)
+# signal only, alongside the entity effect. See ATTRIBUTION.md.
 #
 # Senate terms are staggered, so the temporal split's "last event per state"
 # is each state's most recent race (2018/2020/2022/2024 by seat class) — a
@@ -64,7 +66,9 @@ unknown_entity_sentinel: null
 min_year: 1976
 
 # --- dataset preparation -----------------------------------------------------
-min_obs_thresholds: [0, 1000, 100000]
+# Tiers straddle the data (min two-party turnout is ~122k): 1000 keeps all
+# 805 races, 500k keeps 605, 1M keeps 465 — real progressive filtering.
+min_obs_thresholds: [1000, 500000, 1000000]
 primary_min_obs: 1000
 processed_name_template: "dem_share_minvotes_{min_ratings}"
 
