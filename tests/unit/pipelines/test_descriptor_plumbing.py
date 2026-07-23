@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -309,6 +309,51 @@ class TestBetaBinomialGate:
         )
         orch = PipelineOrchestrator(config)
         assert orch.descriptor.n_obs_is_aggregation_count is True
+
+    def test_nonunit_span_logs_trial_count_warning(self, tmp_path):
+        config = PipelineConfig(
+            likelihood_family="beta_binomial",
+            target_transform="identity",
+            dataset=str(self._yaml(tmp_path, agg=True)),
+        )
+        with patch("panelcast.pipelines.orchestrator.log.warning") as warning:
+            PipelineOrchestrator(config)
+
+        warning.assert_called_once()
+        assert warning.call_args.args[0] == "beta_binomial_trial_count_scaled"
+        assert warning.call_args.kwargs["count_multiplier"] == 100
+
+    def test_fractional_nonunit_span_logs_exact_multiplier(self, tmp_path):
+        yaml_path = self._yaml(tmp_path, agg=True)
+        yaml_path.write_text(
+            "name: ds\nn_obs_is_aggregation_count: true\ntarget_bounds: [0.0, 1.4]\n",
+            encoding="utf-8",
+        )
+        config = PipelineConfig(
+            likelihood_family="beta_binomial",
+            target_transform="identity",
+            dataset=str(yaml_path),
+        )
+        with patch("panelcast.pipelines.orchestrator.log.warning") as warning:
+            PipelineOrchestrator(config)
+
+        assert warning.call_args.kwargs["count_multiplier"] == pytest.approx(1.4)
+
+    def test_unit_span_does_not_log_trial_count_warning(self, tmp_path):
+        yaml_path = self._yaml(tmp_path, agg=True)
+        yaml_path.write_text(
+            "name: ds\nn_obs_is_aggregation_count: true\ntarget_bounds: [0.0, 1.0]\n",
+            encoding="utf-8",
+        )
+        config = PipelineConfig(
+            likelihood_family="beta_binomial",
+            target_transform="identity",
+            dataset=str(yaml_path),
+        )
+        with patch("panelcast.pipelines.orchestrator.log.warning") as warning:
+            PipelineOrchestrator(config)
+
+        warning.assert_not_called()
 
     def test_gate_ignores_other_families(self, tmp_path):
         config = PipelineConfig(

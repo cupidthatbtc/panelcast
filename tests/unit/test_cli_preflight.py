@@ -10,10 +10,12 @@ import json
 import math
 
 import numpy as np
+import pytest
 from typer.testing import CliRunner
 
 from panelcast.cli import app
 from panelcast.model_preflight import (
+    check_beta_binomial_trial_scale,
     check_collinearity,
     check_prior_data_scale,
     cross_entity_mean_sd,
@@ -90,6 +92,44 @@ class TestCheckPriorDataScale:
             r.name: r for r in check_prior_data_scale(y=y, artist_idx=artist_idx, priors=priors)
         }
         assert by_name["sigma_rw scale"].status == "PASS"
+
+
+class TestBetaBinomialTrialScale:
+    def test_unit_span_passes(self):
+        result = check_beta_binomial_trial_scale(
+            likelihood_family="beta_binomial",
+            n_obs_is_aggregation_count=True,
+            target_bounds=(0.0, 1.0),
+        )
+        assert result.status == "PASS"
+
+    def test_nonunit_span_fails_with_rescaling_guidance(self):
+        result = check_beta_binomial_trial_scale(
+            likelihood_family="beta_binomial",
+            n_obs_is_aggregation_count=True,
+            target_bounds=(0.0, 100.0),
+        )
+        assert result.status == "FAIL"
+        assert "100" in result.detail
+        assert "[0, 1]" in result.suggestion
+
+    @pytest.mark.parametrize("span", [0.6, 1.2, 1.4])
+    def test_fractional_nonunit_span_fails(self, span):
+        result = check_beta_binomial_trial_scale(
+            likelihood_family="beta_binomial",
+            n_obs_is_aggregation_count=True,
+            target_bounds=(0.0, span),
+        )
+        assert result.status == "FAIL"
+        assert f"{span:g}" in result.detail
+
+    def test_other_likelihood_is_inactive(self):
+        result = check_beta_binomial_trial_scale(
+            likelihood_family="studentt",
+            n_obs_is_aggregation_count=True,
+            target_bounds=(0.0, 100.0),
+        )
+        assert result.status == "PASS"
 
 
 class TestCheckCollinearity:
@@ -349,6 +389,7 @@ class TestAssembleOnPreparedData:
         monkeypatch.chdir(tmp_path)
         results = run_model_preflight(None, None)
         assert [r.name for r in results] == [
+            "beta_binomial trial scale",
             "sigma_rw scale",
             "sigma_artist scale",
             "collinearity",
@@ -361,4 +402,4 @@ class TestAssembleOnPreparedData:
         cfg = tmp_path / "fit.yaml"
         cfg.write_text("target_transform: identity\n", encoding="utf-8")
         results = run_model_preflight(None, [str(cfg)])
-        assert len(results) == 3
+        assert len(results) == 4
