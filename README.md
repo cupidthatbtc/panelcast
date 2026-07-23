@@ -209,6 +209,7 @@ See [`docs/CLI.md`](docs/CLI.md) for the complete command reference.
 - [`docs/EVALUATION_PROTOCOL.md`](docs/EVALUATION_PROTOCOL.md) — metrics, diagnostics, and thresholds
 - [`docs/PROJECT_STRUCTURE.md`](docs/PROJECT_STRUCTURE.md) — directory and file layout
 - [`docs/DATA_CONTRACT.md`](docs/DATA_CONTRACT.md) — raw schema and cleaned artifacts
+- [`docs/LINEAGE.md`](docs/LINEAGE.md) — repository lineage (the private predecessor, the 2026-06-20 migration) and JOSS submission timing
 - [`MODEL_CARD.md`](MODEL_CARD.md) — intended use, results, and limitations
 
 A note on results: at the amended publication configuration the published fit

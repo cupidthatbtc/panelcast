@@ -2,6 +2,9 @@
 
 Thanks for your interest in the project. This guide covers the development
 setup, the test and lint workflow, and the conventions the codebase follows.
+New here? The repository's history starts at a 2026-06-20 migration boundary —
+[`docs/LINEAGE.md`](docs/LINEAGE.md) explains the private predecessor and the
+project's actual age.
 
 ## Development setup
 
