@@ -58,11 +58,28 @@ class TestApplyYamlOverrides:
         out = apply_yaml_overrides(kwargs, {"min_albums_filter": 5}, set())
         assert out["min_albums_filter"] == 5
 
-    def test_unmapped_key_is_ignored(self):
-        kwargs = {"seed": 42}
-        out = apply_yaml_overrides(kwargs, {"not_a_real_key": 1, "seed": 7})
+    def test_unknown_key_is_fatal(self):
+        with pytest.raises(ValueError, match="not_a_real_key"):
+            apply_yaml_overrides({"seed": 42}, {"not_a_real_key": 1, "seed": 7})
+
+    def test_typo_error_suggests_nearest_key(self):
+        with pytest.raises(ValueError, match="did you mean: num_samples"):
+            apply_yaml_overrides({}, {"num_sample": 5000})
+
+    def test_unknown_nested_block_is_fatal(self):
+        with pytest.raises(ValueError, match="mcmc"):
+            apply_yaml_overrides({}, {"mcmc": {"num_samples": 5000}})
+
+    def test_allow_unknown_preserves_keys_and_applies_mapped(self):
+        out = apply_yaml_overrides(
+            {"seed": 42}, {"not_a_real_key": 1, "seed": 7}, allow_unknown=True
+        )
         assert out["seed"] == 7
-        assert "not_a_real_key" not in out
+        assert out["unknown_config_keys"] == {"not_a_real_key": 1}
+
+    def test_allow_unknown_with_no_unknowns_adds_nothing(self):
+        out = apply_yaml_overrides({}, {"seed": 7}, allow_unknown=True)
+        assert "unknown_config_keys" not in out
 
     def test_calibration_intervals_normalized_to_sorted_tuple(self):
         out = apply_yaml_overrides({}, {"calibration_intervals": [0.95, 0.8, 0.95]})
@@ -307,3 +324,73 @@ class TestCliConfigOption:
         cfg.write_text(yaml.safe_dump({"chain_method": "bogus"}), encoding="utf-8")
         result = runner.invoke(app, ["run", "--dry-run", "--config", str(cfg)])
         assert result.exit_code != 0
+
+    def test_unknown_key_fails_the_cli_with_suggestion(self, monkeypatch, tmp_path):
+        _make_pipeline_mocks(monkeypatch)
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text(yaml.safe_dump({"num_sample": 5000}), encoding="utf-8")
+        result = runner.invoke(app, ["run", "--dry-run", "--config", str(cfg)])
+        assert result.exit_code != 0
+        assert "num_sample" in result.output
+        assert "num_samples" in result.output
+
+    def test_unknown_key_from_merged_second_file_fails(self, monkeypatch, tmp_path):
+        _make_pipeline_mocks(monkeypatch)
+        first = tmp_path / "a.yaml"
+        second = tmp_path / "b.yaml"
+        first.write_text(yaml.safe_dump({"num_samples": 111}), encoding="utf-8")
+        second.write_text(yaml.safe_dump({"num_sample": 222}), encoding="utf-8")
+        result = runner.invoke(
+            app, ["run", "--dry-run", "--config", str(first), "--config", str(second)]
+        )
+        assert result.exit_code != 0
+        assert "num_sample" in result.output
+
+    def test_allow_unknown_config_keys_escape(self, monkeypatch, tmp_path):
+        captured = _make_pipeline_mocks(monkeypatch)
+        cfg = tmp_path / "c.yaml"
+        cfg.write_text(
+            yaml.safe_dump({"num_sample": 5000, "seed": 9}), encoding="utf-8"
+        )
+        result = runner.invoke(
+            app,
+            ["run", "--dry-run", "--config", str(cfg), "--allow-unknown-config-keys"],
+        )
+        assert result.exit_code == 0, result.output
+        config = captured["config"]
+        assert config.seed == 9
+        assert config.unknown_config_keys == {"num_sample": 5000}
+        assert config.num_samples == 1000  # the typo key was NOT applied
+
+
+class TestUnknownKeysReachTheManifest:
+    def test_setup_records_unknown_config_keys(self, tmp_path, monkeypatch):
+        from panelcast.pipelines.orchestrator import PipelineOrchestrator
+        from panelcast.utils.git_state import GitState
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.capture_git_state",
+            lambda: GitState(commit="abc", branch="t", dirty=False, untracked_count=0),
+        )
+        orch = PipelineOrchestrator(
+            PipelineConfig(unknown_config_keys={"num_sample": 5000}),
+            output_base=tmp_path / "outputs",
+        )
+        orch._setup_run()
+        assert orch.manifest.flags["unknown_config_keys"] == {"num_sample": 5000}
+
+    def test_unknown_keys_do_not_invalidate_skip_detection(self):
+        from panelcast.pipelines.manifest import flag_differences
+        from panelcast.pipelines.orchestrator import (
+            PipelineOrchestrator,
+            _get_default_config,
+        )
+
+        assert "unknown_config_keys" in PipelineOrchestrator.SKIP_FLAG_IGNORE
+        diffs = flag_differences(
+            {"seed": 42, "unknown_config_keys": {"num_sample": 5000}},
+            {"seed": 42, "unknown_config_keys": {}},
+            _get_default_config(),
+            ignore=PipelineOrchestrator.SKIP_FLAG_IGNORE,
+        )
+        assert diffs == []

@@ -55,6 +55,7 @@ def _apply_config_layers(
     ctx: typer.Context,
     config_kwargs: dict,
     effective_config_files: list[str],
+    allow_unknown: bool = False,
 ) -> dict:
     """Overlay preset/config YAML onto PipelineConfig kwargs (explicit CLI wins)."""
     if not effective_config_files:
@@ -76,7 +77,9 @@ def _apply_config_layers(
             source = get_source(name)
             if source is not None and getattr(source, "name", "") == "COMMANDLINE":
                 explicit_cli_params.add(name)
-    return apply_yaml_overrides(config_kwargs, yaml_data, explicit_cli_params)
+    return apply_yaml_overrides(
+        config_kwargs, yaml_data, explicit_cli_params, allow_unknown=allow_unknown
+    )
 
 
 def _build_stage_config(
@@ -435,6 +438,15 @@ def run(
             "Named config preset {quick,dev,diagnostic,publication} — sugar for "
             "--config configs/<preset>.yaml, layered first so any --config files "
             "and explicit CLI options still win."
+        ),
+    ),
+    allow_unknown_config_keys: bool = typer.Option(
+        False,
+        "--allow-unknown-config-keys",
+        help=(
+            "Migration escape: load configs despite unknown keys. The keys are "
+            "ignored (their intended effect is NOT applied) and preserved in "
+            "the run manifest. Default: unknown keys are a hard error."
         ),
     ),
     seed: int = typer.Option(42, "--seed", help="Random seed for reproducibility"),
@@ -964,7 +976,9 @@ def run(
     # --config files and CLI options still win (later layers override earlier).
     effective_config_files = _resolve_effective_config_files(preset, config_files)
     try:
-        config_kwargs = _apply_config_layers(ctx, config_kwargs, effective_config_files)
+        config_kwargs = _apply_config_layers(
+            ctx, config_kwargs, effective_config_files, allow_unknown=allow_unknown_config_keys
+        )
         config = PipelineConfig(**config_kwargs)
     except FileNotFoundError as e:
         raise typer.BadParameter(f"Config file not found: {e.filename or e}") from e

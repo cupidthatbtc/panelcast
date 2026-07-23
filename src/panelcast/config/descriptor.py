@@ -13,6 +13,7 @@ Retargeting the pipeline to a new domain means writing one YAML file (see
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import math
@@ -28,6 +29,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PrivateAttr,
+    ValidationError,
     field_validator,
     model_validator,
 )
@@ -77,6 +79,8 @@ _AOTY_OPTIONAL_RAW_COLUMNS = [
 
 class FeatureBlockSpec(BaseModel):
     """One feature block to instantiate, by registry name, with params."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str
     params: dict[str, Any] = Field(default_factory=dict)
@@ -136,6 +140,10 @@ class DatasetDescriptor(BaseModel):
     Field defaults are the AOTY literals they replaced; constructing with no
     arguments reproduces the original hard-coded behavior exactly.
     """
+
+    # Unknown fields are fatal (#297): a typo like "targt_col" silently keeping
+    # the AOTY default would change the experiment, not error.
+    model_config = ConfigDict(extra="forbid")
 
     _source_path: Path | None = PrivateAttr(default=None)
     _source_root: Path | None = PrivateAttr(default=None)
@@ -353,7 +361,37 @@ def load_descriptor(ref: str | Path | None) -> DatasetDescriptor:
     from panelcast.config.loader import _expand_env_vars
 
     data = _expand_env_vars(data)
-    descriptor = DatasetDescriptor(**data)
+    try:
+        descriptor = DatasetDescriptor(**data)
+    except ValidationError as e:
+        # Suggest against the model that owns the unknown leaf, not the root.
+        nested_models = {"feature_blocks": FeatureBlockSpec, "basis_curves": BasisCurveSpec}
+        lines = []
+        for err in e.errors():
+            if err["type"] != "extra_forbidden":
+                continue
+            loc = [str(part) for part in err["loc"]]
+            model = nested_models.get(loc[0], DatasetDescriptor)
+            matches = difflib.get_close_matches(loc[-1], list(model.model_fields), n=3, cutoff=0.6)
+            suggestion = f" — did you mean: {', '.join(matches)}?" if matches else ""
+            lines.append(f"  '{'.'.join(loc)}'{suggestion}")
+        if not lines:
+            raise
+        message = (
+            f"Unknown field(s) in dataset descriptor {path}:\n"
+            + "\n".join(sorted(lines))
+            + "\nUnknown fields are fatal because a typo would silently keep the "
+            "AOTY default. Field reference: src/panelcast/config/descriptor.py."
+        )
+        # Surface the remaining validation errors too, so fixing the typo
+        # doesn't reveal a second, previously-hidden failure.
+        others = [err for err in e.errors() if err["type"] != "extra_forbidden"]
+        if others:
+            message += "\nAdditional validation errors:\n" + "\n".join(
+                f"  {'.'.join(str(part) for part in err['loc'])}: {err['msg']}"
+                for err in others
+            )
+        raise ValueError(message) from e
     descriptor._source_path = path.resolve()
     package_root = _packaged_data_root().resolve()
     if descriptor._source_path.is_relative_to(package_root):

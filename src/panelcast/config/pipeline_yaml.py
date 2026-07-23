@@ -6,12 +6,15 @@ whose top-level keys mirror :class:`PipelineConfig` field names — see
 ``configs/publication.yaml`` for the canonical example.
 
 Precedence: built-in defaults < YAML files (later files win) < options given
-explicitly on the command line. Keys with no mapping produce one structured
-warning and are otherwise ignored.
+explicitly on the command line. Keys with no mapping are a hard error (#297):
+a typo like ``num_sample`` must not silently fall back to a default. The
+``--allow-unknown-config-keys`` escape downgrades the error to a prominent
+warning and preserves the ignored keys in the run manifest.
 """
 
 from __future__ import annotations
 
+import difflib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -187,10 +190,22 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
 }
 
 
+def describe_unknown_keys(unknown: list[str], known: Any) -> str:
+    """One line per unknown key with its nearest known keys."""
+    lines = []
+    for key in sorted(unknown):
+        matches = difflib.get_close_matches(key, list(known), n=3, cutoff=0.6)
+        suggestion = f" — did you mean: {', '.join(matches)}?" if matches else ""
+        lines.append(f"  '{key}'{suggestion}")
+    return "\n".join(lines)
+
+
 def apply_yaml_overrides(
     kwargs: dict[str, Any],
     yaml_data: dict[str, Any],
     explicit_cli_params: set[str] | frozenset[str] = frozenset(),
+    *,
+    allow_unknown: bool = False,
 ) -> dict[str, Any]:
     """Overlay YAML config values onto PipelineConfig kwargs.
 
@@ -199,13 +214,16 @@ def apply_yaml_overrides(
         yaml_data: Deep-merged YAML mapping (from ``load_yaml_config``).
         explicit_cli_params: ``run()`` parameter names the user set explicitly
             on the command line; those keep their CLI values.
+        allow_unknown: Migration escape (``--allow-unknown-config-keys``):
+            downgrade unknown keys from an error to a prominent warning and
+            record them under ``unknown_config_keys`` for the run manifest.
 
     Returns:
-        New kwargs dict with YAML overrides applied. Unmapped YAML keys are
-        ignored with a single structured warning.
+        New kwargs dict with YAML overrides applied.
 
     Raises:
-        ValueError: If a mapped value fails its normalization.
+        ValueError: On any unknown top-level key (unless ``allow_unknown``),
+            or if a mapped value fails its normalization.
     """
     out = dict(kwargs)
     unmapped: list[str] = []
@@ -218,15 +236,26 @@ def apply_yaml_overrides(
             continue  # explicit CLI option wins over YAML
         out[spec.config_field] = spec.transform(value)
     if unmapped:
+        if not allow_unknown:
+            raise ValueError(
+                "Unknown config key(s):\n"
+                f"{describe_unknown_keys(unmapped, PIPELINE_YAML_MAPPING)}\n"
+                "Unknown keys are fatal because a typo would silently keep the "
+                "default and change the experiment. Dataset/domain settings "
+                "belong in a dataset descriptor (configs/datasets/*.yaml via "
+                "--dataset), not the pipeline config. To load this file anyway, "
+                "pass --allow-unknown-config-keys."
+            )
         structlog.get_logger().warning(
-            "yaml_config_keys_ignored",
+            "unknown_config_keys_allowed",
             keys=sorted(unmapped),
             hint=(
-                "These top-level keys have no PipelineConfig mapping. Dataset/"
-                "domain settings belong in a dataset descriptor "
-                "(configs/datasets/*.yaml via --dataset), not the pipeline config."
+                "--allow-unknown-config-keys is set: these keys are IGNORED and "
+                "their intended effect is NOT applied. They are preserved in the "
+                "run manifest under unknown_config_keys."
             ),
         )
+        out["unknown_config_keys"] = {key: yaml_data[key] for key in sorted(unmapped)}
     return out
 
 
@@ -237,7 +266,9 @@ def dump_resolved_config(config: Any) -> str:
     --config overlays + CLI wins + descriptor-resolved values collapsed), so a
     run can be re-executed from its run directory alone. Round-trip identity
     (config -> yaml -> config) is test-pinned, which permanently prevents new
-    config knobs from escaping provenance.
+    config knobs from escaping provenance. The one intended exception is
+    ``unknown_config_keys`` (provenance-only, unmapped): it lives in the run
+    manifest, never here.
     """
     import yaml  # type: ignore[import-untyped]
 
