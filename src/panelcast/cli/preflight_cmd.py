@@ -1,8 +1,8 @@
 """The `panelcast preflight` command: pre-fit prior/data statistical checks.
 
 Distinct from `panelcast run --preflight` (GPU-memory estimation). This one
-audits the statistics of the fit — prior/data scale and covariate collinearity
-given entity intercepts — reading the prepared splits + feature matrices.
+audits prior/data scale, covariate collinearity given entity intercepts, and
+Beta-Binomial trial scale using the prepared splits + feature matrices.
 """
 
 from __future__ import annotations
@@ -40,12 +40,14 @@ def preflight(
 ) -> None:
     """Pre-fit statistical sanity check on the prepared data (after features).
 
-    Two checks, warn-only by default:
+    Three checks, warn-only by default:
       A. resolved sigma_rw / sigma_artist prior medians vs the data moments they
          govern, on the model-training scale;
       B. condition number of the within-entity demeaned, standardized covariate
          matrix (plus cohort dummies when group pooling is active) — catches the
-         age-period-cohort rank deficiency per-entity intercepts hide.
+         age-period-cohort rank deficiency per-entity intercepts hide;
+      C. Beta-Binomial target span vs aggregation counts — catches accidental
+         multiplication of true trial counts on non-unit proportion scales.
 
     Never touches the GPU or MCMC. Run it before the first fit on a new domain.
     """
