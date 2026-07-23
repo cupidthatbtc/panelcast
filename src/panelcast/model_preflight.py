@@ -1,8 +1,8 @@
 """`panelcast preflight`: pre-fit statistical sanity checks on prepared data.
 
-Runs AFTER the features stage and BEFORE the fit. Two checks, warn-only by
-default, that would have caught the two failure modes behind an 11-rung baseball
-diagnostic ladder:
+Runs AFTER the features stage and BEFORE the fit. Three checks, warn-only by
+default, cover the recurring failures behind the external-domain diagnostic
+ladders:
 
 - Check A (prior/data scale): resolved sigma_rw / sigma_artist prior medians vs
   the data moments they govern, on the model-training scale. AOTY-scale sigma
@@ -13,6 +13,8 @@ diagnostic ladder:
   active). Per-entity intercepts absorb per-entity constants, so time-like
   covariates (age, album_sequence, release_year, cohort) collapse into an
   age-period-cohort rank deficiency the raw correlation never reveals.
+- Check C (Beta-Binomial trial scale): a non-unit target span multiplies genuine
+  trial counts, producing spuriously tight likelihoods for proportion targets.
 
 Distinct from `panelcast run --preflight` (GPU-memory estimation, see
 ``panelcast.preflight``): this audits the statistics of the fit, not its memory.
@@ -211,6 +213,34 @@ def check_prior_data_scale(
     return results
 
 
+def check_beta_binomial_trial_scale(
+    *,
+    likelihood_family: str,
+    n_obs_is_aggregation_count: bool,
+    target_bounds: tuple[float, float],
+) -> CheckResult:
+    """Flag the span multiplier when a Beta-Binomial consumes true trial counts."""
+    name = "beta_binomial trial scale"
+    if likelihood_family != "beta_binomial":
+        return CheckResult(name, "PASS", "not active for this likelihood family")
+    if not n_obs_is_aggregation_count:
+        return CheckResult(name, "FAIL", "n_obs is not a true aggregation count")
+
+    low, high = (float(v) for v in target_bounds)
+    span = high - low
+    multiplier = round(span)
+    if multiplier == 1:
+        return CheckResult(name, "PASS", f"target span {span:g} preserves trial counts")
+    return CheckResult(
+        name,
+        "FAIL",
+        f"target span {span:g} multiplies each aggregation count by about {multiplier:g}",
+        "If the target is a genuine proportion, rescale it to [0, 1] and set "
+        "target_bounds: [0.0, 1.0]. Otherwise verify that each observation really "
+        "contains span-sized integer rating units.",
+    )
+
+
 def _within_entity_demean(col: np.ndarray, idx: np.ndarray, counts: np.ndarray) -> np.ndarray:
     sums = np.bincount(idx, weights=col, minlength=counts.size)
     entity_mean = sums / counts
@@ -326,6 +356,13 @@ def run_model_preflight(
     except Exception as exc:
         return [CheckResult(SETUP_ERROR_NAME, "FAIL", f"could not assemble fit inputs: {exc}")]
 
+    results.append(
+        check_beta_binomial_trial_scale(
+            likelihood_family=getattr(inputs, "likelihood_family", "studentt"),
+            n_obs_is_aggregation_count=getattr(inputs, "n_obs_is_aggregation_count", True),
+            target_bounds=getattr(inputs, "target_bounds", (0.0, 100.0)),
+        )
+    )
     results.extend(
         check_prior_data_scale(
             y=inputs.y,

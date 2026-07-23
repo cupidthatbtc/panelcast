@@ -132,3 +132,8 @@ memory** — a different concern. `preflight` audits the *statistics* of the fit
   ridge prior absorbs) are stripped. A large residual condition number names the
   participating feature set, e.g. an `age_c + album_sequence + release_year +
   cohort` age-period-cohort identity that per-entity intercepts otherwise hide.
+- **Check C — Beta-Binomial trial scale.** When `likelihood_family:
+  beta_binomial` consumes a true aggregation count, a target span other than one
+  expands each count by the score span. Preflight FAILs with guidance to rescale
+  genuine proportions and their `target_bounds` to `[0, 1]`; the run path also
+  emits a warning because preflight is optional.

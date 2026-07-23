@@ -561,6 +561,18 @@ class PipelineOrchestrator:
                 f"({self.descriptor.n_obs_col} is not a count of independent raters). "
                 "Use an aggregation-count domain or a different likelihood_family."
             )
+        if config.likelihood_family == "beta_binomial":
+            span = float(self.descriptor.target_bounds[1] - self.descriptor.target_bounds[0])
+            if round(span) != 1:
+                log.warning(
+                    "beta_binomial_trial_count_scaled",
+                    target_span=span,
+                    count_multiplier=round(span),
+                    message=(
+                        "The Beta-Binomial expands each aggregation count by the target span. "
+                        "For a genuine proportion, rescale the target and target_bounds to [0, 1]."
+                    ),
+                )
         # Resolve the observation threshold: an explicit CLI/YAML value wins;
         # otherwise fall back to the descriptor's primary_min_obs so retargeted
         # domains don't need --min-ratings on the command line. The data stage

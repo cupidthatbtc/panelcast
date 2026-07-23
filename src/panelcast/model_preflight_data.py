@@ -22,6 +22,9 @@ class PreflightInputs:
     feature_names: list[str]
     group_idx_by_artist: np.ndarray | None
     priors: object
+    likelihood_family: str
+    n_obs_is_aggregation_count: bool
+    target_bounds: tuple[float, float]
 
 
 def _resolve_config(dataset: str | None, config_files: list[str] | None):
@@ -116,4 +119,7 @@ def assemble_preflight_inputs(
             else None
         ),
         priors=priors,
+        likelihood_family=config.likelihood_family,
+        n_obs_is_aggregation_count=descriptor.n_obs_is_aggregation_count,
+        target_bounds=tuple(descriptor.target_bounds),
     )
