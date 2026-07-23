@@ -1153,14 +1153,19 @@ def save_artist_prediction_plot(
         if invert_y_axis:
             ax.invert_yaxis()
 
-        tick_step = (
-            1 if max_x_ticks is None else max(1, int(np.ceil(n_albums / max(1, max_x_ticks))))
-        )
-        ticks = np.arange(0, n_albums, tick_step, dtype=int)
-        if n_albums and ticks[-1] != n_albums - 1:
-            ticks = np.append(ticks, n_albums - 1)
+        if max_x_ticks is None or n_albums <= max_x_ticks:
+            ticks = np.arange(n_albums, dtype=int)
+        elif max_x_ticks <= 1:
+            ticks = np.array([0], dtype=int)
+        else:
+            ticks = np.unique(
+                np.rint(np.linspace(0, n_albums - 1, max_x_ticks)).astype(int)
+            )
         ax.set_xticks(ticks)
-        if album_labels is not None:
+        use_event_labels = album_labels is not None and (
+            max_x_ticks is not None or n_albums <= 20
+        )
+        if use_event_labels:
             ax.set_xticklabels(
                 [str(album_labels[i]) for i in ticks],
                 rotation=45,

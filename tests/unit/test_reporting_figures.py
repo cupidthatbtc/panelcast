@@ -573,7 +573,9 @@ class TestSaveArtistPredictionPlot:
         captured = {}
 
         def capture(fig, output_dir, filename_base):
-            captured["ticks"] = fig.axes[0].get_xticks()
+            axis = fig.axes[0]
+            captured["ticks"] = axis.get_xticks()
+            captured["labels"] = [label.get_text() for label in axis.get_xticklabels()]
             return output_dir / f"{filename_base}.pdf", output_dir / f"{filename_base}.png"
 
         monkeypatch.setattr("panelcast.reporting.figures._save_dual_format", capture)
@@ -581,12 +583,37 @@ class TestSaveArtistPredictionPlot:
             artist="Test Artist",
             actual_scores=actual,
             pred_samples=np.tile(actual, (5, 1)),
-            album_labels=None,
+            album_labels=[f"event-{i}" for i in range(30)],
             output_dir=tmp_path,
             filename_base="legacy_ticks",
         )
 
         np.testing.assert_array_equal(captured["ticks"], np.arange(30))
+        assert captured["labels"] == [str(i) for i in range(1, 31)]
+
+    @pytest.mark.parametrize("n_events", [40, 60])
+    def test_portable_tick_cap_includes_endpoints(self, tmp_path, monkeypatch, n_events):
+        actual = np.linspace(60.0, 80.0, n_events)
+        captured = {}
+
+        def capture(fig, output_dir, filename_base):
+            captured["ticks"] = fig.axes[0].get_xticks()
+            return output_dir / f"{filename_base}.pdf", output_dir / f"{filename_base}.png"
+
+        monkeypatch.setattr("panelcast.reporting.figures._save_dual_format", capture)
+        save_artist_prediction_plot(
+            artist="Test Entity",
+            actual_scores=actual,
+            pred_samples=np.tile(actual, (5, 1)),
+            album_labels=[f"event-{i}" for i in range(n_events)],
+            output_dir=tmp_path,
+            filename_base=f"portable_ticks_{n_events}",
+            max_x_ticks=20,
+        )
+
+        assert len(captured["ticks"]) <= 20
+        assert captured["ticks"][0] == 0
+        assert captured["ticks"][-1] == n_events - 1
 
     def test_mismatched_dimensions_raise(self, tmp_path):
         """Guard the contract: N actual vs N+1 prediction columns is invalid.
