@@ -266,7 +266,9 @@ def dump_resolved_config(config: Any) -> str:
     --config overlays + CLI wins + descriptor-resolved values collapsed), so a
     run can be re-executed from its run directory alone. Round-trip identity
     (config -> yaml -> config) is test-pinned, which permanently prevents new
-    config knobs from escaping provenance.
+    config knobs from escaping provenance. The one intended exception is
+    ``unknown_config_keys`` (provenance-only, unmapped): it lives in the run
+    manifest, never here.
     """
     import yaml  # type: ignore[import-untyped]
 

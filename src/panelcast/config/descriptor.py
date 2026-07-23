@@ -377,12 +377,21 @@ def load_descriptor(ref: str | Path | None) -> DatasetDescriptor:
             lines.append(f"  '{'.'.join(loc)}'{suggestion}")
         if not lines:
             raise
-        raise ValueError(
+        message = (
             f"Unknown field(s) in dataset descriptor {path}:\n"
             + "\n".join(sorted(lines))
             + "\nUnknown fields are fatal because a typo would silently keep the "
             "AOTY default. Field reference: src/panelcast/config/descriptor.py."
-        ) from e
+        )
+        # Surface the remaining validation errors too, so fixing the typo
+        # doesn't reveal a second, previously-hidden failure.
+        others = [err for err in e.errors() if err["type"] != "extra_forbidden"]
+        if others:
+            message += "\nAdditional validation errors:\n" + "\n".join(
+                f"  {'.'.join(str(part) for part in err['loc'])}: {err['msg']}"
+                for err in others
+            )
+        raise ValueError(message) from e
     descriptor._source_path = path.resolve()
     package_root = _packaged_data_root().resolve()
     if descriptor._source_path.is_relative_to(package_root):

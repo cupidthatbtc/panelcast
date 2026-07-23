@@ -288,3 +288,11 @@ class TestUnknownFieldsAreFatal:
         yaml_path.write_text("primary_min_obs: 7\n", encoding="utf-8")
         with pytest.raises(ValueError, match="primary_min_obs"):
             load_descriptor(yaml_path)
+
+    def test_typo_and_value_error_are_both_reported(self, tmp_path):
+        yaml_path = tmp_path / "both.yaml"
+        yaml_path.write_text(
+            "targt_col: Perf_Score\nmin_year: not_a_number\n", encoding="utf-8"
+        )
+        with pytest.raises(ValueError, match=r"(?s)targt_col.*Additional validation errors.*min_year"):
+            load_descriptor(yaml_path)
