@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import structlog
 
+from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.evaluation.calibration import ReliabilityData
 from panelcast.models.bayes.io import load_manifest, load_model
@@ -756,6 +757,13 @@ def _save_predictions_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -
             with open(pred_path, encoding="utf-8") as f:
                 pred_data = json.load(f)
             interval_level = pred_data.get("interval_level", 0.90)
+            descriptor = getattr(inp.ctx, "descriptor", None) or DatasetDescriptor()
+            label_kwargs = {}
+            if descriptor != DatasetDescriptor():
+                label_kwargs = {
+                    "target_label": descriptor.target_col.replace("_", " "),
+                    "axis_padding": None,
+                }
             pdf_path, png_path = save_predictions_plot(
                 y_true=np.array(pred_data["y_true"]),
                 y_pred_mean=np.array(pred_data["y_pred_mean"]),
@@ -764,6 +772,7 @@ def _save_predictions_plot(inp: _PublicationInputs, artifacts: dict[str, Any]) -
                 output_dir=inp.figures_dir,
                 filename_base="predictions_primary",
                 ci_label=f"{interval_level * 100:.0f}% CI",
+                **label_kwargs,
             )
             artifacts["figures"].append(str(pdf_path))
             artifacts["figures"].append(str(png_path))
@@ -871,14 +880,20 @@ def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) 
             log.warning("artist_fan_charts_skipped", reason="train.parquet not found")
             return
 
-        from panelcast.config.descriptor import DatasetDescriptor
-
         fan_descriptor = getattr(inp.ctx, "descriptor", None) or DatasetDescriptor()
         train_for_fans = pd.read_parquet(train_path)
         sort_cols_fans = [fan_descriptor.entity_col]
         if fan_descriptor.parsed_date_col in train_for_fans.columns:
             sort_cols_fans.append(fan_descriptor.parsed_date_col)
         train_for_fans = train_for_fans.sort_values(sort_cols_fans)
+        fan_plot_kwargs = {}
+        if fan_descriptor != DatasetDescriptor():
+            fan_plot_kwargs = {
+                "event_label": fan_descriptor.event_col.replace("_", " "),
+                "target_label": fan_descriptor.target_col.replace("_", " "),
+                "y_limits": None,
+                "invert_y_axis": fan_descriptor.invert_target_axis,
+            }
 
         def _fan_chart_for_artist(artist: str, categories: list[str]) -> None:
             artist_train = train_for_fans[train_for_fans[fan_descriptor.entity_col] == artist]
@@ -917,6 +932,7 @@ def _save_artist_fan_charts(inp: _PublicationInputs, artifacts: dict[str, Any]) 
                     filename_base=f"artist_{safe_name}",
                     categories=categories,
                     forecast_quantiles=pred_quantiles,
+                    **fan_plot_kwargs,
                 )
                 artifacts["figures"].append(str(pdf_path))
                 artifacts["figures"].append(str(png_path))

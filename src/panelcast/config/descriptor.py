@@ -138,6 +138,7 @@ class DatasetDescriptor(BaseModel):
     # --- targets ----------------------------------------------------------
     target_col: str = "User_Score"
     target_bounds: tuple[float, float] = (0.0, 100.0)
+    invert_target_axis: bool = False
     model_prefix: str = "user"
     n_obs_col: str = "User_Ratings"
     # Whether n_obs_col counts independent raters whose mean IS the target (AOTY:
@@ -215,6 +216,7 @@ class DatasetDescriptor(BaseModel):
             "event_col": self.event_col,
             "target_col": self.target_col,
             "target_bounds": list(self.target_bounds),
+            "invert_target_axis": self.invert_target_axis,
             "model_prefix": self.model_prefix,
             "n_obs_col": self.n_obs_col,
             "secondary_target_col": self.secondary_target_col,

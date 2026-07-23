@@ -30,6 +30,7 @@ class TestDefaultEqualsAoty:
         d = DatasetDescriptor()
         assert d.target_col == "User_Score"
         assert d.target_bounds == (0.0, 100.0)
+        assert d.invert_target_axis is False
         assert d.model_prefix == "user"
         assert d.n_obs_col == "User_Ratings"
         assert d.n_obs_is_aggregation_count is True
@@ -82,6 +83,13 @@ class TestDefaultEqualsAoty:
 
     def test_module_level_default_instance(self):
         assert DEFAULT_DESCRIPTOR == DatasetDescriptor()
+
+
+class TestPlotPresentation:
+    def test_yaml_can_invert_target_axis(self, tmp_path):
+        yaml_path = tmp_path / "magnitude.yaml"
+        yaml_path.write_text("name: magnitude\ninvert_target_axis: true\n", encoding="utf-8")
+        assert load_descriptor(yaml_path).invert_target_axis is True
 
 
 class TestAggregationCountFlag:

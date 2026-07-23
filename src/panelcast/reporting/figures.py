@@ -369,6 +369,8 @@ def save_predictions_plot(
     filename_base: str,
     ci_label: str = "94% CI",
     figsize: tuple[float, float] = (6, 6),
+    target_label: str = "Score",
+    axis_padding: float | None = 2.0,
 ) -> tuple[Path, Path]:
     """Generate and save predicted vs actual scatter plot with uncertainty bands.
 
@@ -393,6 +395,10 @@ def save_predictions_plot(
         Label for the credible interval in legend.
     figsize : tuple[float, float], default (6, 6)
         Figure size in inches (square for equal aspect).
+    target_label : str, default "Score"
+        Domain-specific target name used on both axes.
+    axis_padding : float | None, default 2.0
+        Fixed axis padding, or None for scale-relative padding.
 
     Returns
     -------
@@ -435,7 +441,13 @@ def save_predictions_plot(
 
         # Add diagonal reference line (perfect prediction)
         all_values = np.concatenate([y_true, y_pred_mean, y_pred_lower, y_pred_upper])
-        lims = [np.min(all_values) - 2, np.max(all_values) + 2]
+        lower, upper = float(np.min(all_values)), float(np.max(all_values))
+        if axis_padding is None:
+            spread = upper - lower
+            padding = 0.05 * spread if spread > 0 else max(abs(lower), 1.0) * 0.01
+        else:
+            padding = axis_padding
+        lims = [lower - padding, upper + padding]
         ax.plot(
             lims,
             lims,
@@ -448,8 +460,8 @@ def save_predictions_plot(
         ax.set_ylim(lims)
 
         # Labels
-        ax.set_xlabel("Predicted Score")
-        ax.set_ylabel("Actual Score")
+        ax.set_xlabel(f"Predicted {target_label}")
+        ax.set_ylabel(f"Actual {target_label}")
         ax.legend(loc="lower right")
 
         # Equal aspect ratio for square plot
@@ -1030,6 +1042,10 @@ def save_artist_prediction_plot(
     categories: list[str] | None = None,
     figsize: tuple[float, float] = (8, 5),
     forecast_quantiles: np.ndarray | None = None,
+    event_label: str = "Album",
+    target_label: str = "User Score",
+    y_limits: tuple[float, float] | None = (0.0, 100.0),
+    invert_y_axis: bool = False,
 ) -> tuple[Path, Path]:
     """Generate and save a per-artist prediction fan chart.
 
@@ -1059,6 +1075,12 @@ def save_artist_prediction_plot(
         Precomputed (q05, q25, q50, q75, q95) for the final (forecast) point.
         When given, these render exactly as the band bounds instead of being
         re-percentiled from ``pred_samples``.
+    event_label, target_label : str
+        Descriptor-owned axis labels.
+    y_limits : tuple[float, float] | None
+        Fixed limits, or None to derive padded limits from the plotted data.
+    invert_y_axis : bool
+        Invert the target axis for domains such as astronomical magnitudes.
 
     Returns
     -------
@@ -1109,16 +1131,35 @@ def save_artist_prediction_plot(
         if categories:
             title += f"  ({', '.join(categories)})"
         ax.set_title(title, fontsize=10)
-        ax.set_xlabel("Album")
-        ax.set_ylabel("User Score")
-        ax.set_ylim(0, 100)
-
-        if album_labels is not None and n_albums <= 20:
-            ax.set_xticks(x)
-            ax.set_xticklabels(album_labels, rotation=45, ha="right", fontsize=7)
+        ax.set_xlabel(event_label)
+        ax.set_ylabel(target_label)
+        if y_limits is None:
+            plotted = np.concatenate([actual_scores, q05, q95])
+            finite = plotted[np.isfinite(plotted)]
+            if finite.size:
+                lower, upper = float(np.min(finite)), float(np.max(finite))
+                spread = upper - lower
+                padding = 0.08 * spread if spread > 0 else max(abs(lower), 1.0) * 0.01
+                ax.set_ylim(lower - padding, upper + padding)
         else:
-            ax.set_xticks(x)
-            ax.set_xticklabels([str(i + 1) for i in x])
+            ax.set_ylim(*y_limits)
+        if invert_y_axis:
+            ax.invert_yaxis()
+
+        tick_step = max(1, int(np.ceil(n_albums / 20)))
+        ticks = np.arange(0, n_albums, tick_step, dtype=int)
+        if n_albums and ticks[-1] != n_albums - 1:
+            ticks = np.append(ticks, n_albums - 1)
+        ax.set_xticks(ticks)
+        if album_labels is not None:
+            ax.set_xticklabels(
+                [str(album_labels[i]) for i in ticks],
+                rotation=45,
+                ha="right",
+                fontsize=7,
+            )
+        else:
+            ax.set_xticklabels([str(i + 1) for i in ticks])
 
         ax.legend(fontsize=7, loc="lower left")
         fig.tight_layout()
