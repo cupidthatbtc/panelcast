@@ -11,13 +11,13 @@
 > same X. Full-corpus validation is tracked in
 > [#15](https://github.com/cupidthatbtc/panelcast/issues/15).
 >
-> **Fairness pass (2026-07)**: the ridge baseline now standardizes features
-> internally (its L2 penalty previously acted on raw feature scales), baseline
-> test panels mirror the model's review-count validity filter, and runs with a
-> validation split condition baselines on the same last-known validation score
-> the model sees. The committed tables predate the ridge standardization, so
-> the ridge rows may shift slightly on regeneration; the other two changes are
-> no-ops for this run (no validation split, all review counts valid).
+> **Fairness pass (0.13.1)**: both the entity-obs model and its archived
+> incumbent were re-evaluated under #247's fixed train-only cap coordinate frame;
+> the paired promotion result remains +29.77 ± 7.00 (z +4.25) and every model
+> headline is unchanged at published precision. The tables below were regenerated
+> with the standardized ridge baseline, review-count validity filter, and
+> last-known validation-score conditioning. Full evidence is in
+> [`.audit/fair_eval_0131/`](../.audit/fair_eval_0131/SUMMARY.md).
 
 This page states, in the open, **where the hierarchical Bayesian model actually
 sits against simple baselines** — because that placement is the honest argument for
@@ -29,50 +29,46 @@ what the model is *for*. (The generated table lands under the gitignored
 | Model | MAE | RMSE | R² | CRPS | 80% cov | 95% cov | 95% width |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | **panelcast (Bayesian)** | **5.28** | 7.67 | 0.498 | **3.81** | 0.830 | 0.968 | 31.0 |
-| ridge | 5.38 | 7.68 | 0.498 | 4.02 | 0.879 | 0.965 | 32.2 |
-| gradient boosting | 5.58 | 7.88 | 0.471 | 4.12 | 0.763 | 0.888 | 22.6 |
-| conformal GBM | 5.63 | 8.01 | 0.453 | 4.15 | 0.821 | 0.954 | 33.6 |
+| ridge | 5.39 | 7.71 | 0.494 | 4.06 | 0.884 | 0.962 | 33.3 |
+| gradient boosting | 5.62 | 8.07 | 0.446 | 4.18 | 0.749 | 0.877 | 22.1 |
+| conformal GBM | 5.64 | 8.03 | 0.450 | 4.13 | 0.818 | 0.946 | 32.2 |
 | last score | 6.10 | 8.88 | 0.328 | 4.71 | 0.900 | 0.971 | 39.4 |
 | entity mean | 6.11 | 8.92 | 0.322 | 4.59 | 0.818 | 0.925 | 29.8 |
 | global mean | 7.23 | 10.91 | −0.015 | 5.55 | 0.890 | 0.956 | 43.3 |
 
 Read without flattery:
 
-- **The model leads on MAE and CRPS and roughly ties ridge on RMSE and R².**
-  Against the archived ridge row (5.38 / 7.68 / 0.498 / 4.02 — pre-dating the
-  fairness-pass standardization, so it may shift slightly on regeneration) it
-  wins MAE (5.28) and CRPS (3.81) clearly, edges RMSE (7.67 vs 7.68), and ties
-  R² at the reported precision (0.498). The point-signal lead the 0.6.0
-  `gbm_offset` stacking block opened (#86) has narrowed to a tie on R²/RMSE
-  under the entity-obs re-baseline — the win is now MAE, CRPS, and modeled
-  calibration, not a clean sweep of the point metrics.
-- **The lead over ridge is real but modest** (5.28 vs 5.38 MAE; R² tied at
-  0.498); the decisive gap is CRPS (3.81 vs 4.02) and the modeled intervals.
-  Note the baselines also consume the `gbm_offset` column now — ridge improved
-  from 5.62 to 5.38 for the same reason the model did. The raw GBM *worsened*
-  (5.41 → 5.58): feeding a GBM its own stacked prediction is redundancy, not
+- **The model leads on all four point/probabilistic headline metrics, but only
+  modestly over ridge.** Against the regenerated standardized ridge row it wins
+  MAE (5.28 vs 5.39), RMSE (7.67 vs 7.71), R² (0.498 vs 0.494), and CRPS
+  (3.81 vs 4.06). The point gaps are small; CRPS and modeled calibration remain
+  the clearer separation.
+- **The lead over ridge is real but modest.** The baselines consume the
+  `gbm_offset` column too; after standardization ridge lands at 5.39 MAE. The raw
+  GBM reaches 5.62: feeding a GBM its own stacked prediction is redundancy, not
   information.
 - **It clears the naive entity baselines by a wide margin.** R² 0.498 vs the
   per-entity mean's 0.322 and persistence's 0.328.
-- **The GBM's residual intervals remain over-confident** (0.763 / 0.888
+- **The GBM's residual intervals remain over-confident** (0.749 / 0.877
   coverage); the model's are modeled, near-nominal (0.830 / 0.968) — with the
   entity-obs re-baseline the 80% interval sits *closer to nominal* than the old
   0.853 — and are the narrowest of the covariate methods' calibrated bands
-  (31.0 vs ridge's 32.2 and conformal's 33.6). The naive entity-mean band is
+  (31.0 vs ridge's 33.3 and conformal's 32.2). The naive entity-mean band is
   narrower still (29.8) at tolerable coverage, but carries none of the point
   accuracy (MAE 6.11, R² 0.322).
 
 The model's justification used to be "not the leaderboard — calibrated
 intervals, variance decomposition, a generative story." Those deliverables all
-still hold; and the model now also leads on MAE, CRPS, and calibrated intervals,
-tying ridge on R² and RMSE.
+still hold; the model now also leads the standardized ridge row on MAE, RMSE,
+R², CRPS, and calibrated interval width, though the point-metric margins are
+narrow.
 
 > The conformal check ([#50](https://github.com/cupidthatbtc/panelcast/issues/50))
 > still stands as the honest control: **conformal GBM** wraps the same GBM in
-> split-conformal calibration and reaches near-nominal coverage (95%: 0.954;
-> 80%: 0.821) — calibration alone is cheap. But under the 0.6.0 baseline it no
-> longer matches the model on anything else: point accuracy (5.63 vs 5.28),
-> CRPS (4.15 vs 3.81), and interval width (33.6 vs 31.0) all favor the model.
+> split-conformal calibration and reaches near-nominal coverage (95%: 0.946;
+> 80%: 0.818) — calibration alone is cheap. But it no longer matches the model
+> on anything else: point accuracy (5.64 vs 5.28), CRPS (4.13 vs 3.81), and
+> interval width (32.2 vs 31.0) all favor the model.
 > What conformal cannot produce remains what it could never produce: a
 > generative story you can interrogate (posterior parameters, PPC) and the
 > entity-vs-residual variance decomposition.
@@ -82,9 +78,9 @@ tying ridge on R² and RMSE.
 | Model | MAE | R² | 80% cov | 95% cov | 95% width |
 |---|---:|---:|---:|---:|---:|
 | **panelcast (Bayesian)** | **6.82** | **0.117** | 0.842 | 0.965 | 43.5 |
-| ridge | 7.21 | 0.076 | 0.796 | 0.916 | 31.8 |
-| conformal GBM | 7.22 | 0.086 | 0.723 | 0.920 | 32.2 |
-| gradient boosting | 7.34 | 0.060 | 0.603 | 0.786 | 21.1 |
+| ridge | 7.21 | 0.089 | 0.807 | 0.922 | 32.7 |
+| conformal GBM | 7.56 | 0.013 | 0.723 | 0.914 | 32.6 |
+| gradient boosting | 7.60 | 0.009 | 0.598 | 0.765 | 20.9 |
 | entity mean | 7.69 | −0.001 | 0.743 | 0.900 | 29.1 |
 | last score | 7.69 | −0.001 | 0.837 | 0.947 | 38.0 |
 | global mean | 7.69 | −0.001 | 0.901 | 0.957 | 44.0 |
@@ -99,15 +95,15 @@ R² ≈ +0.02 at every screened seed) and the `gbm_offset` covariate (real
 leakage-safe values on this evaluation split via the feature parquets; only
 hypothetical-entity CLI predictions degrade to the train-mean offset).
 
-Read without flattery, still: R² 0.113 is weak in absolute terms — debut
+Read without flattery, still: R² 0.117 is weak in absolute terms — debut
 reception remains close to unpredictable from the available features (the
 covariates-only headroom estimate was ≈ 0.083,
 [`.audit/genre_pooling/`](../.audit/genre_pooling/covariates_only_r2.md), and
 the pooling tier captured essentially all of the genre share of it), and every
 method's MAE sits within ~0.8 of the global mean's. The conformal wrapper's
 exchangeability guarantee is false by construction for never-seen entities and
-degrades accordingly (0.920 at 95%), though it still beats the raw GBM's
-0.786. The multi-seed screening and publication-scale confirmation behind the
+degrades accordingly (0.914 at 95%), though it still beats the raw GBM's
+0.765. The multi-seed screening and publication-scale confirmation behind the
 pooling promotion live in
 [`.audit/genre_pooling/`](../.audit/genre_pooling/gate_on_screening.md);
 domains without a usable group column resolve the gate to off automatically.
@@ -143,8 +139,8 @@ panelcast compare --baselines            # writes <latest run>/reports/baselines
 ```
 
 Both `outputs/` and flat `reports/` are gitignored (large, regenerable), so this
-page is the curated, version-controlled copy. The committed snapshot of the model's own evaluation lives
-at `.audit/baseline_metrics.json`, regenerated from the current default model
-(`user_score_20260712_014147.nc`, the 2026-07-12 entity-obs re-baseline for
-0.13.0: the 0.6.0 defaults plus `heteroscedastic_entity_obs`, warmup 5,000 /
-target_accept 0.90).
+page is the curated, version-controlled copy. The committed snapshot of the
+model's own evaluation lives at `.audit/baseline_metrics.json`, re-evaluated
+under #247's fixed estimator from `user_score_20260712_014147.nc` (the seed-42
+entity-obs fit: warmup 5,000, target_accept 0.90). The paired incumbent evidence
+and exact deltas are in `.audit/fair_eval_0131/`.
