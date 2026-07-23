@@ -230,6 +230,27 @@ class TestLoadDescriptor:
 
         assert descriptor.resolve_raw_path() == csv_path
 
+    def test_descriptor_directory_wins_over_checkout_root_collision(
+        self, tmp_path, monkeypatch
+    ):
+        checkout = tmp_path / "checkout"
+        descriptor_dir = checkout / "examples" / "domain"
+        descriptor_dir.mkdir(parents=True)
+        (checkout / "pyproject.toml").write_text("[project]\nname='test'\n", encoding="utf-8")
+        root_csv = checkout / "panel.csv"
+        local_csv = descriptor_dir / "panel.csv"
+        root_csv.write_text("entity,target\nroot,1\n", encoding="utf-8")
+        local_csv.write_text("entity,target\nlocal,2\n", encoding="utf-8")
+        yaml_path = descriptor_dir / "descriptor.yaml"
+        yaml_path.write_text("raw_path_default: panel.csv\n", encoding="utf-8")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        monkeypatch.chdir(elsewhere)
+
+        descriptor = load_descriptor(yaml_path)
+
+        assert descriptor.resolve_raw_path() == local_csv
+
 
 class TestFeatureBlockSpec:
     def test_defaults(self):

@@ -169,7 +169,7 @@ The committed CSV is regenerated from the shared synthetic generator with
 baselines on the splits it just produced:
 
 ```bash
-panelcast compare --baselines --dataset examples/aerospace/descriptor.yaml
+panelcast compare --baselines --dataset aero
 ```
 
 To run the flagship AOTY domain instead, point at your data and omit `--dataset`:

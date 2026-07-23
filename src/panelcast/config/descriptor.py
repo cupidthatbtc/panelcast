@@ -214,7 +214,7 @@ class DatasetDescriptor(BaseModel):
         path = Path(env_value if env_value is not None else self.raw_path_default)
         if env_value is not None or path.is_absolute() or path.exists():
             return path
-        roots = [self._source_root, self._source_path.parent if self._source_path else None]
+        roots = [self._source_path.parent if self._source_path else None, self._source_root]
         for root in roots:
             if root is not None and (candidate := root / path).exists():
                 return candidate

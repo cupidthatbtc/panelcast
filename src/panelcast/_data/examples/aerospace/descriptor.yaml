@@ -31,6 +31,8 @@ required_raw_columns:
   - "Perf Score"
   - "Sensor Samples"
   - "Test Crew"
+  - "Thrust Margin"
+  - "Payload Fraction"
 optional_raw_columns: []
 
 # --- identity / sequencing ------------------------------------------------

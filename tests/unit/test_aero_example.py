@@ -43,12 +43,16 @@ def test_packaged_data_matches_checkout_copies():
         REPO_ROOT / "configs" / "datasets" / "aoty_full.yaml"
     ).read_bytes()
 
-    hashes = {load_descriptor(path).descriptor_hash() for path in aero_descriptors}
-    assert len(hashes) == 1
+    descriptors = [load_descriptor(path) for path in aero_descriptors]
+    assert len({descriptor.descriptor_hash() for descriptor in descriptors}) == 1
+    for descriptor in descriptors:
+        assert "Thrust Margin" in descriptor.required_raw_columns
+        assert "Payload Fraction" in descriptor.required_raw_columns
 
 
 def test_bare_aero_descriptor_works_outside_checkout(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("AERO_DATASET_PATH", raising=False)
 
     path = resolve_descriptor_path("aero")
     descriptor = load_descriptor("aero")
