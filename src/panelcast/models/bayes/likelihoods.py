@@ -881,7 +881,8 @@ def available_families() -> tuple[str, ...]:
 
 def find_likelihood(family: str) -> LikelihoodSpec | None:
     """The spec for a family, or None when unknown."""
-    return REGISTRY.get(family) or _discovered_likelihoods().get(family)
+    spec = REGISTRY.get(family)
+    return spec if spec is not None else _discovered_likelihoods().get(family)
 
 
 def get_likelihood(family: str) -> LikelihoodSpec:

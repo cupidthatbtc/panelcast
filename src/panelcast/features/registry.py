@@ -123,7 +123,8 @@ def _discovered_packs() -> dict[str, Callable[[FeatureRegistry], None]]:
     ``packs/aoty.py::register(registry)``. Builtins shadow plugins on a name
     collision so an installed package can never silently replace the shipped
     behavior. Plugin code runs at import time — the standard entry-point
-    trade-off.
+    trade-off. Uncached deliberately (unlike likelihood discovery): this runs
+    only when a descriptor names a non-builtin pack, never on the default path.
     """
     import importlib.metadata
 

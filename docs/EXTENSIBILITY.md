@@ -51,7 +51,10 @@ Rules of the road:
   with their distribution names and versions, so a sweep containing a plugin
   family stays reproducible.
 - **Plugin code runs at import/discovery time** — the standard entry-point
-  trade-off; only install plugins you trust.
+  trade-off; only install plugins you trust. Discovery is fail-fast: a
+  malformed plugin (an entry that does not load to a `LikelihoodSpec`) fails
+  family enumeration loudly rather than being silently skipped — uninstall or
+  fix the broken package.
 - The `LikelihoodFamily` Literal in `config/gates.py` stays the *builtin* set;
   boundary annotations accept any string and the runtime registry check is
   the contract.

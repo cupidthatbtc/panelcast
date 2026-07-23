@@ -59,7 +59,7 @@ def fixture_plugins(monkeypatch):
         "panelcast.likelihoods": [
             FakeEntryPoint(
                 "fixture_normal",
-                "fixture_plugin:LIKELIHOOD",
+                "fixture_plugin:SPEC",
                 FIXTURE_LIKELIHOOD,
                 SimpleNamespace(name="fixture-plugin", version="1.2.3"),
             ),
