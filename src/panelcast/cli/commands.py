@@ -253,8 +253,18 @@ def demo(
                 Path("outputs/evaluation/metrics.json"),
             )
         typer.echo("\nDemo complete. Generated artifacts:")
+        # Non-UTF-8 consoles (Windows cp1252) cannot encode the check mark;
+        # fall back to ASCII rather than crash after a successful run.
+        import sys
+
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        try:
+            "✓".encode(encoding)
+            found_marker, missing_marker = "✓", "·"
+        except (UnicodeEncodeError, LookupError):
+            found_marker, missing_marker = "OK", "--"
         for artifact in artifacts:
-            marker = "✓" if artifact.exists() else "·"
+            marker = found_marker if artifact.exists() else missing_marker
             typer.echo(f"  {marker} {artifact}")
     raise typer.Exit(code=exit_code)
 
