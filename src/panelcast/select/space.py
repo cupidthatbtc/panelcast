@@ -21,7 +21,7 @@ from typing import Any, Literal, get_args
 
 from panelcast.config import gates
 from panelcast.config.descriptor import DatasetDescriptor
-from panelcast.models.bayes.likelihoods import REGISTRY
+from panelcast.models.bayes.likelihoods import all_likelihoods, find_likelihood
 
 KnobKind = Literal["literal", "bool", "tristate"]
 
@@ -60,13 +60,18 @@ def _literal_values(alias: Any, default: Any) -> tuple[Any, ...]:
 
 
 def _family_values() -> tuple[str, ...]:
-    return ("studentt", *(f for f in REGISTRY if f != "studentt"))
+    # Builtins keep REGISTRY order (arm order is golden-pinned for the
+    # no-plugin path); plugin families join as a sorted, deterministic tail.
+    from panelcast.models.bayes.likelihoods import REGISTRY
+
+    extras = sorted(f for f in all_likelihoods() if f not in REGISTRY)
+    return ("studentt", *(f for f in REGISTRY if f != "studentt"), *extras)
 
 
 def _family_compatible(
     value: Any, descriptor: DatasetDescriptor, columns: frozenset[str] | None
 ) -> bool:
-    if not REGISTRY[value].requires_aggregation_count:
+    if not all_likelihoods()[value].requires_aggregation_count:
         return True
     return descriptor.n_obs_is_aggregation_count
 
@@ -417,7 +422,7 @@ def arm_conflicts(
             )
 
     family = merged["likelihood_family"]
-    spec = REGISTRY.get(family)
+    spec = find_likelihood(family)
     transform = merged["target_transform"]
     if spec is not None:
         if spec.requires_identity_transform and transform != "identity":

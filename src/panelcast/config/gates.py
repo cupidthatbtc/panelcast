@@ -25,7 +25,9 @@ DebutPrevScoreSource = Literal["train_mean", "dataset_stats"]
 NExponentPrior = Literal["logit-normal", "beta"]
 # Kept in sync with panelcast.models.bayes.likelihoods.REGISTRY by
 # tests/unit/models/bayes/test_likelihood_registry.py (a Literal is a static
-# type and can't be derived from the runtime registry).
+# type and can't be derived from the runtime registry). This is the BUILTIN
+# set only: entry-point plugin families (#172) are legal at runtime, so
+# boundary annotations use plain str and rely on the registry check.
 LikelihoodFamily = Literal[
     "studentt", "normal", "skew_studentt", "beta", "skew_normal", "split_normal",
     "mixture", "beta_binomial", "beta_ceiling",

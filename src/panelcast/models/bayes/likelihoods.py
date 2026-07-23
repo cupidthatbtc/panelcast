@@ -26,6 +26,7 @@ The continuous (toggle-off) path is byte-identical to the pre-registry code.
 
 from __future__ import annotations
 
+import functools
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import ClassVar
@@ -57,6 +58,10 @@ __all__ = [
     "BetaBinomialScore",
     "NormalMixture2",
     "REGISTRY",
+    "all_likelihoods",
+    "available_families",
+    "find_likelihood",
+    "get_likelihood",
 ]
 
 # Floor for interval-mass and Beta boundary clips, shared across the module.
@@ -833,3 +838,59 @@ REGISTRY: dict[str, LikelihoodSpec] = {
         samples_bare_phi=True,
     ),
 }
+
+
+# --- plugin discovery (#172) -------------------------------------------------
+
+
+@functools.cache
+def _discovered_likelihoods() -> dict[str, LikelihoodSpec]:
+    """Plugin families from the ``panelcast.likelihoods`` entry-point group.
+
+    Entries load to LikelihoodSpec instances. Builtins shadow plugins on a
+    name collision so an installed package can never silently replace a
+    shipped family. Plugin code runs at import time — the standard entry-point
+    trade-off. Cached: installed distributions cannot change mid-process
+    (tests clear the cache around monkeypatched entry points).
+    """
+    import importlib.metadata
+
+    discovered: dict[str, LikelihoodSpec] = {}
+    for entry in importlib.metadata.entry_points(group="panelcast.likelihoods"):
+        if entry.name in REGISTRY or entry.name in discovered:
+            continue
+        spec = entry.load()
+        if not isinstance(spec, LikelihoodSpec):
+            raise TypeError(
+                f"Entry point panelcast.likelihoods:{entry.name} must load to a "
+                f"LikelihoodSpec, got {type(spec).__name__}."
+            )
+        discovered[entry.name] = spec
+    return discovered
+
+
+def all_likelihoods() -> dict[str, LikelihoodSpec]:
+    """Every resolvable family: builtins plus installed plugins."""
+    return {**_discovered_likelihoods(), **REGISTRY}
+
+
+def available_families() -> tuple[str, ...]:
+    """Sorted names of every resolvable family."""
+    return tuple(sorted(all_likelihoods()))
+
+
+def find_likelihood(family: str) -> LikelihoodSpec | None:
+    """The spec for a family, or None when unknown."""
+    spec = REGISTRY.get(family)
+    return spec if spec is not None else _discovered_likelihoods().get(family)
+
+
+def get_likelihood(family: str) -> LikelihoodSpec:
+    """The spec for a family, builtins first, then installed plugins."""
+    spec = find_likelihood(family)
+    if spec is None:
+        raise KeyError(
+            f"Unknown likelihood_family {family!r}. Available "
+            f"(builtin + installed plugins): {list(available_families())}."
+        )
+    return spec

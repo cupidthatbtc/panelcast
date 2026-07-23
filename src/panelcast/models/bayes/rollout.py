@@ -31,7 +31,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 from jax import lax, random
 
-from panelcast.models.bayes.likelihoods import REGISTRY
+from panelcast.models.bayes.likelihoods import available_families, find_likelihood
 from panelcast.models.bayes.model import compute_sigma_scaled
 from panelcast.models.bayes.transforms import get_transform
 
@@ -87,13 +87,12 @@ def predict_horizon(
         dict with ``y`` and ``mu``, both (n_draws, H, n_entities) on the
         score scale.
     """
-    try:
-        spec = REGISTRY[likelihood_family]
-    except KeyError:
+    spec = find_likelihood(likelihood_family)
+    if spec is None:
         raise ValueError(
             f"Unknown likelihood_family: '{likelihood_family}'. "
-            f"Registered: {sorted(REGISTRY)}."
-        ) from None
+            f"Registered: {list(available_families())}."
+        )
 
     init_effect = posterior_samples[f"{prefix}init_artist_effect"][:, artist_idx]
     sigma_rw = posterior_samples[f"{prefix}sigma_rw"]

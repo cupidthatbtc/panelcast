@@ -146,9 +146,9 @@ def _validate_run_options(
         raise typer.Exit(code=1)
 
     # Single source of truth: the likelihood registry.
-    from panelcast.models.bayes.likelihoods import REGISTRY
+    from panelcast.models.bayes.likelihoods import available_families
 
-    valid_families = tuple(REGISTRY)
+    valid_families = available_families()
     if likelihood_family not in valid_families:
         typer.echo(
             f"Error: Invalid --likelihood-family '{likelihood_family}'. "

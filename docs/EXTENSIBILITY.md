@@ -21,6 +21,44 @@ Goal
    The music blocks (genre PCA, album type, collaboration) live in
    `packs/aoty.py`; a descriptor with `feature_packs: []` never sees them.
 
+## Entry-point plugins (no fork required)
+
+Both registries are externally extensible via standard Python entry points
+(#172), so a pip-installed package can contribute a feature pack or a
+likelihood family with zero panelcast source changes:
+
+```toml
+# pyproject.toml of a third-party plugin
+[project.entry-points."panelcast.feature_packs"]
+my_domain = "my_plugin.pack:register"          # same contract as packs/aoty.py
+
+[project.entry-points."panelcast.likelihoods"]
+my_family = "my_plugin.likelihood:SPEC"        # a LikelihoodSpec instance
+```
+
+A descriptor then writes `feature_packs: ["my_domain"]`, and
+`likelihood_family: my_family` is legal in run configs — validation, the model
+and prediction seams, and the `panelcast select` arm space all resolve through
+the plugin-aware accessors (`get_likelihood` / `available_families`). Plugin
+families enter the sweep automatically and are pruned by the same
+`requires_*` constraint flags as builtins.
+
+Rules of the road:
+
+- **Builtins shadow plugins** on a name collision — an installed package can
+  never silently replace shipped behavior.
+- **Provenance is recorded**: every run manifest lists the discovered plugins
+  with their distribution names and versions, so a sweep containing a plugin
+  family stays reproducible.
+- **Plugin code runs at import/discovery time** — the standard entry-point
+  trade-off; only install plugins you trust. Discovery is fail-fast: a
+  malformed plugin (an entry that does not load to a `LikelihoodSpec`) fails
+  family enumeration loudly rather than being silently skipped — uninstall or
+  fix the broken package.
+- The `LikelihoodFamily` Literal in `config/gates.py` stays the *builtin* set;
+  boundary annotations accept any string and the runtime registry check is
+  the contract.
+
 ## Feature block pattern
 
 1. Implement a block following `FeatureBlock` in

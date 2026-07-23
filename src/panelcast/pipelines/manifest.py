@@ -298,6 +298,10 @@ class RunManifest(BaseModel):
     # state, environment fingerprint, lock hash, and package version. Empty on
     # manifests written by older versions.
     experiment_identity: dict[str, Any] = {}
+    # Installed panelcast entry-point plugins with dist versions (#172): a
+    # plugin family in a sweep must not surprise reproducibility. Empty when
+    # no plugins are installed or on manifests written by older versions.
+    plugins: dict[str, dict[str, str]] = {}
 
 
 def generate_run_id() -> str:
