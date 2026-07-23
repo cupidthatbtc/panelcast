@@ -206,6 +206,12 @@ class TestCheckCollinearity:
 
 
 class TestPreflightCli:
+    def test_help_lists_all_three_checks(self):
+        result = runner.invoke(app, ["preflight", "--help"])
+        assert result.exit_code == 0
+        assert "Three checks" in result.output
+        assert "Beta-Binomial target span" in result.output
+
     def test_missing_data_reports_fail_row_json(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)  # no data/ here
         result = runner.invoke(app, ["preflight", "--json"])
