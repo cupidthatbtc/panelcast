@@ -228,8 +228,13 @@ def _run_full_preflight(
         raise typer.Exit(2)  # CANNOT_CHECK exit code
 
     from panelcast.config.descriptor import load_descriptor
+    from panelcast.pipelines.orchestrator import resolve_model_facts
 
     preflight_descriptor = load_descriptor(config.dataset)
+    # The preflight runs before the orchestrator exists, so the model-fact
+    # sentinels (#268) must be resolved here or the signature/cap math below
+    # would see None.
+    resolve_model_facts(config, preflight_descriptor)
 
     effective_group_pooling = _resolve_preflight_group_pooling(
         config, preflight_descriptor, features_path, splits_path
@@ -367,6 +372,7 @@ def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> No
     preflight-only or on a failure not overridden by --force-run."""
     from panelcast.config.descriptor import load_descriptor
     from panelcast.data.ingest import extract_data_dimensions
+    from panelcast.pipelines.orchestrator import resolve_model_facts
     from panelcast.preflight import (
         PreflightStatus,
         render_preflight_result,
@@ -377,6 +383,8 @@ def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> No
     # preflight reads the configured domain's data and columns, not just
     # AOTY's. config.dataset=None -> AOTY defaults.
     quick_descriptor = load_descriptor(config.dataset)
+    # Resolve the model-fact sentinels (#268) before max_seq math sees None.
+    resolve_model_facts(config, quick_descriptor)
     quick_csv_path = quick_descriptor.resolve_raw_path()
     # Mirror the orchestrator's resolution so the preflight reads the same
     # threshold a default run would use.

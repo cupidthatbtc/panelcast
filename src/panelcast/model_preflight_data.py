@@ -42,26 +42,12 @@ def _resolve_config(dataset: str | None, config_files: list[str] | None):
         explicit = {"dataset"} if dataset is not None else set()
         config_kwargs = apply_yaml_overrides(config_kwargs, yaml_data, explicit)
     config = PipelineConfig(**config_kwargs)
-    # Mirror the orchestrator's descriptor-owned model-fact resolution (#268)
-    # so the audit sees the same resolved family/transform the run would.
+    # Same descriptor-owned model-fact resolution the orchestrator applies
+    # (#268), so the audit sees the resolved family/transform the run would.
     from panelcast.config.descriptor import load_descriptor
+    from panelcast.pipelines.orchestrator import resolve_model_facts
 
-    descriptor = load_descriptor(config.dataset)
-    if config.likelihood_family is None:
-        config.likelihood_family = (
-            descriptor.likelihood_family
-            if descriptor.likelihood_family is not None
-            else "studentt"
-        )
-    if config.target_transform is None:
-        config.target_transform = (
-            descriptor.target_transform
-            if descriptor.target_transform is not None
-            else "offset_logit"
-        )
-    if config.max_albums is None:
-        config.max_albums = descriptor.max_events if descriptor.max_events is not None else 50
-    config._validate()
+    resolve_model_facts(config, load_descriptor(config.dataset))
     return config
 
 

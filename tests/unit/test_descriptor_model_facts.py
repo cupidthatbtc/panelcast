@@ -114,6 +114,79 @@ class TestOrchestratorResolution:
             PipelineOrchestrator(PipelineConfig(dataset=dataset), output_base=tmp_path)
 
 
+class TestSharedResolutionHelper:
+    def test_resolves_and_is_idempotent(self, tmp_path):
+        from panelcast.config.descriptor import load_descriptor
+        from panelcast.pipelines.orchestrator import resolve_model_facts
+
+        dataset = _write_descriptor(
+            tmp_path,
+            "name: facts\n"
+            "likelihood_family: beta_binomial\n"
+            "target_transform: identity\n"
+            "max_events: 60\n",
+        )
+        config = PipelineConfig(dataset=dataset)
+        descriptor = load_descriptor(dataset)
+        resolve_model_facts(config, descriptor)
+        resolved = (config.likelihood_family, config.target_transform, config.max_albums)
+        assert resolved == ("beta_binomial", "identity", 60)
+        resolve_model_facts(config, descriptor)
+        assert (config.likelihood_family, config.target_transform, config.max_albums) == resolved
+
+    def test_rejects_beta_binomial_without_aggregation_counts(self, tmp_path):
+        from panelcast.config.descriptor import load_descriptor
+        from panelcast.pipelines.orchestrator import resolve_model_facts
+
+        dataset = _write_descriptor(
+            tmp_path, "name: facts\nn_obs_is_aggregation_count: false\n"
+        )
+        config = PipelineConfig(
+            dataset=dataset, likelihood_family="beta_binomial", target_transform="identity"
+        )
+        with pytest.raises(ValueError, match="aggregation"):
+            resolve_model_facts(config, load_descriptor(dataset))
+
+    def test_quick_preflight_resolves_descriptor_facts(self, tmp_path, monkeypatch):
+        # Regression: the CLI preflights run before the orchestrator exists,
+        # so they must resolve the sentinels themselves or max_seq sees None.
+        from types import SimpleNamespace
+
+        import panelcast.data.ingest as ingest_mod
+        import panelcast.preflight as preflight_mod
+        from panelcast.cli.run import _run_quick_preflight
+        from panelcast.config.descriptor import DatasetDescriptor
+
+        dataset = _write_descriptor(
+            tmp_path,
+            "name: facts\n"
+            "likelihood_family: beta_binomial\n"
+            "target_transform: identity\n"
+            "max_events: 60\n",
+        )
+        captured: dict = {}
+
+        def fake_check(**kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(status=preflight_mod.PreflightStatus.PASS, exit_code=0)
+
+        monkeypatch.setattr(preflight_mod, "run_preflight_check", fake_check)
+        monkeypatch.setattr(preflight_mod, "render_preflight_result", lambda *a, **k: None)
+        monkeypatch.setattr(
+            ingest_mod,
+            "extract_data_dimensions",
+            lambda **k: SimpleNamespace(n_observations=10, n_artists=3),
+        )
+        monkeypatch.setattr(
+            DatasetDescriptor, "resolve_raw_path", lambda self: tmp_path / "raw.csv"
+        )
+        config = PipelineConfig(dataset=dataset)
+        _run_quick_preflight(config, preflight_only=False, force_run=False)
+        assert captured["max_seq"] == 60
+        assert config.likelihood_family == "beta_binomial"
+        assert config.target_transform == "identity"
+
+
 class TestRescaleTargetToUnit:
     def test_normalizes_bounds_and_keeps_raw_readable(self):
         d = DatasetDescriptor(rescale_target_to_unit=True)

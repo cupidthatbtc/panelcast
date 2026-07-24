@@ -160,6 +160,9 @@ def prepare_datasets(config: PrepareConfig | None = None) -> PrepareResult:
     ):
         raw_low, raw_high = descriptor.raw_target_bounds
         span = raw_high - raw_low
+        # The primary span applies to the secondary target too: a descriptor
+        # declares one target_bounds for both targets (they share a scale, as
+        # AOTY's user/critic scores do).
         rescaled = [
             col
             for col in (descriptor.target_col, descriptor.secondary_target_col)

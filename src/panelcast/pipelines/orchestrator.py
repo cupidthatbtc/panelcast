@@ -567,6 +567,42 @@ def _installed_plugins() -> dict[str, dict[str, str]]:
     return discovered_plugins()
 
 
+def resolve_model_facts(config: PipelineConfig, descriptor) -> None:
+    """Resolve descriptor-owned model facts onto a config in place (#268).
+
+    These are properties of the data, so an explicit CLI/YAML value wins, the
+    descriptor is next, and the historical pipeline defaults are last.
+    Re-validates afterwards so family/transform coupling rules see resolved
+    values, then enforces descriptor coherence for beta_binomial. Idempotent:
+    a config that already ran through resolution passes through unchanged.
+    """
+    if config.likelihood_family is None:
+        config.likelihood_family = (
+            descriptor.likelihood_family
+            if descriptor.likelihood_family is not None
+            else "studentt"
+        )
+    if config.target_transform is None:
+        config.target_transform = (
+            descriptor.target_transform
+            if descriptor.target_transform is not None
+            else "offset_logit"
+        )
+    if config.max_albums is None:
+        config.max_albums = descriptor.max_events if descriptor.max_events is not None else 50
+    config._validate()
+    # beta_binomial models the target as the mean of n aggregated ratings, so
+    # it only makes sense when n_obs_col is a true count of independent raters.
+    if config.likelihood_family == "beta_binomial" and not descriptor.n_obs_is_aggregation_count:
+        raise ValueError(
+            "likelihood_family='beta_binomial' models the target as the mean of "
+            f"n={descriptor.n_obs_col} aggregated ratings, but descriptor "
+            f"'{descriptor.name}' sets n_obs_is_aggregation_count=false "
+            f"({descriptor.n_obs_col} is not a count of independent raters). "
+            "Use an aggregation-count domain or a different likelihood_family."
+        )
+
+
 # Execution mechanics and per-invocation provenance excluded from resume
 # restore (#296); everything else on PipelineConfig is restored. strict stays a
 # per-invocation gate: it aborts on warnings but never changes outputs, and a
@@ -624,40 +660,7 @@ class PipelineOrchestrator:
         # StageContext rather than re-deriving domain names from literals.
         self.descriptor = load_descriptor(config.dataset)
         self.descriptor_path = resolve_descriptor_path(config.dataset)
-        # Resolve descriptor-owned model facts (#268): these are properties of
-        # the data, so an explicit CLI/YAML value wins, the descriptor is next,
-        # and the historical pipeline defaults are last. Re-validate afterwards
-        # so family/transform coupling rules see resolved values.
-        if config.likelihood_family is None:
-            config.likelihood_family = (
-                self.descriptor.likelihood_family
-                if self.descriptor.likelihood_family is not None
-                else "studentt"
-            )
-        if config.target_transform is None:
-            config.target_transform = (
-                self.descriptor.target_transform
-                if self.descriptor.target_transform is not None
-                else "offset_logit"
-            )
-        if config.max_albums is None:
-            config.max_albums = (
-                self.descriptor.max_events if self.descriptor.max_events is not None else 50
-            )
-        config._validate()
-        # beta_binomial models the target as the mean of n aggregated ratings, so
-        # it only makes sense when n_obs_col is a true count of independent raters.
-        if (
-            config.likelihood_family == "beta_binomial"
-            and not self.descriptor.n_obs_is_aggregation_count
-        ):
-            raise ValueError(
-                "likelihood_family='beta_binomial' models the target as the mean of "
-                f"n={self.descriptor.n_obs_col} aggregated ratings, but descriptor "
-                f"'{self.descriptor.name}' sets n_obs_is_aggregation_count=false "
-                f"({self.descriptor.n_obs_col} is not a count of independent raters). "
-                "Use an aggregation-count domain or a different likelihood_family."
-            )
+        resolve_model_facts(config, self.descriptor)
         if config.likelihood_family == "beta_binomial":
             span, is_unit = beta_binomial_trial_scale(self.descriptor.target_bounds)
             if not is_unit:
