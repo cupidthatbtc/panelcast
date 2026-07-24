@@ -86,7 +86,7 @@ panelcast run [OPTIONS]
 | `--num-samples` | `1000` | ≥100 | Post-warmup samples per chain |
 | `--num-warmup` | `1000` | ≥50 | Warmup iterations per chain |
 | `--target-accept` | `0.90` | 0.5–0.999 | Target acceptance probability |
-| `--max-albums` | `50` | ≥1 | Maximum albums per artist |
+| `--max-albums` | descriptor `max_events`, else 50 | ≥1 | Maximum events per entity |
 
 #### Convergence Thresholds
 
@@ -128,7 +128,7 @@ These features are **enabled by default**. Use these flags to disable them:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--likelihood-df` | `4.0` | Student-t degrees of freedom (`≥100` behaves as Normal) |
-| `--likelihood-family` | `studentt` | Observation likelihood: `studentt`, `normal`, `skew_studentt`, `skew_normal`, `split_normal`, `beta`, `mixture`, `beta_binomial`, or `beta_ceiling`. See [`LIKELIHOOD_CANDIDATES.md`](LIKELIHOOD_CANDIDATES.md) |
+| `--likelihood-family` | descriptor `likelihood_family`, else `studentt` | Observation likelihood: `studentt`, `normal`, `skew_studentt`, `skew_normal`, `split_normal`, `beta`, `mixture`, `beta_binomial`, or `beta_ceiling`. See [`LIKELIHOOD_CANDIDATES.md`](LIKELIHOOD_CANDIDATES.md) |
 | `--discretize-observation` | `false` | Interval-censor the observation to integers (honest PPC for integer scores). Location-scale families only (`studentt`, `normal`, `skew_normal`, `split_normal`, `mixture`); rejected for `skew_studentt`, `beta`, `beta_binomial` (`beta_binomial` is already discrete) |
 
 #### Domain & Model Options
@@ -139,7 +139,7 @@ These features are **enabled by default**. Use these flags to disable them:
 | `--allow-unknown-config-keys` | `false` | Migration escape: load configs despite unknown keys — they are ignored (not applied), preserved in the run manifest under `unknown_config_keys`, and never written to `resolved_config.yaml` |
 | `--dataset` | built-in AOTY | Dataset descriptor: bare name (resolves to `configs/datasets/{name}.yaml`) or YAML path. Unknown descriptor fields are a hard error |
 | `--debut-prev-score-source` | `train_mean` | Debut `prev_score` fill: `train_mean` or `dataset_stats` (legacy; mild leakage) |
-| `--target-transform` | `offset_logit` | Score-scale transform: `offset_logit` (default since 0.5.0; the model runs on the Smithson-Verkuilen logit scale, bounds hold by construction) or `identity` (soft-clip; the former default, still selectable) |
+| `--target-transform` | descriptor `target_transform`, else `offset_logit` | Score-scale transform: `offset_logit` (default since 0.5.0; the model runs on the Smithson-Verkuilen logit scale, bounds hold by construction) or `identity` (soft-clip; the former default, still selectable) |
 | `--ar-center` | `global` | AR(1) centering: `global`, `none` (legacy), or `artist_running` (sensitivity only) |
 | `--latent-process` | `rw` | Artist-effect process: `rw` (random walk) or `ar1` (stationary). Experimental |
 | `--exclude-rw-raw-from-collection` | `false` | Don't store `rw_raw` draws on device (~96% peak-GPU cut); required for the 4-chain publication run on 24 GB GPUs |

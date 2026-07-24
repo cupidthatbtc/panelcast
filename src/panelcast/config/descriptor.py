@@ -147,6 +147,7 @@ class DatasetDescriptor(BaseModel):
 
     _source_path: Path | None = PrivateAttr(default=None)
     _source_root: Path | None = PrivateAttr(default=None)
+    _raw_target_bounds: tuple[float, float] | None = PrivateAttr(default=None)
 
     # --- identity -------------------------------------------------------
     name: str = "aoty"
@@ -209,6 +210,24 @@ class DatasetDescriptor(BaseModel):
     ablation_groups: dict[str, list[str]] = Field(default_factory=_default_ablation_groups)
     basis_curves: dict[str, BasisCurveSpec] = Field(default_factory=dict)
 
+    # --- model facts (#268) -------------------------------------------------
+    # Properties of the DATA, not the run: a binomial domain's default run
+    # should be binomial without CLI flags. None defers to the pipeline
+    # defaults (studentt / offset_logit / 50); explicit CLI or config values
+    # always win over the descriptor. Family names may be entry-point plugins,
+    # so they are validated against the runtime registry at resolution time,
+    # not here.
+    likelihood_family: str | None = None
+    target_transform: str | None = None
+    max_events: int | None = Field(default=None, ge=1)
+    # Auto-rescale (#268, extending #263): the target is a true proportion
+    # recorded on a non-unit span (e.g. percent). The pipeline divides it onto
+    # [0, 1] between cleaning and filtering, so beta_binomial trial counts are
+    # never span-inflated. target_bounds normalizes to (0, 1) at construction;
+    # the declared raw bounds stay readable via raw_target_bounds for raw-CSV
+    # validation and the rescale itself.
+    rescale_target_to_unit: bool = False
+
     @model_validator(mode="after")
     def _validate(self) -> DatasetDescriptor:
         invalid_curve_names = [
@@ -245,9 +264,26 @@ class DatasetDescriptor(BaseModel):
             raise ValueError(
                 "processed_name_template must contain the '{min_ratings}' placeholder."
             )
+        if self.rescale_target_to_unit and tuple(self.target_bounds) != (0.0, 1.0):
+            if not self.n_obs_is_aggregation_count:
+                raise ValueError(
+                    "rescale_target_to_unit=true only makes sense for a true "
+                    "proportion whose n_obs_col counts trials "
+                    "(n_obs_is_aggregation_count=true)."
+                )
+            # Normalize at construction: downstream consumers see [0, 1]; the
+            # declared bounds stay readable via raw_target_bounds for raw-CSV
+            # validation and the prepare-stage rescale.
+            self._raw_target_bounds = (float(lo), float(hi))
+            self.target_bounds = (0.0, 1.0)
         return self
 
     # --- derived helpers ----------------------------------------------------
+
+    @property
+    def raw_target_bounds(self) -> tuple[float, float]:
+        """Bounds of the raw CSV target (pre-rescale; equals target_bounds otherwise)."""
+        return self._raw_target_bounds or self.target_bounds
 
     def processed_name(self, min_obs: int | None = None) -> str:
         """Processed dataset name for a threshold (default: primary)."""
@@ -271,6 +307,13 @@ class DatasetDescriptor(BaseModel):
         fields = self.model_dump(mode="json", exclude={"invert_target_axis"})
         if not fields["basis_curves"]:
             fields.pop("basis_curves")
+        # Unset model facts (#268) drop out so pre-existing descriptors keep
+        # their recorded hashes; a declared value is a genuine fit change.
+        for optional in ("likelihood_family", "target_transform", "max_events"):
+            if fields.get(optional) is None:
+                fields.pop(optional, None)
+        if fields.get("rescale_target_to_unit") is False:
+            fields.pop("rescale_target_to_unit", None)
         payload = json.dumps(fields, sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

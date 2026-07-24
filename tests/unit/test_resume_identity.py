@@ -182,7 +182,15 @@ class TestResumeRestoresCompleteExperiment:
             self._resume(tmp_path, original, identity=identity, tamper=tamper)
 
     def test_resume_proceeds_when_identity_matches(self, tmp_path):
-        original = PipelineConfig(num_samples=1234, enable_artist=False, min_ratings=10)
+        original = PipelineConfig(
+            num_samples=1234,
+            enable_artist=False,
+            min_ratings=10,
+            # Recorded identities hold post-resolution values (#268).
+            likelihood_family="studentt",
+            target_transform="offset_logit",
+            max_albums=50,
+        )
         identity = {
             "config_hash": experiment_config_hash(original),
             "config_payload": experiment_config_payload(original),

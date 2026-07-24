@@ -122,7 +122,7 @@ def _build_stage_config(
 def _validate_run_options(
     chain_method: str,
     n_exponent_prior: str,
-    likelihood_family: str,
+    likelihood_family: str | None,
     calibration_intervals: str,
 ) -> tuple[str, tuple[float, ...]]:
     """Validate the free-form run options, returning the normalized chain method
@@ -149,7 +149,8 @@ def _validate_run_options(
     from panelcast.models.bayes.likelihoods import available_families
 
     valid_families = available_families()
-    if likelihood_family not in valid_families:
+    # None = unset: resolved from the descriptor by the orchestrator (#268).
+    if likelihood_family is not None and likelihood_family not in valid_families:
         typer.echo(
             f"Error: Invalid --likelihood-family '{likelihood_family}'. "
             f"Must be one of: {', '.join(valid_families)}"
@@ -526,12 +527,15 @@ def run(
         help="Free-form label recorded in the run manifest (shown by `runs history`)",
     ),
     max_albums: Annotated[
-        int,
+        int | None,
         typer.Option(
             min=1,
-            help="Max albums per artist for training. Beyond this use same artist effect.",
+            help=(
+                "Max events per entity for training; beyond this the same entity "
+                "effect is reused. Default: the descriptor's max_events, else 50."
+            ),
         ),
-    ] = 50,
+    ] = None,
     # MCMC Configuration
     num_chains: Annotated[
         int,
@@ -730,11 +734,12 @@ def run(
             ),
         ),
     ] = 4.0,
-    likelihood_family: str = typer.Option(
-        "studentt",
+    likelihood_family: str | None = typer.Option(
+        None,
         "--likelihood-family",
         help=(
-            "Observation likelihood: 'studentt' (default) or 'normal' (symmetric); "
+            "Observation likelihood (default: the descriptor's likelihood_family, "
+            "else 'studentt'): 'studentt' or 'normal' (symmetric); "
             "the skew candidates 'skew_studentt' / 'skew_normal' (sinh-arcsinh) and "
             "'split_normal' (two-piece); 'beta' (bounded mean-precision Beta); or "
             "'beta_binomial' (target as the mean of n aggregated ratings)."
@@ -824,11 +829,12 @@ def run(
             "'dataset_stats' (legacy pre-split mean; mild test leakage)."
         ),
     ),
-    target_transform: str = typer.Option(
-        "offset_logit",
+    target_transform: str | None = typer.Option(
+        None,
         "--target-transform",
         help=(
-            "Score-scale transform: 'offset_logit' (default; model runs on the "
+            "Score-scale transform (default: the descriptor's target_transform, "
+            "else 'offset_logit'): 'offset_logit' (model runs on the "
             "Smithson-Verkuilen logit scale — bounds by construction, held-out "
             "elpd +22 over identity on the corrected #63 estimator) or "
             "'identity' (the former soft-clip default; faster per step)."

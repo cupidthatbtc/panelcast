@@ -86,7 +86,9 @@ def _as_legacy_bound(value: float) -> float | int:
 
 
 def _target_bounds(descriptor: DatasetDescriptor) -> tuple[float | int, float | int]:
-    low, high = descriptor.target_bounds
+    # Raw-CSV validation runs pre-rescale, so a rescale_target_to_unit domain
+    # is checked against its declared raw bounds (#268).
+    low, high = descriptor.raw_target_bounds
     return _as_legacy_bound(low), _as_legacy_bound(high)
 
 

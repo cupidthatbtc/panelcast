@@ -151,6 +151,28 @@ def prepare_datasets(config: PrepareConfig | None = None) -> PrepareResult:
     cleaned_df = clean_albums(raw_df, config=config.cleaning, logger=logger)
     log.info("cleaning_complete", rows=len(cleaned_df))
 
+    # Step 2b: auto-rescale a declared true proportion onto [0, 1] (#268).
+    # From here on the target lives on the descriptor's normalized unit
+    # bounds, so beta_binomial trial counts are never span-inflated (#263);
+    # observation counts are untouched.
+    if descriptor.rescale_target_to_unit and (
+        descriptor.raw_target_bounds != tuple(descriptor.target_bounds)
+    ):
+        raw_low, raw_high = descriptor.raw_target_bounds
+        span = raw_high - raw_low
+        rescaled = [
+            col
+            for col in (descriptor.target_col, descriptor.secondary_target_col)
+            if col is not None and col in cleaned_df.columns
+        ]
+        for col in rescaled:
+            cleaned_df[col] = (cleaned_df[col] - raw_low) / span
+        log.info(
+            "target_rescaled_to_unit",
+            columns=rescaled,
+            raw_bounds=[raw_low, raw_high],
+        )
+
     # Step 3: Generate primary-target datasets at multiple thresholds
     datasets_created: dict[str, Path] = {}
     dataset_rows: dict[str, int] = {}

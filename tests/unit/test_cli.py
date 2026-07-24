@@ -315,7 +315,8 @@ class TestRunConfigPassthrough:
         assert kwargs["enforce_lockfile"] is True
         assert kwargs["verbose"] is False
         assert kwargs["resume"] is None
-        assert kwargs["max_albums"] == 50
+        # None = descriptor-deferred (#268); the orchestrator resolves it.
+        assert kwargs["max_albums"] is None
         assert kwargs["num_chains"] == 4
         assert kwargs["num_samples"] == 1000
         assert kwargs["num_warmup"] == 1000

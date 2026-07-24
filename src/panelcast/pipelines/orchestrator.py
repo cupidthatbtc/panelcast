@@ -48,7 +48,6 @@ from panelcast.config.gates import (
     LatentProcess,
     NExponentPrior,
     SigmaObsPriorType,
-    TargetTransform,
 )
 from panelcast.model_preflight import beta_binomial_trial_scale
 from panelcast.paths import ArtifactPaths, resolve_latest
@@ -167,7 +166,8 @@ class PipelineConfig:
     # each arm's run up front instead of racing the mutable `latest` pointer.
     # None (default) keeps the generated timestamp ids. No CLI flag.
     run_id: str | None = None
-    max_albums: int = 50
+    # None resolves to the descriptor's max_events, else 50 (#268).
+    max_albums: int | None = None
     # MCMC configuration
     num_chains: int = 4
     num_samples: int = 1000
@@ -215,7 +215,8 @@ class PipelineConfig:
     # Builtins are the LikelihoodFamily Literal; entry-point plugin families
     # (#172) are also legal, so the boundary widens to str and the runtime
     # registry check in _validate_likelihood is the contract.
-    likelihood_family: str = "studentt"
+    # None resolves to the descriptor's likelihood_family, else "studentt".
+    likelihood_family: str | None = None
     # Discretization gate: interval-censor the observation to integers (default
     # off => continuous likelihood). Location-scale families only; not for beta.
     discretize_observation: bool = False
@@ -223,7 +224,9 @@ class PipelineConfig:
     debut_prev_score_source: DebutPrevScoreSource = "train_mean"
     # Target transform gate: "offset_logit" (default since 0.5.0 — promoted on
     # the corrected #63 ledger, +22 held-out elpd) | "identity" (former default)
-    target_transform: TargetTransform = "offset_logit"
+    # None resolves to the descriptor's target_transform, else "offset_logit"
+    # (the default since 0.5.0 — promoted on the corrected #63 ledger).
+    target_transform: str | None = None
     logit_offset: float = 0.5
     # AR(1) centering gate: "global" | "none" (legacy) | "artist_running"
     ar_center: ArCenter = "global"
@@ -343,6 +346,8 @@ class PipelineConfig:
                 f"Must be one of {valid_priors}."
             )
         self._validate_run_id()
+        if self.max_albums is not None and self.max_albums < 1:
+            raise ValueError(f"Invalid max_albums: {self.max_albums}. Must be >= 1.")
         if not 5 <= self.max_tree_depth <= 15:
             raise ValueError(
                 f"Invalid max_tree_depth: {self.max_tree_depth}. Must be between 5 and 15."
@@ -352,7 +357,10 @@ class PipelineConfig:
         for prob in self.calibration_intervals:
             if not 0.0 < prob < 1.0:
                 raise ValueError(f"Invalid calibration interval {prob}. Must be in (0, 1).")
-        if self.target_transform not in ("identity", "offset_logit"):
+        if self.target_transform is not None and self.target_transform not in (
+            "identity",
+            "offset_logit",
+        ):
             raise ValueError(
                 f"Invalid target_transform: '{self.target_transform}'. "
                 "Must be 'identity' or 'offset_logit'."
@@ -483,6 +491,22 @@ class PipelineConfig:
         """Validate the likelihood family and its structural constraints."""
         from panelcast.models.bayes.likelihoods import all_likelihoods, find_likelihood
 
+        # Family-independent coupling first: it must hold even while the
+        # family is an unresolved sentinel (#268).
+        if (
+            self.discretize_observation
+            and self.target_transform is not None
+            and self.target_transform != "identity"
+        ):
+            raise ValueError(
+                "discretize_observation=True requires target_transform='identity': "
+                "discretization interval-censors integers on the raw score scale, "
+                f"but target_transform='{self.target_transform}' moves y off that scale."
+            )
+        if self.likelihood_family is None:
+            # Unresolved sentinel: the orchestrator resolves it from the
+            # descriptor and re-validates (#268).
+            return
         spec = find_likelihood(self.likelihood_family)
         if spec is None:
             raise ValueError(
@@ -495,13 +519,11 @@ class PipelineConfig:
                 f"discretize_observation=True is not supported by likelihood_family "
                 f"'{self.likelihood_family}'. Supported: {', '.join(supported)}."
             )
-        if self.discretize_observation and self.target_transform != "identity":
-            raise ValueError(
-                "discretize_observation=True requires target_transform='identity': "
-                "discretization interval-censors integers on the raw score scale, "
-                f"but target_transform='{self.target_transform}' moves y off that scale."
-            )
-        if spec.requires_identity_transform and self.target_transform != "identity":
+        if (
+            spec.requires_identity_transform
+            and self.target_transform is not None
+            and self.target_transform != "identity"
+        ):
             raise ValueError(
                 f"likelihood_family='{self.likelihood_family}' requires "
                 f"target_transform='identity' (got '{self.target_transform}'): "
@@ -602,6 +624,17 @@ class PipelineOrchestrator:
         # StageContext rather than re-deriving domain names from literals.
         self.descriptor = load_descriptor(config.dataset)
         self.descriptor_path = resolve_descriptor_path(config.dataset)
+        # Resolve descriptor-owned model facts (#268): these are properties of
+        # the data, so an explicit CLI/YAML value wins, the descriptor is next,
+        # and the historical pipeline defaults are last. Re-validate afterwards
+        # so family/transform coupling rules see resolved values.
+        if config.likelihood_family is None:
+            config.likelihood_family = self.descriptor.likelihood_family or "studentt"
+        if config.target_transform is None:
+            config.target_transform = self.descriptor.target_transform or "offset_logit"
+        if config.max_albums is None:
+            config.max_albums = self.descriptor.max_events or 50
+        config._validate()
         # beta_binomial models the target as the mean of n aggregated ratings, so
         # it only makes sense when n_obs_col is a true count of independent raters.
         if (
@@ -659,6 +692,24 @@ class PipelineOrchestrator:
         if self.config.min_ratings is None:
             raise PipelineError("min_ratings unresolved before use", stage="setup")
         return self.config.min_ratings
+
+    def _resolved_event_cap(self) -> int:
+        """The per-entity event cap after descriptor resolution (#268)."""
+        if self.config.max_albums is None:
+            raise PipelineError("event cap unresolved before use", stage="setup")
+        return self.config.max_albums
+
+    def _resolved_likelihood_family(self) -> str:
+        """likelihood_family after descriptor resolution (#268)."""
+        if self.config.likelihood_family is None:
+            raise PipelineError("likelihood_family unresolved before use", stage="setup")
+        return self.config.likelihood_family
+
+    def _resolved_target_transform(self) -> str:
+        """target_transform after descriptor resolution (#268)."""
+        if self.config.target_transform is None:
+            raise PipelineError("target_transform unresolved before use", stage="setup")
+        return self.config.target_transform
 
     def run(self) -> int:
         """Execute the pipeline and return exit code.
@@ -1109,6 +1160,11 @@ class PipelineOrchestrator:
         """Build command string representation for manifest."""
         parts = ["panelcast run"]
         defaults = _get_default_config()
+        # Descriptor-owned model facts (#268): the effective default is what
+        # the descriptor resolves to, so a domain's default run needs no flag.
+        eff_family = self.descriptor.likelihood_family or "studentt"
+        eff_transform = self.descriptor.target_transform or "offset_logit"
+        eff_max_events = self.descriptor.max_events or 50
 
         if self.config.seed != defaults.seed:
             parts.append(f"--seed {self.config.seed}")
@@ -1126,7 +1182,7 @@ class PipelineOrchestrator:
             parts.append("--verbose")
         if self.config.progress_bar is False:
             parts.append("--no-progress")
-        if self.config.max_albums != defaults.max_albums:
+        if self.config.max_albums != eff_max_events:
             parts.append(f"--max-albums {self.config.max_albums}")
         # MCMC config
         if self.config.num_chains != defaults.num_chains:
@@ -1191,14 +1247,14 @@ class PipelineOrchestrator:
                     parts.append(f"--n-exponent-beta {self.config.n_exponent_beta}")
         if self.config.likelihood_df != defaults.likelihood_df:
             parts.append(f"--likelihood-df {self.config.likelihood_df}")
-        if self.config.likelihood_family != defaults.likelihood_family:
+        if self.config.likelihood_family != eff_family:
             parts.append(f"--likelihood-family {self.config.likelihood_family}")
         if self.config.discretize_observation != defaults.discretize_observation:
             parts.append("--discretize-observation")
         # Model gates. The YAML-only knobs (logit_offset through
         # entity_group_pooling) have no CLI flags — they are recorded
         # flag-style for provenance and reproduced via run_config.yaml.
-        if self.config.target_transform != defaults.target_transform:
+        if self.config.target_transform != eff_transform:
             parts.append(f"--target-transform {self.config.target_transform}")
         if self.config.logit_offset != defaults.logit_offset:
             parts.append(f"--logit-offset {self.config.logit_offset}")
@@ -1518,7 +1574,7 @@ class PipelineOrchestrator:
             verbose=self.config.verbose,
             progress_bar=self.config.progress_bar,
             manifest=self.manifest,
-            max_albums=self.config.max_albums,
+            max_albums=self._resolved_event_cap(),
             # MCMC configuration
             num_chains=self.config.num_chains,
             num_samples=self.config.num_samples,
@@ -1550,10 +1606,10 @@ class PipelineOrchestrator:
             n_exponent_beta=self.config.n_exponent_beta,
             n_exponent_prior=self.config.n_exponent_prior,
             likelihood_df=self.config.likelihood_df,
-            likelihood_family=self.config.likelihood_family,
+            likelihood_family=self._resolved_likelihood_family(),
             discretize_observation=self.config.discretize_observation,
             debut_prev_score_source=self.config.debut_prev_score_source,
-            target_transform=self.config.target_transform,
+            target_transform=self._resolved_target_transform(),
             logit_offset=self.config.logit_offset,
             ar_center=self.config.ar_center,
             latent_process=self.config.latent_process,
