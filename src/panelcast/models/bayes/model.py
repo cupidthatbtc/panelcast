@@ -596,6 +596,8 @@ def make_score_model(score_type: str) -> Callable:
         prev_meas_sigma: jnp.ndarray | None = None,
         group_idx_by_artist: jnp.ndarray | None = None,
         n_groups: int | None = None,
+        period_idx: jnp.ndarray | None = None,
+        n_periods: int | None = None,
     ) -> None:
         """Centered parameterization of score model (internal).
 
@@ -751,6 +753,57 @@ def make_score_model(score_type: str) -> Callable:
         # === Fixed effects for covariates (prior-type seam) ===
         beta = _sample_beta(prefix, n_features, priors)
 
+        # === Period (calendar-time) effects (gated; default off => legacy) ===
+        # A constrained additive offset per period. The declared constraint is
+        # the identification: against entity intercepts + cohorts + an age-like
+        # covariate, a free period term is an exact APC rank deficiency.
+        # Gate-off creates no sites, so the legacy draw sequence stays
+        # bit-identical; unseen periods (period_idx < 0, e.g. future years at
+        # prediction time) contribute exactly zero — the constraint's center.
+        if priors.period_effects:
+            if period_idx is None or n_periods is None:
+                raise ValueError(
+                    "period_effects=True requires period_idx and n_periods "
+                    "(per-observation period indices; set period_col in the "
+                    "dataset descriptor)."
+                )
+            sigma_period = numpyro.sample(
+                f"{prefix}sigma_period",
+                dist.HalfNormal(priors.sigma_period_scale),
+            )
+            if priors.period_constraint == "zero_sum":
+                period_z = numpyro.sample(
+                    f"{prefix}period_offset_z",
+                    dist.ZeroSumNormal(1.0, event_shape=(n_periods,)),
+                )
+                period_offset = numpyro.deterministic(
+                    f"{prefix}period_offset", sigma_period * period_z
+                )
+            else:
+                # pin_first / pin_last: one period's offset is exactly zero
+                # and the rest are free draws around it.
+                period_z = numpyro.sample(
+                    f"{prefix}period_offset_z",
+                    dist.Normal(0.0, 1.0).expand((n_periods - 1,)).to_event(1),
+                )
+                free = sigma_period * period_z
+                zero = jnp.zeros((1,))
+                stacked = (
+                    jnp.concatenate([zero, free])
+                    if priors.period_constraint == "pin_first"
+                    else jnp.concatenate([free, zero])
+                )
+                period_offset = numpyro.deterministic(
+                    f"{prefix}period_offset", stacked
+                )
+            obs_period_effect = jnp.where(
+                period_idx >= 0,
+                period_offset[jnp.clip(period_idx, 0, n_periods - 1)],
+                0.0,
+            )
+        else:
+            obs_period_effect = 0.0
+
         # === AR(1) term for album-to-album dependency ===
         # With ar_center=0 (legacy) debuts carry the training global mean as
         # prev_score, so rho also absorbs the overall score level. Centering
@@ -764,7 +817,7 @@ def make_score_model(score_type: str) -> Callable:
         # guarantees bounds by construction. The transform is RNG-free, so the
         # mu call is deferred to just before the likelihood -- after the gated
         # EIV resample below -- without perturbing any draw on the gate-off path.
-        mu_raw = obs_artist_effect + X @ beta + ar_term
+        mu_raw = obs_artist_effect + X @ beta + ar_term + obs_period_effect
 
         # === Heteroscedastic mode validation ===
         # Note: When learn_n_exponent=True, n_exp is a traced JAX value and cannot

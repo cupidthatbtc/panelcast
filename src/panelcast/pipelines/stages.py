@@ -162,6 +162,11 @@ class StageContext:
     # present in the training split (the orchestrator always passes the
     # configured PipelineConfig value; train resolves it).
     entity_group_pooling: bool | None = None
+    # Period (calendar-time) effects gate (#269): constrained per-period
+    # offsets indexed by the descriptor's period_col.
+    period_effects: bool = False
+    period_constraint: str = "zero_sum"
+    sigma_period_scale: float = 0.5
     # Missing-covariate treatment gate (#158): median + indicators vs fillna(0)
     impute_missing: bool = False
     # Stacked-GBM offset feature block (#86). Stays False here so bare test

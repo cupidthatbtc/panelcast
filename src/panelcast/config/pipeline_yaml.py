@@ -161,6 +161,10 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "propagate_rw_horizon": _spec("propagate_rw_horizon", None),
     # Genre/group pooling gate (#41; no CLI flag).
     "entity_group_pooling": _spec("entity_group_pooling", None),
+    # Period-effects gate (#269; no CLI flag).
+    "period_effects": _spec("period_effects", None),
+    "period_constraint": _spec("period_constraint", None),
+    "sigma_period_scale": _spec("sigma_period_scale", None),
     # Stacked-GBM offset feature block (#86; no CLI flag).
     "gbm_offset": _spec("gbm_offset", None),
     # Train-median imputation gate (#158; no CLI flag).
