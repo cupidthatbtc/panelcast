@@ -821,8 +821,47 @@ def _prepare_test_model_args(
         test_model_args["group_idx_by_artist"] = np.asarray(group_idx_by_artist, dtype=np.int32)
         test_model_args["n_groups"] = int(n_groups)
 
+    if getattr(priors_obj, "period_effects", False):
+        test_model_args.update(_period_args_from_summary(summary, test_df))
+
     row_ids = _row_identities(test_df, summary, artist_counts_for_filter, n_reviews)
     return test_model_args, y_true, row_ids
+
+
+def _period_args_from_summary(summary: dict, df: pd.DataFrame) -> dict:
+    """Period model args (#269) for a split, from the training-time mapping.
+
+    Periods unseen in training map to -1: exactly zero effect, the declared
+    constraint's center.
+    """
+    period_to_idx = summary.get("period_to_idx")
+    n_periods = summary.get("n_periods")
+    period_col = summary.get("period_col")
+    if period_to_idx is None or n_periods is None or period_col is None:
+        raise ValueError(
+            "period_effects is on but the training summary lacks "
+            "period_to_idx/n_periods/period_col — re-run the train stage."
+        )
+    if period_col not in df.columns:
+        raise ValueError(
+            f"period_effects is on but column '{period_col}' is missing "
+            "from the split being scored."
+        )
+    period_idx = np.array(
+        [period_to_idx.get(str(p), -1) for p in df[period_col]], dtype=np.int32
+    )
+    if len(period_idx) and not (period_idx >= 0).any():
+        # An all-unseen split is legitimate for a genuinely future horizon,
+        # but it is also exactly what a train/eval dtype drift in period_col
+        # looks like (str(2018) != str(2018.0)) — surface it either way.
+        log.warning(
+            "period_all_unseen",
+            period_col=period_col,
+            n_rows=len(period_idx),
+            sample_values=[str(p) for p in df[period_col].head(3)],
+            trained_periods=list(period_to_idx)[:3],
+        )
+    return {"period_idx": period_idx, "n_periods": int(n_periods)}
 
 
 def _resolve_feature_split_dir(split_name: str, features_root: Path | None = None) -> Path:
@@ -1447,6 +1486,9 @@ def _run_training_prior_predictive(
                 group_idx_by_artist, dtype=np.int32
             )
             train_model_args["n_groups"] = int(n_groups)
+
+        if bool(getattr(train_model_args["priors"], "period_effects", False)):
+            train_model_args.update(_period_args_from_summary(summary, train_df_pp))
 
         if bool(getattr(train_model_args["priors"], "errors_in_variables", False)):
             global_std_pp = float(summary.get("global_std_score") or 0.0)

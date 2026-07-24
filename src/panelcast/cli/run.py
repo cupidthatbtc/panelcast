@@ -300,6 +300,11 @@ def _run_full_preflight(
         "heteroscedastic_entity_obs": entity_obs_gate,
         "entity_group_pooling": effective_group_pooling,
     }
+    # Included only when on so pre-existing gate-off calibration caches stay
+    # valid (#269).
+    if bool(getattr(config, "period_effects", False)):
+        model_signature["period_effects"] = True
+        model_signature["period_constraint"] = str(config.period_constraint)
     # Mirror the production fit's memory gate in the calibration runs:
     # with the rw_raw exclusion on, the dominant memory term disappears
     # and the projection must reflect that.

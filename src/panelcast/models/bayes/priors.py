@@ -299,6 +299,20 @@ class PriorConfig:
     entity_group_pooling: bool = False
     # HalfNormal scale for sigma_group (the between-group spread).
     sigma_group_scale: float = 0.5
+    # Period (calendar-time) effects with a declared identification constraint
+    # (#269; default off => legacy path, no new sites, bit-identical RNG).
+    # With entity intercepts + cohort pooling + an age-like covariate, a free
+    # period term is an exact age-period-cohort rank deficiency — the declared
+    # constraint is what identifies the decomposition. Requires period_idx /
+    # n_periods model args (built from the descriptor's period_col).
+    # New sites: {prefix}sigma_period, {prefix}period_offset_z
+    # (+ deterministic {prefix}period_offset).
+    period_effects: bool = False
+    # "zero_sum" (offsets sum to zero across periods), "pin_first", or
+    # "pin_last" (that period's offset is exactly zero).
+    period_constraint: str = "zero_sum"
+    # HalfNormal scale for sigma_period (the between-period spread).
+    sigma_period_scale: float = 0.5
 
 
 def priors_for_transform(target_transform: str = "identity", **overrides) -> PriorConfig:
