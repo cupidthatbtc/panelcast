@@ -143,6 +143,14 @@ class TestRescaleTargetToUnit:
         assert DatasetDescriptor(rescale_target_to_unit=False).descriptor_hash() == base
         assert DatasetDescriptor(rescale_target_to_unit=True).descriptor_hash() != base
 
+    def test_hash_distinguishes_raw_spans_under_rescale(self):
+        # Both normalize to (0, 1) but prepare different data; resume/skip
+        # must never treat them as the same experiment.
+        a = DatasetDescriptor(rescale_target_to_unit=True, target_bounds=(0.0, 100.0))
+        b = DatasetDescriptor(rescale_target_to_unit=True, target_bounds=(20.0, 80.0))
+        assert tuple(a.target_bounds) == tuple(b.target_bounds) == (0.0, 1.0)
+        assert a.descriptor_hash() != b.descriptor_hash()
+
     def test_prepare_rescales_target_but_not_counts(self, tmp_path, monkeypatch):
         import pandas as pd
 
