@@ -314,6 +314,10 @@ class DatasetDescriptor(BaseModel):
                 fields.pop(optional, None)
         if fields.get("rescale_target_to_unit") is False:
             fields.pop("rescale_target_to_unit", None)
+        elif self._raw_target_bounds is not None:
+            # Two different raw spans both normalize to [0, 1]; the hash must
+            # tell them apart or resume/skip could reuse incompatible data.
+            fields["target_bounds"] = list(self._raw_target_bounds)
         payload = json.dumps(fields, sort_keys=True)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 

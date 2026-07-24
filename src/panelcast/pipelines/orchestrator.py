@@ -629,11 +629,19 @@ class PipelineOrchestrator:
         # and the historical pipeline defaults are last. Re-validate afterwards
         # so family/transform coupling rules see resolved values.
         if config.likelihood_family is None:
-            config.likelihood_family = self.descriptor.likelihood_family or "studentt"
+            config.likelihood_family = (
+                self.descriptor.likelihood_family
+                if self.descriptor.likelihood_family is not None
+                else "studentt"
+            )
         if config.target_transform is None:
-            config.target_transform = self.descriptor.target_transform or "offset_logit"
+            config.target_transform = (
+                self.descriptor.target_transform
+                if self.descriptor.target_transform is not None
+                else "offset_logit"
+            )
         if config.max_albums is None:
-            config.max_albums = self.descriptor.max_events or 50
+            config.max_albums = self.descriptor.max_events if self.descriptor.max_events is not None else 50
         config._validate()
         # beta_binomial models the target as the mean of n aggregated ratings, so
         # it only makes sense when n_obs_col is a true count of independent raters.

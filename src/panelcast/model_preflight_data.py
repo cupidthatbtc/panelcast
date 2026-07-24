@@ -48,11 +48,19 @@ def _resolve_config(dataset: str | None, config_files: list[str] | None):
 
     descriptor = load_descriptor(config.dataset)
     if config.likelihood_family is None:
-        config.likelihood_family = descriptor.likelihood_family or "studentt"
+        config.likelihood_family = (
+            descriptor.likelihood_family
+            if descriptor.likelihood_family is not None
+            else "studentt"
+        )
     if config.target_transform is None:
-        config.target_transform = descriptor.target_transform or "offset_logit"
+        config.target_transform = (
+            descriptor.target_transform
+            if descriptor.target_transform is not None
+            else "offset_logit"
+        )
     if config.max_albums is None:
-        config.max_albums = descriptor.max_events or 50
+        config.max_albums = descriptor.max_events if descriptor.max_events is not None else 50
     config._validate()
     return config
 
