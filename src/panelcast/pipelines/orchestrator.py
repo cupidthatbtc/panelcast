@@ -641,7 +641,9 @@ class PipelineOrchestrator:
                 else "offset_logit"
             )
         if config.max_albums is None:
-            config.max_albums = self.descriptor.max_events if self.descriptor.max_events is not None else 50
+            config.max_albums = (
+                self.descriptor.max_events if self.descriptor.max_events is not None else 50
+            )
         config._validate()
         # beta_binomial models the target as the mean of n aggregated ratings, so
         # it only makes sense when n_obs_col is a true count of independent raters.
