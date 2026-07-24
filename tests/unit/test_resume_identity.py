@@ -164,9 +164,10 @@ class TestResumeRestoresCompleteExperiment:
         assert tuple(config.calibration_intervals) == (0.5, 0.9)
 
     def test_resume_refuses_on_identity_mismatch_with_actionable_diff(self, tmp_path):
-        # min_ratings pinned: a real run records the hash after the orchestrator
-        # resolves it from the descriptor.
-        original = PipelineConfig(num_samples=1234, min_ratings=10)
+        # Recorded identities hold post-resolution values: resolve exactly the
+        # way a real run does instead of hand-pinning each sentinel.
+        original = PipelineConfig(num_samples=1234)
+        PipelineOrchestrator(original, output_base=tmp_path / "resolve_a")
         identity = {
             "config_hash": experiment_config_hash(original),
             "config_payload": experiment_config_payload(original),
@@ -182,15 +183,8 @@ class TestResumeRestoresCompleteExperiment:
             self._resume(tmp_path, original, identity=identity, tamper=tamper)
 
     def test_resume_proceeds_when_identity_matches(self, tmp_path):
-        original = PipelineConfig(
-            num_samples=1234,
-            enable_artist=False,
-            min_ratings=10,
-            # Recorded identities hold post-resolution values (#268).
-            likelihood_family="studentt",
-            target_transform="offset_logit",
-            max_albums=50,
-        )
+        original = PipelineConfig(num_samples=1234, enable_artist=False)
+        PipelineOrchestrator(original, output_base=tmp_path / "resolve_b")
         identity = {
             "config_hash": experiment_config_hash(original),
             "config_payload": experiment_config_payload(original),

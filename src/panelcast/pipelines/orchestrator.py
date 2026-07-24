@@ -322,6 +322,9 @@ class PipelineConfig:
     # Prediction batching (memory/speed trade-off, not statistically relevant)
     predictive_batch_size: int = 500
     predict_artist_batch_size: int = 50
+    # priors: auto (#267): derive sigma lognormal locs from train-data moments
+    # at fit time. None resolves to the descriptor's auto_priors, else False.
+    auto_priors: bool | None = None
     # Dataset descriptor reference (bare name or YAML path; None = AOTY defaults)
     dataset: str | None = None
     # YAML keys ignored under --allow-unknown-config-keys (#297). Provenance
@@ -415,6 +418,7 @@ class PipelineConfig:
             value = getattr(self, scale_field)
             if value <= 0.0:
                 raise ValueError(f"Invalid {scale_field}: {value}. Must be > 0.")
+        self._validate_auto_priors()
         if self.coverage_tolerance < 0.0:
             raise ValueError("coverage_tolerance must be >= 0.")
         if not 0.0 < self.prediction_interval < 1.0:
@@ -485,6 +489,27 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid run_id: {self.run_id!r}. Must be a bare directory name "
                 "(no path separators, not a reserved name)."
+            )
+
+    def _validate_auto_priors(self) -> None:
+        """auto_priors derives the sigma locs; explicit values conflict (#267)."""
+        if not self.auto_priors:
+            return
+        defaults = _field_defaults()
+        explicit = [
+            name
+            for name in (
+                "sigma_rw_lognormal_loc",
+                "sigma_rw_lognormal_sigma",
+                "sigma_artist_lognormal_loc",
+                "sigma_artist_lognormal_sigma",
+            )
+            if getattr(self, name) != defaults[name]
+        ]
+        if explicit:
+            raise ValueError(
+                f"auto_priors=True derives {', '.join(explicit)} from the "
+                "training data; remove the explicit value(s) or turn auto off."
             )
 
     def _validate_likelihood(self) -> None:
@@ -590,6 +615,10 @@ def resolve_model_facts(config: PipelineConfig, descriptor) -> None:
         )
     if config.max_albums is None:
         config.max_albums = descriptor.max_events if descriptor.max_events is not None else 50
+    if config.auto_priors is None:
+        config.auto_priors = (
+            descriptor.auto_priors if descriptor.auto_priors is not None else False
+        )
     config._validate()
     # beta_binomial models the target as the mean of n aggregated ratings, so
     # it only makes sense when n_obs_col is a true count of independent raters.
@@ -1620,6 +1649,7 @@ class PipelineOrchestrator:
             n_exponent_prior=self.config.n_exponent_prior,
             likelihood_df=self.config.likelihood_df,
             likelihood_family=self._resolved_likelihood_family(),
+            auto_priors=bool(self.config.auto_priors),
             discretize_observation=self.config.discretize_observation,
             debut_prev_score_source=self.config.debut_prev_score_source,
             target_transform=self._resolved_target_transform(),

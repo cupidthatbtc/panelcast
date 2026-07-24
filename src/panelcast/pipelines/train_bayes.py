@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 import os
 from collections.abc import Callable
 from dataclasses import asdict
@@ -27,6 +28,7 @@ from panelcast.data.chronology import normalize_chronology
 from panelcast.data.imputation import apply_imputation, fit_imputation
 from panelcast.data.split_types import SplitType, resolve_split_dir
 from panelcast.gpu_memory import estimate_memory_gb
+from panelcast.model_preflight import cross_entity_mean_sd, within_entity_step_sd
 from panelcast.models.bayes.diagnostics import check_convergence, detect_caged_chains
 from panelcast.models.bayes.fit import MCMCConfig, fit_model, resolve_progress_bar
 from panelcast.models.bayes.io import save_model
@@ -182,6 +184,54 @@ def build_training_priors(
         logit_offset=logit_offset,
         target_bounds=target_bounds,
     )
+
+
+def apply_auto_prior_locs(priors, y, entity_idx):
+    """Derive the sigma lognormal locs from the training data (#267).
+
+    sigma_artist sits at ln(cross-entity SD of entity means) — the moment it
+    governs. The within-entity per-step SD only upper-bounds latent sigma_rw
+    (observation noise and overdispersion inflate it), so its loc sits half an
+    e-fold below the moment, with a generous width. Returns the updated
+    PriorConfig plus an audit record; the resolved values also land in the
+    model manifest via the saved PriorConfig.
+    """
+    y = np.asarray(y, dtype=float)
+    entity_idx = np.asarray(entity_idx)
+    rw_moment = within_entity_step_sd(y, entity_idx)
+    entity_moment = cross_entity_mean_sd(y, entity_idx)
+    if rw_moment <= 0.0 or entity_moment <= 0.0:
+        raise ValueError(
+            "auto_priors could not derive prior locations: a governing data "
+            f"moment is degenerate (within-entity step SD {rw_moment:.3g}, "
+            f"cross-entity mean SD {entity_moment:.3g}). Set the lognormal locs "
+            "explicitly instead."
+        )
+    derived = {
+        "sigma_rw_lognormal_loc": math.log(rw_moment) - 0.5,
+        "sigma_rw_lognormal_sigma": 0.8,
+        "sigma_artist_lognormal_loc": math.log(entity_moment),
+        "sigma_artist_lognormal_sigma": 0.6,
+        # Intentional override of the halfnormal default: placing the derived
+        # loc requires the lognormal channel, so auto always switches to it.
+        "sigma_artist_prior_type": "lognormal",
+    }
+    record = {
+        **derived,
+        "within_entity_step_sd": rw_moment,
+        "cross_entity_mean_sd": entity_moment,
+    }
+    return dataclasses.replace(priors, **derived), record
+
+
+def maybe_apply_auto_priors(ctx, priors, model_args):
+    """The #267 hook shared by the train stage and the preflight audit, so
+    both always derive from the same y / entity index."""
+    if not bool(getattr(ctx, "auto_priors", False)):
+        return priors
+    priors, record = apply_auto_prior_locs(priors, model_args["y"], model_args["artist_idx"])
+    log.info("auto_priors_applied", **record)
+    return priors
 
 
 def load_training_data(
@@ -1550,6 +1600,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
         ar_center_value=ar_center_value,
         target_bounds=tuple(descriptor.target_bounds),
     )
+    priors = maybe_apply_auto_priors(ctx, priors, model_args)
     model_args["priors"] = priors
     model_args["target_bounds"] = tuple(descriptor.target_bounds)
 

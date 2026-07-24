@@ -67,6 +67,7 @@ def assemble_preflight_inputs(
     from panelcast.pipelines.train_bayes import (
         build_training_priors,
         load_training_data,
+        maybe_apply_auto_priors,
         resolve_entity_group_pooling,
     )
 
@@ -114,6 +115,8 @@ def assemble_preflight_inputs(
         ar_center_value=model_args["ar_center_value"],
         target_bounds=tuple(descriptor.target_bounds),
     )
+    # Audit the same data-derived priors the fit will use (#267).
+    priors = maybe_apply_auto_priors(config, priors, model_args)
 
     return PreflightInputs(
         X=np.asarray(model_args["X"], dtype=float),

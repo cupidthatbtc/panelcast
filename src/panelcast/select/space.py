@@ -311,6 +311,7 @@ KNOBS: tuple[Knob, ...] = (
 # Literal) but are deliberately NOT candidates. The guard test forces every
 # such field to appear either in KNOBS or here — with a reason.
 EXCLUDED_FIELDS: dict[str, str] = {
+    "auto_priors": "prior locs become data-derived; the sweep varies priors explicitly",
     "skip_existing": "workflow control, not a model option",
     "dry_run": "workflow control, not a model option",
     "strict": "convergence-warning policy, not a model option",
