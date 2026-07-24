@@ -38,14 +38,20 @@ class TestTable:
 
     def test_default_arm_matches_pipeline_defaults(self):
         from panelcast.pipelines.orchestrator import PipelineConfig
+        from panelcast.select.space import _SENTINEL_KNOB_FALLBACKS
 
         cfg = PipelineConfig()
         arm = default_arm()
         for knob in KNOBS:
-            assert arm[knob.name] == getattr(cfg, knob.name)
-            assert knob.default == getattr(cfg, knob.name), (
+            # Descriptor-deferred knobs (#268) are None on a bare config; the
+            # sweep's neutral base pins the pipeline fallbacks.
+            expected = getattr(cfg, knob.name)
+            if expected is None and knob.name in _SENTINEL_KNOB_FALLBACKS:
+                expected = _SENTINEL_KNOB_FALLBACKS[knob.name]
+            assert arm[knob.name] == expected
+            assert knob.default == expected, (
                 f"{knob.name}: table default {knob.default!r} drifted from "
-                f"PipelineConfig default {getattr(cfg, knob.name)!r}"
+                f"the effective pipeline default {expected!r}"
             )
 
     def test_feature_affecting_knobs(self):

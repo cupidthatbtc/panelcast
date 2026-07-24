@@ -72,6 +72,13 @@ min_obs_thresholds: [1000, 500000, 1000000]
 primary_min_obs: 1000
 processed_name_template: "dem_share_minvotes_{min_ratings}"
 
+# --- model facts (#268) -------------------------------------------------------
+# Votes are a true aggregation count, so the domain's default run IS binomial:
+# no CLI flags needed. beta_binomial is discrete on the raw score scale, hence
+# the identity transform.
+likelihood_family: beta_binomial
+target_transform: identity
+
 # --- features -----------------------------------------------------------------
 feature_packs: []
 feature_blocks:

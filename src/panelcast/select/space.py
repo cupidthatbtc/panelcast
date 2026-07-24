@@ -353,6 +353,16 @@ EXCLUDED_FIELDS: dict[str, str] = {
 }
 
 
+# Descriptor-deferred knobs (#268) are None on a bare PipelineConfig; the
+# sweep's neutral base uses the pipeline fallbacks the AOTY orchestrator
+# resolves to. A descriptor-declared value is a per-domain default the sweep
+# does not model.
+_SENTINEL_KNOB_FALLBACKS = {
+    "likelihood_family": "studentt",
+    "target_transform": "offset_logit",
+}
+
+
 def default_arm() -> dict[str, Any]:
     """The neutral base: every knob at its shipped default.
 
@@ -362,7 +372,11 @@ def default_arm() -> dict[str, Any]:
     from panelcast.pipelines.orchestrator import PipelineConfig
 
     cfg = PipelineConfig()
-    return {knob.name: getattr(cfg, knob.name) for knob in KNOBS}
+    arm = {knob.name: getattr(cfg, knob.name) for knob in KNOBS}
+    for name, fallback in _SENTINEL_KNOB_FALLBACKS.items():
+        if arm.get(name) is None:
+            arm[name] = fallback
+    return arm
 
 
 def knob_is_active(knob: Knob, arm: Mapping[str, Any]) -> bool:

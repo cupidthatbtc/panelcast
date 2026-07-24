@@ -122,7 +122,7 @@ def _build_stage_config(
 def _validate_run_options(
     chain_method: str,
     n_exponent_prior: str,
-    likelihood_family: str,
+    likelihood_family: str | None,
     calibration_intervals: str,
 ) -> tuple[str, tuple[float, ...]]:
     """Validate the free-form run options, returning the normalized chain method
@@ -149,7 +149,8 @@ def _validate_run_options(
     from panelcast.models.bayes.likelihoods import available_families
 
     valid_families = available_families()
-    if likelihood_family not in valid_families:
+    # None = unset: resolved from the descriptor by the orchestrator (#268).
+    if likelihood_family is not None and likelihood_family not in valid_families:
         typer.echo(
             f"Error: Invalid --likelihood-family '{likelihood_family}'. "
             f"Must be one of: {', '.join(valid_families)}"
@@ -227,8 +228,13 @@ def _run_full_preflight(
         raise typer.Exit(2)  # CANNOT_CHECK exit code
 
     from panelcast.config.descriptor import load_descriptor
+    from panelcast.pipelines.orchestrator import resolve_model_facts
 
     preflight_descriptor = load_descriptor(config.dataset)
+    # The preflight runs before the orchestrator exists, so the model-fact
+    # sentinels (#268) must be resolved here or the signature/cap math below
+    # would see None.
+    resolve_model_facts(config, preflight_descriptor)
 
     effective_group_pooling = _resolve_preflight_group_pooling(
         config, preflight_descriptor, features_path, splits_path
@@ -366,6 +372,7 @@ def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> No
     preflight-only or on a failure not overridden by --force-run."""
     from panelcast.config.descriptor import load_descriptor
     from panelcast.data.ingest import extract_data_dimensions
+    from panelcast.pipelines.orchestrator import resolve_model_facts
     from panelcast.preflight import (
         PreflightStatus,
         render_preflight_result,
@@ -376,6 +383,8 @@ def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> No
     # preflight reads the configured domain's data and columns, not just
     # AOTY's. config.dataset=None -> AOTY defaults.
     quick_descriptor = load_descriptor(config.dataset)
+    # Resolve the model-fact sentinels (#268) before max_seq math sees None.
+    resolve_model_facts(config, quick_descriptor)
     quick_csv_path = quick_descriptor.resolve_raw_path()
     # Mirror the orchestrator's resolution so the preflight reads the same
     # threshold a default run would use.
@@ -526,12 +535,15 @@ def run(
         help="Free-form label recorded in the run manifest (shown by `runs history`)",
     ),
     max_albums: Annotated[
-        int,
+        int | None,
         typer.Option(
             min=1,
-            help="Max albums per artist for training. Beyond this use same artist effect.",
+            help=(
+                "Max events per entity for training; beyond this the same entity "
+                "effect is reused. Default: the descriptor's max_events, else 50."
+            ),
         ),
-    ] = 50,
+    ] = None,
     # MCMC Configuration
     num_chains: Annotated[
         int,
@@ -730,11 +742,12 @@ def run(
             ),
         ),
     ] = 4.0,
-    likelihood_family: str = typer.Option(
-        "studentt",
+    likelihood_family: str | None = typer.Option(
+        None,
         "--likelihood-family",
         help=(
-            "Observation likelihood: 'studentt' (default) or 'normal' (symmetric); "
+            "Observation likelihood (default: the descriptor's likelihood_family, "
+            "else 'studentt'): 'studentt' or 'normal' (symmetric); "
             "the skew candidates 'skew_studentt' / 'skew_normal' (sinh-arcsinh) and "
             "'split_normal' (two-piece); 'beta' (bounded mean-precision Beta); or "
             "'beta_binomial' (target as the mean of n aggregated ratings)."
@@ -824,11 +837,12 @@ def run(
             "'dataset_stats' (legacy pre-split mean; mild test leakage)."
         ),
     ),
-    target_transform: str = typer.Option(
-        "offset_logit",
+    target_transform: str | None = typer.Option(
+        None,
         "--target-transform",
         help=(
-            "Score-scale transform: 'offset_logit' (default; model runs on the "
+            "Score-scale transform (default: the descriptor's target_transform, "
+            "else 'offset_logit'): 'offset_logit' (model runs on the "
             "Smithson-Verkuilen logit scale — bounds by construction, held-out "
             "elpd +22 over identity on the corrected #63 estimator) or "
             "'identity' (the former soft-clip default; faster per step)."

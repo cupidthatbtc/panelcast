@@ -1175,9 +1175,12 @@ class TestPipelineConfigValidation:
         must reject the combination up front."""
         import pytest
 
+        # The transform is stated explicitly: family alone is a legal
+        # half-resolved sentinel state now that descriptors can own the
+        # transform (#268).
         for family in ("beta", "beta_ceiling", "beta_binomial"):
             with pytest.raises(ValueError, match="target_transform='identity'"):
-                PipelineConfig(likelihood_family=family)
+                PipelineConfig(likelihood_family=family, target_transform="offset_logit")
 
     def test_identity_required_family_with_identity_passes(self):
         config = PipelineConfig(likelihood_family="beta", target_transform="identity")

@@ -10,6 +10,10 @@
 # paths) do NOT belong here — they live in a dataset descriptor under
 # configs/datasets/ and are selected with --dataset.
 
+# max_albums / target_transform are deliberately unset here (#268): they
+# defer to the dataset descriptor, then to the pipeline defaults (50 /
+# offset_logit). Restating them would override every descriptor.
+
 seed: 42
 
 # MCMC configuration
@@ -32,7 +36,6 @@ allow_divergences: false
 # Data filtering
 min_ratings: 10
 min_albums_filter: 2
-max_albums: 50
 
 # Feature ablation (block composition itself comes from the dataset
 # descriptor's feature_blocks list; these flags disable ablation groups)
@@ -54,7 +57,6 @@ likelihood_df: 4.0
 # Model gates (Phase 5/6 adopted decisions; defaults restated).
 # offset_logit promoted to default in 0.5.0 (#43): +22 held-out elpd over
 # identity on the corrected estimator, stable across seeds.
-target_transform: offset_logit
 ar_center: global
 latent_process: rw
 debut_prev_score_source: train_mean

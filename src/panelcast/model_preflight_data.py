@@ -41,7 +41,14 @@ def _resolve_config(dataset: str | None, config_files: list[str] | None):
         # was omitted.
         explicit = {"dataset"} if dataset is not None else set()
         config_kwargs = apply_yaml_overrides(config_kwargs, yaml_data, explicit)
-    return PipelineConfig(**config_kwargs)
+    config = PipelineConfig(**config_kwargs)
+    # Same descriptor-owned model-fact resolution the orchestrator applies
+    # (#268), so the audit sees the resolved family/transform the run would.
+    from panelcast.config.descriptor import load_descriptor
+    from panelcast.pipelines.orchestrator import resolve_model_facts
+
+    resolve_model_facts(config, load_descriptor(config.dataset))
+    return config
 
 
 def assemble_preflight_inputs(

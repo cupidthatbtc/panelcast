@@ -278,9 +278,9 @@ class TestElectionsTinyMcmc:
             stages=["data", "splits", "features", "train", "evaluate", "predict"],
             dataset=str(ELECTIONS_DESCRIPTOR),
             min_ratings=1000,
-            likelihood_family="beta_binomial",
-            # beta_binomial is discrete on the raw score scale.
-            target_transform="identity",
+            # likelihood_family / target_transform deliberately unset: the
+            # descriptor declares beta_binomial/identity (#268), and this run
+            # proves the domain's default run is binomial with no flags.
             num_chains=1,
             num_samples=50,
             num_warmup=50,

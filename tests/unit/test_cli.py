@@ -30,13 +30,18 @@ def _make_pipeline_mocks(monkeypatch, exit_code: int = 0):
 
     The captured dict will contain:
       - "kwargs": keyword arguments passed to PipelineConfig
-      - "config": the SimpleNamespace config object
+      - "config": the real PipelineConfig built from them
+
+    A real config (not a SimpleNamespace) because the preflight paths run
+    resolve_model_facts on it, which needs _validate and the full field set.
     """
+    from panelcast.pipelines.orchestrator import PipelineConfig
+
     captured: dict[str, object] = {}
 
     def fake_config(**kwargs):
         captured["kwargs"] = kwargs
-        return SimpleNamespace(**kwargs)
+        return PipelineConfig(**kwargs)
 
     def fake_run_pipeline(config):
         captured["config"] = config
@@ -315,7 +320,8 @@ class TestRunConfigPassthrough:
         assert kwargs["enforce_lockfile"] is True
         assert kwargs["verbose"] is False
         assert kwargs["resume"] is None
-        assert kwargs["max_albums"] == 50
+        # None = descriptor-deferred (#268); the orchestrator resolves it.
+        assert kwargs["max_albums"] is None
         assert kwargs["num_chains"] == 4
         assert kwargs["num_samples"] == 1000
         assert kwargs["num_warmup"] == 1000
@@ -1053,11 +1059,13 @@ class TestDiagnoseCommand:
 
 def _make_pipeline_mocks_new(monkeypatch, exit_code: int = 0):
     """Patch PipelineConfig and run_pipeline, returning capture dict."""
+    from panelcast.pipelines.orchestrator import PipelineConfig
+
     captured: dict[str, object] = {}
 
     def fake_config(**kwargs):
         captured["kwargs"] = kwargs
-        return SimpleNamespace(**kwargs)
+        return PipelineConfig(**kwargs)
 
     def fake_run_pipeline(config):
         captured["config"] = config

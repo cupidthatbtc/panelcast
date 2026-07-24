@@ -37,7 +37,9 @@ def _invoke(captured: dict, *args: str) -> PipelineConfig:
 class TestGateFlagDefaults:
     def test_defaults(self, captured_config):
         config = _invoke(captured_config)
-        assert config.target_transform == "offset_logit"
+        # None = descriptor-deferred (#268); the orchestrator resolves it to
+        # the descriptor's transform, else offset_logit.
+        assert config.target_transform is None
         assert config.ar_center == "global"
         assert config.latent_process == "rw"
         assert config.debut_prev_score_source == "train_mean"

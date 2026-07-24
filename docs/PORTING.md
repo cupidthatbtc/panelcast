@@ -11,6 +11,13 @@ domain is **one YAML file and zero source changes**.
 > statewide returns, CC0; see its `ATTRIBUTION.md`). The walkthrough below
 > uses the synthetic aerospace example; the elections descriptor follows the
 > identical pattern.
+>
+> Descriptors also own the domain's model facts (#268): `likelihood_family`,
+> `target_transform`, and `max_events` make `panelcast run --dataset X.yaml`
+> the complete, correct fit with no extra flags (explicit CLI/config values
+> still win). A true proportion recorded on a non-unit span (e.g. percent)
+> can declare `rescale_target_to_unit: true` and the pipeline rescales it to
+> [0, 1] internally, so Beta-Binomial trial counts are never span-inflated.
 
 This guide walks the bundled aerospace example end to end:
 airframes fly sequential test flights, each scored 0–10 by flight-test
