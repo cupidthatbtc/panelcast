@@ -51,6 +51,60 @@ class TestPrepareModelData:
         assert "n_periods" not in model_args
         assert "period_to_idx" not in model_args
 
+    def test_missing_column_raises(self):
+        descriptor = DatasetDescriptor(period_col="Nonexistent")
+        with pytest.raises(ValueError, match="missing"):
+            prepare_model_data(
+                _train_df(), ["feature_1"], descriptor=descriptor, period_effects=True
+            )
+
+    def test_single_period_still_builds(self):
+        # Structurally vacuous (every constraint zeroes the sole offset) but
+        # must not crash; a warning is logged at index-build time.
+        df = _train_df().assign(Release_Year=2020)
+        descriptor = DatasetDescriptor(period_col="Release_Year")
+        model_args, _ = prepare_model_data(
+            df, ["feature_1"], descriptor=descriptor, period_effects=True
+        )
+        assert model_args["n_periods"] == 1
+        np.testing.assert_array_equal(np.asarray(model_args["period_idx"]), np.zeros(6))
+
+
+class TestEvaluatePeriodArgs:
+    _SUMMARY = {
+        "period_to_idx": {"2018": 0, "2019": 1, "2020": 2},
+        "n_periods": 3,
+        "period_col": "Release_Year",
+    }
+
+    def test_seen_periods_map_and_unseen_map_to_minus_one(self):
+        from panelcast.pipelines.evaluate import _period_args_from_summary
+
+        df = pd.DataFrame({"Release_Year": [2019, 2020, 2021]})
+        args = _period_args_from_summary(self._SUMMARY, df)
+        np.testing.assert_array_equal(args["period_idx"], [1, 2, -1])
+        assert args["n_periods"] == 3
+
+    def test_all_unseen_split_warns(self, caplog):
+        from panelcast.pipelines.evaluate import _period_args_from_summary
+
+        # A dtype drift (int -> float) makes every str() lookup miss.
+        df = pd.DataFrame({"Release_Year": [2018.0, 2019.0]})
+        args = _period_args_from_summary(self._SUMMARY, df)
+        np.testing.assert_array_equal(args["period_idx"], [-1, -1])
+
+    def test_missing_summary_keys_raise(self):
+        from panelcast.pipelines.evaluate import _period_args_from_summary
+
+        with pytest.raises(ValueError, match="training summary lacks"):
+            _period_args_from_summary({}, pd.DataFrame({"Release_Year": [2018]}))
+
+    def test_missing_column_raises(self):
+        from panelcast.pipelines.evaluate import _period_args_from_summary
+
+        with pytest.raises(ValueError, match="missing"):
+            _period_args_from_summary(self._SUMMARY, pd.DataFrame({"Other": [1]}))
+
 
 class TestConfigPlumbing:
     def test_invalid_constraint_rejected(self):
@@ -70,6 +124,35 @@ class TestConfigPlumbing:
         config = PipelineConfig(dataset=str(dataset), period_effects=True)
         PipelineOrchestrator(config, output_base=tmp_path)
         assert config.period_effects is True
+
+    def test_command_string_records_the_gate(self, tmp_path):
+        dataset = tmp_path / "d.yaml"
+        dataset.write_text("name: ok\nperiod_col: Release_Year\n", encoding="utf-8")
+        config = PipelineConfig(
+            dataset=str(dataset), period_effects=True, period_constraint="pin_first"
+        )
+        orch = PipelineOrchestrator(config, output_base=tmp_path)
+        cmd = orch._build_command_string()
+        assert "--period-effects" in cmd
+        assert "--period-constraint pin_first" in cmd
+
+    def test_invalid_sigma_period_scale_rejected(self):
+        with pytest.raises(ValueError, match="sigma_period_scale"):
+            PipelineConfig(sigma_period_scale=0.0)
+
+    def test_preflight_signature_includes_gate_only_when_on(self, tmp_path):
+        from panelcast.cli.run import _period_signature
+
+        dataset = tmp_path / "d.yaml"
+        dataset.write_text("name: ok\nperiod_col: Release_Year\n", encoding="utf-8")
+        assert _period_signature(PipelineConfig()) == {}
+        on = PipelineConfig(
+            dataset=str(dataset), period_effects=True, period_constraint="pin_last"
+        )
+        assert _period_signature(on) == {
+            "period_effects": True,
+            "period_constraint": "pin_last",
+        }
 
     def test_descriptor_hash_stable_when_period_col_unset(self):
         assert (
