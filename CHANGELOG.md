@@ -4,6 +4,42 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] — 2026-07-24
+
+Descriptors finish becoming the single source of domain truth: a dataset now
+declares its own likelihood, transform, event cap, and target scaling, and can
+ask for data-derived prior locations — so porting a domain no longer requires
+model flags on the command line.
+
+### Added
+
+- **Descriptor-owned model facts** (#268): descriptors can declare
+  `likelihood_family`, `target_transform`, and `max_events`. Pipeline config
+  fields became None sentinels resolved by one shared
+  `resolve_model_facts` helper (orchestrator, both CLI preflights, and the
+  preflight audit all use it): explicit CLI/YAML wins, the descriptor is next,
+  the historical defaults are last. The bundled elections domain now runs its
+  Beta-Binomial identity model with no model flags at all, proven end-to-end.
+- **`rescale_target_to_unit`** (#268, closing the #263 loop): a descriptor
+  whose target is a true proportion on a non-unit span (e.g. percent) can
+  declare one flag; the prepare stage rescales the target columns onto
+  [0, 1], bounds normalize automatically, raw-CSV validation still checks the
+  declared raw span, and the descriptor hash distinguishes different raw
+  spans. Beta-Binomial trial counts are never span-inflated again.
+- **`auto_priors`** (#267): a gate (CLI/YAML or descriptor-declared) that
+  derives the sigma lognormal locations from the training panel's own moments
+  — `sigma_rw` half an e-fold below the within-entity step SD, `sigma_artist`
+  at the cross-entity mean SD — instead of the AOTY-calibrated constants.
+  Degenerate panels raise actionably; explicit loc/width knobs conflict
+  loudly rather than silently fighting; the preflight audits the same derived
+  priors the fit uses; the derived values land in the model manifest.
+
+### Changed
+
+- `--likelihood-family`, `--target-transform`, and `--max-albums` CLI defaults
+  are now "descriptor default, else the historical value" instead of
+  hard-coded; `configs/base.yaml` no longer restates them.
+
 ## [0.15.0] — 2026-07-23
 
 Extensibility and adoption: panelcast becomes a platform you can build on
