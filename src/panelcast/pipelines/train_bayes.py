@@ -184,6 +184,49 @@ def build_training_priors(
     )
 
 
+def apply_auto_prior_locs(priors, y, entity_idx):
+    """Derive the sigma lognormal locs from the training data (#267).
+
+    sigma_artist sits at ln(cross-entity SD of entity means) — the moment it
+    governs. The within-entity per-step SD only upper-bounds latent sigma_rw
+    (observation noise and overdispersion inflate it), so its loc sits half an
+    e-fold below the moment, with a generous width. Returns the updated
+    PriorConfig plus an audit record; the resolved values also land in the
+    model manifest via the saved PriorConfig.
+    """
+    import dataclasses
+    import math as _math
+
+    import numpy as _np
+
+    from panelcast.model_preflight import cross_entity_mean_sd, within_entity_step_sd
+
+    y = _np.asarray(y, dtype=float)
+    entity_idx = _np.asarray(entity_idx)
+    rw_moment = within_entity_step_sd(y, entity_idx)
+    entity_moment = cross_entity_mean_sd(y, entity_idx)
+    if rw_moment <= 0.0 or entity_moment <= 0.0:
+        raise ValueError(
+            "auto_priors could not derive prior locations: a governing data "
+            f"moment is degenerate (within-entity step SD {rw_moment:.3g}, "
+            f"cross-entity mean SD {entity_moment:.3g}). Set the lognormal locs "
+            "explicitly instead."
+        )
+    derived = {
+        "sigma_rw_lognormal_loc": _math.log(rw_moment) - 0.5,
+        "sigma_rw_lognormal_sigma": 0.8,
+        "sigma_artist_lognormal_loc": _math.log(entity_moment),
+        "sigma_artist_lognormal_sigma": 0.6,
+        "sigma_artist_prior_type": "lognormal",
+    }
+    record = {
+        **derived,
+        "within_entity_step_sd": rw_moment,
+        "cross_entity_mean_sd": entity_moment,
+    }
+    return dataclasses.replace(priors, **derived), record
+
+
 def load_training_data(
     features_path: Path,
     splits_path: Path,
@@ -1550,6 +1593,11 @@ def train_models(  # noqa: C901  # tracked complexity debt
         ar_center_value=ar_center_value,
         target_bounds=tuple(descriptor.target_bounds),
     )
+    if bool(getattr(ctx, "auto_priors", False)):
+        priors, auto_record = apply_auto_prior_locs(
+            priors, model_args["y"], model_args["artist_idx"]
+        )
+        log.info("auto_priors_applied", **auto_record)
     model_args["priors"] = priors
     model_args["target_bounds"] = tuple(descriptor.target_bounds)
 

@@ -114,6 +114,13 @@ def assemble_preflight_inputs(
         ar_center_value=model_args["ar_center_value"],
         target_bounds=tuple(descriptor.target_bounds),
     )
+    if bool(getattr(config, "auto_priors", False)):
+        # Audit the same data-derived priors the fit will use (#267).
+        from panelcast.pipelines.train_bayes import apply_auto_prior_locs
+
+        priors, _ = apply_auto_prior_locs(
+            priors, model_args["y"], model_args["artist_idx"]
+        )
 
     return PreflightInputs(
         X=np.asarray(model_args["X"], dtype=float),

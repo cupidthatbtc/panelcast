@@ -186,6 +186,8 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     # Prediction batching (no CLI flags)
     "predictive_batch_size": _spec("predictive_batch_size", None),
     "predict_artist_batch_size": _spec("predict_artist_batch_size", None),
+    # priors: auto (#267; no CLI flag — a descriptor/run-config fact).
+    "auto_priors": _spec("auto_priors", None),
     # Dataset descriptor reference
     "dataset": _spec("dataset", "dataset"),
 }

@@ -227,6 +227,11 @@ class DatasetDescriptor(BaseModel):
     # the declared raw bounds stay readable via raw_target_bounds for raw-CSV
     # validation and the rescale itself.
     rescale_target_to_unit: bool = False
+    # priors: auto (#267) — the train stage derives the sigma lognormal locs
+    # from the training data's own moments, making AOTY-scale-priors-on-a-
+    # foreign-domain failures structurally impossible. None defers to config,
+    # then to off.
+    auto_priors: bool | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> DatasetDescriptor:
@@ -309,7 +314,7 @@ class DatasetDescriptor(BaseModel):
             fields.pop("basis_curves")
         # Unset model facts (#268) drop out so pre-existing descriptors keep
         # their recorded hashes; a declared value is a genuine fit change.
-        for optional in ("likelihood_family", "target_transform", "max_events"):
+        for optional in ("likelihood_family", "target_transform", "max_events", "auto_priors"):
             if fields.get(optional) is None:
                 fields.pop(optional, None)
         if fields.get("rescale_target_to_unit") is False:
