@@ -107,6 +107,14 @@ class TestGateOn:
         # The free periods are real draws, not degenerate zeros.
         assert np.any(offset != 0.0)
 
+    def test_unknown_constraint_raises(self):
+        args = _model_args(
+            PriorConfig(period_effects=True, period_constraint="nope"),
+            with_periods=True,
+        )
+        with pytest.raises(ValueError, match="period_constraint"):
+            _seeded_trace(args)
+
     def test_offset_shifts_mu_and_unseen_period_is_zero(self):
         """With everything else pinned flat, mu differs between observations
         exactly by the period offsets, and period_idx=-1 contributes zero."""

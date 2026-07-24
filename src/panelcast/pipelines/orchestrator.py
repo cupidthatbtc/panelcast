@@ -428,6 +428,7 @@ class PipelineConfig:
             "rho_scale",
             "hs_global_scale",
             "tau_entity_scale",
+            "sigma_period_scale",
         ):
             value = getattr(self, scale_field)
             if value <= 0.0:
@@ -1313,9 +1314,9 @@ class PipelineOrchestrator:
             parts.append(f"--likelihood-family {self.config.likelihood_family}")
         if self.config.discretize_observation != defaults.discretize_observation:
             parts.append("--discretize-observation")
-        # Model gates. The YAML-only knobs (logit_offset through
-        # entity_group_pooling) have no CLI flags — they are recorded
-        # flag-style for provenance and reproduced via run_config.yaml.
+        # Model gates. The YAML-only knobs (logit_offset through the period
+        # gates) have no CLI flags — they are recorded flag-style for
+        # provenance and reproduced via run_config.yaml.
         if self.config.target_transform != eff_transform:
             parts.append(f"--target-transform {self.config.target_transform}")
         if self.config.logit_offset != defaults.logit_offset:

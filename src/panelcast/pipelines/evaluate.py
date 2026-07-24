@@ -847,12 +847,21 @@ def _period_args_from_summary(summary: dict, df: pd.DataFrame) -> dict:
             f"period_effects is on but column '{period_col}' is missing "
             "from the split being scored."
         )
-    return {
-        "period_idx": np.array(
-            [period_to_idx.get(str(p), -1) for p in df[period_col]], dtype=np.int32
-        ),
-        "n_periods": int(n_periods),
-    }
+    period_idx = np.array(
+        [period_to_idx.get(str(p), -1) for p in df[period_col]], dtype=np.int32
+    )
+    if len(period_idx) and not (period_idx >= 0).any():
+        # An all-unseen split is legitimate for a genuinely future horizon,
+        # but it is also exactly what a train/eval dtype drift in period_col
+        # looks like (str(2018) != str(2018.0)) — surface it either way.
+        log.warning(
+            "period_all_unseen",
+            period_col=period_col,
+            n_rows=len(period_idx),
+            sample_values=[str(p) for p in df[period_col].head(3)],
+            trained_periods=list(period_to_idx)[:3],
+        )
+    return {"period_idx": period_idx, "n_periods": int(n_periods)}
 
 
 def _resolve_feature_split_dir(split_name: str, features_root: Path | None = None) -> Path:

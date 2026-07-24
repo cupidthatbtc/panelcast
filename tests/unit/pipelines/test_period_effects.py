@@ -31,11 +31,15 @@ class TestPrepareModelData:
         )
         assert model_args["n_periods"] == 3
         assert model_args["period_to_idx"] == {"2018": 0, "2019": 1, "2020": 2}
-        # Chronology normalization may reorder rows; the index must agree with
-        # the frame's own period values, so check the value distribution.
+        # Chronology normalization may reorder rows; the index must align
+        # row-for-row with the normalized frame's own period values.
+        from panelcast.pipelines.train_bayes import _normalize_model_frame
+
+        normalized = _normalize_model_frame(_train_df(), descriptor)
+        expected = normalized["Release_Year"].map({2018: 0, 2019: 1, 2020: 2}).to_numpy()
         idx = np.asarray(model_args["period_idx"])
         assert idx.dtype == np.int32
-        assert sorted(idx.tolist()) == [0, 0, 1, 1, 2, 2]
+        np.testing.assert_array_equal(idx, expected)
 
     def test_gate_without_descriptor_period_col_raises(self):
         with pytest.raises(ValueError, match="period_col"):

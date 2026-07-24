@@ -550,6 +550,10 @@ def _add_period_args(model_args, train_df, descriptor, valid_mask) -> None:
     )
     model_args["n_periods"] = len(periods)
     model_args["period_to_idx"] = period_to_idx
+    if len(periods) <= 1:
+        # Every constraint zeroes a single period's offset, so the block is
+        # structurally a no-op on a one-period domain.
+        log.warning("period_effects_vacuous", period_col=period_col, n_periods=len(periods))
     log.info("period_effects", period_col=period_col, n_periods=len(periods))
 
 

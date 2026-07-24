@@ -779,9 +779,9 @@ def make_score_model(score_type: str) -> Callable:
                 period_offset = numpyro.deterministic(
                     f"{prefix}period_offset", sigma_period * period_z
                 )
-            else:
-                # pin_first / pin_last: one period's offset is exactly zero
-                # and the rest are free draws around it.
+            elif priors.period_constraint in ("pin_first", "pin_last"):
+                # One period's offset is exactly zero and the rest are free
+                # draws around it.
                 period_z = numpyro.sample(
                     f"{prefix}period_offset_z",
                     dist.Normal(0.0, 1.0).expand((n_periods - 1,)).to_event(1),
@@ -795,6 +795,11 @@ def make_score_model(score_type: str) -> Callable:
                 )
                 period_offset = numpyro.deterministic(
                     f"{prefix}period_offset", stacked
+                )
+            else:
+                raise ValueError(
+                    f"Unknown period_constraint: '{priors.period_constraint}'. "
+                    "Must be 'zero_sum', 'pin_first', or 'pin_last'."
                 )
             obs_period_effect = jnp.where(
                 period_idx >= 0,
