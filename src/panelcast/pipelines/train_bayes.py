@@ -61,6 +61,7 @@ MODEL_ARGS_METADATA_KEYS = (
     "artist_album_counts",
     "artist_to_idx",
     "group_to_idx",
+    "period_to_idx",
     "global_mean_score",
     "global_std_score",
     "effective_ceiling",
@@ -175,6 +176,9 @@ def build_training_priors(
         errors_in_variables=bool(getattr(ctx, "errors_in_variables", False)),
         propagate_rw_horizon=bool(getattr(ctx, "propagate_rw_horizon", False)),
         entity_group_pooling=entity_group_pooling,
+        period_effects=bool(getattr(ctx, "period_effects", False)),
+        period_constraint=str(getattr(ctx, "period_constraint", "zero_sum")),
+        sigma_period_scale=float(getattr(ctx, "sigma_period_scale", 0.5)),
         effective_ceiling=effective_ceiling,
     )
     return locate_level_prior(
@@ -244,6 +248,7 @@ def load_training_data(
     logit_offset: float = 0.5,
     ar_center: str = "global",
     entity_group_pooling: bool = False,
+    period_effects: bool = False,
     impute_missing: bool = False,
     imputation_record: dict | None = None,
 ) -> tuple[dict, list[str], pd.DataFrame, dict | None]:
@@ -328,6 +333,7 @@ def load_training_data(
         logit_offset=logit_offset,
         ar_center=ar_center,
         entity_group_pooling=entity_group_pooling,
+        period_effects=period_effects,
     )
 
     # Apply valid_mask to train_df so it matches the filtered model arrays
@@ -492,6 +498,65 @@ def _normalize_model_frame(
     )
 
 
+def _add_group_args(model_args, train_df, descriptor, artists, entity_col) -> None:
+    """Build the #41 per-entity group index onto model_args, in place."""
+    group_col = descriptor.entity_group_col
+    if group_col is None:
+        raise ValueError(
+            "entity_group_pooling=True but the dataset descriptor has no "
+            "entity_group_col — the gate is unusable for this domain."
+        )
+    if group_col not in train_df.columns:
+        raise ValueError(
+            f"entity_group_pooling=True but column '{group_col}' is missing "
+            "from the training split."
+        )
+    group_idx_by_artist, group_to_idx = _build_entity_groups(
+        train_df, artists, entity_col, group_col
+    )
+    model_args["group_idx_by_artist"] = group_idx_by_artist
+    model_args["n_groups"] = len(group_to_idx)
+    model_args["group_to_idx"] = group_to_idx
+    log.info(
+        "entity_group_pooling",
+        group_col=group_col,
+        n_groups=len(group_to_idx),
+        n_rest=int(np.sum(group_idx_by_artist == 0)),
+    )
+
+
+def _add_period_args(model_args, train_df, descriptor, valid_mask) -> None:
+    """Build the #269 period index over the training rows, in place."""
+    period_col = descriptor.period_col
+    if period_col is None:
+        raise ValueError(
+            "period_effects=True but the dataset descriptor has no "
+            "period_col — the gate is unusable for this domain."
+        )
+    if period_col not in train_df.columns:
+        raise ValueError(
+            f"period_effects=True but column '{period_col}' is missing "
+            "from the training split."
+        )
+    # Same row filtering the model arrays got: valid_mask is all-True unless
+    # invalid n_obs rows were dropped.
+    period_values = train_df[period_col].values[valid_mask]
+    periods = sorted(pd.unique(period_values))
+    # str() keys so the mapping survives the JSON training summary and the
+    # evaluate stage can look periods up the same way.
+    period_to_idx = {str(p): i for i, p in enumerate(periods)}
+    model_args["period_idx"] = np.array(
+        [period_to_idx[str(p)] for p in period_values], dtype=np.int32
+    )
+    model_args["n_periods"] = len(periods)
+    model_args["period_to_idx"] = period_to_idx
+    if len(periods) <= 1:
+        # Every constraint zeroes a single period's offset, so the block is
+        # structurally a no-op on a one-period domain.
+        log.warning("period_effects_vacuous", period_col=period_col, n_periods=len(periods))
+    log.info("period_effects", period_col=period_col, n_periods=len(periods))
+
+
 def prepare_model_data(
     train_df: pd.DataFrame,
     feature_cols: list[str],
@@ -502,6 +567,7 @@ def prepare_model_data(
     logit_offset: float = 0.5,
     ar_center: str = "global",
     entity_group_pooling: bool = False,
+    period_effects: bool = False,
 ) -> tuple[dict, np.ndarray]:
     """Prepare data for NumPyro model fitting.
 
@@ -535,6 +601,9 @@ def prepare_model_data(
             the descriptor's entity_group_col (modal value over training
             rows; sparse/missing groups bucket to "__rest__") and add
             group_idx_by_artist / n_groups / group_to_idx to model_args.
+        period_effects: When True, build per-observation period indices from
+            the descriptor's period_col (sorted unique training values) and
+            add period_idx / n_periods / period_to_idx to model_args (#269).
 
     Returns:
         Tuple of (model_args dict, valid_mask boolean array indicating retained rows).
@@ -758,29 +827,10 @@ def prepare_model_data(
     }
 
     if entity_group_pooling:
-        group_col = descriptor.entity_group_col
-        if group_col is None:
-            raise ValueError(
-                "entity_group_pooling=True but the dataset descriptor has no "
-                "entity_group_col — the gate is unusable for this domain."
-            )
-        if group_col not in train_df.columns:
-            raise ValueError(
-                f"entity_group_pooling=True but column '{group_col}' is missing "
-                "from the training split."
-            )
-        group_idx_by_artist, group_to_idx = _build_entity_groups(
-            train_df, artists, entity_col, group_col
-        )
-        model_args["group_idx_by_artist"] = group_idx_by_artist
-        model_args["n_groups"] = len(group_to_idx)
-        model_args["group_to_idx"] = group_to_idx
-        log.info(
-            "entity_group_pooling",
-            group_col=group_col,
-            n_groups=len(group_to_idx),
-            n_rest=int(np.sum(group_idx_by_artist == 0)),
-        )
+        _add_group_args(model_args, train_df, descriptor, artists, entity_col)
+
+    if period_effects:
+        _add_period_args(model_args, train_df, descriptor, valid_mask)
 
     return model_args, valid_mask
 
@@ -1421,6 +1471,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
     entity_group_pooling = resolve_entity_group_pooling(
         getattr(ctx, "entity_group_pooling", None), descriptor, train_columns
     )
+    period_effects_on = bool(getattr(ctx, "period_effects", False))
     model_args, feature_cols, train_df, imputation = load_training_data(
         features_path=features_path,
         splits_path=splits_path,
@@ -1431,6 +1482,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
         logit_offset=logit_offset,
         ar_center=ar_center,
         entity_group_pooling=entity_group_pooling,
+        period_effects=period_effects_on,
         impute_missing=bool(getattr(ctx, "impute_missing", False)),
     )
 
@@ -1448,6 +1500,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
     artist_album_counts = model_args.pop("artist_album_counts")
     artist_to_idx = model_args.pop("artist_to_idx")
     group_to_idx = model_args.pop("group_to_idx", None)
+    period_to_idx = model_args.pop("period_to_idx", None)
     global_mean_score = model_args.pop("global_mean_score")
     # prepare_model_data always supplies this; fall back to the score std for
     # hand-built model_args (test fixtures that bypass prepare_model_data).
@@ -1913,6 +1966,12 @@ def train_models(  # noqa: C901  # tracked complexity debt
         summary["group_to_idx"] = group_to_idx
         summary["group_idx_by_artist"] = [int(g) for g in model_args["group_idx_by_artist"]]
         summary["n_groups"] = int(model_args["n_groups"])
+    summary["period_effects"] = period_effects_on
+    if period_effects_on:
+        summary["period_col"] = descriptor.period_col
+        summary["period_constraint"] = str(getattr(ctx, "period_constraint", "zero_sum"))
+        summary["period_to_idx"] = period_to_idx
+        summary["n_periods"] = int(model_args["n_periods"])
     summary["resource_usage"] = resource_usage
     if basis_model_provenance is not None:
         summary["basis_curves"] = basis_model_provenance

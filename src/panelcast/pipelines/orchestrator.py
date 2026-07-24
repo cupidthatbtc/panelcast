@@ -287,6 +287,15 @@ class PipelineConfig:
     # column. Explicit True/False always wins (True hard-fails on unsupported
     # domains). No CLI flag.
     entity_group_pooling: bool | None = None
+    # Period (calendar-time) effects gate (#269): a constrained additive
+    # offset per period_col value. The declared constraint (zero_sum, or
+    # pin_first / pin_last) is what identifies the block against entity
+    # intercepts + cohorts + age-like covariates (the APC rank deficiency).
+    # Default off => legacy bit-identical path. Requires the descriptor to
+    # name a period_col. No CLI flag.
+    period_effects: bool = False
+    period_constraint: str = "zero_sum"
+    sigma_period_scale: float = 0.5
     # Missing-covariate treatment gate (#158): train-median imputation plus
     # <col>__missing indicator columns instead of the legacy fillna(0).
     # Feature-affecting; default off => byte-identical outputs. No CLI flag.
@@ -408,12 +417,18 @@ class PipelineConfig:
                 f"Invalid beta_prior_type: '{self.beta_prior_type}'. "
                 "Must be 'normal' or 'horseshoe'."
             )
+        if self.period_constraint not in ("zero_sum", "pin_first", "pin_last"):
+            raise ValueError(
+                f"Invalid period_constraint: '{self.period_constraint}'. "
+                "Must be 'zero_sum', 'pin_first', or 'pin_last'."
+            )
         for scale_field in (
             "sigma_rw_lognormal_sigma",
             "sigma_artist_lognormal_sigma",
             "rho_scale",
             "hs_global_scale",
             "tau_entity_scale",
+            "sigma_period_scale",
         ):
             value = getattr(self, scale_field)
             if value <= 0.0:
@@ -629,6 +644,12 @@ def resolve_model_facts(config: PipelineConfig, descriptor) -> None:
             f"'{descriptor.name}' sets n_obs_is_aggregation_count=false "
             f"({descriptor.n_obs_col} is not a count of independent raters). "
             "Use an aggregation-count domain or a different likelihood_family."
+        )
+    if config.period_effects and descriptor.period_col is None:
+        raise ValueError(
+            "period_effects=true requires the dataset descriptor to declare "
+            f"period_col (descriptor '{descriptor.name}' does not) — the block "
+            "needs to know which column holds calendar time."
         )
 
 
@@ -1293,9 +1314,9 @@ class PipelineOrchestrator:
             parts.append(f"--likelihood-family {self.config.likelihood_family}")
         if self.config.discretize_observation != defaults.discretize_observation:
             parts.append("--discretize-observation")
-        # Model gates. The YAML-only knobs (logit_offset through
-        # entity_group_pooling) have no CLI flags — they are recorded
-        # flag-style for provenance and reproduced via run_config.yaml.
+        # Model gates. The YAML-only knobs (logit_offset through the period
+        # gates) have no CLI flags — they are recorded flag-style for
+        # provenance and reproduced via run_config.yaml.
         if self.config.target_transform != eff_transform:
             parts.append(f"--target-transform {self.config.target_transform}")
         if self.config.logit_offset != defaults.logit_offset:
@@ -1348,6 +1369,10 @@ class PipelineOrchestrator:
                 if self.config.entity_group_pooling
                 else "--no-entity-group-pooling"
             )
+        if self.config.period_effects:
+            parts.append("--period-effects")
+            if self.config.period_constraint != defaults.period_constraint:
+                parts.append(f"--period-constraint {self.config.period_constraint}")
         if self.config.impute_missing:
             parts.append("--impute-missing")
         if self.config.gbm_offset != defaults.gbm_offset:
@@ -1672,6 +1697,9 @@ class PipelineOrchestrator:
             errors_in_variables=self.config.errors_in_variables,
             propagate_rw_horizon=self.config.propagate_rw_horizon,
             entity_group_pooling=self.config.entity_group_pooling,
+            period_effects=self.config.period_effects,
+            period_constraint=self.config.period_constraint,
+            sigma_period_scale=self.config.sigma_period_scale,
             impute_missing=self.config.impute_missing,
             gbm_offset=self.config.gbm_offset,
             exclude_rw_raw_from_collection=self.config.exclude_rw_raw_from_collection,

@@ -24,6 +24,15 @@ the candidate space:
   sensor/sample count that doesn't average to the score → `false`.
 - `entity_group_col` — a per-event group (AOTY: `primary_genre`) enables the
   `entity_group_pooling` gate. `null` if the domain has no such grouping.
+- `period_col` — the calendar-time column (e.g. a year) enables the
+  `period_effects` gate (default off, config-file only): a constrained
+  additive offset per period, identified by the declared `period_constraint`
+  (`zero_sum`, `pin_first`, or `pin_last`). Use it when era/season difficulty
+  is a real hypothesis — with entity intercepts, cohort pooling, and an
+  age-like covariate, a *free* period term would be an exact age-period-cohort
+  rank deficiency; the constraint is what makes the decomposition identified.
+  Periods unseen in training (future years at prediction time) contribute
+  exactly zero — the constraint's center.
 
 ## 2. Dry run — see the space and the cost
 

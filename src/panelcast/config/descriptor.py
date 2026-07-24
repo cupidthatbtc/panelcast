@@ -232,6 +232,11 @@ class DatasetDescriptor(BaseModel):
     # foreign-domain failures structurally impossible. None defers to config,
     # then to off.
     auto_priors: bool | None = None
+    # Period effects (#269): the column holding calendar time (e.g. year).
+    # A data fact only — the period_effects run gate stays default-off; when
+    # on, the model adds a constrained per-period offset indexed by this
+    # column's sorted unique training values.
+    period_col: str | None = None
 
     @model_validator(mode="after")
     def _validate(self) -> DatasetDescriptor:
@@ -314,7 +319,13 @@ class DatasetDescriptor(BaseModel):
             fields.pop("basis_curves")
         # Unset model facts (#268) drop out so pre-existing descriptors keep
         # their recorded hashes; a declared value is a genuine fit change.
-        for optional in ("likelihood_family", "target_transform", "max_events", "auto_priors"):
+        for optional in (
+            "likelihood_family",
+            "target_transform",
+            "max_events",
+            "auto_priors",
+            "period_col",
+        ):
             if fields.get(optional) is None:
                 fields.pop(optional, None)
         if fields.get("rescale_target_to_unit") is False:

@@ -118,6 +118,14 @@ class TrainingSummary(BaseModel):
     group_to_idx: dict[str, int] | None = None
     group_idx_by_artist: list[int] | None = None
     n_groups: int | None = None
+    # Period-effects gate (#269). period_to_idx maps str(period value) to
+    # offset indices; evaluate looks held-out periods up the same way and
+    # maps unseen ones to -1 (zero effect). All None on gate-off summaries.
+    period_effects: bool | None = None
+    period_col: str | None = None
+    period_constraint: str | None = None
+    period_to_idx: dict[str, int] | None = None
+    n_periods: int | None = None
     # Expected-vs-actual fit resources (#78): estimator projection, measured
     # peak GPU memory, their ratio, and MCMC wall clock.
     resource_usage: dict[str, Any] | None = None
