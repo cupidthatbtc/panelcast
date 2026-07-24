@@ -287,6 +287,13 @@ class PipelineConfig:
     # column. Explicit True/False always wins (True hard-fails on unsupported
     # domains). No CLI flag.
     entity_group_pooling: bool | None = None
+    # Per-group entity-effect variances (#271): each entity group gets its own
+    # sigma_artist via log-scale partial pooling around the shared draw.
+    # "shared" (default) is the legacy bit-identical path. Requires
+    # entity_group_pooling (checked against the resolved gate at train time).
+    # No CLI flag.
+    group_variance: str = "shared"
+    tau_group_sigma_scale: float = 0.3
     # Period (calendar-time) effects gate (#269): a constrained additive
     # offset per period_col value. The declared constraint (zero_sum, or
     # pin_first / pin_last) is what identifies the block against entity
@@ -417,11 +424,7 @@ class PipelineConfig:
                 f"Invalid beta_prior_type: '{self.beta_prior_type}'. "
                 "Must be 'normal' or 'horseshoe'."
             )
-        if self.period_constraint not in ("zero_sum", "pin_first", "pin_last"):
-            raise ValueError(
-                f"Invalid period_constraint: '{self.period_constraint}'. "
-                "Must be 'zero_sum', 'pin_first', or 'pin_last'."
-            )
+        self._validate_structural_gates()
         for scale_field in (
             "sigma_rw_lognormal_sigma",
             "sigma_artist_lognormal_sigma",
@@ -429,6 +432,7 @@ class PipelineConfig:
             "hs_global_scale",
             "tau_entity_scale",
             "sigma_period_scale",
+            "tau_group_sigma_scale",
         ):
             value = getattr(self, scale_field)
             if value <= 0.0:
@@ -504,6 +508,24 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid run_id: {self.run_id!r}. Must be a bare directory name "
                 "(no path separators, not a reserved name)."
+            )
+
+    def _validate_structural_gates(self) -> None:
+        """Enum and coherence checks for the #269/#271 structural gates."""
+        if self.period_constraint not in ("zero_sum", "pin_first", "pin_last"):
+            raise ValueError(
+                f"Invalid period_constraint: '{self.period_constraint}'. "
+                "Must be 'zero_sum', 'pin_first', or 'pin_last'."
+            )
+        if self.group_variance not in ("shared", "per_group"):
+            raise ValueError(
+                f"Invalid group_variance: '{self.group_variance}'. "
+                "Must be 'shared' or 'per_group'."
+            )
+        if self.group_variance == "per_group" and self.entity_group_pooling is False:
+            raise ValueError(
+                "group_variance='per_group' requires entity_group_pooling: "
+                "per-group sigmas are indexed by the entity-group mapping."
             )
 
     def _validate_auto_priors(self) -> None:
@@ -1369,6 +1391,8 @@ class PipelineOrchestrator:
                 if self.config.entity_group_pooling
                 else "--no-entity-group-pooling"
             )
+        if self.config.group_variance != defaults.group_variance:
+            parts.append(f"--group-variance {self.config.group_variance}")
         if self.config.period_effects:
             parts.append("--period-effects")
             if self.config.period_constraint != defaults.period_constraint:
@@ -1697,6 +1721,8 @@ class PipelineOrchestrator:
             errors_in_variables=self.config.errors_in_variables,
             propagate_rw_horizon=self.config.propagate_rw_horizon,
             entity_group_pooling=self.config.entity_group_pooling,
+            group_variance=self.config.group_variance,
+            tau_group_sigma_scale=self.config.tau_group_sigma_scale,
             period_effects=self.config.period_effects,
             period_constraint=self.config.period_constraint,
             sigma_period_scale=self.config.sigma_period_scale,

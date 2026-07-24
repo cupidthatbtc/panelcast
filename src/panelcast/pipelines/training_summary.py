@@ -118,6 +118,8 @@ class TrainingSummary(BaseModel):
     group_to_idx: dict[str, int] | None = None
     group_idx_by_artist: list[int] | None = None
     n_groups: int | None = None
+    # Per-group entity-effect variances (#271): "shared" | "per_group".
+    group_variance: str | None = None
     # Period-effects gate (#269). period_to_idx maps str(period value) to
     # offset indices; evaluate looks held-out periods up the same way and
     # maps unseen ones to -1 (zero effect). All None on gate-off summaries.

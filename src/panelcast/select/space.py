@@ -312,6 +312,8 @@ KNOBS: tuple[Knob, ...] = (
 # such field to appear either in KNOBS or here — with a reason.
 EXCLUDED_FIELDS: dict[str, str] = {
     "auto_priors": "prior locs become data-derived; the sweep varies priors explicitly",
+    "group_variance": "domain-structure gate (#271): needs entity-group pooling, not sweepable",
+    "tau_group_sigma_scale": "prior scale for the per-group variances, tied to the gate",
     "period_effects": "domain-structure gate (#269): needs a descriptor period_col, not sweepable",
     "period_constraint": "identification constraint for the period block, varies with the domain",
     "sigma_period_scale": "prior scale for the period block, tied to the gate",
