@@ -251,6 +251,16 @@ KNOBS: tuple[Knob, ...] = (
         ),
     ),
     Knob(
+        "entity_effect_prior_type",
+        "literal",
+        ("normal", "skew_normal"),
+        "normal",
+        history=(
+            "skewness-pin candidate (#232): the entity-obs win showed the "
+            "structural PPC pins respond to latent-level structure; unscreened"
+        ),
+    ),
+    Knob(
         "gbm_offset",
         "bool",
         (True, False),
@@ -312,6 +322,7 @@ KNOBS: tuple[Knob, ...] = (
 # such field to appear either in KNOBS or here — with a reason.
 EXCLUDED_FIELDS: dict[str, str] = {
     "auto_priors": "prior locs become data-derived; the sweep varies priors explicitly",
+    "entity_skew_alpha_scale": "prior scale for the skew-normal alpha, tied to the knob",
     "group_variance": "domain-structure gate (#271): needs entity-group pooling, not sweepable",
     "tau_group_sigma_scale": "prior scale for the per-group variances, tied to the gate",
     "period_effects": "domain-structure gate (#269): needs a descriptor period_col, not sweepable",

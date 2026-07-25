@@ -311,6 +311,21 @@ class PriorConfig:
     # HalfNormal scale for tau_group_sigma (the log-scale spread of the
     # per-group sigmas around the shared sigma_artist).
     tau_group_sigma_scale: float = 0.3
+    # Latent-population shape seam (#232; default "normal" => legacy path,
+    # bit-identical RNG). "skew_normal" places a skew-normal population on
+    # the initial entity effects via the additive construction
+    # delta*|z0| + sqrt(1-delta^2)*z1 with a learned skewness alpha,
+    # standardized to zero mean and unit SD so mu_artist and sigma_artist
+    # keep their meanings under any alpha. The skewness-pin candidate: the
+    # entity-obs win showed the structural PPC pins respond to latent-level
+    # structure, and marginal skewness plausibly lives in the latent
+    # population, not the observation likelihood. Requires
+    # artist_effect_param="noncentered". New sites:
+    # {prefix}entity_skew_alpha, {prefix}entity_skew_abs,
+    # {prefix}entity_skew_sym (+ deterministic {prefix}init_artist_effect).
+    entity_effect_prior_type: str = "normal"
+    # Normal prior scale on the learned skewness alpha.
+    entity_skew_alpha_scale: float = 2.0
     # Period (calendar-time) effects with a declared identification constraint
     # (#269; default off => legacy path, no new sites, bit-identical RNG).
     # With entity intercepts + cohort pooling + an age-like covariate, a free
