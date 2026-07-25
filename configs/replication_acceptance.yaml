@@ -1,0 +1,29 @@
+# Three-domain replication acceptance manifest (#273).
+#
+# Each domain names a dataset descriptor, its claims.yaml, and the committed
+# expected-verdicts JSON that scripts/replication_acceptance.py diffs against
+# (graded conclusions only — achieved grade + verdict per claim). Descriptor
+# and claims paths may point into sibling checkouts; expected paths are
+# repo-relative and committed here.
+#
+# GPU-scale: run nightly or by hand (pixi run python
+# scripts/replication_acceptance.py --config configs/replication_acceptance.yaml),
+# never in PR CI. Record initial expectations with --record after a verified
+# run.
+#
+# The three standing domains; the runner fails fast with the missing path if
+# a sibling checkout doesn't carry its claims.yaml yet.
+
+domains:
+  - name: astro # clean-pins domain: gates off, healthy preflight
+    dataset: ../panelcast-ztf-wd/descriptor.yaml
+    claims: ../panelcast-ztf-wd/claims.yaml
+    expected: .audit/replication_acceptance/astro_expected.json
+  - name: baseball # adversarial domain: fixed descriptor + auto priors
+    dataset: ../panelcast-replications/baseball-brl1999/descriptor.yaml
+    claims: ../panelcast-replications/baseball-brl1999/claims.yaml
+    expected: .audit/replication_acceptance/baseball_expected.json
+  - name: chess # first-attempt-convergence proof
+    dataset: ../panelcast-replications/chess-strittmatter2020/descriptor.yaml
+    claims: ../panelcast-replications/chess-strittmatter2020/claims.yaml
+    expected: .audit/replication_acceptance/chess_expected.json

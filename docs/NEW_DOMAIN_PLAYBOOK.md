@@ -42,6 +42,16 @@ the candidate space:
   Periods unseen in training (future years at prediction time) contribute
   exactly zero — the constraint's center.
 
+## 1b. Standing acceptance suite
+
+Once a port has a `claims.yaml`, add it to
+`configs/replication_acceptance.yaml` and record its verdicts once:
+`pixi run replication-acceptance` (append `-- --record` on the first
+verified run). The suite reruns `panelcast replicate` per domain and diffs
+each verdict table's *graded conclusions* against the committed expected
+JSON — the regression net that keeps future model changes from silently
+breaking domain portability. GPU-scale: nightly or manual, never PR CI.
+
 ## 2. Dry run — see the space and the cost
 
 ```bash

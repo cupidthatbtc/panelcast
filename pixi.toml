@@ -25,6 +25,8 @@ typecheck = "mypy src/panelcast/__init__.py src/panelcast/config src/panelcast/f
 typecheck-ratchet = "python scripts/typing_ratchet.py --check"
 # Domain-terminology ratchet (#303): generic modules must not grow album/artist terms.
 terminology-ratchet = "python scripts/terminology_ratchet.py --check"
+# Three-domain replication acceptance suite (#273): GPU-scale, nightly/manual.
+replication-acceptance = "python scripts/replication_acceptance.py --config configs/replication_acceptance.yaml"
 
 [dependencies]
 python = ">=3.11"
