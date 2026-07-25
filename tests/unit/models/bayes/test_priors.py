@@ -157,7 +157,7 @@ class TestPriorConfigSerialization:
         assert restored == original
 
     def test_field_count(self):
-        """PriorConfig should have exactly 68 fields.
+        """PriorConfig should have exactly 70 fields.
 
         18 legacy + 11 seam knobs + 5 for the entity-overdispersion / lognormal
         sigma_obs upgrade (sigma_obs_prior_type, sigma_obs_lognormal_loc,
@@ -178,9 +178,10 @@ class TestPriorConfigSerialization:
         (period_effects, period_constraint, sigma_period_scale) + 2 for the
         per-group variance gate (group_variance, tau_group_sigma_scale) + 2
         for the skew-normal population seam (entity_effect_prior_type,
-        entity_skew_alpha_scale).
+        entity_skew_alpha_scale) + 2 for the innovation-shape seam
+        (rw_innovation_type, rw_skew_alpha_scale).
         """
-        assert len(fields(PriorConfig)) == 68
+        assert len(fields(PriorConfig)) == 70
 
 
 class TestModelV2Gates:

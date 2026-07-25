@@ -505,7 +505,29 @@ def _build_latent_effects(
         f"{prefix}rw_raw",
         dist.Normal(0, 1).expand([n_artists, max_seq - 1]).to_event(2),
     )
-    innovations = sigma_rw * rw_raw  # (n_artists, max_seq - 1)
+    if priors.rw_innovation_type == "skew_normal":
+        # Asymmetric innovations (#233): rw_raw stays the symmetric
+        # component (memory exclusions keep applying); the |z| component and
+        # the learned alpha are new sites. The rollout compounds the same
+        # construction via standardized_skew_innovation.
+        rw_skew_alpha = numpyro.sample(
+            f"{prefix}rw_skew_alpha",
+            dist.Normal(0.0, priors.rw_skew_alpha_scale),
+        )
+        rw_raw_abs = numpyro.sample(
+            f"{prefix}rw_raw_abs",
+            dist.HalfNormal(1.0).expand([n_artists, max_seq - 1]).to_event(2),
+        )
+        innovations = sigma_rw * standardized_skew_innovation(
+            rw_raw_abs, rw_raw, rw_skew_alpha
+        )
+    elif priors.rw_innovation_type == "normal":
+        innovations = sigma_rw * rw_raw  # (n_artists, max_seq - 1)
+    else:
+        raise ValueError(
+            f"Unknown rw_innovation_type: '{priors.rw_innovation_type}'. "
+            "Must be 'normal' or 'skew_normal'."
+        )
 
     if priors.latent_process == "ar1":
         phi = numpyro.sample(
@@ -537,6 +559,24 @@ def _build_latent_effects(
             init_artist_effect[None, :] + trajectory,
         ]
     )
+
+
+def standardized_skew_innovation(
+    z_abs: jnp.ndarray, z_sym: jnp.ndarray, alpha: jnp.ndarray
+) -> jnp.ndarray:
+    """Zero-mean, unit-SD skew-normal draw from |N(0,1)| and N(0,1) parts.
+
+    The additive construction: delta*|z0| + sqrt(1-delta^2)*z1 with
+    delta = alpha/sqrt(1+alpha^2) is SkewNormal(0, 1, alpha); standardizing
+    keeps sigma_rw's meaning under any alpha. The single source of truth for
+    training innovations AND the horizon rollout (#233) — a shape drift
+    between them would silently break multi-step honesty.
+    """
+    delta = alpha / jnp.sqrt(1.0 + alpha**2)
+    raw = delta * z_abs + jnp.sqrt(1.0 - delta**2) * z_sym
+    mean = delta * jnp.sqrt(2.0 / jnp.pi)
+    sd = jnp.sqrt(1.0 - (2.0 / jnp.pi) * delta**2)
+    return (raw - mean) / sd
 
 
 def _apply_target_transform(

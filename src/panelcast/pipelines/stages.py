@@ -170,6 +170,9 @@ class StageContext:
     # initial entity effects; the skewness-pin candidate.
     entity_effect_prior_type: str = "normal"
     entity_skew_alpha_scale: float = 2.0
+    # Innovation-shape seam (#233): learned-alpha skew-normal RW innovations.
+    rw_innovation_type: str = "normal"
+    rw_skew_alpha_scale: float = 2.0
     # Period (calendar-time) effects gate (#269): constrained per-period
     # offsets indexed by the descriptor's period_col.
     period_effects: bool = False
