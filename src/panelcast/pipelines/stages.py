@@ -173,6 +173,8 @@ class StageContext:
     # Innovation-shape seam (#233): learned-alpha skew-normal RW innovations.
     rw_innovation_type: str = "normal"
     rw_skew_alpha_scale: float = 2.0
+    # Boundary censoring (#234): bound observations contribute CDF mass.
+    censor_at_bounds: bool = False
     # Period (calendar-time) effects gate (#269): constrained per-period
     # offsets indexed by the descriptor's period_col.
     period_effects: bool = False

@@ -268,6 +268,44 @@ class RoundedDistribution(dist.Distribution):
         return jnp.log(jnp.maximum(hi - lo, _TINY))
 
 
+class BoundCensoredDistribution(dist.Distribution):
+    """Boundary-censored view of a continuous base distribution (#234).
+
+    Observed scores pile up at the target bounds, and no smooth density
+    reproduces boundary mass. Censoring is the honest fix: an observation at
+    the upper bound contributes ``log P(Y >= high) = log(1 - F(high))``, one
+    at the lower bound ``log P(Y <= low) = log F(low)``, and interior points
+    keep the base density. Samples clip to the bounds so replicated y_rep
+    carries the same boundary atoms — exactly what the max PPC pin measures.
+    """
+
+    arg_constraints: ClassVar[dict] = {}
+    support = constraints.real
+
+    def __init__(self, base, cdf_fn, low, high, *, validate_args=None):
+        self._base = base
+        self._cdf_fn = cdf_fn
+        self._low = low
+        self._high = high
+        super().__init__(
+            batch_shape=base.batch_shape,
+            event_shape=base.event_shape,
+            validate_args=validate_args,
+        )
+
+    def sample(self, key, sample_shape=()):
+        return jnp.clip(self._base.sample(key, sample_shape), self._low, self._high)
+
+    def log_prob(self, value):
+        upper_mass = jnp.log(jnp.maximum(1.0 - self._cdf_fn(self._high), _TINY))
+        lower_mass = jnp.log(jnp.maximum(self._cdf_fn(self._low), _TINY))
+        return jnp.where(
+            value >= self._high,
+            upper_mass,
+            jnp.where(value <= self._low, lower_mass, self._base.log_prob(value)),
+        )
+
+
 class DequantizedDistribution(dist.Distribution):
     """Dequantized view of a continuous base distribution.
 
@@ -342,14 +380,36 @@ def _mixture_cdf(value, mu, sigma, df, params):
     return NormalMixture2(loc0, scale0, loc1, scale1, w).cdf(value)
 
 
-def _emit_obs(prefix, base, n_obs, y, *, discretize, cdf_fn):
+def _censor_thresholds(priors, bounds):
+    """The target bounds on the MODEL scale (y is post-transform)."""
+    from panelcast.models.bayes.transforms import get_transform
+
+    transform = get_transform(
+        priors.target_transform, target_bounds=bounds, offset=priors.logit_offset
+    )
+    return (
+        transform.forward(jnp.asarray(float(bounds[0]))),
+        transform.forward(jnp.asarray(float(bounds[1]))),
+    )
+
+
+def _emit_obs(prefix, base, n_obs, y, *, discretize, cdf_fn, priors=None, bounds=None):
     """Emit the ``{prefix}y`` site, integer-aware when ``discretize`` is on.
 
     ``discretize=False`` keeps the original ``sample(f"{prefix}y", base, obs=y)``
     byte-identical. ``discretize=True`` dequantizes (condition on ``y + u``, round
     on generation); the ``interval_cdf`` mode is the dormant marginalized fallback.
+    ``censor_at_bounds`` (#234) wraps the base so boundary observations
+    contribute CDF mass instead of density; LOO per-point log-lik follows
+    automatically (the site's log_prob IS the censored mass), and empirical
+    PIT at a censored bound sits at the interval's upper edge (clipped
+    replicated draws count as <= the bound) — the pinned convention.
     """
-    if not discretize:
+    censor = priors is not None and priors.censor_at_bounds
+    if censor:
+        low, high = _censor_thresholds(priors, bounds)
+        d, obs = BoundCensoredDistribution(base, cdf_fn, low, high), y
+    elif not discretize:
         d, obs = base, y
     elif _DISCRETIZE_MODE == "interval_cdf":
         d, obs = RoundedDistribution(base, cdf_fn), y
@@ -358,6 +418,16 @@ def _emit_obs(prefix, base, n_obs, y, *, discretize, cdf_fn):
         obs = None if y is None else y + _dequant_jitter(y)
     with numpyro.plate(f"{prefix}obs", n_obs):
         numpyro.sample(f"{prefix}y", d, obs=obs)
+
+
+def _reject_censoring(priors: PriorConfig, family: str) -> None:
+    if priors.censor_at_bounds:
+        raise ValueError(
+            f"likelihood_family='{family}' does not support "
+            "censor_at_bounds=True (no usable observation CDF, or the family "
+            "is bounded by construction). Use a location-scale family "
+            "(studentt, normal, skew_normal, split_normal, mixture2)."
+        )
 
 
 def _reject_discretization(priors: PriorConfig, family: str) -> None:
@@ -377,6 +447,8 @@ def _studentt_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_revi
     _emit_obs(
         prefix, base, n_obs, y,
         discretize=priors.discretize_observation,
+        priors=priors,
+        bounds=bounds,
         cdf_fn=lambda v: _studentt_cdf(v, mu, sigma, df, {}),
     )
 
@@ -386,11 +458,14 @@ def _normal_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_review
     _emit_obs(
         prefix, base, n_obs, y,
         discretize=priors.discretize_observation,
+        priors=priors,
+        bounds=bounds,
         cdf_fn=lambda v: _normal_cdf(v, mu, sigma, df, {}),
     )
 
 
 def _skew_studentt_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews):
+    _reject_censoring(priors, "skew_studentt")
     _reject_discretization(priors, "skew_studentt")
     skewness = numpyro.sample(f"{prefix}skewness", dist.Normal(priors.skew_loc, priors.skew_scale))
     base = dist.TransformedDistribution(
@@ -411,6 +486,8 @@ def _skew_normal_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_r
     _emit_obs(
         prefix, base, n_obs, y,
         discretize=priors.discretize_observation,
+        priors=priors,
+        bounds=bounds,
         cdf_fn=lambda v: _skewnormal_cdf(v, mu, sigma, df, params),
     )
 
@@ -427,6 +504,8 @@ def _split_normal_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_
     _emit_obs(
         prefix, base, n_obs, y,
         discretize=priors.discretize_observation,
+        priors=priors,
+        bounds=bounds,
         cdf_fn=lambda v: _splitnormal_cdf(v, mu, sigma, df, params),
     )
 
@@ -454,6 +533,8 @@ def _mixture_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_revie
     _emit_obs(
         prefix, base, n_obs, y,
         discretize=priors.discretize_observation,
+        priors=priors,
+        bounds=bounds,
         cdf_fn=lambda v: _mixture_cdf(v, mu, sigma_b, df, params),
     )
 
@@ -476,6 +557,7 @@ def _beta_emit_obs(prefix, mu, y, n_obs, priors, low, high):
 
 
 def _beta_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews):
+    _reject_censoring(priors, "beta")
     _reject_discretization(priors, "beta")
     if priors.target_transform not in ("identity", None):
         raise ValueError(
@@ -487,6 +569,7 @@ def _beta_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews)
 
 
 def _beta_ceiling_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews):
+    _reject_censoring(priors, "beta_ceiling")
     _reject_discretization(priors, "beta_ceiling")
     if priors.target_transform not in ("identity", None):
         raise ValueError(
@@ -514,6 +597,7 @@ def _beta_ceiling_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_
 
 
 def _beta_binomial_sample_obs(prefix, mu, sigma, y, n_obs, df, priors, bounds, n_reviews):
+    _reject_censoring(priors, "beta_binomial")
     _reject_discretization(priors, "beta_binomial")
     if priors.target_transform not in ("identity", None):
         raise ValueError(

@@ -271,6 +271,16 @@ KNOBS: tuple[Knob, ...] = (
         ),
     ),
     Knob(
+        "censor_at_bounds",
+        "bool",
+        (False, True),
+        False,
+        history=(
+            "max-pin candidate (#234): boundary mass needs censoring, not a "
+            "cleverer density (six families tried); unscreened"
+        ),
+    ),
+    Knob(
         "gbm_offset",
         "bool",
         (True, False),

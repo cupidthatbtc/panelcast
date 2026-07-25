@@ -306,6 +306,10 @@ class PipelineConfig:
     # No CLI flag.
     rw_innovation_type: str = "normal"
     rw_skew_alpha_scale: float = 2.0
+    # Boundary censoring (#234): bound observations contribute CDF mass, the
+    # max-pin candidate. Mutually exclusive with discretize_observation.
+    # No CLI flag.
+    censor_at_bounds: bool = False
     # Period (calendar-time) effects gate (#269): a constrained additive
     # offset per period_col value. The declared constraint (zero_sum, or
     # pin_first / pin_last) is what identifies the block against entity
@@ -558,6 +562,12 @@ class PipelineConfig:
             raise ValueError(
                 f"Invalid rw_innovation_type: '{self.rw_innovation_type}'. "
                 "Must be 'normal' or 'skew_normal'."
+            )
+        if self.censor_at_bounds and self.discretize_observation:
+            raise ValueError(
+                "censor_at_bounds and discretize_observation are mutually "
+                "exclusive: censoring puts mass at the exact bounds while "
+                "discretization interval-censors every integer."
             )
 
     def _validate_auto_priors(self) -> None:
@@ -1431,6 +1441,8 @@ class PipelineOrchestrator:
             )
         if self.config.rw_innovation_type != defaults.rw_innovation_type:
             parts.append(f"--rw-innovation-type {self.config.rw_innovation_type}")
+        if self.config.censor_at_bounds:
+            parts.append("--censor-at-bounds")
         if self.config.period_effects:
             parts.append("--period-effects")
             if self.config.period_constraint != defaults.period_constraint:
@@ -1765,6 +1777,7 @@ class PipelineOrchestrator:
             entity_skew_alpha_scale=self.config.entity_skew_alpha_scale,
             rw_innovation_type=self.config.rw_innovation_type,
             rw_skew_alpha_scale=self.config.rw_skew_alpha_scale,
+            censor_at_bounds=self.config.censor_at_bounds,
             period_effects=self.config.period_effects,
             period_constraint=self.config.period_constraint,
             sigma_period_scale=self.config.sigma_period_scale,
