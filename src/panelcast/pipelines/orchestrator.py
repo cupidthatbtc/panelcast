@@ -294,6 +294,12 @@ class PipelineConfig:
     # No CLI flag.
     group_variance: str = "shared"
     tau_group_sigma_scale: float = 0.3
+    # Latent-population shape seam (#232): "normal" (legacy bit-identical) |
+    # "skew_normal" (learned-alpha skew-normal population on the initial
+    # entity effects — the skewness-pin candidate). Requires
+    # artist_effect_param="noncentered". No CLI flag.
+    entity_effect_prior_type: str = "normal"
+    entity_skew_alpha_scale: float = 2.0
     # Period (calendar-time) effects gate (#269): a constrained additive
     # offset per period_col value. The declared constraint (zero_sum, or
     # pin_first / pin_last) is what identifies the block against entity
@@ -433,6 +439,7 @@ class PipelineConfig:
             "tau_entity_scale",
             "sigma_period_scale",
             "tau_group_sigma_scale",
+            "entity_skew_alpha_scale",
         ):
             value = getattr(self, scale_field)
             if value <= 0.0:
@@ -526,6 +533,19 @@ class PipelineConfig:
             raise ValueError(
                 "group_variance='per_group' requires entity_group_pooling: "
                 "per-group sigmas are indexed by the entity-group mapping."
+            )
+        if self.entity_effect_prior_type not in ("normal", "skew_normal"):
+            raise ValueError(
+                f"Invalid entity_effect_prior_type: '{self.entity_effect_prior_type}'. "
+                "Must be 'normal' or 'skew_normal'."
+            )
+        if (
+            self.entity_effect_prior_type == "skew_normal"
+            and self.artist_effect_param != "noncentered"
+        ):
+            raise ValueError(
+                "entity_effect_prior_type='skew_normal' requires "
+                "artist_effect_param='noncentered'."
             )
 
     def _validate_auto_priors(self) -> None:
@@ -1393,6 +1413,10 @@ class PipelineOrchestrator:
             )
         if self.config.group_variance != defaults.group_variance:
             parts.append(f"--group-variance {self.config.group_variance}")
+        if self.config.entity_effect_prior_type != defaults.entity_effect_prior_type:
+            parts.append(
+                f"--entity-effect-prior-type {self.config.entity_effect_prior_type}"
+            )
         if self.config.period_effects:
             parts.append("--period-effects")
             if self.config.period_constraint != defaults.period_constraint:
@@ -1723,6 +1747,8 @@ class PipelineOrchestrator:
             entity_group_pooling=self.config.entity_group_pooling,
             group_variance=self.config.group_variance,
             tau_group_sigma_scale=self.config.tau_group_sigma_scale,
+            entity_effect_prior_type=self.config.entity_effect_prior_type,
+            entity_skew_alpha_scale=self.config.entity_skew_alpha_scale,
             period_effects=self.config.period_effects,
             period_constraint=self.config.period_constraint,
             sigma_period_scale=self.config.sigma_period_scale,

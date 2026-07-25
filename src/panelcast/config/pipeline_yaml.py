@@ -164,6 +164,9 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     # Per-group entity-effect variances (#271; no CLI flag).
     "group_variance": _spec("group_variance", None),
     "tau_group_sigma_scale": _spec("tau_group_sigma_scale", None),
+    # Latent-population shape seam (#232; no CLI flag).
+    "entity_effect_prior_type": _spec("entity_effect_prior_type", None),
+    "entity_skew_alpha_scale": _spec("entity_skew_alpha_scale", None),
     # Period-effects gate (#269; no CLI flag).
     "period_effects": _spec("period_effects", None),
     "period_constraint": _spec("period_constraint", None),

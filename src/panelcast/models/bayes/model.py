@@ -405,6 +405,43 @@ def _sample_init_artist_effect(
             removing the mu_artist <-> effects location ridge (the exported
             "{prefix}init_artist_effect" becomes a deterministic site).
     """
+    if priors.entity_effect_prior_type == "skew_normal":
+        # Additive construction (#232): delta*|z0| + sqrt(1-delta^2)*z1 is
+        # SkewNormal(0, 1, alpha) with delta = alpha/sqrt(1+alpha^2) — a
+        # non-centered generative form needing no special distribution.
+        # Standardized to zero mean and unit SD so mu_artist and
+        # sigma_artist keep their meanings under any alpha.
+        if priors.artist_effect_param != "noncentered":
+            raise ValueError(
+                "entity_effect_prior_type='skew_normal' requires "
+                "artist_effect_param='noncentered': the zero-sum reparam is "
+                "itself a draw of the symmetric population."
+            )
+        alpha = numpyro.sample(
+            f"{prefix}entity_skew_alpha",
+            dist.Normal(0.0, priors.entity_skew_alpha_scale),
+        )
+        delta = alpha / jnp.sqrt(1.0 + alpha**2)
+        z_abs = numpyro.sample(
+            f"{prefix}entity_skew_abs",
+            dist.HalfNormal(1.0).expand((n_artists,)).to_event(1),
+        )
+        z_sym = numpyro.sample(
+            f"{prefix}entity_skew_sym",
+            dist.Normal(0.0, 1.0).expand((n_artists,)).to_event(1),
+        )
+        skew_z = delta * z_abs + jnp.sqrt(1.0 - delta**2) * z_sym
+        mean = delta * jnp.sqrt(2.0 / jnp.pi)
+        sd = jnp.sqrt(1.0 - (2.0 / jnp.pi) * delta**2)
+        return numpyro.deterministic(
+            f"{prefix}init_artist_effect",
+            mu_artist + sigma_artist * (skew_z - mean) / sd,
+        )
+    if priors.entity_effect_prior_type != "normal":
+        raise ValueError(
+            f"Invalid entity_effect_prior_type: '{priors.entity_effect_prior_type}'. "
+            "Must be 'normal' or 'skew_normal'."
+        )
     if priors.artist_effect_param == "zerosum":
         z = numpyro.sample(
             f"{prefix}artist_effect_z",

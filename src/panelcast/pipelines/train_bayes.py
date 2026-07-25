@@ -178,6 +178,8 @@ def build_training_priors(
         entity_group_pooling=entity_group_pooling,
         group_variance=str(getattr(ctx, "group_variance", "shared")),
         tau_group_sigma_scale=float(getattr(ctx, "tau_group_sigma_scale", 0.3)),
+        entity_effect_prior_type=str(getattr(ctx, "entity_effect_prior_type", "normal")),
+        entity_skew_alpha_scale=float(getattr(ctx, "entity_skew_alpha_scale", 2.0)),
         period_effects=bool(getattr(ctx, "period_effects", False)),
         period_constraint=str(getattr(ctx, "period_constraint", "zero_sum")),
         sigma_period_scale=float(getattr(ctx, "sigma_period_scale", 0.5)),
