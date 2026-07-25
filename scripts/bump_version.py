@@ -33,7 +33,9 @@ def bump(root: Path, version: str) -> None:
         sys.exit(f"error: {version!r} does not look like a version")
     with open(root / "pyproject.toml", "rb") as f:
         current = tomllib.load(f)["project"]["version"]
-    today = datetime.date.today().isoformat()
+    # UTC, not local: tags and the PyPI publish land under UTC, and a
+    # late-evening local bump otherwise stamps yesterday.
+    today = datetime.datetime.now(datetime.UTC).date().isoformat()
 
     _sub(root / "pyproject.toml", rf'^version = "{re.escape(current)}"$', f'version = "{version}"')
     _sub(root / "pixi.toml", r'^version = ".*"$', f'version = "{version}"')
