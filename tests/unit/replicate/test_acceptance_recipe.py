@@ -75,7 +75,23 @@ class TestManifest:
     def test_incomplete_entry_rejected(self, tmp_path):
         path = tmp_path / "m.yaml"
         path.write_text("domains:\n  - {name: x, dataset: d.yaml}\n", encoding="utf-8")
-        with pytest.raises(SystemExit, match="lacks"):
+        with pytest.raises(SystemExit, match="non-empty string"):
+            recipe.load_manifest(path)
+
+    def test_null_and_non_string_fields_rejected(self, tmp_path):
+        path = tmp_path / "m.yaml"
+        path.write_text(
+            "domains:\n"
+            "  - {name: x, dataset: null, claims: 3, expected: e.json}\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(SystemExit, match="non-empty string"):
+            recipe.load_manifest(path)
+
+    def test_scalar_domains_rejected(self, tmp_path):
+        path = tmp_path / "m.yaml"
+        path.write_text("domains: 1\n", encoding="utf-8")
+        with pytest.raises(SystemExit, match="must be a list"):
             recipe.load_manifest(path)
 
     def test_non_mapping_shapes_rejected(self, tmp_path):

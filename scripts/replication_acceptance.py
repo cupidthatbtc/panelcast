@@ -37,16 +37,19 @@ def load_manifest(path: Path) -> list[dict]:
     if data is not None and not isinstance(data, dict):
         raise SystemExit(f"{path}: manifest must be a mapping with a 'domains' list.")
     domains = (data or {}).get("domains") or []
+    if not isinstance(domains, list):
+        raise SystemExit(f"{path}: manifest field 'domains' must be a list.")
     if not domains:
         raise SystemExit(f"{path}: manifest declares no domains.")
-    required = {"name", "dataset", "claims", "expected"}
+    required = ("name", "dataset", "claims", "expected")
     for domain in domains:
         if not isinstance(domain, dict):
             raise SystemExit(f"{path}: domain entries must be mappings, got {domain!r}.")
-        missing = required - set(domain)
+        missing = [k for k in required if not isinstance(domain.get(k), str) or not domain[k]]
         if missing:
             raise SystemExit(
-                f"{path}: domain entry {domain.get('name', '?')} lacks {sorted(missing)}."
+                f"{path}: domain entry {domain.get('name', '?')} needs non-empty "
+                f"string values for {missing}."
             )
     return domains
 
