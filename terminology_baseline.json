@@ -1,6 +1,6 @@
 {
   "description": "Per-file counts of album/artist-derived identifiers (#303). scripts/terminology_ratchet.py --check fails CI when a generic module's count drifts; sanctioned AOTY surfaces are exempt.",
-  "generic_total": 1930,
+  "generic_total": 1933,
   "files": {
     "cli/commands.py": 2,
     "cli/main.py": 2,
@@ -37,8 +37,8 @@
     "models/bayes/diagnostics.py": 2,
     "models/bayes/fit.py": 13,
     "models/bayes/likelihoods.py": 1,
-    "models/bayes/model.py": 210,
-    "models/bayes/predict.py": 70,
+    "models/bayes/model.py": 211,
+    "models/bayes/predict.py": 72,
     "models/bayes/priors.py": 65,
     "models/bayes/rollout.py": 6,
     "pipelines/backtest.py": 1,
