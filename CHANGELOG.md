@@ -34,6 +34,8 @@ bit-identical.
   it; the rest reject actionably), thresholds forward-map under
   offset_logit, and the score-scale LOO Jacobian correctly skips censored
   masses (they are transform-invariant).
+### Fixed
+
 - The version bump now stamps the UTC date (#335), matching where tags and
   the PyPI publish land.
 
