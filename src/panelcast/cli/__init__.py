@@ -43,6 +43,7 @@ from panelcast.cli import preflight_cmd as _preflight_cmd  # noqa: E402, F401
 from panelcast.cli import select_cmd as _select_cmd  # noqa: E402, F401
 from panelcast.cli import stack_cmd as _stack_cmd  # noqa: E402, F401
 from panelcast.cli import backtest_cmd as _backtest_cmd  # noqa: E402, F401
+from panelcast.cli import replicate_cmd as _replicate_cmd  # noqa: E402, F401
 # isort: on
 
 __version__ = _main.__version__
