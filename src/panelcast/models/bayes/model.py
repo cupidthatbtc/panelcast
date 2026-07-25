@@ -340,6 +340,11 @@ def _sample_entity_level(
     inserts sites mid-sequence (they must feed the init effects), which
     legitimately reshuffles downstream RNG.
     """
+    if priors.group_variance not in ("shared", "per_group"):
+        raise ValueError(
+            f"Unknown group_variance: '{priors.group_variance}'. "
+            "Must be 'shared' or 'per_group'."
+        )
     if not priors.entity_group_pooling:
         if priors.group_variance == "per_group":
             raise ValueError(
@@ -376,13 +381,11 @@ def _sample_entity_level(
             f"{prefix}sigma_artist_group",
             sigma_artist * jnp.exp(tau_group_sigma * group_sigma_z),
         )
+        # Interaction note: with artist_effect_param="zerosum", a per-entity
+        # sigma vector means sigma * z no longer sums to zero, so the
+        # zero-sum identification is only approximate under per_group.
         return mu_entity, sigma_artist_group[group_idx_by_artist]
-    if priors.group_variance == "shared":
-        return mu_entity, sigma_artist
-    raise ValueError(
-        f"Unknown group_variance: '{priors.group_variance}'. "
-        "Must be 'shared' or 'per_group'."
-    )
+    return mu_entity, sigma_artist
 
 
 def _sample_init_artist_effect(

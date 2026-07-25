@@ -64,6 +64,31 @@ class TestSharedParity:
         trace = _seeded_trace(_model_args(PriorConfig(entity_group_pooling=True)))
         assert not any("group_sigma" in site or "sigma_artist_group" in site for site in trace)
 
+    def test_shared_site_set_is_the_pinned_pooling_roster(self):
+        # Hard-pin the pooling-only roster so a shared-path divergence from
+        # the pre-#271 model cannot slip through the field-equal parity test.
+        trace = _seeded_trace(_model_args(PriorConfig(entity_group_pooling=True)))
+        assert set(trace) == {
+            "user_artists",
+            "user_beta",
+            "user_entity_log_scale",
+            "user_entity_obs_raw",
+            "user_group_offset",
+            "user_group_offset_z",
+            "user_init_artist_effect",
+            "user_init_artist_effect_decentered",
+            "user_mu_artist",
+            "user_obs",
+            "user_rho",
+            "user_rw_raw",
+            "user_sigma_artist",
+            "user_sigma_group",
+            "user_sigma_obs",
+            "user_sigma_rw",
+            "user_tau_entity",
+            "user_y",
+        }
+
 
 class TestPerGroup:
     def test_adds_exactly_the_new_sites(self):
@@ -115,6 +140,31 @@ class TestPerGroup:
         # Decentered z pinned to 1 => init effect equals that entity's sigma.
         init = np.asarray(trace["user_init_artist_effect"]["value"])
         np.testing.assert_allclose(init, sigma_group[_GROUP_IDX], rtol=1e-5)
+
+    def test_zerosum_param_with_per_group_runs_but_loses_exact_zero_sum(self):
+        # Pin the interaction: with a per-entity sigma vector, sigma * z no
+        # longer sums to zero, so zerosum identification is only approximate.
+        priors = PriorConfig(
+            entity_group_pooling=True,
+            group_variance="per_group",
+            artist_effect_param="zerosum",
+        )
+        args = _model_args(priors)
+        model = make_score_model("user")
+        pinned = {
+            "user_mu_artist": jnp.asarray(0.0),
+            "user_sigma_artist": jnp.asarray(4.0),
+            "user_sigma_group": jnp.asarray(0.0),
+            "user_group_offset_z": jnp.asarray([0.0, 0.0]),
+            "user_tau_group_sigma": jnp.asarray(0.5),
+            "user_group_sigma_z": jnp.asarray([1.0, -1.0]),
+        }
+        with handlers.seed(rng_seed=0):
+            trace = handlers.trace(handlers.substitute(model, pinned)).get_trace(**args)
+        init = np.asarray(trace["user_init_artist_effect"]["value"])
+        z = np.asarray(trace["user_artist_effect_z"]["value"])
+        np.testing.assert_allclose(z.sum(), 0.0, atol=1e-5)
+        assert abs(init.sum()) > 1e-6  # sigma-weighted deviations: not zero-sum
 
     def test_tau_zero_recovers_shared(self):
         priors = PriorConfig(entity_group_pooling=True, group_variance="per_group")
