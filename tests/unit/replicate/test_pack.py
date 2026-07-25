@@ -98,7 +98,10 @@ class TestEnsurePanel:
             "out.write_text('Artist,User_Score\\nA,70\\nB,80\\n', encoding='utf-8')\n",
             encoding="utf-8",
         )
-        monkeypatch.chdir(pack_dir)
+        # Deliberately NOT chdir'd into the pack: the primary path (--all, or
+        # replicate from the repo root) runs with CWD elsewhere, and the
+        # post-build resolution must still find the pack-local panel.
+        monkeypatch.chdir(tmp_path)
         manifest, resolved = load_pack(pack_dir)
         ensure_panel(manifest, resolved)  # builds, then gates clean
         assert (pack_dir / "data" / "panel.csv").exists()
@@ -119,9 +122,30 @@ class TestEnsurePanel:
         data_dir = pack_dir / "data"
         data_dir.mkdir()
         (data_dir / "panel.csv").write_text("Artist,User_Score\nA,70\n", encoding="utf-8")
-        monkeypatch.chdir(pack_dir)
+        monkeypatch.chdir(tmp_path)
         manifest, resolved = load_pack(pack_dir)
         with pytest.raises(RuntimeError, match="expected 99 / 99"):
+            ensure_panel(manifest, resolved)
+
+    def test_missing_entity_column_is_actionable(self, tmp_path, monkeypatch):
+        monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
+        pack_dir = _write_pack(tmp_path, descriptor_body=self._descriptor())
+        (pack_dir / "pack.yaml").write_text(
+            "name: demo-pack\n"
+            "paper:\n"
+            '  citation: "Somebody (1999), JASA"\n'
+            "data:\n"
+            '  source: "a deposit"\n'
+            '  license: "CC0"\n'
+            "  expected_panel: {rows: 1, entities: 1}\n",
+            encoding="utf-8",
+        )
+        data_dir = pack_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "panel.csv").write_text("Wrong,Cols\n1,2\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        manifest, resolved = load_pack(pack_dir)
+        with pytest.raises(RuntimeError, match="no entity column"):
             ensure_panel(manifest, resolved)
 
 
@@ -136,6 +160,10 @@ class TestScaffold:
         scaffold_pack("fresh-pack", tmp_path)
         with pytest.raises(FileExistsError):
             scaffold_pack("fresh-pack", tmp_path)
+
+    def test_scaffold_rejects_names_the_manifest_would(self, tmp_path):
+        with pytest.raises(ValueError, match="kebab/snake"):
+            scaffold_pack("MyPack", tmp_path)
 
 
 class TestCliModes:
@@ -197,3 +225,31 @@ class TestCliModes:
         assert result.exit_code == 1  # worst pack: divergence
         assert "demo-pack" in result.output
         assert "other-pack" in result.output
+
+    def test_all_rejects_json(self, tmp_path):
+        from typer.testing import CliRunner
+
+        from panelcast.cli import app
+
+        _write_pack(tmp_path)
+        result = CliRunner().invoke(
+            app, ["replicate", "--all", str(tmp_path), "--json", str(tmp_path / "o.json")]
+        )
+        assert result.exit_code == 2
+        assert "per-run" in result.output
+
+    def test_collection_surfaces_pack_crashes(self, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+
+        import panelcast.cli.replicate_cmd as cmd
+        from panelcast.cli import app
+
+        _write_pack(tmp_path)
+
+        def boom(pack_dir, console):
+            raise RuntimeError("kaboom")
+
+        monkeypatch.setattr(cmd, "_run_pack", boom)
+        result = CliRunner().invoke(app, ["replicate", "--all", str(tmp_path)])
+        assert result.exit_code == 2
+        assert "RuntimeError: kaboom" in result.output

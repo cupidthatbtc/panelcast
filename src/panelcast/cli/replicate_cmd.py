@@ -83,6 +83,13 @@ def replicate(
         raise typer.Exit(2)
 
     if all_dir is not None:
+        if output_json is not None:
+            console.print(
+                "[bold red]Error:[/bold red] --json is per-run; the collection "
+                "scoreboard has no single verdict list. Each pack writes its own "
+                "notes/replicate_verdicts.json."
+            )
+            raise typer.Exit(2)
         raise typer.Exit(_run_collection(all_dir, console))
 
     if pack_dir is not None:
@@ -185,8 +192,11 @@ def _run_collection(collection_dir: Path, console) -> int:
     for pack_dir in pack_dirs:
         try:
             verdicts = _run_pack(pack_dir, console)
-        except (typer.Exit, Exception) as exc:  # noqa: BLE001 — one pack must not sink the rest
+        except Exception as exc:  # noqa: BLE001 — one pack must not sink the rest
             code = getattr(exc, "exit_code", 2) or 2
+            # Surface what actually happened: a crash must be
+            # distinguishable from a legitimate fit failure.
+            console.print(f"[red]{pack_dir.name}: {type(exc).__name__}: {exc}[/red]")
             scoreboard.add_row(pack_dir.name, "—", "—", "—", "—", f"[red]{code}[/red]")
             worst = max(worst, 2)
             continue

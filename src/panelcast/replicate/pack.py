@@ -135,6 +135,11 @@ def ensure_panel(manifest: PackManifest, pack_dir: Path) -> None:
         result = subprocess.run(
             [sys.executable, str(pack_dir / manifest.build)], cwd=pack_dir, check=False
         )
+        # Re-resolve: pre-build, a relative raw_path_default falls through to
+        # a bare CWD-relative path (the descriptor-dir fallback only fires
+        # for existing files), so the pre-build resolution goes stale the
+        # moment build.py writes under the pack dir.
+        panel_path = descriptor.resolve_raw_path()
         if result.returncode != 0 or not panel_path.exists():
             raise RuntimeError(
                 f"{manifest.name}: build step failed (exit {result.returncode}) "
@@ -145,9 +150,15 @@ def ensure_panel(manifest: PackManifest, pack_dir: Path) -> None:
         import pandas as pd
 
         panel = pd.read_csv(panel_path, encoding=descriptor.encoding)
-        entity_col = descriptor.raw_column_map.get(descriptor.entity_col, descriptor.entity_col)
+        # raw_column_map is raw-display -> canonical; the panel carries raw
+        # headers, so reverse-look the entity column up.
+        reverse = {v: k for k, v in descriptor.raw_column_map.items()}
+        entity_col = reverse.get(descriptor.entity_col, descriptor.entity_col)
         if entity_col not in panel.columns:
-            entity_col = descriptor.entity_col
+            raise RuntimeError(
+                f"{manifest.name}: built panel has no entity column "
+                f"'{entity_col}' — columns: {list(panel.columns)}."
+            )
         rows, entities = len(panel), panel[entity_col].nunique()
         if rows != expected.rows or entities != expected.entities:
             raise RuntimeError(
@@ -196,6 +207,15 @@ _TEMPLATE_GITIGNORE = "data/\noutputs/\n"
 
 def scaffold_pack(name: str, parent: Path | str = ".") -> Path:
     """Create a skeleton pack so contributors start from a valid layout."""
+    import re
+
+    if re.fullmatch(r"[a-z0-9][a-z0-9_-]*", name) is None:
+        # The manifest pattern, enforced up front: the scaffold must produce
+        # a pack load_pack accepts, not one it rejects on first run.
+        raise ValueError(
+            f"pack name '{name}' must be lowercase kebab/snake case "
+            "(pattern [a-z0-9][a-z0-9_-]*)."
+        )
     pack_dir = Path(parent) / name
     if pack_dir.exists():
         raise FileExistsError(f"{pack_dir} already exists.")

@@ -550,6 +550,11 @@ citation, data provenance, `expected_panel` sanity gate, `run:` overrides),
 `descriptor.yaml`, an optional `build.py` (raw deposit → tidy panel, the one
 irreducibly per-paper step), optional `fit.yaml` and `claims.yaml`, and a
 gitignored `data/`. `panelcast pack new <name>` scaffolds a valid skeleton.
+Note the two override vocabularies: the manifest's `run:` block uses
+**pipeline config field names** with config-native values (e.g.
+`min_ratings: 1`), while `fit.yaml` is a normal pipeline YAML using the
+documented **config keys** — prefer `fit.yaml` for anything beyond a scalar
+or two.
 
 Named extractors: `group_mean_trend` (slope of the fitted group offsets over
 label-ordered groups — right for zero-padded cohort labels like
