@@ -4,6 +4,43 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] — 2026-07-25
+
+The replication epic: two new gated structural blocks close the model gaps
+the external ports exposed, and replication claims become machine-checkable
+with a standing three-domain acceptance suite.
+
+### Added
+
+- **Period (calendar-time) effects** (#269): a gated, default-off block
+  adding a constrained per-period offset — `zero_sum`, `pin_first`, or
+  `pin_last`, the declared constraint being what identifies the
+  decomposition against entity intercepts, cohort pooling, and age-like
+  covariates (the age-period-cohort rank deficiency). Descriptors declare
+  `period_col`; unseen periods predict exactly zero (the constraint's
+  center); gate-off is bit-identical.
+- **Per-group entity-effect variances** (#271): with entity-group pooling
+  on, `group_variance: per_group` gives each group its own entity-effect
+  spread via log-scale partial pooling around the shared `sigma_artist`
+  draw — `tau → 0` recovers the shared model and n=1 groups shrink to the
+  center. The structure behind era-variance questions (BRL-1999's
+  Gould-conjecture claim; the ZTF variance census). Cold-start prediction
+  keeps the pooled center (group means propagate, group variances do not —
+  documented).
+- **`panelcast replicate` + claims.yaml** (#272): a domain declares its
+  paper's quantitative claims as assertions over posterior quantities; five
+  named extractors (group-mean trend, raw-scale covariate vertex, entity
+  contrast, top-K ranking, curve decline) grade against posterior draws on
+  the `match > qualitative > shape_only` ladder. A claim failing its target
+  rung while passing a lower one is a **divergence** — a finding, not an
+  error. Exit codes follow the grade profile.
+- **Three-domain replication acceptance suite** (#273):
+  `pixi run replication-acceptance` re-runs `panelcast replicate` for the
+  astro/baseball/chess ports and diffs each verdict table's graded
+  conclusions against committed expected results — the regression net that
+  keeps model changes from silently breaking domain portability. GPU-scale,
+  nightly/manual; `--record` captures expectations after a verified run.
+
 ## [0.16.0] — 2026-07-24
 
 Descriptors finish becoming the single source of domain truth: a dataset now
