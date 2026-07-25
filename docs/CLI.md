@@ -530,16 +530,26 @@ under a fixed model are findings (the baseball era translation, the chess
 peak shift).
 
 ```bash
+panelcast replicate <pack-dir>                                   # run a domain pack end-to-end
+panelcast replicate --all <collection-dir>                       # every pack, one scoreboard
 panelcast replicate --claims claims.yaml --models <run>/models   # grade an existing fit
 panelcast replicate --claims claims.yaml --dataset domain.yaml   # run the chain, then grade
 ```
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--claims` | required | claims.yaml declaring the paper's claims |
+| `PACK_DIR` | — | A domain pack folder (contains `pack.yaml`): build the panel if needed (gated on the manifest's `expected_panel`), run the chain with the pack's `fit.yaml`/`run:` overrides, grade its claims, write results to `notes/` |
+| `--all` | — | Collection mode: run every immediate subfolder holding a `pack.yaml`, print one scoreboard; exit code is the worst pack's |
+| `--claims` | — | claims.yaml declaring the paper's claims (required with `--models`/`--dataset`) |
 | `--models` | — | Models directory of an existing fit (`training_summary.json` + `.nc`) |
 | `--dataset` | — | Dataset descriptor: run data → train first, then grade the fresh fit |
 | `--json` | — | Also write the verdicts as JSON |
+
+A **domain pack** is the drop-a-folder-and-run unit: `pack.yaml` (manifest —
+citation, data provenance, `expected_panel` sanity gate, `run:` overrides),
+`descriptor.yaml`, an optional `build.py` (raw deposit → tidy panel, the one
+irreducibly per-paper step), optional `fit.yaml` and `claims.yaml`, and a
+gitignored `data/`. `panelcast pack new <name>` scaffolds a valid skeleton.
 
 Named extractors: `group_mean_trend` (slope of the fitted group offsets over
 label-ordered groups — right for zero-padded cohort labels like

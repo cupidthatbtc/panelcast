@@ -42,6 +42,16 @@ the candidate space:
   Periods unseen in training (future years at prediction time) contribute
   exactly zero — the constraint's center.
 
+## 1a. Start from a domain pack
+
+For a paper replication, scaffold a pack instead of a bare descriptor:
+`panelcast pack new <name>` creates the folder contract (`pack.yaml` +
+descriptor + `build.py` stub + gitignored `data/`), and
+`panelcast replicate <pack-dir>` runs it end-to-end — build, preflight,
+fit, claim grading — with `panelcast replicate --all <collection>` printing
+a scoreboard across packs. The only irreducibly per-paper file is
+`build.py`; everything else is declarative.
+
 ## 1b. Standing acceptance suite
 
 Once a port has a `claims.yaml`, add it to
