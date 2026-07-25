@@ -1700,11 +1700,10 @@ def train_models(  # noqa: C901  # tracked complexity debt
     # gate-off fits.
     idata_excludes = [
         f"{prefix}_rw_raw",
+        f"{prefix}_rw_raw_abs",
         f"{prefix}_entity_skew_abs",
         f"{prefix}_entity_skew_sym",
     ]
-    collection_excludes = [f"{prefix}_rw_raw"] if exclude_rw_raw_from_collection else []
-    idata_excludes = [f"{prefix}_rw_raw", f"{prefix}_rw_raw_abs"]
     collection_excludes = (
         [f"{prefix}_rw_raw", f"{prefix}_rw_raw_abs"] if exclude_rw_raw_from_collection else []
     )

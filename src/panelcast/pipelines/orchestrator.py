@@ -555,7 +555,10 @@ class PipelineConfig:
                 "artist_effect_param='noncentered'."
             )
         if self.rw_innovation_type not in ("normal", "skew_normal"):
+            raise ValueError(
                 f"Invalid rw_innovation_type: '{self.rw_innovation_type}'. "
+                "Must be 'normal' or 'skew_normal'."
+            )
 
     def _validate_auto_priors(self) -> None:
         """auto_priors derives the sigma locs; explicit values conflict (#267)."""

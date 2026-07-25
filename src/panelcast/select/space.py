@@ -252,13 +252,20 @@ KNOBS: tuple[Knob, ...] = (
     ),
     Knob(
         "entity_effect_prior_type",
-        "rw_innovation_type",
         "literal",
         ("normal", "skew_normal"),
         "normal",
         history=(
             "skewness-pin candidate (#232): the entity-obs win showed the "
             "structural PPC pins respond to latent-level structure; unscreened"
+        ),
+    ),
+    Knob(
+        "rw_innovation_type",
+        "literal",
+        ("normal", "skew_normal"),
+        "normal",
+        history=(
             "skewness-via-dynamics candidate (#233): asymmetric innovations "
             "let the latent trajectory generate marginal left-skew; unscreened"
         ),
