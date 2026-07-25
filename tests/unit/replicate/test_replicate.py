@@ -182,6 +182,64 @@ class TestExtractors:
             extract(_bundle(), claim)
 
 
+class TestExtractorErrors:
+    def test_group_a_covering_everyone_raises(self):
+        claim = _claim(
+            name="c",
+            quantity="entity_contrast",
+            expect={"greater_than": 0},
+            entities={"group_a": ["A", "B", "C", "D"]},
+        )
+        with pytest.raises(ValueError, match="group_b is empty"):
+            extract(_bundle(), claim)
+
+    def test_missing_entities_block_raises(self):
+        claim = _claim(name="c", quantity="entity_contrast", expect={"greater_than": 0})
+        with pytest.raises(ValueError, match="entities"):
+            extract(_bundle(), claim)
+
+    def test_wrong_arg_counts_raise(self):
+        for quantity in ("covariate_vertex(age_c)", "decline_between_ages(age_c, age_sq, 35)"):
+            claim = _claim(name="c", quantity=quantity, expect={"greater_than": 0})
+            with pytest.raises(ValueError):
+                extract(_bundle(), claim)
+
+    def test_ranking_top_k_bounds(self):
+        claim = _claim(
+            name="r",
+            quantity="entity_ranking(9)",
+            expect={"greater_than": 0},
+            entities={"group_a": ["A"]},
+        )
+        with pytest.raises(ValueError, match="top_k"):
+            extract(_bundle(), claim)
+
+    def test_unknown_feature_lists_roster(self):
+        claim = _claim(
+            name="v", quantity="covariate_vertex(nope, age_sq)", expect={"in": [0, 1]}
+        )
+        with pytest.raises(ValueError, match="Trained features"):
+            extract(_bundle(), claim)
+
+    def test_scaler_column_mismatch_raises(self):
+        bundle = _bundle()
+        bundle.summary["feature_scaler"]["feature_cols"] = ["age_sq", "age_c"]
+        claim = _claim(
+            name="v", quantity="covariate_vertex(age_c, age_sq)", expect={"in": [30, 40]}
+        )
+        with pytest.raises(ValueError, match="inconsistent"):
+            extract(bundle, claim)
+
+    def test_missing_site_names_available(self):
+        bundle = _bundle()
+        claim = _claim(
+            name="t", quantity="group_mean_trend", expect={"direction": "increasing"}
+        )
+        del bundle.posterior["perf_group_offset"]
+        with pytest.raises(ValueError, match="no site"):
+            extract(bundle, claim)
+
+
 class TestGrading:
     def test_grade_ladder_pass_divergence_fail(self):
         bundle = _bundle()
@@ -247,3 +305,137 @@ class TestGrading:
         verdicts = evaluate_claims(_bundle(), load_claims(path))
         assert [v.verdict for v in verdicts] == ["PASS"]
         assert exit_code_for(verdicts) == 0
+
+    def test_threshold_and_direction_descriptions(self):
+        bundle = _bundle()
+        for expect, expected_text, verdict in (
+            ({"greater_than": 0.0, "prob": 0.95}, "> 0", "PASS"),
+            # The trend is increasing, so a less_than claim degrades to shape.
+            ({"less_than": 0.0}, "< 0", "DIVERGENCE"),
+            ({"direction": "increasing", "from": "g0"}, "increasing from g0", "PASS"),
+        ):
+            claim = _claim(name="t", quantity="group_mean_trend", expect=expect)
+            v = grade_claim(extract(bundle, claim), claim)
+            assert expected_text in v.expected
+            assert v.verdict == verdict
+
+    def test_non_finite_draws_described_readably(self):
+        from panelcast.replicate.evaluate import _describe_draws
+
+        assert _describe_draws(np.array([np.nan, 1.0])) == "non-finite draws"
+        assert _describe_draws(np.array([])) == "no draws"
+
+
+def _write_models_dir(tmp_path):
+    """A real on-disk bundle: training_summary.json + a tiny arviz .nc."""
+    import json as json_mod
+
+    import arviz as az
+
+    bundle = _bundle()
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    summary = dict(bundle.summary)
+    summary["model_type"] = "perf_score"
+    (models_dir / "training_summary.json").write_text(
+        json_mod.dumps(summary), encoding="utf-8"
+    )
+    posterior = {
+        name: values.reshape(1, *values.shape)  # one chain
+        for name, values in bundle.posterior.items()
+    }
+    az.from_dict(posterior=posterior).to_netcdf(str(models_dir / "perf_score_1.nc"))
+    return models_dir
+
+
+class TestBundleLoading:
+    def test_load_bundle_round_trips(self, tmp_path):
+        from panelcast.replicate.extractors import load_bundle
+
+        bundle = load_bundle(_write_models_dir(tmp_path))
+        assert bundle.prefix == "perf"
+        assert bundle.site("group_offset").shape == (_N_DRAWS, 3)
+
+    def test_missing_summary_raises(self, tmp_path):
+        from panelcast.replicate.extractors import load_bundle
+
+        with pytest.raises(FileNotFoundError, match="training_summary"):
+            load_bundle(tmp_path)
+
+    def test_missing_posterior_raises(self, tmp_path):
+        import json as json_mod
+
+        from panelcast.replicate.extractors import load_bundle
+
+        (tmp_path / "training_summary.json").write_text(
+            json_mod.dumps(_bundle().summary), encoding="utf-8"
+        )
+        with pytest.raises(FileNotFoundError, match=".nc"):
+            load_bundle(tmp_path)
+
+
+class TestCli:
+    def _claims_file(self, tmp_path):
+        path = tmp_path / "claims.yaml"
+        path.write_text(
+            "claims:\n"
+            "  - name: peak_age\n"
+            "    quantity: covariate_vertex(age_c, age_sq)\n"
+            "    expect: {in: [30, 40]}\n",
+            encoding="utf-8",
+        )
+        return path
+
+    def test_grades_existing_fit_and_writes_json(self, tmp_path):
+        import json as json_mod
+
+        from typer.testing import CliRunner
+
+        from panelcast.cli import app
+
+        models_dir = _write_models_dir(tmp_path)
+        out = tmp_path / "verdicts.json"
+        result = CliRunner().invoke(
+            app,
+            [
+                "replicate",
+                "--claims", str(self._claims_file(tmp_path)),
+                "--models", str(models_dir),
+                "--json", str(out),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json_mod.loads(out.read_text(encoding="utf-8"))
+        assert payload[0]["name"] == "peak_age"
+        assert payload[0]["verdict"] == "PASS"
+
+    def test_requires_exactly_one_source(self, tmp_path):
+        from typer.testing import CliRunner
+
+        from panelcast.cli import app
+
+        result = CliRunner().invoke(
+            app, ["replicate", "--claims", str(self._claims_file(tmp_path))]
+        )
+        assert result.exit_code == 2
+        assert "exactly one" in result.output
+
+    def test_divergence_exit_code(self, tmp_path):
+        from typer.testing import CliRunner
+
+        from panelcast.cli import app
+
+        claims = tmp_path / "claims.yaml"
+        claims.write_text(
+            "claims:\n"
+            "  - name: peak_age\n"
+            "    quantity: covariate_vertex(age_c, age_sq)\n"
+            "    expect: {in: [35.5, 36.5]}\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(
+            app,
+            ["replicate", "--claims", str(claims), "--models", str(_write_models_dir(tmp_path))],
+        )
+        assert result.exit_code == 1
+        assert "DIVERGENCE" in result.output

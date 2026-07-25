@@ -81,6 +81,8 @@ def _describe_expect(expect: ExpectSpec) -> str:
 def _describe_draws(draws: np.ndarray) -> str:
     if not draws.size:
         return "no draws"
+    if not np.isfinite(draws).all():
+        return "non-finite draws"
     lo, mid, hi = np.percentile(draws, [5, 50, 95])
     return f"{mid:.3g} [{lo:.3g}, {hi:.3g}]"
 

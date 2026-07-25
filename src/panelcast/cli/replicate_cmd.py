@@ -116,6 +116,11 @@ def _run_chain_for(dataset: str, console) -> Path:
         raise typer.Exit(2)
     models_dir = Path(run_dir) / "models"
     if not models_dir.exists():
-        # Legacy layout: models at the repo-level models/ directory.
-        models_dir = Path("models")
+        # Never fall back to a repo-level models/ here: grading a stale fit
+        # while claiming it is fresh would be silently wrong.
+        console.print(
+            f"[bold red]Error:[/bold red] the run produced no models at {models_dir}."
+        )
+        raise typer.Exit(2)
+    console.print(f"grading the fresh fit at {models_dir}")
     return models_dir

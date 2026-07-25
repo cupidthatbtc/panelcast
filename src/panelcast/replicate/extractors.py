@@ -51,6 +51,14 @@ class ArtifactBundle:
         """(mean, std) the feature was standardized with; (0, 1) if unscaled."""
         scaler = self.summary.get("feature_scaler") or {}
         cols = list(scaler.get("feature_cols", []))
+        if cols and cols != list(self.summary["feature_cols"]):
+            # beta is indexed by feature_cols and its scale by the scaler's
+            # list; a silent ordering divergence would pair beta with the
+            # wrong std.
+            raise ValueError(
+                "feature_scaler.feature_cols disagrees with feature_cols — "
+                "the fit artifacts are inconsistent."
+            )
         if feature in cols:
             i = cols.index(feature)
             std = float(scaler["std"][i])
@@ -78,10 +86,16 @@ def load_bundle(models_dir: Path | str) -> ArtifactBundle:
         raise FileNotFoundError(f"no training_summary.json in {models_dir}.")
     with open(summary_path, encoding="utf-8") as f:
         summary = json.load(f)
-    candidates = sorted(models_dir.glob("*.nc"))
+    # Prefer the summary's own model type; newest by mtime, not filename sort
+    # (a lexicographic pick keys on model_type first in mixed dirs).
+    model_type = summary.get("model_type")
+    candidates = sorted(models_dir.glob(f"{model_type}_*.nc")) if model_type else []
+    if not candidates:
+        candidates = list(models_dir.glob("*.nc"))
     if not candidates:
         raise FileNotFoundError(f"no .nc posterior in {models_dir}.")
-    idata = az.from_netcdf(str(candidates[-1]))
+    newest = max(candidates, key=lambda p: p.stat().st_mtime)
+    idata = az.from_netcdf(str(newest))
     posterior = {
         name: np.asarray(idata.posterior[name].values).reshape(
             -1, *idata.posterior[name].values.shape[2:]
@@ -114,7 +128,12 @@ def _ordered_group_columns(bundle: ArtifactBundle, from_label: str | None) -> li
 
 
 def group_mean_trend(bundle: ArtifactBundle, claim: ClaimSpec) -> ExtractedQuantity:
-    """Per-draw least-squares slope of the group offsets over ordered groups."""
+    """Per-draw least-squares slope of the group offsets over ordered groups.
+
+    Groups order by sorted label — exactly right for zero-padded cohort
+    labels ("1900s"..."2000s"); a domain whose labels don't sort into their
+    intended order should not use this extractor.
+    """
     offsets = bundle.site("group_offset")
     columns = _ordered_group_columns(bundle, claim.expect.from_)
     if len(columns) < 2:
@@ -164,6 +183,10 @@ def entity_contrast(bundle: ArtifactBundle, claim: ClaimSpec) -> ExtractedQuanti
         idx_b = np.flatnonzero(mask)
     else:
         idx_b = bundle.entity_indices(claim.entities.group_b)
+    if idx_b.size == 0:
+        raise ValueError(
+            f"claim '{claim.name}': group_b is empty (group_a covers every entity)."
+        )
     draws = effects[:, idx_a].mean(axis=1) - effects[:, idx_b].mean(axis=1)
     return ExtractedQuantity(
         draws, True, f"{len(idx_a)} vs {len(idx_b)} entities"

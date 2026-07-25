@@ -542,7 +542,9 @@ panelcast replicate --claims claims.yaml --dataset domain.yaml   # run the chain
 | `--json` | — | Also write the verdicts as JSON |
 
 Named extractors: `group_mean_trend` (slope of the fitted group offsets over
-label-ordered groups), `covariate_vertex(linear, quadratic)` (raw-scale peak
+label-ordered groups — right for zero-padded cohort labels like
+`"1900s"…"2000s"`; don't use it where labels don't sort into their intended
+order), `covariate_vertex(linear, quadratic)` (raw-scale peak
 of a quadratic covariate pair), `entity_contrast` (mean initial-effect gap
 between declared entity sets), `entity_ranking(top_k)` (per-draw top-K
 membership of a declared set), `decline_between_ages(linear, quadratic, a, b)`
