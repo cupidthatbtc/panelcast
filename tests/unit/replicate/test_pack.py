@@ -190,6 +190,62 @@ class TestCliModes:
         assert result.exit_code == 2
         assert "exactly one" in result.output
 
+    def _runnable_pack(self, tmp_path, with_claims: bool):
+        pack_dir = tmp_path / "demo-pack"
+        pack_dir.mkdir()
+        body = _MINIMAL_MANIFEST
+        if with_claims:
+            body += "claims: claims.yaml\n"
+            (pack_dir / "claims.yaml").write_text(
+                "claims:\n"
+                "  - name: peak_age\n"
+                "    quantity: covariate_vertex(age_c, age_sq)\n"
+                "    expect: {in: [30, 40]}\n",
+                encoding="utf-8",
+            )
+        (pack_dir / "pack.yaml").write_text(body, encoding="utf-8")
+        (pack_dir / "descriptor.yaml").write_text(
+            "name: demo\n"
+            "raw_path_env: DEMO_PACK_PATH\n"
+            "raw_path_default: data/panel.csv\n",
+            encoding="utf-8",
+        )
+        data_dir = pack_dir / "data"
+        data_dir.mkdir()
+        (data_dir / "panel.csv").write_text("Artist,User_Score\nA,70\n", encoding="utf-8")
+        return pack_dir
+
+    def test_pack_run_grades_and_writes_notes(self, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+
+        import panelcast.cli.replicate_cmd as cmd
+        from panelcast.cli import app
+
+        from .test_replicate import _write_models_dir
+
+        monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
+        pack_dir = self._runnable_pack(tmp_path, with_claims=True)
+        models_dir = _write_models_dir(tmp_path)
+        monkeypatch.setattr(cmd, "_run_chain_for", lambda *a, **k: models_dir)
+        result = CliRunner().invoke(app, ["replicate", str(pack_dir)])
+        assert result.exit_code == 0, result.output
+        notes = pack_dir / "notes" / "replicate_verdicts.json"
+        assert notes.exists()
+        assert "PASS" in result.output
+
+    def test_claimless_pack_runs_and_says_so(self, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+
+        import panelcast.cli.replicate_cmd as cmd
+        from panelcast.cli import app
+
+        monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
+        pack_dir = self._runnable_pack(tmp_path, with_claims=False)
+        monkeypatch.setattr(cmd, "_run_chain_for", lambda *a, **k: tmp_path)
+        result = CliRunner().invoke(app, ["replicate", str(pack_dir)])
+        assert result.exit_code == 0, result.output
+        assert "nothing to grade" in result.output
+
     def test_collection_scoreboard(self, tmp_path, monkeypatch):
         from typer.testing import CliRunner
 
