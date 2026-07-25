@@ -4,6 +4,39 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] — 2026-07-25
+
+The skewness/max candidate trio: three gated, default-off model seams
+attacking the two remaining structural PPC pins from three angles, each
+awaiting its GPU screening ladder before any promotion talk. All three are
+sweepable `panelcast select` knobs; every default path is proven
+bit-identical.
+
+### Added
+
+- **Skew-normal latent population prior** (#232,
+  `entity_effect_prior_type: skew_normal`): the initial entity effects draw
+  from a learned-alpha skew-normal via the additive construction,
+  standardized so `mu_artist` / `sigma_artist` keep their meanings under
+  any alpha. The skewness-pin candidate at the population level — the
+  entity-obs win showed the structural pins respond to latent-level
+  structure.
+- **Asymmetric random-walk innovations** (#233,
+  `rw_innovation_type: skew_normal`): careers can crash faster than they
+  climb — trajectory innovations draw from a learned-alpha skew-normal,
+  with one `standardized_skew_innovation` helper shared by training and
+  the horizon rollout so multi-step prediction can never drift from the
+  fitted shape.
+- **Boundary censoring** (#234, `censor_at_bounds`): bound observations
+  contribute CDF mass instead of density and replicated draws clip, so PPC
+  carries real boundary atoms — the max-pin candidate; no smooth density
+  reproduces boundary mass. Registry-level (every CDF-capable family gains
+  it; the rest reject actionably), thresholds forward-map under
+  offset_logit, and the score-scale LOO Jacobian correctly skips censored
+  masses (they are transform-invariant).
+- The version bump now stamps the UTC date (#335), matching where tags and
+  the PyPI publish land.
+
 ## [0.18.0] — 2026-07-25
 
 Domain packs: onboarding an external domain becomes drop-a-folder-and-run,
