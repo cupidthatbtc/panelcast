@@ -50,6 +50,10 @@ class TestDiff:
         assert any("missing claim 'old'" in line for line in lines)
         assert any("unexpected claim 'new'" in line for line in lines)
 
+    def test_duplicate_claim_names_rejected(self):
+        with pytest.raises(SystemExit, match="duplicate"):
+            recipe.diff_verdicts([_verdict("a"), _verdict("a")], [_verdict("a")])
+
 
 class TestManifest:
     def test_valid_manifest_loads(self, tmp_path):
@@ -73,6 +77,16 @@ class TestManifest:
         path.write_text("domains:\n  - {name: x, dataset: d.yaml}\n", encoding="utf-8")
         with pytest.raises(SystemExit, match="lacks"):
             recipe.load_manifest(path)
+
+    def test_non_mapping_shapes_rejected(self, tmp_path):
+        top_list = tmp_path / "list.yaml"
+        top_list.write_text("- a\n- b\n", encoding="utf-8")
+        with pytest.raises(SystemExit, match="must be a mapping"):
+            recipe.load_manifest(top_list)
+        scalar_entry = tmp_path / "scalar.yaml"
+        scalar_entry.write_text("domains:\n  - just_a_string\n", encoding="utf-8")
+        with pytest.raises(SystemExit, match="entries must be mappings"):
+            recipe.load_manifest(scalar_entry)
 
     def test_missing_domain_paths_fail_actionably(self):
         with pytest.raises(SystemExit, match="does not exist"):

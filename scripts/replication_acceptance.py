@@ -34,11 +34,15 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 def load_manifest(path: Path) -> list[dict]:
     with open(path, encoding="utf-8") as f:
         data = yaml.safe_load(f)
+    if data is not None and not isinstance(data, dict):
+        raise SystemExit(f"{path}: manifest must be a mapping with a 'domains' list.")
     domains = (data or {}).get("domains") or []
     if not domains:
         raise SystemExit(f"{path}: manifest declares no domains.")
     required = {"name", "dataset", "claims", "expected"}
     for domain in domains:
+        if not isinstance(domain, dict):
+            raise SystemExit(f"{path}: domain entries must be mappings, got {domain!r}.")
         missing = required - set(domain)
         if missing:
             raise SystemExit(
@@ -60,33 +64,39 @@ def check_domain_paths(domain: dict) -> None:
 
 def run_replicate(domain: dict) -> list[dict]:
     """Run the chain + grading for one domain; return its verdict list."""
-    with tempfile.NamedTemporaryFile(suffix=".json", delete=False) as handle:
-        out_path = Path(handle.name)
-    command = [
-        sys.executable,
-        "-c",
-        "from panelcast.cli import main; main()",
-        "replicate",
-        "--dataset",
-        str(domain["dataset"]),
-        "--claims",
-        str(domain["claims"]),
-        "--json",
-        str(out_path),
-    ]
-    # Exit 1 (divergences) still writes verdicts — divergences at the
-    # recorded grade are the expected state for the adversarial domains.
-    result = subprocess.run(command, cwd=REPO_ROOT, check=False)
-    if result.returncode == 2 or not out_path.exists():
-        raise SystemExit(
-            f"{domain['name']}: replicate hard-failed (exit {result.returncode})."
-        )
-    with open(out_path, encoding="utf-8") as f:
-        return json.load(f)
+    with tempfile.TemporaryDirectory() as tmp:
+        out_path = Path(tmp) / "verdicts.json"
+        command = [
+            sys.executable,
+            "-c",
+            "from panelcast.cli import main; main()",
+            "replicate",
+            "--dataset",
+            str(domain["dataset"]),
+            "--claims",
+            str(domain["claims"]),
+            "--json",
+            str(out_path),
+        ]
+        # Exit 0 (all pass) and 1 (divergences) both write verdicts and are
+        # valid recorded states — divergences at the recorded grade are the
+        # expected shape of the adversarial domains. Anything else (2, an
+        # OOM kill's 137, a crash that never wrote JSON) is a hard fail.
+        result = subprocess.run(command, cwd=REPO_ROOT, check=False)
+        if result.returncode not in (0, 1) or not out_path.exists():
+            raise SystemExit(
+                f"{domain['name']}: replicate hard-failed (exit {result.returncode})."
+            )
+        return json.loads(out_path.read_text(encoding="utf-8"))
 
 
 def graded_conclusions(verdicts: list[dict]) -> dict[str, tuple[str, str]]:
-    return {v["name"]: (v["achieved"], v["verdict"]) for v in verdicts}
+    # target (the expected grade) is intentionally excluded: it only changes
+    # when someone edits claims.yaml, which shows up in review, not here.
+    mapping = {v["name"]: (v["achieved"], v["verdict"]) for v in verdicts}
+    if len(mapping) != len(verdicts):
+        raise SystemExit("duplicate claim names in a verdict list — malformed input.")
+    return mapping
 
 
 def diff_verdicts(actual: list[dict], expected: list[dict]) -> list[str]:
