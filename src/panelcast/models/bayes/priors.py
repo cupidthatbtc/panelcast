@@ -338,6 +338,16 @@ class PriorConfig:
     # idata/collection memory exclusions keep applying). NOTE: gate-on
     # doubles the dominant latent tensor.
     rw_innovation_type: str = "normal"
+    # Boundary censoring (#234; default off => byte-identical). Observed
+    # scores pile up at the target bounds and no smooth density reproduces
+    # boundary mass; when on, a bound observation contributes CDF mass
+    # (P(Y >= high) / P(Y <= low)) instead of density, and replicated draws
+    # clip to the bounds so PPC carries the same atoms — the max-pin
+    # candidate. LOO per-point log-lik follows automatically (the site's
+    # log_prob IS the censored mass); empirical PIT at a censored bound sits
+    # at the interval's upper edge. Location-scale families only; mutually
+    # exclusive with discretize_observation.
+    censor_at_bounds: bool = False
     # Normal prior scale on the learned innovation-skewness alpha. Note:
     # alpha -> 0 recovers the SHAPE of the normal path, not bit-identical
     # RNG (the gate still draws rw_raw_abs / rw_skew_alpha) — parity is a

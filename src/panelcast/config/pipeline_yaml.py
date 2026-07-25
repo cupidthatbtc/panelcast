@@ -170,6 +170,8 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     # Innovation-shape seam (#233; no CLI flag).
     "rw_innovation_type": _spec("rw_innovation_type", None),
     "rw_skew_alpha_scale": _spec("rw_skew_alpha_scale", None),
+    # Boundary censoring (#234; no CLI flag).
+    "censor_at_bounds": _spec("censor_at_bounds", None),
     # Period-effects gate (#269; no CLI flag).
     "period_effects": _spec("period_effects", None),
     "period_constraint": _spec("period_constraint", None),
