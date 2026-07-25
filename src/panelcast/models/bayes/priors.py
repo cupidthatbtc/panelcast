@@ -299,6 +299,18 @@ class PriorConfig:
     entity_group_pooling: bool = False
     # HalfNormal scale for sigma_group (the between-group spread).
     sigma_group_scale: float = 0.5
+    # Per-group entity-effect variances (#271; default "shared" => legacy
+    # path, no new sites, bit-identical RNG). "per_group" gives each entity
+    # group its own sigma_artist via log-scale partial pooling around the
+    # shared draw: sigma_g = sigma_artist * exp(tau_group_sigma * z_g), so
+    # tau -> 0 recovers the shared model and small groups (chess cohorts with
+    # n=1) shrink to the center instead of blowing up. Requires
+    # entity_group_pooling. New sites: {prefix}tau_group_sigma,
+    # {prefix}group_sigma_z (+ deterministic {prefix}sigma_artist_group).
+    group_variance: str = "shared"
+    # HalfNormal scale for tau_group_sigma (the log-scale spread of the
+    # per-group sigmas around the shared sigma_artist).
+    tau_group_sigma_scale: float = 0.3
     # Period (calendar-time) effects with a declared identification constraint
     # (#269; default off => legacy path, no new sites, bit-identical RNG).
     # With entity intercepts + cohort pooling + an age-like covariate, a free

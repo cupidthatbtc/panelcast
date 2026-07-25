@@ -161,6 +161,9 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "propagate_rw_horizon": _spec("propagate_rw_horizon", None),
     # Genre/group pooling gate (#41; no CLI flag).
     "entity_group_pooling": _spec("entity_group_pooling", None),
+    # Per-group entity-effect variances (#271; no CLI flag).
+    "group_variance": _spec("group_variance", None),
+    "tau_group_sigma_scale": _spec("tau_group_sigma_scale", None),
     # Period-effects gate (#269; no CLI flag).
     "period_effects": _spec("period_effects", None),
     "period_constraint": _spec("period_constraint", None),

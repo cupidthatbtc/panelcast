@@ -162,6 +162,10 @@ class StageContext:
     # present in the training split (the orchestrator always passes the
     # configured PipelineConfig value; train resolves it).
     entity_group_pooling: bool | None = None
+    # Per-group entity-effect variances (#271): sigma_artist per entity group
+    # via log-scale partial pooling around the shared draw.
+    group_variance: str = "shared"
+    tau_group_sigma_scale: float = 0.3
     # Period (calendar-time) effects gate (#269): constrained per-period
     # offsets indexed by the descriptor's period_col.
     period_effects: bool = False

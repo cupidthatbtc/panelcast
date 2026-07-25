@@ -509,7 +509,10 @@ def predict_new_entity(
         if single_album and n_reviews_new.shape[0] == 1:
             n_reviews_new = n_reviews_new[0]  # Scalar for broadcasting
 
-    # Sample new entity effect from population distribution
+    # Sample new entity effect from population distribution. Known limitation
+    # (#271): under group_variance="per_group" this uses the pooled-center
+    # sigma_artist, not sigma_artist_group[group] — group MEANS propagate to
+    # cold-start (group_term below) but group VARIANCES do not.
     rng_key, subkey = random.split(rng_key)
     new_artist_effect = mu_artist + sigma_artist * random.normal(subkey, (n_samples,))
 

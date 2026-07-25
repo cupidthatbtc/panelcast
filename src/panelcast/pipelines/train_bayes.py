@@ -176,6 +176,8 @@ def build_training_priors(
         errors_in_variables=bool(getattr(ctx, "errors_in_variables", False)),
         propagate_rw_horizon=bool(getattr(ctx, "propagate_rw_horizon", False)),
         entity_group_pooling=entity_group_pooling,
+        group_variance=str(getattr(ctx, "group_variance", "shared")),
+        tau_group_sigma_scale=float(getattr(ctx, "tau_group_sigma_scale", 0.3)),
         period_effects=bool(getattr(ctx, "period_effects", False)),
         period_constraint=str(getattr(ctx, "period_constraint", "zero_sum")),
         sigma_period_scale=float(getattr(ctx, "sigma_period_scale", 0.5)),
@@ -1471,6 +1473,12 @@ def train_models(  # noqa: C901  # tracked complexity debt
     entity_group_pooling = resolve_entity_group_pooling(
         getattr(ctx, "entity_group_pooling", None), descriptor, train_columns
     )
+    if str(getattr(ctx, "group_variance", "shared")) == "per_group" and not entity_group_pooling:
+        raise ValueError(
+            "group_variance='per_group' requires entity_group_pooling, which "
+            f"resolved off for descriptor '{descriptor.name}' (no usable "
+            "entity_group_col in the training split)."
+        )
     period_effects_on = bool(getattr(ctx, "period_effects", False))
     model_args, feature_cols, train_df, imputation = load_training_data(
         features_path=features_path,
@@ -1966,6 +1974,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
         summary["group_to_idx"] = group_to_idx
         summary["group_idx_by_artist"] = [int(g) for g in model_args["group_idx_by_artist"]]
         summary["n_groups"] = int(model_args["n_groups"])
+        summary["group_variance"] = str(getattr(ctx, "group_variance", "shared"))
     summary["period_effects"] = period_effects_on
     if period_effects_on:
         summary["period_col"] = descriptor.period_col

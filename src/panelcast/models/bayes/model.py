@@ -319,6 +319,75 @@ def _apply_entity_overdispersion(
     return sigma_scaled * jnp.exp(entity_log_scale[artist_idx])
 
 
+def _sample_entity_level(
+    prefix: str,
+    mu_artist: jnp.ndarray,
+    sigma_artist: jnp.ndarray,
+    priors: PriorConfig,
+    group_idx_by_artist: jnp.ndarray | None,
+    n_groups: int | None,
+) -> tuple[jnp.ndarray, jnp.ndarray]:
+    """Per-entity init-effect location and scale under the group gates.
+
+    Pooling (#41): a ZeroSumNormal group offset between the global mean and
+    the entity effects — each entity's init-effect location becomes
+    mu_artist + group_offset[group(entity)]; zero-sum keeps the offsets
+    identified against mu_artist. Per-group variances (#271): log-scale
+    partial pooling around the shared sigma_artist draw,
+    sigma_g = sigma_artist * exp(tau * z_g) — cold-start prediction keeps
+    reading {prefix}sigma_artist, which remains the pooled center. Gates off
+    create no sites, so the legacy draw sequence stays bit-identical; gate-on
+    inserts sites mid-sequence (they must feed the init effects), which
+    legitimately reshuffles downstream RNG.
+    """
+    if priors.group_variance not in ("shared", "per_group"):
+        raise ValueError(
+            f"Unknown group_variance: '{priors.group_variance}'. "
+            "Must be 'shared' or 'per_group'."
+        )
+    if not priors.entity_group_pooling:
+        if priors.group_variance == "per_group":
+            raise ValueError(
+                "group_variance='per_group' requires entity_group_pooling: "
+                "per-group sigmas are indexed by the entity-group mapping."
+            )
+        return mu_artist, sigma_artist
+    if group_idx_by_artist is None or n_groups is None:
+        raise ValueError(
+            "entity_group_pooling=True requires group_idx_by_artist and "
+            "n_groups (per-entity group indices; set entity_group_col "
+            "in the dataset descriptor)."
+        )
+    sigma_group = numpyro.sample(
+        f"{prefix}sigma_group",
+        dist.HalfNormal(priors.sigma_group_scale),
+    )
+    group_offset_z = numpyro.sample(
+        f"{prefix}group_offset_z",
+        dist.ZeroSumNormal(1.0, event_shape=(n_groups,)),
+    )
+    group_offset = numpyro.deterministic(f"{prefix}group_offset", sigma_group * group_offset_z)
+    mu_entity = mu_artist + group_offset[group_idx_by_artist]
+    if priors.group_variance == "per_group":
+        tau_group_sigma = numpyro.sample(
+            f"{prefix}tau_group_sigma",
+            dist.HalfNormal(priors.tau_group_sigma_scale),
+        )
+        group_sigma_z = numpyro.sample(
+            f"{prefix}group_sigma_z",
+            dist.Normal(0.0, 1.0).expand((n_groups,)).to_event(1),
+        )
+        sigma_artist_group = numpyro.deterministic(
+            f"{prefix}sigma_artist_group",
+            sigma_artist * jnp.exp(tau_group_sigma * group_sigma_z),
+        )
+        # Interaction note: with artist_effect_param="zerosum", a per-entity
+        # sigma vector means sigma * z no longer sums to zero, so the
+        # zero-sum identification is only approximate under per_group.
+        return mu_entity, sigma_artist_group[group_idx_by_artist]
+    return mu_entity, sigma_artist
+
+
 def _sample_init_artist_effect(
     prefix: str,
     n_artists: int,
@@ -701,39 +770,14 @@ def make_score_model(score_type: str) -> Callable:
             ),
         )
 
-        # === Genre/group pooling level (gated; default off => legacy path) ===
-        # A ZeroSumNormal group offset between the global mean and the entity
-        # effects: each entity's init-effect location becomes
-        # mu_artist + group_offset[group(entity)]. Zero-sum keeps the offsets
-        # identified against mu_artist. Gate-off creates no sites, so the
-        # legacy draw sequence stays bit-identical; gate-on inserts sites
-        # mid-sequence (they must feed the init-effect loc), which legitimately
-        # reshuffles downstream RNG.
-        if priors.entity_group_pooling:
-            if group_idx_by_artist is None or n_groups is None:
-                raise ValueError(
-                    "entity_group_pooling=True requires group_idx_by_artist and "
-                    "n_groups (per-entity group indices; set entity_group_col "
-                    "in the dataset descriptor)."
-                )
-            sigma_group = numpyro.sample(
-                f"{prefix}sigma_group",
-                dist.HalfNormal(priors.sigma_group_scale),
-            )
-            group_offset_z = numpyro.sample(
-                f"{prefix}group_offset_z",
-                dist.ZeroSumNormal(1.0, event_shape=(n_groups,)),
-            )
-            group_offset = numpyro.deterministic(
-                f"{prefix}group_offset", sigma_group * group_offset_z
-            )
-            mu_entity = mu_artist + group_offset[group_idx_by_artist]
-        else:
-            mu_entity = mu_artist
+        # === Genre/group pooling level + per-group variances (gated) ===
+        mu_entity, sigma_entity = _sample_entity_level(
+            prefix, mu_artist, sigma_artist, priors, group_idx_by_artist, n_groups
+        )
 
         # === Initial artist effects (partial pooling; parameterization seam) ===
         init_artist_effect = _sample_init_artist_effect(
-            prefix, n_artists, mu_entity, sigma_artist, priors
+            prefix, n_artists, mu_entity, sigma_entity, priors
         )
 
         # === Time-varying artist effects (latent process seam) ===

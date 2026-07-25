@@ -24,6 +24,14 @@ the candidate space:
   sensor/sample count that doesn't average to the score → `false`.
 - `entity_group_col` — a per-event group (AOTY: `primary_genre`) enables the
   `entity_group_pooling` gate. `null` if the domain has no such grouping.
+  With pooling on, `group_variance: per_group` (default `shared`, config-file
+  only) additionally gives each group its own entity-effect spread via
+  log-scale partial pooling around the shared `sigma_artist` — the structure
+  behind era-variance questions ("does the spread compress over decades?").
+  Small groups shrink to the shared center, so n=1 cohorts are safe. Known
+  limitation: cold-start prediction for unseen entities uses the pooled
+  `sigma_artist` center — group means propagate to cold-start, group
+  variances do not.
 - `period_col` — the calendar-time column (e.g. a year) enables the
   `period_effects` gate (default off, config-file only): a constrained
   additive offset per period, identified by the declared `period_constraint`
