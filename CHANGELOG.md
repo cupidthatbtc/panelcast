@@ -4,6 +4,31 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] — 2026-07-25
+
+Domain packs: onboarding an external domain becomes drop-a-folder-and-run,
+completing the in-repo half of the #266 single-YAML epic.
+
+### Added
+
+- **Domain-pack contract** (#276): a pack bundles a paper replication into
+  one runnable folder — `pack.yaml` manifest (citation, data provenance
+  with warnings when incomplete, an `expected_panel` rows/entities sanity
+  gate, and `run:` overrides validated against real config fields at load),
+  the dataset descriptor, an optional `build.py` (raw deposit → tidy panel,
+  the one irreducibly per-paper step), optional `fit.yaml` and
+  `claims.yaml`, and a gitignored `data/`.
+- **`panelcast replicate <pack-dir>`**: build the panel if missing (gated),
+  run the leakage-safe chain with the pack's overrides, grade its claims,
+  and write verdicts to the pack's `notes/`.
+- **`panelcast replicate --all <collection-dir>`**: run every pack in a
+  collection and print one scoreboard; a single pack's crash surfaces on
+  the board without sinking the sweep, and the exit code is the worst
+  pack's.
+- **`panelcast pack new <name>`**: scaffold a valid, loadable skeleton pack
+  (manifest template, descriptor and build stubs, data/-excluding
+  .gitignore).
+
 ## [0.17.0] — 2026-07-25
 
 The replication epic: two new gated structural blocks close the model gaps
