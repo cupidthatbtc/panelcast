@@ -186,6 +186,23 @@ def _summary_dataset(summary: dict) -> dict:
     }
 
 
+def _score_scale_jacobian(transform, y_raw, priors, target_bounds) -> np.ndarray:
+    """Per-observation log-Jacobian for score-scale LOO comparability.
+
+    A censored boundary observation's log_prob is a probability MASS
+    (P(Y >= high) / P(Y <= low)), invariant under the monotonic transform —
+    no change-of-variables Jacobian applies there (#234), so those entries
+    are zeroed; adding it would bias cross-transform comparisons precisely
+    on the points censoring exists to fix.
+    """
+    jacobian = np.asarray(transform.log_jacobian(y_raw))
+    if bool(getattr(priors, "censor_at_bounds", False)) and target_bounds is not None:
+        low, high = float(target_bounds[0]), float(target_bounds[1])
+        at_bound = (np.asarray(y_raw) <= low) | (np.asarray(y_raw) >= high)
+        jacobian = np.where(at_bound, 0.0, jacobian)
+    return jacobian
+
+
 def _transform_from_summary(summary: dict):
     """Resolve the target transform the model was trained under."""
     ds = _summary_dataset(summary)
@@ -1213,7 +1230,9 @@ def _compute_info_criteria(
     if transform is not None and getattr(transform, "name", "identity") != "identity":
         if y_raw is None:
             raise ValueError("y_raw is required to apply the transform Jacobian.")
-        jacobian = np.asarray(transform.log_jacobian(y_raw))
+        jacobian = _score_scale_jacobian(
+            transform, y_raw, model_args.get("priors"), model_args.get("target_bounds")
+        )
         log_lik = log_lik + jacobian[None, :]
 
     n_samples_total, n_obs = log_lik.shape

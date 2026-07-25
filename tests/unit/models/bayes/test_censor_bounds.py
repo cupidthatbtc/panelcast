@@ -154,6 +154,34 @@ class TestModelGate:
         assert np.isfinite(float(low)) and np.isfinite(float(high))
 
 
+class TestEvaluationConventions:
+    def test_jacobian_zeroed_at_censored_bounds(self):
+        from panelcast.models.bayes.transforms import get_transform
+        from panelcast.pipelines.evaluate import _score_scale_jacobian
+
+        transform = get_transform("offset_logit", target_bounds=(0.0, 100.0), offset=0.5)
+        y_raw = np.array([0.0, 50.0, 100.0])
+        censoring = PriorConfig(censor_at_bounds=True, target_transform="offset_logit")
+        jac = _score_scale_jacobian(transform, y_raw, censoring, (0.0, 100.0))
+        # Boundary masses are transform-invariant: no Jacobian applies.
+        assert jac[0] == 0.0 and jac[2] == 0.0
+        assert jac[1] != 0.0
+        # Gate off: every observation keeps the density correction.
+        plain = _score_scale_jacobian(transform, y_raw, PriorConfig(), (0.0, 100.0))
+        assert plain[0] != 0.0 and plain[2] != 0.0
+
+    def test_emit_seam_rejects_the_flag_conflict(self):
+        # Defense-in-depth: a directly-built PriorConfig with both flags must
+        # error at the seam, not silently drop discretization.
+        priors = PriorConfig(
+            censor_at_bounds=True,
+            discretize_observation=True,
+            target_transform="identity",
+        )
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            _seeded_trace(_model_args(priors))
+
+
 class TestConfigPlumbing:
     def test_censor_with_discretize_rejected(self):
         from panelcast.pipelines.orchestrator import PipelineConfig

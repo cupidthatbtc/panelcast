@@ -406,6 +406,12 @@ def _emit_obs(prefix, base, n_obs, y, *, discretize, cdf_fn, priors=None, bounds
     replicated draws count as <= the bound) — the pinned convention.
     """
     censor = priors is not None and priors.censor_at_bounds
+    if censor and discretize:
+        # Defense-in-depth next to where the flags are read: the pipeline
+        # validates this, but PriorConfig is also built directly.
+        raise ValueError(
+            "censor_at_bounds and discretize_observation are mutually exclusive."
+        )
     if censor:
         low, high = _censor_thresholds(priors, bounds)
         d, obs = BoundCensoredDistribution(base, cdf_fn, low, high), y
