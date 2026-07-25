@@ -226,6 +226,31 @@ class TestCliModes:
         assert "demo-pack" in result.output
         assert "other-pack" in result.output
 
+    def test_pack_new_bad_name_is_a_clean_error(self, tmp_path):
+        from typer.testing import CliRunner
+
+        from panelcast.cli import app
+
+        result = CliRunner().invoke(
+            app, ["pack", "new", "MyPack", "--parent", str(tmp_path)]
+        )
+        assert result.exit_code == 2
+        assert "kebab/snake" in result.output
+
+    def test_claims_rejected_with_pack_modes(self, tmp_path):
+        from typer.testing import CliRunner
+
+        from panelcast.cli import app
+
+        pack_dir = _write_pack(tmp_path)
+        claims = tmp_path / "c.yaml"
+        claims.write_text("claims: []\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            app, ["replicate", str(pack_dir), "--claims", str(claims)]
+        )
+        assert result.exit_code == 2
+        assert "declare their own claims" in result.output
+
     def test_all_rejects_json(self, tmp_path):
         from typer.testing import CliRunner
 

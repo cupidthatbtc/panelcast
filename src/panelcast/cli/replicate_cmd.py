@@ -82,6 +82,13 @@ def replicate(
         )
         raise typer.Exit(2)
 
+    if claims is not None and (pack_dir is not None or all_dir is not None):
+        console.print(
+            "[bold red]Error:[/bold red] packs declare their own claims in "
+            "pack.yaml — --claims only combines with --models/--dataset."
+        )
+        raise typer.Exit(2)
+
     if all_dir is not None:
         if output_json is not None:
             console.print(
@@ -131,8 +138,13 @@ def pack_new(
 
     from panelcast.replicate.pack import scaffold_pack
 
-    created = scaffold_pack(name, parent)
-    Console().print(
+    console = Console()
+    try:
+        created = scaffold_pack(name, parent)
+    except (ValueError, FileExistsError) as exc:
+        console.print(f"[bold red]Error:[/bold red] {exc}")
+        raise typer.Exit(2) from exc
+    console.print(
         f"created {created} — fill pack.yaml, descriptor.yaml, and build.py, "
         f"then run: panelcast replicate {created}"
     )
