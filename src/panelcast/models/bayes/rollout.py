@@ -32,7 +32,7 @@ import jax.numpy as jnp
 from jax import lax, random
 
 from panelcast.models.bayes.likelihoods import available_families, find_likelihood
-from panelcast.models.bayes.model import compute_sigma_scaled
+from panelcast.models.bayes.model import compute_sigma_scaled, standardized_skew_innovation
 from panelcast.models.bayes.transforms import get_transform
 
 __all__ = ["predict_horizon"]
@@ -183,8 +183,6 @@ def predict_horizon(
         X_h, nrev_h, k = xs
         k_eps, k_y = random.split(k)
         if rw_skew_alpha is not None:
-            from panelcast.models.bayes.model import standardized_skew_innovation
-
             k_eps, k_abs = random.split(k_eps)
             step_z = standardized_skew_innovation(
                 jnp.abs(random.normal(k_abs, dev.shape)),

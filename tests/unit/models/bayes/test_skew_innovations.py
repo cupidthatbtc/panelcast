@@ -80,26 +80,38 @@ class TestSkewInnovations:
         assert not any("rw_skew" in site for site in trace)
 
     def test_training_innovations_use_the_shared_helper(self):
-        """The traced trajectory equals the helper applied to the traced
-        latent sites — the single-source-of-truth property the rollout
-        relies on."""
-        args = _model_args(PriorConfig(rw_innovation_type="skew_normal"))
-        trace = _seeded_trace(args)
+        """The likelihood location equals the helper-rebuilt trajectory —
+        the single-source-of-truth property the rollout relies on. With
+        beta and rho pinned to zero (and the AR term centered away), each
+        observation's location is exactly init + cumsum(helper innovations)
+        at its sequence position, mid-range so the soft-clip is ~identity."""
+        priors = PriorConfig(rw_innovation_type="skew_normal", mu_artist_loc=50.0)
+        args = _model_args(priors)
+        model = make_score_model("user")
+        pinned = {
+            "user_beta": jnp.zeros(_N_FEAT),
+            "user_rho": jnp.asarray(0.0),
+        }
+        with handlers.seed(rng_seed=0):
+            trace = handlers.trace(handlers.substitute(model, pinned)).get_trace(**args)
         rw_raw = np.asarray(trace["user_rw_raw"]["value"])
         rw_abs = np.asarray(trace["user_rw_raw_abs"]["value"])
         alpha = np.asarray(trace["user_rw_skew_alpha"]["value"])
         sigma_rw = np.asarray(trace["user_sigma_rw"]["value"])
         init = np.asarray(trace["user_init_artist_effect"]["value"])
-        expected_innov = sigma_rw * np.asarray(
+        innovations = sigma_rw * np.asarray(
             standardized_skew_innovation(jnp.asarray(rw_abs), jnp.asarray(rw_raw), alpha)
         )
-        # Rebuild the RW trajectory row for step 2 (first innovation).
-        # The obs effect at seq 2 is init + cumsum(innovations)[:, 0].
-        # We can't read artist_effects directly, but the likelihood location
-        # differences pin it; simplest structural check: recompute and
-        # compare against a manual forward pass of the same trace values.
-        assert expected_innov.shape == (init.shape[0], args["max_seq"] - 1)
-        assert np.isfinite(expected_innov).all()
+        trajectory = np.cumsum(innovations, axis=1)  # (n_artists, max_seq-1)
+        artist_idx = np.asarray(args["artist_idx"])
+        album_seq = np.asarray(args["album_seq"])
+        expected = np.where(
+            album_seq == 1,
+            init[artist_idx],
+            init[artist_idx] + trajectory[artist_idx, np.maximum(album_seq - 2, 0)],
+        )
+        loc = np.asarray(trace["user_y"]["fn"].loc)
+        np.testing.assert_allclose(loc, expected, atol=1e-3)  # soft-clip slack
 
 
 class TestSharedHelper:

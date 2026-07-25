@@ -338,7 +338,10 @@ class PriorConfig:
     # idata/collection memory exclusions keep applying). NOTE: gate-on
     # doubles the dominant latent tensor.
     rw_innovation_type: str = "normal"
-    # Normal prior scale on the learned innovation-skewness alpha.
+    # Normal prior scale on the learned innovation-skewness alpha. Note:
+    # alpha -> 0 recovers the SHAPE of the normal path, not bit-identical
+    # RNG (the gate still draws rw_raw_abs / rw_skew_alpha) — parity is a
+    # "normal"-only guarantee.
     rw_skew_alpha_scale: float = 2.0
     # Period (calendar-time) effects with a declared identification constraint
     # (#269; default off => legacy path, no new sites, bit-identical RNG).

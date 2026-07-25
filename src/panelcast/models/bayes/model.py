@@ -460,6 +460,24 @@ def _sample_init_artist_effect(
     )
 
 
+def standardized_skew_innovation(
+    z_abs: jnp.ndarray, z_sym: jnp.ndarray, alpha: jnp.ndarray
+) -> jnp.ndarray:
+    """Zero-mean, unit-SD skew-normal draw from |N(0,1)| and N(0,1) parts.
+
+    The additive construction: delta*|z0| + sqrt(1-delta^2)*z1 with
+    delta = alpha/sqrt(1+alpha^2) is SkewNormal(0, 1, alpha); standardizing
+    keeps sigma_rw's meaning under any alpha. The single source of truth for
+    training innovations AND the horizon rollout (#233) — a shape drift
+    between them would silently break multi-step honesty.
+    """
+    delta = alpha / jnp.sqrt(1.0 + alpha**2)
+    raw = delta * z_abs + jnp.sqrt(1.0 - delta**2) * z_sym
+    mean = delta * jnp.sqrt(2.0 / jnp.pi)
+    sd = jnp.sqrt(1.0 - (2.0 / jnp.pi) * delta**2)
+    return (raw - mean) / sd
+
+
 def _build_latent_effects(
     prefix: str,
     n_artists: int,
@@ -559,24 +577,6 @@ def _build_latent_effects(
             init_artist_effect[None, :] + trajectory,
         ]
     )
-
-
-def standardized_skew_innovation(
-    z_abs: jnp.ndarray, z_sym: jnp.ndarray, alpha: jnp.ndarray
-) -> jnp.ndarray:
-    """Zero-mean, unit-SD skew-normal draw from |N(0,1)| and N(0,1) parts.
-
-    The additive construction: delta*|z0| + sqrt(1-delta^2)*z1 with
-    delta = alpha/sqrt(1+alpha^2) is SkewNormal(0, 1, alpha); standardizing
-    keeps sigma_rw's meaning under any alpha. The single source of truth for
-    training innovations AND the horizon rollout (#233) — a shape drift
-    between them would silently break multi-step honesty.
-    """
-    delta = alpha / jnp.sqrt(1.0 + alpha**2)
-    raw = delta * z_abs + jnp.sqrt(1.0 - delta**2) * z_sym
-    mean = delta * jnp.sqrt(2.0 / jnp.pi)
-    sd = jnp.sqrt(1.0 - (2.0 / jnp.pi) * delta**2)
-    return (raw - mean) / sd
 
 
 def _apply_target_transform(
