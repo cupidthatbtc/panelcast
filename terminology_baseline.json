@@ -1,6 +1,6 @@
 {
   "description": "Per-file counts of album/artist-derived identifiers (#303). scripts/terminology_ratchet.py --check fails CI when a generic module's count drifts; sanctioned AOTY surfaces are exempt.",
-  "generic_total": 1933,
+  "generic_total": 1936,
   "files": {
     "cli/commands.py": 2,
     "cli/main.py": 2,
@@ -59,6 +59,7 @@
     "preflight/full_check.py": 29,
     "preflight/mini_run.py": 22,
     "preflight/output.py": 3,
+    "replicate/extractors.py": 3,
     "reporting/figures.py": 43,
     "reporting/model_card.py": 50,
     "reporting/tables.py": 2,

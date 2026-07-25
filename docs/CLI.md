@@ -518,6 +518,54 @@ panelcast backtest --origins 5 --num-chains 2 --num-samples 500
 panelcast backtest --backtest-id nightly   # rerun the same id to resume
 ```
 
+### `replicate` — Machine-Checkable Replication Claims
+
+Grade a domain's `claims.yaml` — the paper's quantitative claims declared as
+assertions over posterior quantities — against a fitted run, and print the
+verdict table the replication write-ups assemble by hand. Every claim grades
+against posterior draws, never point estimates, on the ladder
+`match > qualitative > shape_only`. A claim that fails its target rung but
+passes a lower one is reported as a **divergence**, not an error: divergences
+under a fixed model are findings (the baseball era translation, the chess
+peak shift).
+
+```bash
+panelcast replicate --claims claims.yaml --models <run>/models   # grade an existing fit
+panelcast replicate --claims claims.yaml --dataset domain.yaml   # run the chain, then grade
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--claims` | required | claims.yaml declaring the paper's claims |
+| `--models` | — | Models directory of an existing fit (`training_summary.json` + `.nc`) |
+| `--dataset` | — | Dataset descriptor: run data → train first, then grade the fresh fit |
+| `--json` | — | Also write the verdicts as JSON |
+
+Named extractors: `group_mean_trend` (slope of the fitted group offsets over
+label-ordered groups), `covariate_vertex(linear, quadratic)` (raw-scale peak
+of a quadratic covariate pair), `entity_contrast` (mean initial-effect gap
+between declared entity sets), `entity_ranking(top_k)` (per-draw top-K
+membership of a declared set), `decline_between_ages(linear, quadratic, a, b)`
+(covariate-curve change between two raw values).
+
+Exit codes: `0` every claim met its target grade; `1` divergences only;
+`2` a claim failed every rung (or the chained run failed).
+
+```yaml
+claims:
+  - name: cohort_improvement
+    quantity: group_mean_trend
+    expect: {direction: increasing, from: "1900s"}
+  - name: peak_age
+    quantity: covariate_vertex(age_c, age_sq)
+    expect: {in: [30, 40]}
+    grade: qualitative
+  - name: elite_premium
+    quantity: entity_contrast
+    entities: {group_a: [Kasparov, Carlsen], group_b: rest}
+    expect: {greater_than: 0, prob: 0.95}
+```
+
 ---
 
 ### `doctor` — Environment & Reproducibility Preflight
