@@ -102,6 +102,7 @@ def _expected_variations() -> list[tuple[str, int]]:
         ("discretize_observation", 1),
         ("heteroscedastic_entity_obs", 1),
         ("entity_effect_prior_type", 1),
+        ("rw_innovation_type", 1),
         ("errors_in_variables", 1),
         ("propagate_rw_horizon", 1),
         ("entity_group_pooling", 2),
