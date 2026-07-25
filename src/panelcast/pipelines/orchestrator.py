@@ -300,6 +300,12 @@ class PipelineConfig:
     # artist_effect_param="noncentered". No CLI flag.
     entity_effect_prior_type: str = "normal"
     entity_skew_alpha_scale: float = 2.0
+    # Innovation-shape seam (#233): "normal" (legacy bit-identical) |
+    # "skew_normal" (learned-alpha skew-normal random-walk innovations — the
+    # skewness-via-dynamics candidate; doubles the dominant latent tensor).
+    # No CLI flag.
+    rw_innovation_type: str = "normal"
+    rw_skew_alpha_scale: float = 2.0
     # Period (calendar-time) effects gate (#269): a constrained additive
     # offset per period_col value. The declared constraint (zero_sum, or
     # pin_first / pin_last) is what identifies the block against entity
@@ -440,6 +446,7 @@ class PipelineConfig:
             "sigma_period_scale",
             "tau_group_sigma_scale",
             "entity_skew_alpha_scale",
+            "rw_skew_alpha_scale",
         ):
             value = getattr(self, scale_field)
             if value <= 0.0:
@@ -546,6 +553,11 @@ class PipelineConfig:
             raise ValueError(
                 "entity_effect_prior_type='skew_normal' requires "
                 "artist_effect_param='noncentered'."
+            )
+        if self.rw_innovation_type not in ("normal", "skew_normal"):
+            raise ValueError(
+                f"Invalid rw_innovation_type: '{self.rw_innovation_type}'. "
+                "Must be 'normal' or 'skew_normal'."
             )
 
     def _validate_auto_priors(self) -> None:
@@ -1417,6 +1429,8 @@ class PipelineOrchestrator:
             parts.append(
                 f"--entity-effect-prior-type {self.config.entity_effect_prior_type}"
             )
+        if self.config.rw_innovation_type != defaults.rw_innovation_type:
+            parts.append(f"--rw-innovation-type {self.config.rw_innovation_type}")
         if self.config.period_effects:
             parts.append("--period-effects")
             if self.config.period_constraint != defaults.period_constraint:
@@ -1749,6 +1763,8 @@ class PipelineOrchestrator:
             tau_group_sigma_scale=self.config.tau_group_sigma_scale,
             entity_effect_prior_type=self.config.entity_effect_prior_type,
             entity_skew_alpha_scale=self.config.entity_skew_alpha_scale,
+            rw_innovation_type=self.config.rw_innovation_type,
+            rw_skew_alpha_scale=self.config.rw_skew_alpha_scale,
             period_effects=self.config.period_effects,
             period_constraint=self.config.period_constraint,
             sigma_period_scale=self.config.sigma_period_scale,

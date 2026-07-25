@@ -261,6 +261,16 @@ KNOBS: tuple[Knob, ...] = (
         ),
     ),
     Knob(
+        "rw_innovation_type",
+        "literal",
+        ("normal", "skew_normal"),
+        "normal",
+        history=(
+            "skewness-via-dynamics candidate (#233): asymmetric innovations "
+            "let the latent trajectory generate marginal left-skew; unscreened"
+        ),
+    ),
+    Knob(
         "gbm_offset",
         "bool",
         (True, False),
@@ -323,6 +333,7 @@ KNOBS: tuple[Knob, ...] = (
 EXCLUDED_FIELDS: dict[str, str] = {
     "auto_priors": "prior locs become data-derived; the sweep varies priors explicitly",
     "entity_skew_alpha_scale": "prior scale for the skew-normal alpha, tied to the knob",
+    "rw_skew_alpha_scale": "prior scale for the innovation-skew alpha, tied to the knob",
     "group_variance": "domain-structure gate (#271): needs entity-group pooling, not sweepable",
     "tau_group_sigma_scale": "prior scale for the per-group variances, tied to the gate",
     "period_effects": "domain-structure gate (#269): needs a descriptor period_col, not sweepable",

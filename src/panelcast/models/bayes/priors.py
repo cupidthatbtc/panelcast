@@ -326,6 +326,23 @@ class PriorConfig:
     entity_effect_prior_type: str = "normal"
     # Normal prior scale on the learned skewness alpha.
     entity_skew_alpha_scale: float = 2.0
+    # Innovation-shape seam (#233; default "normal" => legacy path,
+    # bit-identical RNG). "skew_normal" draws the random-walk innovations
+    # from a learned-alpha skew-normal (one scalar alpha shared across
+    # entities), standardized to zero mean / unit SD so sigma_rw keeps its
+    # meaning — careers can crash faster than they climb, letting the latent
+    # dynamics generate marginal left-skew no observation family could. The
+    # horizon rollout compounds the same skewed innovation (single source of
+    # truth). New sites: {prefix}rw_skew_alpha, {prefix}rw_raw_abs (the |z|
+    # component; {prefix}rw_raw stays the symmetric component so the
+    # idata/collection memory exclusions keep applying). NOTE: gate-on
+    # doubles the dominant latent tensor.
+    rw_innovation_type: str = "normal"
+    # Normal prior scale on the learned innovation-skewness alpha. Note:
+    # alpha -> 0 recovers the SHAPE of the normal path, not bit-identical
+    # RNG (the gate still draws rw_raw_abs / rw_skew_alpha) — parity is a
+    # "normal"-only guarantee.
+    rw_skew_alpha_scale: float = 2.0
     # Period (calendar-time) effects with a declared identification constraint
     # (#269; default off => legacy path, no new sites, bit-identical RNG).
     # With entity intercepts + cohort pooling + an age-like covariate, a free

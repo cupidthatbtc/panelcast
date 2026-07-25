@@ -32,7 +32,7 @@ import jax.numpy as jnp
 from jax import lax, random
 
 from panelcast.models.bayes.likelihoods import available_families, find_likelihood
-from panelcast.models.bayes.model import compute_sigma_scaled
+from panelcast.models.bayes.model import compute_sigma_scaled, standardized_skew_innovation
 from panelcast.models.bayes.transforms import get_transform
 
 __all__ = ["predict_horizon"]
@@ -96,6 +96,9 @@ def predict_horizon(
 
     init_effect = posterior_samples[f"{prefix}init_artist_effect"][:, artist_idx]
     sigma_rw = posterior_samples[f"{prefix}sigma_rw"]
+    # Asymmetric-innovation fits (#233) carry the learned alpha; None on
+    # gate-off fits keeps the legacy symmetric draw below.
+    rw_skew_alpha = posterior_samples.get(f"{prefix}rw_skew_alpha")
     rho = posterior_samples[f"{prefix}rho"]
     beta = posterior_samples[f"{prefix}beta"]
     sigma_obs = posterior_samples[f"{prefix}sigma_obs"]
@@ -163,6 +166,10 @@ def predict_horizon(
 
     key = random.key(seed)
     key, k_term = random.split(key)
+    # The pre-horizon accumulated deviation keeps the variance-matched
+    # Gaussian collapse even under skewed innovations (#233): the sum of
+    # many standardized steps loses skewness at rate steps^-1/2, and the
+    # per-step compounding below carries the shape where it matters.
     dev0 = term_sd * random.normal(k_term, (n_samples, n_entities))
 
     innov_scale = sigma_rw[:, None] * dyn[None, :]
@@ -175,7 +182,16 @@ def predict_horizon(
         dev, y_prev = carry
         X_h, nrev_h, k = xs
         k_eps, k_y = random.split(k)
-        dev = damp[:, None] * dev + innov_scale * random.normal(k_eps, dev.shape)
+        if rw_skew_alpha is not None:
+            k_eps, k_abs = random.split(k_eps)
+            step_z = standardized_skew_innovation(
+                jnp.abs(random.normal(k_abs, dev.shape)),
+                random.normal(k_eps, dev.shape),
+                rw_skew_alpha[:, None],
+            )
+        else:
+            step_z = random.normal(k_eps, dev.shape)
+        dev = damp[:, None] * dev + innov_scale * step_z
         mu_raw = (
             init_effect
             + dev

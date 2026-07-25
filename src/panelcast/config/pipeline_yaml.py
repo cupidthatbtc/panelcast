@@ -167,6 +167,9 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     # Latent-population shape seam (#232; no CLI flag).
     "entity_effect_prior_type": _spec("entity_effect_prior_type", None),
     "entity_skew_alpha_scale": _spec("entity_skew_alpha_scale", None),
+    # Innovation-shape seam (#233; no CLI flag).
+    "rw_innovation_type": _spec("rw_innovation_type", None),
+    "rw_skew_alpha_scale": _spec("rw_skew_alpha_scale", None),
     # Period-effects gate (#269; no CLI flag).
     "period_effects": _spec("period_effects", None),
     "period_constraint": _spec("period_constraint", None),
