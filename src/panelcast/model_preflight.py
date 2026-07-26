@@ -84,7 +84,7 @@ def _classify_gap(gap_orders: float) -> str:
     return "PASS"
 
 
-def within_entity_step_sd(y: np.ndarray, artist_idx: np.ndarray) -> float:
+def within_entity_step_sd(y: np.ndarray, entity_idx: np.ndarray) -> float:
     """Pooled within-entity per-step SD of the target.
 
     Consecutive-observation diffs within each entity, pooled, divided by
@@ -96,7 +96,7 @@ def within_entity_step_sd(y: np.ndarray, artist_idx: np.ndarray) -> float:
     (``groupby(entity).cumcount()`` in ``prepare_model_data``).
     """
     y = np.asarray(y, dtype=float)
-    idx = np.asarray(artist_idx)
+    idx = np.asarray(entity_idx)
     if y.size < 2:
         return 0.0
     order = np.argsort(idx, kind="stable")
@@ -110,10 +110,10 @@ def within_entity_step_sd(y: np.ndarray, artist_idx: np.ndarray) -> float:
     return float(np.std(within) / math.sqrt(2.0))
 
 
-def cross_entity_mean_sd(y: np.ndarray, artist_idx: np.ndarray) -> float:
+def cross_entity_mean_sd(y: np.ndarray, entity_idx: np.ndarray) -> float:
     """SD of per-entity mean targets across entities (the scale sigma_artist governs)."""
     y = np.asarray(y, dtype=float)
-    idx = np.asarray(artist_idx).astype(np.int64)
+    idx = np.asarray(entity_idx).astype(np.int64)
     if y.size == 0:
         return 0.0
     counts = np.bincount(idx)
@@ -147,7 +147,7 @@ def _yaml_lognormal_block(loc_field: str, sigma_field: str, moment: float, sigma
 def check_prior_data_scale(
     *,
     y: np.ndarray,
-    artist_idx: np.ndarray,
+    entity_idx: np.ndarray,
     priors,
 ) -> list[CheckResult]:
     """Compare resolved sigma priors against the data moments they govern.
@@ -157,7 +157,7 @@ def check_prior_data_scale(
     """
     results: list[CheckResult] = []
 
-    rw_moment = within_entity_step_sd(y, artist_idx)
+    rw_moment = within_entity_step_sd(y, entity_idx)
     rw_median = _sigma_rw_prior_median(priors)
     if rw_moment <= 0.0 or rw_median <= 0.0:
         results.append(
@@ -182,7 +182,7 @@ def check_prior_data_scale(
             )
         results.append(CheckResult("sigma_rw scale", status, detail, suggestion))
 
-    art_moment = cross_entity_mean_sd(y, artist_idx)
+    art_moment = cross_entity_mean_sd(y, entity_idx)
     art_scale = _sigma_artist_prior_scale(priors)
     if art_moment <= 0.0 or art_scale <= 0.0:
         results.append(
@@ -254,9 +254,9 @@ def _within_entity_demean(col: np.ndarray, idx: np.ndarray, counts: np.ndarray) 
 def check_collinearity(
     *,
     X: np.ndarray,
-    artist_idx: np.ndarray,
+    entity_idx: np.ndarray,
     feature_names: list[str],
-    group_idx_by_artist: np.ndarray | None = None,
+    group_idx_by_entity: np.ndarray | None = None,
 ) -> CheckResult:
     """Residual-condition-number audit of the covariates given entity intercepts.
 
@@ -273,15 +273,15 @@ def check_collinearity(
     X = np.asarray(X, dtype=float)
     if X.ndim != 2 or X.shape[1] == 0:
         return CheckResult("collinearity", "WARN", "no covariate columns to check")
-    idx = np.asarray(artist_idx).astype(np.int64)
+    idx = np.asarray(entity_idx).astype(np.int64)
     counts = np.bincount(idx)
     counts_safe = np.where(counts == 0, 1, counts)
 
     columns = [X[:, j] for j in range(X.shape[1])]
     names = list(feature_names)
 
-    if group_idx_by_artist is not None:
-        cohort = np.asarray(group_idx_by_artist)[idx]
+    if group_idx_by_entity is not None:
+        cohort = np.asarray(group_idx_by_entity)[idx]
         for g in np.unique(cohort):
             columns.append((cohort == g).astype(float))
             names.append(f"cohort[{int(g)}]")
@@ -370,16 +370,16 @@ def run_model_preflight(
     results.extend(
         check_prior_data_scale(
             y=inputs.y,
-            artist_idx=inputs.artist_idx,
+            entity_idx=inputs.entity_idx,
             priors=inputs.priors,
         )
     )
     results.append(
         check_collinearity(
             X=inputs.X,
-            artist_idx=inputs.artist_idx,
+            entity_idx=inputs.entity_idx,
             feature_names=inputs.feature_names,
-            group_idx_by_artist=inputs.group_idx_by_artist,
+            group_idx_by_entity=inputs.group_idx_by_entity,
         )
     )
     return results

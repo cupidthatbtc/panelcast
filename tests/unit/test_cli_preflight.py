@@ -31,48 +31,48 @@ def _panel(
     seed: int = 0, n_entities: int = 40, per: int = 6, step: float = 0.05, spread: float = 0.5
 ):
     rng = np.random.default_rng(seed)
-    artist_idx = np.repeat(np.arange(n_entities), per)
+    entity_idx = np.repeat(np.arange(n_entities), per)
     entity_mean = rng.normal(0.0, spread, n_entities)
-    y = entity_mean[artist_idx] + rng.normal(0.0, step, n_entities * per)
-    return y, artist_idx
+    y = entity_mean[entity_idx] + rng.normal(0.0, step, n_entities * per)
+    return y, entity_idx
 
 
 class TestMoments:
     def test_step_sd_recovers_innovation_scale(self):
-        y, artist_idx = _panel(step=0.05, spread=0.5)
-        assert abs(within_entity_step_sd(y, artist_idx) - 0.05) < 0.02
+        y, entity_idx = _panel(step=0.05, spread=0.5)
+        assert abs(within_entity_step_sd(y, entity_idx) - 0.05) < 0.02
 
     def test_cross_entity_sd_recovers_spread(self):
-        y, artist_idx = _panel(step=0.05, spread=0.5)
-        assert abs(cross_entity_mean_sd(y, artist_idx) - 0.5) < 0.15
+        y, entity_idx = _panel(step=0.05, spread=0.5)
+        assert abs(cross_entity_mean_sd(y, entity_idx) - 0.5) < 0.15
 
 
 class TestCheckPriorDataScale:
     def test_well_matched_passes(self):
-        y, artist_idx = _panel()
-        rw = within_entity_step_sd(y, artist_idx)
-        art = cross_entity_mean_sd(y, artist_idx)
+        y, entity_idx = _panel()
+        rw = within_entity_step_sd(y, entity_idx)
+        art = cross_entity_mean_sd(y, entity_idx)
         priors = PriorConfig(
             sigma_rw_prior_type="lognormal",
             sigma_rw_lognormal_loc=math.log(rw),
             sigma_artist_prior_type="halfnormal",
             sigma_artist_scale=art,
         )
-        results = check_prior_data_scale(y=y, artist_idx=artist_idx, priors=priors)
+        results = check_prior_data_scale(y=y, entity_idx=entity_idx, priors=priors)
         assert [r.name for r in results] == ["sigma_rw scale", "sigma_artist scale"]
         assert all(r.status == "PASS" for r in results)
 
     def test_prior_far_above_moment_fails_with_yaml(self):
-        y, artist_idx = _panel()
-        rw = within_entity_step_sd(y, artist_idx)
-        art = cross_entity_mean_sd(y, artist_idx)
+        y, entity_idx = _panel()
+        rw = within_entity_step_sd(y, entity_idx)
+        art = cross_entity_mean_sd(y, entity_idx)
         priors = PriorConfig(
             sigma_rw_prior_type="lognormal",
             sigma_rw_lognormal_loc=math.log(rw) + 6.0,  # ~2.6 orders above
             sigma_artist_prior_type="halfnormal",
             sigma_artist_scale=art * 100.0,  # 2 orders above
         )
-        results = check_prior_data_scale(y=y, artist_idx=artist_idx, priors=priors)
+        results = check_prior_data_scale(y=y, entity_idx=entity_idx, priors=priors)
         by_name = {r.name: r for r in results}
         assert by_name["sigma_rw scale"].status == "FAIL"
         assert "sigma_rw_lognormal_loc" in by_name["sigma_rw scale"].suggestion
@@ -80,16 +80,16 @@ class TestCheckPriorDataScale:
 
     def test_sigma_rw_below_moment_is_not_flagged_until_extreme(self):
         # The moment upper-bounds latent sigma_rw, so a modestly-lower prior is fine.
-        y, artist_idx = _panel()
-        rw = within_entity_step_sd(y, artist_idx)
+        y, entity_idx = _panel()
+        rw = within_entity_step_sd(y, entity_idx)
         priors = PriorConfig(
             sigma_rw_prior_type="lognormal",
             sigma_rw_lognormal_loc=math.log(rw) - 1.0,  # ~0.43 orders below
             sigma_artist_prior_type="halfnormal",
-            sigma_artist_scale=cross_entity_mean_sd(y, artist_idx),
+            sigma_artist_scale=cross_entity_mean_sd(y, entity_idx),
         )
         by_name = {
-            r.name: r for r in check_prior_data_scale(y=y, artist_idx=artist_idx, priors=priors)
+            r.name: r for r in check_prior_data_scale(y=y, entity_idx=entity_idx, priors=priors)
         }
         assert by_name["sigma_rw scale"].status == "PASS"
 
@@ -139,13 +139,13 @@ class TestCheckCollinearity:
         # structural-null strip and drives the residual condition number.
         rng = np.random.default_rng(1)
         n_entities, per = 20, 3
-        artist_idx = np.repeat(np.arange(n_entities), per)
+        entity_idx = np.repeat(np.arange(n_entities), per)
         n = n_entities * per
         x1 = rng.normal(size=n)
         x2 = rng.normal(size=n)
         x3 = x1 + 2.0 * x2 + 1e-6 * rng.normal(size=n)
         X = np.column_stack([x1, x2, x3])
-        result = check_collinearity(X=X, artist_idx=artist_idx, feature_names=["x1", "x2", "x3"])
+        result = check_collinearity(X=X, entity_idx=entity_idx, feature_names=["x1", "x2", "x3"])
         assert result.status == "FAIL"
         assert "x3" in result.detail and "x1" in result.detail
 
@@ -154,36 +154,36 @@ class TestCheckCollinearity:
         # so it is stripped as a structural null and does not fail on its own.
         rng = np.random.default_rng(9)
         n_entities, per = 30, 4
-        artist_idx = np.repeat(np.arange(n_entities), per)
+        entity_idx = np.repeat(np.arange(n_entities), per)
         n = n_entities * per
         x1 = rng.normal(size=n)
         x2 = rng.normal(size=n)
         dup = x1 + 3.0  # exact affine duplicate of a single column
         X = np.column_stack([x1, x2, dup])
-        result = check_collinearity(X=X, artist_idx=artist_idx, feature_names=["x1", "x2", "dup"])
+        result = check_collinearity(X=X, entity_idx=entity_idx, feature_names=["x1", "x2", "dup"])
         assert result.status == "PASS"
         assert "exact-redundant" in result.detail
 
     def test_well_conditioned_passes(self):
         rng = np.random.default_rng(2)
         n_entities, per = 30, 4
-        artist_idx = np.repeat(np.arange(n_entities), per)
+        entity_idx = np.repeat(np.arange(n_entities), per)
         X = rng.normal(size=(n_entities * per, 3))
-        result = check_collinearity(X=X, artist_idx=artist_idx, feature_names=["a", "b", "c"])
+        result = check_collinearity(X=X, entity_idx=entity_idx, feature_names=["a", "b", "c"])
         assert result.status == "PASS"
 
     def test_within_entity_constant_column_is_absorbed(self):
         rng = np.random.default_rng(3)
         n_entities, per = 25, 3
-        artist_idx = np.repeat(np.arange(n_entities), per)
+        entity_idx = np.repeat(np.arange(n_entities), per)
         n = n_entities * per
         good1 = rng.normal(size=n)
         good2 = rng.normal(size=n)
         per_entity = rng.normal(size=n_entities)
-        const_within = per_entity[artist_idx]  # absorbed by the entity intercept
+        const_within = per_entity[entity_idx]  # absorbed by the entity intercept
         X = np.column_stack([good1, good2, const_within])
         result = check_collinearity(
-            X=X, artist_idx=artist_idx, feature_names=["good1", "good2", "const_within"]
+            X=X, entity_idx=entity_idx, feature_names=["good1", "good2", "const_within"]
         )
         assert result.status == "PASS"
         assert "absorbed" in result.detail
@@ -191,14 +191,14 @@ class TestCheckCollinearity:
     def test_cohort_dummies_appended_and_absorbed(self):
         rng = np.random.default_rng(4)
         n_entities, per = 24, 3
-        artist_idx = np.repeat(np.arange(n_entities), per)
+        entity_idx = np.repeat(np.arange(n_entities), per)
         X = rng.normal(size=(n_entities * per, 2))
-        group_idx_by_artist = np.arange(n_entities) % 3  # 3 cohorts
+        group_idx_by_entity = np.arange(n_entities) % 3  # 3 cohorts
         result = check_collinearity(
             X=X,
-            artist_idx=artist_idx,
+            entity_idx=entity_idx,
             feature_names=["a", "b"],
-            group_idx_by_artist=group_idx_by_artist,
+            group_idx_by_entity=group_idx_by_entity,
         )
         # cohort dummies are constant within entity -> absorbed, not fatal
         assert result.status == "PASS"
@@ -227,7 +227,7 @@ class TestPreflightCli:
         assert result.exit_code == 2  # setup error, distinct from a statistical FAIL
 
     def test_strict_statistical_fail_exits_1(self, monkeypatch):
-        y, artist_idx = _panel()
+        y, entity_idx = _panel()
         rng = np.random.default_rng(0)
         n = len(y)
         x1 = rng.normal(size=n)
@@ -235,15 +235,15 @@ class TestPreflightCli:
         x3 = x1 + 2.0 * x2 + 1e-6 * rng.normal(size=n)  # near-collinear -> FAIL
         inputs = _StubInputs(
             X=np.column_stack([x1, x2, x3]),
-            artist_idx=artist_idx,
+            entity_idx=entity_idx,
             y=y,
             feature_names=["x1", "x2", "x3"],
-            group_idx_by_artist=None,
+            group_idx_by_entity=None,
             priors=PriorConfig(
                 sigma_rw_prior_type="lognormal",
-                sigma_rw_lognormal_loc=math.log(within_entity_step_sd(y, artist_idx)),
+                sigma_rw_lognormal_loc=math.log(within_entity_step_sd(y, entity_idx)),
                 sigma_artist_prior_type="halfnormal",
-                sigma_artist_scale=cross_entity_mean_sd(y, artist_idx),
+                sigma_artist_scale=cross_entity_mean_sd(y, entity_idx),
             ),
         )
         monkeypatch.setattr(
@@ -254,19 +254,19 @@ class TestPreflightCli:
         assert result.exit_code == 1
 
     def test_human_output_prints_suggestion(self, tmp_path, monkeypatch):
-        y, artist_idx = _panel()
-        rw = within_entity_step_sd(y, artist_idx)
+        y, entity_idx = _panel()
+        rw = within_entity_step_sd(y, entity_idx)
         inputs = _StubInputs(
             X=np.random.default_rng(0).normal(size=(len(y), 3)),
-            artist_idx=artist_idx,
+            entity_idx=entity_idx,
             y=y,
             feature_names=["a", "b", "c"],
-            group_idx_by_artist=None,
+            group_idx_by_entity=None,
             priors=PriorConfig(
                 sigma_rw_prior_type="lognormal",
                 sigma_rw_lognormal_loc=math.log(rw) + 6.0,
                 sigma_artist_prior_type="halfnormal",
-                sigma_artist_scale=cross_entity_mean_sd(y, artist_idx) * 100.0,
+                sigma_artist_scale=cross_entity_mean_sd(y, entity_idx) * 100.0,
             ),
         )
         monkeypatch.setattr(
@@ -286,46 +286,46 @@ class _StubInputs:
 class TestEdgeBranches:
     def test_zero_step_sd_warns(self):
         # y constant within each entity -> no within-entity variation
-        artist_idx = np.repeat(np.arange(6), 3)
+        entity_idx = np.repeat(np.arange(6), 3)
         y = np.repeat(np.arange(6).astype(float), 3)
         by = {
             r.name: r
-            for r in check_prior_data_scale(y=y, artist_idx=artist_idx, priors=PriorConfig())
+            for r in check_prior_data_scale(y=y, entity_idx=entity_idx, priors=PriorConfig())
         }
         assert by["sigma_rw scale"].status == "WARN"
 
     def test_single_entity_cross_sd_warns(self):
-        artist_idx = np.zeros(5, dtype=int)
+        entity_idx = np.zeros(5, dtype=int)
         y = np.array([1.0, 2.0, 3.0, 2.5, 1.5])
         by = {
             r.name: r
-            for r in check_prior_data_scale(y=y, artist_idx=artist_idx, priors=PriorConfig())
+            for r in check_prior_data_scale(y=y, entity_idx=entity_idx, priors=PriorConfig())
         }
         assert by["sigma_artist scale"].status == "WARN"
 
     def test_halfnormal_and_lognormal_prior_medians(self):
-        y, artist_idx = _panel()
-        rw = within_entity_step_sd(y, artist_idx)
-        art = cross_entity_mean_sd(y, artist_idx)
+        y, entity_idx = _panel()
+        rw = within_entity_step_sd(y, entity_idx)
+        art = cross_entity_mean_sd(y, entity_idx)
         priors = PriorConfig(
             sigma_rw_prior_type="halfnormal",
             sigma_rw_scale=rw / 0.6744897501960817,  # HalfNormal median == rw
             sigma_artist_prior_type="lognormal",
             sigma_artist_lognormal_loc=math.log(art),
         )
-        by = {r.name: r for r in check_prior_data_scale(y=y, artist_idx=artist_idx, priors=priors)}
+        by = {r.name: r for r in check_prior_data_scale(y=y, entity_idx=entity_idx, priors=priors)}
         assert by["sigma_rw scale"].status == "PASS"
         assert by["sigma_artist scale"].status == "PASS"
 
     def test_empty_covariates_warn(self):
-        result = check_collinearity(X=np.empty((5, 0)), artist_idx=np.arange(5), feature_names=[])
+        result = check_collinearity(X=np.empty((5, 0)), entity_idx=np.arange(5), feature_names=[])
         assert result.status == "WARN"
 
     def test_single_varying_column_passes(self):
-        artist_idx = np.repeat(np.arange(10), 3)
+        entity_idx = np.repeat(np.arange(10), 3)
         rng = np.random.default_rng(0)
         X = rng.normal(size=(30, 1))
-        result = check_collinearity(X=X, artist_idx=artist_idx, feature_names=["only"])
+        result = check_collinearity(X=X, entity_idx=entity_idx, feature_names=["only"])
         assert result.status == "PASS"
 
     def test_run_model_preflight_reports_assembly_failure(self, tmp_path, monkeypatch):
@@ -341,14 +341,14 @@ class TestEdgeBranches:
 
     def test_moderate_collinearity_warns(self):
         rng = np.random.default_rng(0)
-        artist_idx = np.repeat(np.arange(40), 4)
-        n = len(artist_idx)
+        entity_idx = np.repeat(np.arange(40), 4)
+        n = len(entity_idx)
         x1 = rng.normal(size=n)
         x2 = rng.normal(size=n)
         x3 = x1 + 2.0 * x2 + 0.01 * rng.normal(size=n)  # residual cond ~460
         result = check_collinearity(
             X=np.column_stack([x1, x2, x3]),
-            artist_idx=artist_idx,
+            entity_idx=entity_idx,
             feature_names=["x1", "x2", "x3"],
         )
         assert result.status == "WARN"
