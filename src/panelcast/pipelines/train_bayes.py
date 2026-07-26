@@ -1699,8 +1699,8 @@ def train_models(  # noqa: C901  # tracked complexity debt
     # treatment); only DROP it above the cap, where memory forces the cold-start
     # prior-marginalization (e.g. ~50k-director domains). The interpretable
     # deterministic {prefix}_entity_log_scale is kept either way.
-    n_artists_fit = int(model_args["n_artists"])
-    drop_entity_obs = entity_obs_on and n_artists_fit > _ENTITY_OBS_KEEP_MAX
+    n_entities_fit = int(model_args["n_artists"])
+    drop_entity_obs = entity_obs_on and n_entities_fit > _ENTITY_OBS_KEEP_MAX
     # The entity skew latents (#232) STAY in the saved fit below the entity
     # cap: under the skew gate the decentered site disappears, so they are the
     # only latents carrying fitted per-entity information, and Predictive-based
@@ -1713,7 +1713,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
     entity_skew_on = (
         str(getattr(ctx, "entity_effect_prior_type", "normal") or "normal") == "skew_normal"
     )
-    drop_entity_skew = entity_skew_on and n_artists_fit > _ENTITY_OBS_KEEP_MAX
+    drop_entity_skew = entity_skew_on and n_entities_fit > _ENTITY_OBS_KEEP_MAX
     idata_excludes = [
         f"{prefix}_rw_raw",
         f"{prefix}_rw_raw_abs",
@@ -1728,7 +1728,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
     if entity_skew_on:
         log.info(
             "entity_skew_latent_storage",
-            n_artists=n_artists_fit,
+            n_entities=n_entities_fit,
             kept=not drop_entity_skew,
             keep_max=_ENTITY_OBS_KEEP_MAX,
         )
@@ -1746,7 +1746,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
     if entity_obs_on:
         log.info(
             "entity_obs_raw_storage",
-            n_artists=n_artists_fit,
+            n_entities=n_entities_fit,
             kept=not drop_entity_obs,
             keep_max=_ENTITY_OBS_KEEP_MAX,
         )
