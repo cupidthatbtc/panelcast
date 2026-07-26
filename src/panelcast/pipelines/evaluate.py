@@ -1175,6 +1175,17 @@ def _compute_info_criteria(
     eiv_on = bool(getattr(model_args.get("priors"), "errors_in_variables", False))
     if eiv_on and eiv_site not in posterior_samples:
         excluded_latents.append(eiv_site)
+    # Skew-construction latents (#232/#233): their alpha companions are always
+    # collected, so their presence detects the gates. Without this the log-lik
+    # replay hits the unseeded HalfNormal sites and dies (the trio-screen bug).
+    if f"{prefix}_rw_skew_alpha" in posterior_samples:
+        rw_abs_site = f"{prefix}_rw_raw_abs"
+        if rw_abs_site not in posterior_samples:
+            excluded_latents.append(rw_abs_site)
+    if f"{prefix}_entity_skew_alpha" in posterior_samples:
+        for skew_site in (f"{prefix}_entity_skew_abs", f"{prefix}_entity_skew_sym"):
+            if skew_site not in posterior_samples:
+                excluded_latents.append(skew_site)
     needs_latents = bool(excluded_latents)
     n_total = int(next(iter(posterior_samples.values())).shape[0])
     n_batches = (n_total + batch_size - 1) // batch_size
@@ -1200,7 +1211,9 @@ def _compute_info_criteria(
                 return_sites=excluded_latents,
             )
             latents = latent_pred(random.key(seed + start), **args_predictive)
-            chunk = {**chunk, **{s: latents[s] for s in excluded_latents}}
+            # Predictive drops requested sites the model never sampled (e.g.
+            # rw_raw under max_seq <= 1); only merge what actually exists.
+            chunk = {**chunk, **{s: latents[s] for s in excluded_latents if s in latents}}
         log_lik_dict = log_likelihood(
             model,
             chunk,

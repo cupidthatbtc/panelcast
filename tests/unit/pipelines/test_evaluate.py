@@ -324,6 +324,116 @@ class TestComputeInfoCriteriaBranches:
         all_requested = [s for sites in latent_sites_requested for s in sites]
         assert "user_entity_obs_raw" in all_requested
 
+    def test_skew_gates_marginalize_missing_latents(self):
+        # #232/#233: the always-collected alpha companions detect the gates;
+        # absent skew-construction latents must be marginalized, or the
+        # log-likelihood replay dies on the unseeded HalfNormal sites.
+        n_obs, n_total = 5, 10
+        posterior_samples = {
+            "user_rw_skew_alpha": np.zeros(n_total),
+            "user_entity_skew_alpha": np.zeros(n_total),
+            "user_sigma_obs": np.ones(n_total),
+        }
+        model_args = {
+            "artist_idx": np.zeros(n_obs, dtype=np.int32),
+            "album_seq": np.ones(n_obs, dtype=np.int32),
+            "prev_score": np.full(n_obs, 70.0, dtype=np.float32),
+            "X": np.zeros((n_obs, 2), dtype=np.float32),
+            "n_reviews": np.full(n_obs, 50, dtype=np.int32),
+            "n_artists": 1,
+            "max_seq": 5,
+        }
+        y_true = np.full(n_obs, 70.0, dtype=np.float32)
+        fake_log_lik = np.random.default_rng(0).normal(size=(n_total, n_obs))
+
+        latent_sites_requested: list[list[str]] = []
+
+        def fake_predictive_cls(model, posterior_samples, batch_ndims, return_sites):
+            latent_sites_requested.append(list(return_sites))
+            mock = MagicMock()
+            mock.return_value = {
+                s: np.zeros((len(next(iter(posterior_samples.values()))), n_obs))
+                for s in return_sites
+            }
+            return mock
+
+        with (
+            patch("panelcast.pipelines.evaluate.Predictive", side_effect=fake_predictive_cls),
+            patch(
+                "panelcast.pipelines.evaluate.log_likelihood",
+                return_value={"user_y": fake_log_lik},
+            ),
+        ):
+            result = _compute_info_criteria(
+                posterior_samples, model_args, y_true, n_chains=1, n_draws=10
+            )
+
+        assert result["latents_marginalized"] is True
+        all_requested = [s for sites in latent_sites_requested for s in sites]
+        assert "user_rw_raw_abs" in all_requested
+        assert "user_entity_skew_abs" in all_requested
+        assert "user_entity_skew_sym" in all_requested
+
+    def test_present_skew_latents_are_conditioned_not_redrawn(self):
+        # The post-fix saved fit keeps the entity skew latents; the replay must
+        # condition on those fitted draws, never re-request them from the prior.
+        n_obs, n_total, n_entities, max_seq = 5, 10, 3, 5
+        posterior_samples = {
+            "user_rw_skew_alpha": np.zeros(n_total),
+            "user_entity_skew_alpha": np.zeros(n_total),
+            "user_entity_skew_abs": np.abs(
+                np.random.default_rng(1).normal(size=(n_total, n_entities))
+            ),
+            "user_entity_skew_sym": np.random.default_rng(2).normal(size=(n_total, n_entities)),
+            "user_sigma_obs": np.ones(n_total),
+        }
+        model_args = {
+            "artist_idx": np.zeros(n_obs, dtype=np.int32),
+            "album_seq": np.ones(n_obs, dtype=np.int32),
+            "prev_score": np.full(n_obs, 70.0, dtype=np.float32),
+            "X": np.zeros((n_obs, 2), dtype=np.float32),
+            "n_reviews": np.full(n_obs, 50, dtype=np.int32),
+            "n_artists": n_entities,
+            "max_seq": max_seq,
+        }
+        y_true = np.full(n_obs, 70.0, dtype=np.float32)
+        fake_log_lik = np.random.default_rng(0).normal(size=(n_total, n_obs))
+
+        latent_shapes = {
+            "user_rw_raw": (n_entities, max_seq - 1),
+            "user_rw_raw_abs": (n_entities, max_seq - 1),
+        }
+        latent_sites_requested: list[list[str]] = []
+
+        def fake_predictive_cls(model, posterior_samples, batch_ndims, return_sites):
+            latent_sites_requested.append(list(return_sites))
+            n_batch = len(next(iter(posterior_samples.values())))
+            mock = MagicMock()
+            mock.return_value = {
+                s: np.zeros((n_batch, *latent_shapes.get(s, (n_obs,)))) for s in return_sites
+            }
+            return mock
+
+        with (
+            patch("panelcast.pipelines.evaluate.Predictive", side_effect=fake_predictive_cls),
+            patch(
+                "panelcast.pipelines.evaluate.log_likelihood",
+                return_value={"user_y": fake_log_lik},
+            ),
+        ):
+            result = _compute_info_criteria(
+                posterior_samples, model_args, y_true, n_chains=1, n_draws=10
+            )
+
+        # rw_raw / rw_raw_abs are absent and still marginalized...
+        assert result["latents_marginalized"] is True
+        all_requested = [s for sites in latent_sites_requested for s in sites]
+        assert "user_rw_raw" in all_requested
+        assert "user_rw_raw_abs" in all_requested
+        # ...but the fitted entity skew draws are conditioned on, not re-drawn.
+        assert "user_entity_skew_abs" not in all_requested
+        assert "user_entity_skew_sym" not in all_requested
+
     def test_jacobian_correction_applied(self):
         # When transform is not identity, log-Jacobian is added (lines 626-629).
         n_obs, n_total = 4, 8

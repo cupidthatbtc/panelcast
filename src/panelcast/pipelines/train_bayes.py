@@ -1215,6 +1215,7 @@ def _fit_diagnostics(
     rhat_threshold: float,
     ess_threshold: int,
     allow_divergences: bool,
+    gate_exclude: tuple[str, ...] = (),
 ):
     caged = detect_caged_chains(
         fit_result.idata,
@@ -1229,6 +1230,7 @@ def _fit_diagnostics(
         rhat_threshold=rhat_threshold,
         ess_threshold=ess_threshold,
         allow_divergences=allow_divergences,
+        gate_exclude=gate_exclude,
     )
     survivor_diagnostics = None
     if caged.chains:
@@ -1243,6 +1245,7 @@ def _fit_diagnostics(
                 rhat_threshold=rhat_threshold,
                 ess_threshold=ess_threshold,
                 allow_divergences=allow_divergences,
+                gate_exclude=gate_exclude,
             )
     return diagnostics, caged, survivor_diagnostics
 
@@ -1260,6 +1263,7 @@ def _fit_with_caged_chain_retries(
     rhat_threshold: float,
     ess_threshold: int,
     allow_divergences: bool,
+    gate_exclude: tuple[str, ...] = (),
 ):
     """Return the first all-consensus fit, or the original fit after bounded retries."""
 
@@ -1274,6 +1278,7 @@ def _fit_with_caged_chain_retries(
             rhat_threshold=rhat_threshold,
             ess_threshold=ess_threshold,
             allow_divergences=allow_divergences,
+            gate_exclude=gate_exclude,
         )
 
     def diagnostics_record(value):
@@ -1694,20 +1699,39 @@ def train_models(  # noqa: C901  # tracked complexity debt
     # treatment); only DROP it above the cap, where memory forces the cold-start
     # prior-marginalization (e.g. ~50k-director domains). The interpretable
     # deterministic {prefix}_entity_log_scale is kept either way.
-    n_artists_fit = int(model_args["n_artists"])
-    drop_entity_obs = entity_obs_on and n_artists_fit > _ENTITY_OBS_KEEP_MAX
-    # The skew-construction latents (#232) are re-derivable from the prior and
-    # nothing downstream reads them; excluding absent sites is a no-op on
-    # gate-off fits.
+    n_entities_fit = int(model_args["n_artists"])
+    drop_entity_obs = entity_obs_on and n_entities_fit > _ENTITY_OBS_KEEP_MAX
+    # The entity skew latents (#232) STAY in the saved fit below the entity
+    # cap: under the skew gate the decentered site disappears, so they are the
+    # only latents carrying fitted per-entity information, and Predictive-based
+    # test-set prediction (which skips deterministics) silently re-drew every
+    # entity effect from the prior without them. The log-lik replay was safe
+    # either way — substitute() honors the saved init-effect deterministic.
+    # Above the cap they drop like entity_obs_raw and evaluate falls back to
+    # gate-detected prior-marginalization. rw_raw_abs follows rw_raw's
+    # always-excluded/marginalized treatment.
+    entity_skew_on = (
+        str(getattr(ctx, "entity_effect_prior_type", "normal") or "normal") == "skew_normal"
+    )
+    drop_entity_skew = entity_skew_on and n_entities_fit > _ENTITY_OBS_KEEP_MAX
     idata_excludes = [
         f"{prefix}_rw_raw",
         f"{prefix}_rw_raw_abs",
-        f"{prefix}_entity_skew_abs",
-        f"{prefix}_entity_skew_sym",
     ]
     collection_excludes = (
         [f"{prefix}_rw_raw", f"{prefix}_rw_raw_abs"] if exclude_rw_raw_from_collection else []
     )
+    if drop_entity_skew:
+        idata_excludes += [f"{prefix}_entity_skew_abs", f"{prefix}_entity_skew_sym"]
+        if exclude_rw_raw_from_collection:
+            collection_excludes += [f"{prefix}_entity_skew_abs", f"{prefix}_entity_skew_sym"]
+    if entity_skew_on:
+        log.info(
+            "entity_skew_latent_storage",
+            n_entities=n_entities_fit,
+            kept=not drop_entity_skew,
+            keep_max=_ENTITY_OBS_KEEP_MAX,
+        )
     if drop_entity_obs:
         idata_excludes.append(f"{prefix}_entity_obs_raw")
         if exclude_rw_raw_from_collection:
@@ -1722,7 +1746,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
     if entity_obs_on:
         log.info(
             "entity_obs_raw_storage",
-            n_artists=n_artists_fit,
+            n_entities=n_entities_fit,
             kept=not drop_entity_obs,
             keep_max=_ENTITY_OBS_KEEP_MAX,
         )
@@ -1772,6 +1796,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
             rhat_threshold=ctx.rhat_threshold,
             ess_threshold=ctx.ess_threshold,
             allow_divergences=ctx.allow_divergences,
+            gate_exclude=(f"{prefix}_entity_skew_abs", f"{prefix}_entity_skew_sym"),
         )
     )
     _finalize_retry_warmup_export(
