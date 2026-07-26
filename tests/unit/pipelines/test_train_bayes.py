@@ -1205,8 +1205,8 @@ def _make_ctx(**overrides):
     defaults = {
         "seed": 42,
         "strict": False,
-        "max_albums": 50,
-        "min_albums_filter": 2,
+        "max_events": 50,
+        "min_events_filter": 2,
         "num_chains": 4,
         "num_samples": 1000,
         "num_warmup": 500,
@@ -2234,7 +2234,7 @@ class TestTrainModelsMinAlbumsFilter:
     def test_min_albums_filter_passthrough(self, tmp_path):
         """min_albums_filter from ctx should be passed to load_training_data."""
         features_path, splits_path = _make_train_parquets(tmp_path, n_artists=3, n_albums_per=3)
-        ctx = _make_ctx(min_albums_filter=3)
+        ctx = _make_ctx(min_events_filter=3)
 
         fit_result = _make_fake_fit_result()
         diagnostics = _make_fake_diagnostics()
@@ -2400,8 +2400,8 @@ def _make_ctx_new(**overrides):
     defaults = {
         "seed": 42,
         "strict": False,
-        "max_albums": 50,
-        "min_albums_filter": 2,
+        "max_events": 50,
+        "min_events_filter": 2,
         "num_chains": 4,
         "num_samples": 1000,
         "num_warmup": 500,
