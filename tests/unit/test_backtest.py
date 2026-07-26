@@ -30,15 +30,15 @@ def _df():
 class TestOriginOffsetSplit:
     def test_offset_zero_is_the_standard_split(self):
         df = _df()
-        base = within_entity_temporal_split(df, test_albums=1, val_albums=1)
-        offset = within_entity_temporal_split(df, test_albums=1, val_albums=1, origin_offset=0)
+        base = within_entity_temporal_split(df, test_events=1, val_events=1)
+        offset = within_entity_temporal_split(df, test_events=1, val_events=1, origin_offset=0)
         for a, b in zip(base, offset):
             pd.testing.assert_frame_equal(a, b)
 
     def test_offset_one_holds_out_second_to_last(self):
         df = _df()
         train, val, test = within_entity_temporal_split(
-            df, test_albums=1, val_albums=0, min_train_albums=1, origin_offset=1
+            df, test_events=1, val_events=0, min_train_events=1, origin_offset=1
         )
         held = test.set_index("Artist")["Album"].to_dict()
         # Last event per entity is dropped as future; (last-1)-th is the test.
@@ -49,9 +49,9 @@ class TestOriginOffsetSplit:
     def test_deeper_origins_shrink_entity_set(self):
         df = _df()
         _, _, test = within_entity_temporal_split(
-            df, test_albums=1, val_albums=0, min_train_albums=1, origin_offset=2
+            df, test_events=1, val_events=0, min_train_events=1, origin_offset=2
         )
-        # C has 3 events: 2 future + 1 test + 0 train fails min_train_albums=1.
+        # C has 3 events: 2 future + 1 test + 0 train fails min_train_events=1.
         assert set(test["Artist"]) == {"A", "B"}
 
     def test_negative_offset_raises(self):
