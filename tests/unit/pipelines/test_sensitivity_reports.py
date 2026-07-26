@@ -468,8 +468,8 @@ class TestRunSensitivitySuite:
         ctx = SimpleNamespace(
             descriptor=descriptor,
             sensitivity_axes=axes,
-            min_albums_filter=2,
-            max_albums=50,
+            min_events_filter=2,
+            max_events=50,
             num_warmup=10,
             num_samples=10,
             num_chains=1,
@@ -530,7 +530,7 @@ class TestRunSensitivitySuite:
         train_df = pd.DataFrame({"Artist": [f"A{i}" for i in range(n)], "Score": np.zeros(n)})
         import panelcast.pipelines.train_bayes as _tb_mod
         monkeypatch.setattr(_tb_mod, "load_training_data", lambda **kw: (dict(model_args_base), feature_cols, train_df, None))
-        monkeypatch.setattr(_tb_mod, "_apply_max_albums_cap", lambda args, max_albums, counts: args)
+        monkeypatch.setattr(_tb_mod, "_apply_max_albums_cap", lambda args, max_events, counts: args)
         monkeypatch.setattr(_tb_mod, "locate_level_prior", lambda config, **kw: config)
 
         # make_score_model — imported from panelcast.models.bayes.model

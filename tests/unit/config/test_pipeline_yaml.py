@@ -51,12 +51,33 @@ class TestApplyYamlOverrides:
         assert out["num_samples"] == 250
 
     def test_cli_param_name_differs_from_field(self):
-        # min_albums_filter is guarded by the CLI param "min_albums".
-        kwargs = {"min_albums_filter": 3}
-        out = apply_yaml_overrides(kwargs, {"min_albums_filter": 5}, {"min_albums"})
-        assert out["min_albums_filter"] == 3
-        out = apply_yaml_overrides(kwargs, {"min_albums_filter": 5}, set())
-        assert out["min_albums_filter"] == 5
+        # min_events_filter is guarded by the CLI param "min_events".
+        kwargs = {"min_events_filter": 3}
+        out = apply_yaml_overrides(kwargs, {"min_events_filter": 5}, {"min_events"})
+        assert out["min_events_filter"] == 3
+        out = apply_yaml_overrides(kwargs, {"min_events_filter": 5}, set())
+        assert out["min_events_filter"] == 5
+
+    def test_deprecated_key_resolves_with_warning(self):
+        # The AOTY-flavored spellings (#303) still apply, onto the new field,
+        # and the deprecation warning actually fires.
+        from unittest.mock import patch
+
+        with patch("panelcast.config.pipeline_yaml.structlog.get_logger") as get_logger:
+            out = apply_yaml_overrides({}, {"val_albums": 2})
+        assert out["val_events"] == 2
+        warning_calls = get_logger.return_value.warning.call_args_list
+        assert any(
+            call.args[:1] == ("deprecated_config_key",) and call.kwargs.get("key") == "val_albums"
+            for call in warning_calls
+        )
+        out = apply_yaml_overrides({}, {"max_albums": 30, "min_albums_filter": 3})
+        assert out["max_events"] == 30
+        assert out["min_events_filter"] == 3
+
+    def test_deprecated_and_canonical_key_together_is_fatal(self):
+        with pytest.raises(ValueError, match="val_albums"):
+            apply_yaml_overrides({}, {"val_albums": 1, "val_events": 2})
 
     def test_unknown_key_is_fatal(self):
         with pytest.raises(ValueError, match="not_a_real_key"):
@@ -254,13 +275,13 @@ class TestRepositoryConfigs:
         data = load_yaml_config(REPO_ROOT / "configs" / "base.yaml")
         kwargs = apply_yaml_overrides({}, data)
         config = PipelineConfig(**kwargs)
-        # Spot-check against PipelineConfig defaults (min_train_albums used to
+        # Spot-check against PipelineConfig defaults (min_train_events used to
         # diverge between the CLI (2) and the dataclass (1); both are 2 now).
         defaults = PipelineConfig()
         assert config.seed == defaults.seed
         assert config.num_samples == defaults.num_samples
         assert config.target_transform == defaults.target_transform
-        assert config.min_train_albums == defaults.min_train_albums == 2
+        assert config.min_train_events == defaults.min_train_events == 2
 
     def test_dev_yaml_is_cheap_run(self):
         data = load_yaml_config(REPO_ROOT / "configs" / "dev.yaml")
@@ -286,7 +307,7 @@ class TestCliConfigOption:
         assert config == expected
         assert isinstance(config, PipelineConfig)
         assert config.num_samples == 1000
-        assert config.min_train_albums == 2
+        assert config.min_train_events == 2
 
     def test_config_file_overrides_defaults(self, monkeypatch, tmp_path):
         cfg = tmp_path / "c.yaml"

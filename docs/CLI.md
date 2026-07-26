@@ -86,7 +86,7 @@ panelcast run [OPTIONS]
 | `--num-samples` | `1000` | ≥100 | Post-warmup samples per chain |
 | `--num-warmup` | `1000` | ≥50 | Warmup iterations per chain |
 | `--target-accept` | `0.90` | 0.5–0.999 | Target acceptance probability |
-| `--max-albums` | descriptor `max_events`, else 50 | ≥1 | Maximum events per entity |
+| `--max-events` | descriptor `max_events`, else 50 | ≥1 | Maximum events per entity |
 
 #### Convergence Thresholds
 
@@ -101,7 +101,7 @@ panelcast run [OPTIONS]
 | Option | Default | Range | Description |
 |--------|---------|-------|-------------|
 | `--min-ratings` | descriptor default | ≥1 | Minimum observations per event; defaults to the dataset descriptor's `primary_min_obs` (10 for AOTY) |
-| `--min-albums` | `2` | ≥1 | Minimum albums per artist for dynamic effects |
+| `--min-events` | `2` | ≥1 | Minimum events per entity for dynamic effects |
 
 #### Feature Ablation
 
@@ -157,8 +157,8 @@ These features are **enabled by default**. Use these flags to disable them:
 
 | Option | Default | Range | Description |
 |--------|---------|-------|-------------|
-| `--val-albums` | `0` | ≥0 | Albums per artist held out for validation (0 = none) |
-| `--min-train-albums` | `2` | ≥1 | Minimum training albums per artist |
+| `--val-events` | `0` | ≥0 | Events per entity held out for validation (0 = none) |
+| `--min-train-events` | `2` | ≥1 | Minimum training events per entity |
 | `--origin-offset` | `0` | ≥0 | Rolling-origin offset k: drop each entity's last k events as future and hold out the (last-k)-th; `0` = the standard split. `panelcast backtest` sweeps this |
 | `--secondary-split` / `--no-secondary-split` | on | | Artist-disjoint secondary evaluation split |
 | `--calibration-intervals` | `0.80,0.95` | | Comma-separated interval levels for calibration checks |

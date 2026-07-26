@@ -85,7 +85,7 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "enforce_lockfile": _spec("enforce_lockfile", "allow_unlocked_env"),
     "verbose": _spec("verbose", "verbose"),
     "progress_bar": _spec("progress_bar", "no_progress"),
-    "max_albums": _spec("max_albums", "max_albums"),
+    "max_events": _spec("max_events", "max_events"),
     # MCMC configuration
     "num_chains": _spec("num_chains", "num_chains"),
     "num_samples": _spec("num_samples", "num_samples"),
@@ -113,7 +113,7 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "allow_divergences": _spec("allow_divergences", "allow_divergences"),
     # Data filtering
     "min_ratings": _spec("min_ratings", "min_ratings"),
-    "min_albums_filter": _spec("min_albums_filter", "min_albums"),
+    "min_events_filter": _spec("min_events_filter", "min_events"),
     # Feature ablation
     "enable_genre": _spec("enable_genre", "enable_genre"),
     "enable_artist": _spec("enable_artist", "enable_artist"),
@@ -184,13 +184,13 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
         "exclude_rw_raw_from_collection", "exclude_rw_raw_from_collection"
     ),
     # Split configuration
-    "val_albums": _spec("val_albums", "val_albums"),
+    "val_events": _spec("val_events", "val_events"),
     "origin_offset": _spec("origin_offset", "origin_offset"),
     # Conformal wrapper gate (#156; no CLI flag).
     "conformal_calibration": _spec("conformal_calibration", None),
     # Multi-step rollout evaluation depth (#157; no CLI flag).
     "eval_horizon": _spec("eval_horizon", None),
-    "min_train_albums": _spec("min_train_albums", "min_train_albums"),
+    "min_train_events": _spec("min_train_events", "min_train_events"),
     # Evaluation configuration
     "calibration_intervals": _spec(
         "calibration_intervals", "calibration_intervals", _as_calibration_levels
@@ -200,11 +200,22 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     "evaluate_secondary_split": _spec("evaluate_secondary_split", "secondary_split"),
     # Prediction batching (no CLI flags)
     "predictive_batch_size": _spec("predictive_batch_size", None),
-    "predict_artist_batch_size": _spec("predict_artist_batch_size", None),
+    "predict_entity_batch_size": _spec("predict_entity_batch_size", None),
     # priors: auto (#267; no CLI flag — a descriptor/run-config fact).
     "auto_priors": _spec("auto_priors", None),
     # Dataset descriptor reference
     "dataset": _spec("dataset", "dataset"),
+}
+
+# Deprecated AOTY-flavored spellings (#303): accepted with a warning, resolved
+# to their canonical key before mapping. Kept out of PIPELINE_YAML_MAPPING so
+# dump_resolved_config / experiment_config_payload emit canonical keys only.
+DEPRECATED_YAML_KEYS: dict[str, str] = {
+    "max_albums": "max_events",
+    "min_albums_filter": "min_events_filter",
+    "val_albums": "val_events",
+    "min_train_albums": "min_train_events",
+    "predict_artist_batch_size": "predict_entity_batch_size",
 }
 
 
@@ -244,6 +255,21 @@ def apply_yaml_overrides(
             or if a mapped value fails its normalization.
     """
     out = dict(kwargs)
+    yaml_data = dict(yaml_data)
+    for old_key, new_key in DEPRECATED_YAML_KEYS.items():
+        if old_key not in yaml_data:
+            continue
+        if new_key in yaml_data:
+            raise ValueError(
+                f"Config sets both '{old_key}' (deprecated) and '{new_key}'; keep only '{new_key}'."
+            )
+        structlog.get_logger().warning(
+            "deprecated_config_key",
+            key=old_key,
+            replacement=new_key,
+            hint=f"'{old_key}' still works but will be removed; rename it to '{new_key}'",
+        )
+        yaml_data[new_key] = yaml_data.pop(old_key)
     unmapped: list[str] = []
     for key, value in yaml_data.items():
         spec = PIPELINE_YAML_MAPPING.get(key)

@@ -467,7 +467,7 @@ class TestOrchestratorResumeFromFailed:
                 "strict": False,
                 "verbose": False,
                 "resume": None,
-                "max_albums": 50,
+                "max_events": 50,
                 "num_chains": 4,
                 "num_samples": 1000,
                 "num_warmup": 1000,
@@ -478,7 +478,7 @@ class TestOrchestratorResumeFromFailed:
                 "ess_threshold": 400,
                 "allow_divergences": False,
                 "min_ratings": 10,
-                "min_albums_filter": 2,
+                "min_events_filter": 2,
                 "enable_genre": True,
                 "enable_artist": True,
                 "enable_temporal": True,
@@ -562,7 +562,7 @@ class TestOrchestratorSkipExistingManifest:
                 "strict": False,
                 "verbose": False,
                 "resume": None,
-                "max_albums": 50,
+                "max_events": 50,
                 "num_chains": 4,
                 "num_samples": 1000,
                 "num_warmup": 1000,
@@ -573,7 +573,7 @@ class TestOrchestratorSkipExistingManifest:
                 "ess_threshold": 400,
                 "allow_divergences": False,
                 "min_ratings": 10,
-                "min_albums_filter": 2,
+                "min_events_filter": 2,
                 "enable_genre": True,
                 "enable_artist": True,
                 "enable_temporal": True,
@@ -692,7 +692,7 @@ class TestOrchestratorSkipExistingManifest:
                 "strict": False,
                 "verbose": False,
                 "resume": None,
-                "max_albums": 50,
+                "max_events": 50,
                 "num_chains": 4,
                 "num_samples": 1000,
                 "num_warmup": 1000,
@@ -703,7 +703,7 @@ class TestOrchestratorSkipExistingManifest:
                 "ess_threshold": 400,
                 "allow_divergences": False,
                 "min_ratings": 5,  # Different from current
-                "min_albums_filter": 2,
+                "min_events_filter": 2,
                 "enable_genre": True,
                 "enable_artist": True,
                 "enable_temporal": True,
@@ -873,12 +873,12 @@ class TestOrchestratorCommandStringAdvanced:
         """Command string includes non-default data filtering."""
         from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
 
-        config = PipelineConfig(min_ratings=25, min_albums_filter=5)
+        config = PipelineConfig(min_ratings=25, min_events_filter=5)
         orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
         cmd = orchestrator._build_command_string()
 
         assert "--min-ratings 25" in cmd
-        assert "--min-albums 5" in cmd
+        assert "--min-events 5" in cmd
 
     def test_command_with_chain_method(self, tmp_path):
         """Command string includes non-default chain method."""
@@ -1083,7 +1083,7 @@ class TestExecuteStagesResume:
                 "strict": False,
                 "verbose": False,
                 "resume": None,
-                "max_albums": 50,
+                "max_events": 50,
                 "num_chains": 4,
                 "num_samples": 1000,
                 "num_warmup": 1000,
@@ -1094,7 +1094,7 @@ class TestExecuteStagesResume:
                 "ess_threshold": 400,
                 "allow_divergences": False,
                 "min_ratings": 10,
-                "min_albums_filter": 2,
+                "min_events_filter": 2,
                 "enable_genre": True,
                 "enable_artist": True,
                 "enable_temporal": True,
@@ -1541,7 +1541,7 @@ class TestRecordStageOutputsPath:
 
 class TestSplitConfigParity:
     """`stage splits`, `run --stages splits`, and `demo` must build the same
-    split population (min_train_albums used to diverge: CLI 2 vs dataclass 1)."""
+    split population (min_train_events used to diverge: CLI 2 vs dataclass 1)."""
 
     def _captured_config(self, monkeypatch, args):
         captured = {}
@@ -1585,17 +1585,17 @@ class TestSplitConfigParity:
     def test_split_defaults_match_documented_default(self, monkeypatch, tmp_path):
         run_cfg = self._captured_config(monkeypatch, ["run", "--stages", "splits"])
         split = self._split_config(run_cfg, tmp_path)
-        assert split.min_train_albums == 2
+        assert split.min_train_events == 2
 
     def test_demo_config_matches_split_defaults(self, monkeypatch):
-        """demo builds PipelineConfig without min_train_albums; the dataclass
+        """demo builds PipelineConfig without min_train_events; the dataclass
         default must match the documented `run` default."""
         from panelcast.pipelines.orchestrator import PipelineConfig
 
         demo_cfg = self._captured_config(monkeypatch, ["demo"])
         defaults = PipelineConfig()
-        assert demo_cfg.min_train_albums == defaults.min_train_albums == 2
-        assert demo_cfg.val_albums == defaults.val_albums
+        assert demo_cfg.min_train_events == defaults.min_train_events == 2
+        assert demo_cfg.val_events == defaults.val_events
 
 
 # ============================================================================

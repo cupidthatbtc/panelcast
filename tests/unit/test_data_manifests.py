@@ -25,7 +25,7 @@ def _sample_manifest(**overrides) -> SplitManifest:
         version="v1",
         created_at="2026-01-01T00:00:00Z",
         split_type="within_entity_temporal",
-        parameters={"test_albums": 1, "val_albums": 1},
+        parameters={"test_events": 1, "val_events": 1},
         source_dataset={"path": "data/processed/user_score_minratings_10.parquet", "sha256": "abc"},
         splits={
             "train": SplitStats(row_count=10, unique_artists=3, sha256="train_hash"),

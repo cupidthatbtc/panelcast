@@ -45,7 +45,7 @@ Rolling-origin backtest (`panelcast backtest --origins K`)
 
 Conformal calibration wrapper (`conformal_calibration: true`, default off)
 - Calibrated on the validation split with train-only history (needs
-  `val_albums >= 1`); test rows never inform the calibration.
+  `val_events >= 1`); test rows never inform the calibration.
 - Two layers reported in `metrics.json` under `calibration.conformal`, next
   to the raw Bayesian numbers: split-conformal (CQR) interval widening with
   its finite-sample adjustment per nominal level, and quantile recalibration
@@ -73,15 +73,15 @@ Multi-step rollout evaluation (`eval_horizon: H`, default 0 = off)
   never mix into the flagship one-step metrics; h=1 reconciles with the
   one-step evaluation in distribution (the sanity anchor).
 
-History cap (`max_albums`)
-- `--max-albums` (default 50 for AOTY) caps the length of the time-varying
+History cap (`max_events`)
+- `--max-events` (default 50 for AOTY) caps the length of the time-varying
   trajectory per entity. It is a max-EVENTS cap, not a row filter: an entity's
-  events beyond the most recent `max_albums` are NOT dropped — they collapse
+  events beyond the most recent `max_events` are NOT dropped — they collapse
   onto sequence position 1 (the initial entity effect), so every row still
   contributes to the likelihood. The cap bounds the random-walk trajectory
   length (and peak GPU memory); distant positions carry little signal about the
   current state because cumulative random-walk variance grows over steps.
-- Domains with longer histories than AOTY should raise `--max-albums`
+- Domains with longer histories than AOTY should raise `--max-events`
   accordingly. The cap is computed on training data only (no leakage).
 
 Diagnostics

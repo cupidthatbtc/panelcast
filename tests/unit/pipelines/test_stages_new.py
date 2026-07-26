@@ -391,7 +391,7 @@ class TestStageContextCustomValues:
             strict=True,
             verbose=True,
             manifest=MagicMock(),
-            max_albums=100,
+            max_events=100,
             num_chains=8,
             num_samples=2000,
             num_warmup=500,
@@ -402,7 +402,7 @@ class TestStageContextCustomValues:
             ess_threshold=200,
             allow_divergences=True,
             min_ratings=20,
-            min_albums_filter=5,
+            min_events_filter=5,
             enable_genre=False,
             enable_artist=False,
             enable_temporal=False,
@@ -417,7 +417,7 @@ class TestStageContextCustomValues:
             evaluate_secondary_split=False,
         )
         assert ctx.seed == 99
-        assert ctx.max_albums == 100
+        assert ctx.max_events == 100
         assert ctx.chain_method == "parallel"
         assert ctx.enable_genre is False
         assert ctx.learn_n_exponent is True

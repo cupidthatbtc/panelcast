@@ -321,7 +321,7 @@ class TestRunConfigPassthrough:
         assert kwargs["verbose"] is False
         assert kwargs["resume"] is None
         # None = descriptor-deferred (#268); the orchestrator resolves it.
-        assert kwargs["max_albums"] is None
+        assert kwargs["max_events"] is None
         assert kwargs["num_chains"] == 4
         assert kwargs["num_samples"] == 1000
         assert kwargs["num_warmup"] == 1000
@@ -334,7 +334,7 @@ class TestRunConfigPassthrough:
         # min_ratings defaults to None at the CLI; the orchestrator resolves it
         # from the descriptor's primary_min_obs (10 for AOTY).
         assert kwargs["min_ratings"] is None
-        assert kwargs["min_albums_filter"] == 2
+        assert kwargs["min_events_filter"] == 2
         assert kwargs["enable_genre"] is True
         assert kwargs["enable_artist"] is True
         assert kwargs["enable_temporal"] is True
@@ -407,17 +407,17 @@ class TestRunConfigPassthrough:
                 "run",
                 "--min-ratings",
                 "20",
-                "--min-albums",
+                "--min-events",
                 "5",
-                "--max-albums",
+                "--max-events",
                 "100",
             ],
         )
         assert result.exit_code == 0
         kwargs = captured["kwargs"]
         assert kwargs["min_ratings"] == 20
-        assert kwargs["min_albums_filter"] == 5
-        assert kwargs["max_albums"] == 100
+        assert kwargs["min_events_filter"] == 5
+        assert kwargs["max_events"] == 100
 
     def test_feature_ablation_flags(self, monkeypatch):
         """Feature ablation flags pass through correctly."""

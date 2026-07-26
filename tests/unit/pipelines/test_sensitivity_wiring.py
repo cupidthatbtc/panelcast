@@ -201,8 +201,8 @@ class TestSensitivitySuiteRealFitSmoke:
         ctx = SimpleNamespace(
             descriptor=DatasetDescriptor(),
             sensitivity_axes=("ablation",),
-            min_albums_filter=2,
-            max_albums=50,
+            min_events_filter=2,
+            max_events=50,
             num_warmup=15,
             num_samples=15,
             num_chains=1,

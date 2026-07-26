@@ -586,7 +586,7 @@ def _load_conformal_levels(
         log.warning(
             "conformal_levels_unavailable",
             path=str(metrics_path),
-            hint="run evaluate with conformal_calibration and val_albums >= 1 first",
+            hint="run evaluate with conformal_calibration and val_events >= 1 first",
         )
         return None
 
@@ -737,7 +737,7 @@ def predict_next_events(ctx: StageContext) -> dict:
         seed=seed,
         strict=ctx.strict,
         batch_size=int(getattr(ctx, "predictive_batch_size", 500)),
-        artist_batch_size=int(getattr(ctx, "predict_artist_batch_size", 50)),
+        artist_batch_size=int(getattr(ctx, "predict_entity_batch_size", 50)),
         conformal_levels=conformal_levels,
     )
     log.info("known_predictions_complete", n_rows=len(known_df))

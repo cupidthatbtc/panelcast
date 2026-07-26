@@ -1577,7 +1577,7 @@ def _conformal_block(
 
     if val_df is None or val_df.empty:
         raise ValueError(
-            "conformal_calibration needs a validation split; rerun with val_albums >= 1."
+            "conformal_calibration needs a validation split; rerun with val_events >= 1."
         )
     val_features_path = features_dir / "validation_features.parquet"
     if not val_features_path.exists():
