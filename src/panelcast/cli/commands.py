@@ -236,8 +236,8 @@ def demo(
         num_warmup=num_warmup,
         # min_ratings unset: resolves to the aerospace descriptor's
         # primary_min_obs (5) in the orchestrator.
-        max_albums=10,
-        min_albums_filter=2,
+        max_events=10,
+        min_events_filter=2,
         rhat_threshold=1.1,
         ess_threshold=100,
         allow_divergences=True,

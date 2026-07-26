@@ -40,15 +40,15 @@ class TestConfigSentinels:
         config = PipelineConfig()
         assert config.likelihood_family is None
         assert config.target_transform is None
-        assert config.max_albums is None
+        assert config.max_events is None
 
     def test_explicit_values_validate_immediately(self):
         with pytest.raises(ValueError, match="likelihood_family"):
             PipelineConfig(likelihood_family="nope")
         with pytest.raises(ValueError, match="target_transform"):
             PipelineConfig(target_transform="nope")
-        with pytest.raises(ValueError, match="max_albums"):
-            PipelineConfig(max_albums=0)
+        with pytest.raises(ValueError, match="max_events"):
+            PipelineConfig(max_events=0)
 
     def test_family_without_transform_defers_coupling(self):
         # The identity requirement is checked after resolution, not on the
@@ -63,7 +63,7 @@ class TestOrchestratorResolution:
         PipelineOrchestrator(config, output_base=tmp_path)
         assert config.likelihood_family == "studentt"
         assert config.target_transform == "offset_logit"
-        assert config.max_albums == 50
+        assert config.max_events == 50
 
     def test_descriptor_owns_the_default_run(self, tmp_path):
         dataset = _write_descriptor(
@@ -77,7 +77,7 @@ class TestOrchestratorResolution:
         PipelineOrchestrator(config, output_base=tmp_path)
         assert config.likelihood_family == "beta_binomial"
         assert config.target_transform == "identity"
-        assert config.max_albums == 60
+        assert config.max_events == 60
 
     def test_explicit_config_beats_the_descriptor(self, tmp_path):
         dataset = _write_descriptor(
@@ -91,12 +91,12 @@ class TestOrchestratorResolution:
             dataset=dataset,
             likelihood_family="studentt",
             target_transform="offset_logit",
-            max_albums=25,
+            max_events=25,
         )
         PipelineOrchestrator(config, output_base=tmp_path)
         assert config.likelihood_family == "studentt"
         assert config.target_transform == "offset_logit"
-        assert config.max_albums == 25
+        assert config.max_events == 25
 
     def test_incoherent_descriptor_facts_fail_at_resolution(self, tmp_path):
         dataset = _write_descriptor(
@@ -129,10 +129,10 @@ class TestSharedResolutionHelper:
         config = PipelineConfig(dataset=dataset)
         descriptor = load_descriptor(dataset)
         resolve_model_facts(config, descriptor)
-        resolved = (config.likelihood_family, config.target_transform, config.max_albums)
+        resolved = (config.likelihood_family, config.target_transform, config.max_events)
         assert resolved == ("beta_binomial", "identity", 60)
         resolve_model_facts(config, descriptor)
-        assert (config.likelihood_family, config.target_transform, config.max_albums) == resolved
+        assert (config.likelihood_family, config.target_transform, config.max_events) == resolved
 
     def test_rejects_beta_binomial_without_aggregation_counts(self, tmp_path):
         from panelcast.config.descriptor import load_descriptor

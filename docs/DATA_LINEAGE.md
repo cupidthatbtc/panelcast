@@ -80,7 +80,7 @@
 │  │ STAGE 4: TRAIN                                          │           │
 │  │ Module: pipelines/train_bayes.py                        │           │
 │  │ • Prepare model data (artist indices, album sequences)  │           │
-│  │ • Apply max_albums cap (most recent per artist)         │           │
+│  │ • Apply max_events cap (most recent per artist)         │           │
 │  │ • Fit user_score_model via NUTS MCMC                    │           │
 │  │ • Check convergence (R-hat, ESS, divergences)           │           │
 │  │ • Save NetCDF + model manifest                          │           │
@@ -387,9 +387,9 @@ Audit log saved to `data/audit/` via `data/lineage.py:AuditLogger`.
 | `output_dir` | `data/splits` | Output directory |
 | `version` | `"v1"` | Manifest version tag |
 | `random_state` | `42` | Seed (from CLI `--seed`) |
-| `test_albums` | `1` | Albums per artist held for test |
-| `val_albums` | `1` | Albums per artist held for validation |
-| `min_train_albums` | `1` | Minimum training albums to include artist |
+| `test_events` | `1` | Albums per artist held for test |
+| `val_events` | `1` | Albums per artist held for validation |
+| `min_train_events` | `1` | Minimum training albums to include artist |
 | `disjoint_test_size` | `0.15` | Artist-disjoint test fraction |
 | `disjoint_val_size` | `0.15` | Artist-disjoint validation fraction |
 | `source_path` | Computed | `data/processed/user_score_minratings_{min_ratings}.parquet` |
@@ -398,10 +398,10 @@ Audit log saved to `data/audit/` via `data/lineage.py:AuditLogger`.
 
 **Algorithm** (`data/split.py:within_entity_temporal_split`):
 
-For each artist with sufficient albums (>= `min_train_albums + val_albums + test_albums`):
+For each artist with sufficient albums (>= `min_train_events + val_events + test_events`):
 1. Sort albums chronologically
-2. Last `test_albums` → test set
-3. Previous `val_albums` → validation set
+2. Last `test_events` → test set
+3. Previous `val_events` → validation set
 4. Remaining → training set
 
 Artists with fewer albums are excluded entirely. This prevents data leakage by ensuring the model never trains on albums released after the test/validation albums.
@@ -570,10 +570,10 @@ Feature manifest records:
 | `n_reviews` | `(n_obs,)` | `n_reviews` column (int32), from `User_Ratings` |
 | `n_artists` | scalar | Count of unique artists |
 
-**min_albums_filter:** Artists with fewer than `min_albums_filter` (default 2) albums have `album_seq` clamped to 1 (static effect only, no random walk).
+**min_events_filter:** Artists with fewer than `min_events_filter` (default 2) albums have `album_seq` clamped to 1 (static effect only, no random walk).
 
-**max_albums cap** (`_apply_max_albums_cap`):
-- For artists with more than `max_albums` (default 50) albums, shifts album_seq so the most recent albums get positions 1 to max_albums
+**max_events cap** (`_apply_max_albums_cap`):
+- For artists with more than `max_events` (default 50) albums, shifts album_seq so the most recent albums get positions 1 to max_events
 - Older albums share position 1
 - `max_seq = album_seq.max()` after capping
 
@@ -1104,7 +1104,7 @@ Final arrays passed to `user_score_model`:
 | Array | Source Column(s) | Transform |
 |-------|-----------------|-----------|
 | `artist_idx` | `Artist` | Unique string → integer index |
-| `album_seq` | Within-artist index | `groupby("Artist").cumcount() + 1`, capped at `max_albums` |
+| `album_seq` | Within-artist index | `groupby("Artist").cumcount() + 1`, capped at `max_events` |
 | `prev_score` | `User_Score` | `groupby("Artist").shift(1)`, NaN → global mean |
 | `X` | Feature columns | float32 feature matrix |
 | `y` | `User_Score` | float32 target |
@@ -1167,9 +1167,9 @@ panelcast export-figures     # Static figure export
 
 | Field | CLI Flag | Default | Description |
 |-------|----------|---------|-------------|
-| `max_albums` | `--max-albums` | `50` | Max albums per artist |
+| `max_events` | `--max-events` | `50` | Max albums per artist |
 | `min_ratings` | `--min-ratings` | `10` | Minimum user ratings per album |
-| `min_albums_filter` | `--min-albums` | `2` | Min albums for dynamic effects |
+| `min_events_filter` | `--min-events` | `2` | Min albums for dynamic effects |
 
 ### Feature Ablation
 
@@ -1213,9 +1213,9 @@ panelcast export-figures     # Static figure export
 | `output_dir` | `data/splits` | Output directory |
 | `version` | `"v1"` | Manifest version |
 | `random_state` | `42` | Seed from CLI |
-| `test_albums` | `1` | Albums per artist for test |
-| `val_albums` | `1` | Albums per artist for validation |
-| `min_train_albums` | `1` | Minimum training albums to include artist |
+| `test_events` | `1` | Albums per artist for test |
+| `val_events` | `1` | Albums per artist for validation |
+| `min_train_events` | `1` | Minimum training albums to include artist |
 | `disjoint_test_size` | `0.15` | Artist-disjoint test fraction |
 | `disjoint_val_size` | `0.15` | Artist-disjoint validation fraction |
 
@@ -1516,7 +1516,7 @@ Each split strategy saves its own manifest (`data/manifests.py:SplitManifest`):
 | `version` | Manifest version tag |
 | `created_at` | ISO-8601 UTC timestamp |
 | `split_type` | `"within_entity_temporal"` or `"entity_disjoint"` |
-| `parameters` | Split-specific parameters (test_albums, random_state, etc.) |
+| `parameters` | Split-specific parameters (test_events, random_state, etc.) |
 | `source_dataset` | Path, SHA-256, row count, unique artists |
 | `splits` | Per-split `SplitStats`: row count, unique artists, SHA-256 |
 | `assignments` | Per-row split assignment with reasoning |
@@ -1678,7 +1678,7 @@ With the within-artist temporal split, Kendrick Lamar's albums are sorted chrono
 | DAMN. | 2017 | validation (second-to-last) |
 | Mr. Morale & The Big Steppers | 2022 | test (last album) |
 
-The exact assignment depends on the artist's album count and `test_albums=1`, `val_albums=1` parameters. With 5+ albums, the last goes to test, second-to-last to validation, rest to train.
+The exact assignment depends on the artist's album count and `test_events=1`, `val_events=1` parameters. With 5+ albums, the last goes to test, second-to-last to validation, rest to train.
 
 ## 2.4 Stage 3: Feature Engineering
 
@@ -1840,7 +1840,7 @@ n_reviews: 7834
 ```
 # This album's position in the model arrays:
 artist_idx[i]: 1042  (Kendrick's integer index)
-album_seq[i]: 3      (3rd album, within max_albums=50 cap)
+album_seq[i]: 3      (3rd album, within max_events=50 cap)
 prev_score[i]: 90.0  (good kid, m.A.A.d city User_Score)
 X[i, :]: [0.15, 4.0, 1, 0, 0, 3, 89, 0.8, -0.2, ..., 1, 1]
 y[i]: 92.0

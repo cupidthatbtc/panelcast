@@ -1497,7 +1497,7 @@ class TestPredictNextEventsBranches:
         ctx.seed = 1
         ctx.strict = False
         ctx.predictive_batch_size = 500
-        ctx.predict_artist_batch_size = 50
+        ctx.predict_entity_batch_size = 50
         return ctx
 
     def test_manifest_missing_model_key_raises(self, tmp_path, base_summary, small_posterior):

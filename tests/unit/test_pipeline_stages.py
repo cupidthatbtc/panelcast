@@ -648,14 +648,14 @@ class TestStageContextDefaults:
             strict=True,
             verbose=True,
             manifest=MagicMock(),
-            max_albums=100,
+            max_events=100,
             num_chains=8,
             n_exponent=0.5,
             learn_n_exponent=True,
         )
         assert ctx.seed == 99
         assert ctx.strict is True
-        assert ctx.max_albums == 100
+        assert ctx.max_events == 100
         assert ctx.num_chains == 8
         assert ctx.n_exponent == 0.5
         assert ctx.learn_n_exponent is True

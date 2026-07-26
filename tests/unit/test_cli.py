@@ -407,17 +407,17 @@ class TestRunConfigPassthrough:
                 "run",
                 "--min-ratings",
                 "20",
-                "--min-albums",
+                "--min-events",
                 "5",
-                "--max-albums",
+                "--max-events",
                 "100",
             ],
         )
         assert result.exit_code == 0
         kwargs = captured["kwargs"]
         assert kwargs["min_ratings"] == 20
-        assert kwargs["min_albums_filter"] == 5
-        assert kwargs["max_albums"] == 100
+        assert kwargs["min_events_filter"] == 5
+        assert kwargs["max_events"] == 100
 
     def test_feature_ablation_flags(self, monkeypatch):
         """Feature ablation flags pass through correctly."""

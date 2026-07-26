@@ -95,8 +95,8 @@ likelihood_family: studentt
 
 # Data/evaluation settings (defaults, restated for provenance)
 min_ratings: 10
-min_albums_filter: 2
-max_albums: 50
+min_events_filter: 2
+max_events: 50
 calibration_intervals: [0.80, 0.95]
 coverage_tolerance: 0.03
 prediction_interval: 0.95

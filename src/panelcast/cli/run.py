@@ -252,7 +252,7 @@ def _run_full_preflight(
     model_args, _, _, _ = load_training_data(
         features_path=features_path,
         splits_path=splits_path,
-        min_albums_filter=config.min_albums_filter,
+        min_albums_filter=config.min_events_filter,
         descriptor=preflight_descriptor,
         entity_group_pooling=effective_group_pooling,
         impute_missing=bool(getattr(config, "impute_missing", False)),
@@ -261,10 +261,10 @@ def _run_full_preflight(
     # Remove artist_album_counts (not needed for preflight)
     model_args.pop("artist_album_counts", None)
 
-    # Apply max_albums cap to model_args["album_seq"]
+    # Apply max_events cap to model_args["album_seq"]
     album_seq = model_args["album_seq"]
-    model_args["album_seq"] = np.clip(album_seq, 1, config.max_albums)
-    model_args["max_seq"] = config.max_albums
+    model_args["album_seq"] = np.clip(album_seq, 1, config.max_events)
+    model_args["max_seq"] = config.max_events
 
     # Add heteroscedastic/likelihood params (use effective-config values;
     # the mini-run consumes all three) and the domain's score bounds for the
@@ -348,7 +348,7 @@ def _run_full_preflight(
             n_observations=n_observations,
             n_artists=n_artists_dim,
             n_features=n_features,
-            max_seq=config.max_albums,
+            max_seq=config.max_events,
             headroom_target=0.20,
             # Sequential chains run one after another in the calibration
             # mini-runs; scale the per-run timeout with the chain count.
@@ -414,7 +414,7 @@ def _run_quick_preflight(config, *, preflight_only: bool, force_run: bool) -> No
         n_observations=dimensions.n_observations,
         n_features=QUICK_PREFLIGHT_FEATURES,  # Features built from columns, not counted
         n_artists=dimensions.n_artists,
-        max_seq=config.max_albums,
+        max_seq=config.max_events,
         num_chains=config.num_chains,
         num_samples=config.num_samples,
         num_warmup=config.num_warmup,
@@ -543,13 +543,16 @@ def run(
         "--tag",
         help="Free-form label recorded in the run manifest (shown by `runs history`)",
     ),
-    max_albums: Annotated[
+    max_events: Annotated[
         int | None,
         typer.Option(
+            "--max-events",
+            "--max-albums",
             min=1,
             help=(
                 "Max events per entity for training; beyond this the same entity "
-                "effect is reused. Default: the descriptor's max_events, else 50."
+                "effect is reused. Default: the descriptor's max_events, else 50. "
+                "(--max-albums is a deprecated alias.)"
             ),
         ),
     ] = None,
@@ -678,11 +681,16 @@ def run(
             ),
         ),
     ] = None,
-    min_albums: Annotated[
+    min_events: Annotated[
         int,
         typer.Option(
+            "--min-events",
+            "--min-albums",
             min=1,
-            help="Minimum albums per artist for dynamic effects (default 2)",
+            help=(
+                "Minimum events per entity for dynamic effects (default 2). "
+                "(--min-albums is a deprecated alias.)"
+            ),
         ),
     ] = 2,
     # Feature Ablation flags
@@ -773,24 +781,30 @@ def run(
             "split_normal); rejected for beta."
         ),
     ),
-    val_albums: Annotated[
+    val_events: Annotated[
         int,
         typer.Option(
+            "--val-events",
+            "--val-albums",
             min=0,
             help=(
-                "Number of albums per artist to hold out for validation "
-                "(default 0 = no validation split)."
+                "Number of events per entity to hold out for validation "
+                "(default 0 = no validation split). (--val-albums is a "
+                "deprecated alias.)"
             ),
         ),
     ] = 0,
-    min_train_albums: Annotated[
+    min_train_events: Annotated[
         int,
         typer.Option(
+            "--min-train-events",
+            "--min-train-albums",
             min=1,
             help=(
-                "Minimum training albums per artist. Artists with fewer than "
-                "(min_train_albums + val_albums + 1) total albums are excluded. "
-                "Higher values = fewer artists but more history per artist (default 2)."
+                "Minimum training events per entity. Entities with fewer than "
+                "(min_train_events + val_events + 1) total events are excluded. "
+                "Higher values = fewer entities but more history per entity "
+                "(default 2). (--min-train-albums is a deprecated alias.)"
             ),
         ),
     ] = 2,
@@ -947,7 +961,7 @@ def run(
         progress_bar=False if no_progress else None,
         resume=resume,
         tag=tag,
-        max_albums=max_albums,
+        max_events=max_events,
         # MCMC config
         num_chains=num_chains,
         num_samples=num_samples,
@@ -966,7 +980,7 @@ def run(
         allow_divergences=allow_divergences,
         # Data filtering
         min_ratings=min_ratings,
-        min_albums_filter=min_albums,
+        min_events_filter=min_events,
         # Feature flags
         enable_genre=enable_genre,
         enable_artist=enable_artist,
@@ -980,9 +994,9 @@ def run(
         likelihood_df=likelihood_df,
         likelihood_family=likelihood_family,
         discretize_observation=discretize_observation,
-        val_albums=val_albums,
+        val_events=val_events,
         origin_offset=origin_offset,
-        min_train_albums=min_train_albums,
+        min_train_events=min_train_events,
         calibration_intervals=calibration_levels,
         coverage_tolerance=coverage_tolerance,
         prediction_interval=prediction_interval,
