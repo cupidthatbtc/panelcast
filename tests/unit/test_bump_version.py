@@ -28,7 +28,8 @@ def repo(tmp_path):
 
 def test_bump_rewrites_all_pinned_files(repo):
     bump_version.bump(repo, "0.10.0")
-    today = datetime.date.today().isoformat()
+    # UTC to match the script's stamp — local today() drifts a day off near midnight.
+    today = datetime.datetime.now(datetime.UTC).date().isoformat()
     assert 'version = "0.10.0"' in (repo / "pyproject.toml").read_text()
     assert 'version = "0.10.0"' in (repo / "pixi.toml").read_text()
     citation = (repo / "CITATION.cff").read_text()
