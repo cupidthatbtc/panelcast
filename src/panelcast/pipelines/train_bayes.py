@@ -1696,14 +1696,14 @@ def train_models(  # noqa: C901  # tracked complexity debt
     # deterministic {prefix}_entity_log_scale is kept either way.
     n_artists_fit = int(model_args["n_artists"])
     drop_entity_obs = entity_obs_on and n_artists_fit > _ENTITY_OBS_KEEP_MAX
-    # The skew-construction latents (#232) are re-derivable from the prior and
-    # nothing downstream reads them; excluding absent sites is a no-op on
-    # gate-off fits.
+    # The entity skew latents (#232) STAY in the saved fit: they are
+    # n_entities-small and the fitted init effects derive from them, so
+    # evaluation must condition on the fitted draws (dropping them silently
+    # re-drew every entity effect from the prior during replay). rw_raw_abs
+    # follows rw_raw's always-excluded/marginalized treatment.
     idata_excludes = [
         f"{prefix}_rw_raw",
         f"{prefix}_rw_raw_abs",
-        f"{prefix}_entity_skew_abs",
-        f"{prefix}_entity_skew_sym",
     ]
     collection_excludes = (
         [f"{prefix}_rw_raw", f"{prefix}_rw_raw_abs"] if exclude_rw_raw_from_collection else []
