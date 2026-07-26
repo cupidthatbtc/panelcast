@@ -1216,6 +1216,8 @@ class PipelineOrchestrator:
         from panelcast.config.pipeline_yaml import (
             experiment_config_hash,
             experiment_config_payload,
+            experiment_payload_hash,
+            normalize_experiment_payload,
         )
 
         recorded = getattr(self.manifest, "experiment_identity", None)
@@ -1234,6 +1236,23 @@ class PipelineOrchestrator:
         if recorded_hash and current_hash != recorded_hash:
             current_payload = experiment_config_payload(self.config)
             recorded_payload: dict[str, Any] = recorded.get("config_payload") or {}
+            # A pre-#303 run recorded its identity under the deprecated key
+            # spellings; the same experiment hashes differently only because
+            # of the rename. Translate and re-compare before refusing.
+            normalized_recorded = normalize_experiment_payload(recorded_payload)
+            if (
+                normalized_recorded != recorded_payload
+                and experiment_payload_hash(normalized_recorded) == current_hash
+            ):
+                log.info(
+                    "resume_experiment_identity_translated",
+                    message=(
+                        "recorded identity used pre-rename key spellings; "
+                        "hashes match after #303 alias translation"
+                    ),
+                )
+                return
+            recorded_payload = normalized_recorded
             diff = [
                 f"  {key}: recorded {recorded_payload.get(key)!r} != "
                 f"requested {current_payload.get(key)!r}"

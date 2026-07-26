@@ -13,15 +13,21 @@ campaign, plus the evaluation fix the skewness-trio screens flushed out.
 
 - The five domain-flavored public config keys become canonical entity/event
   spellings (#303, #346): `max_events`, `min_events_filter`, `val_events`,
-  `min_train_events`, `predict_entity_batch_size`, across YAML, CLI flags,
-  and config fields. The old spellings still load with a deprecation
-  warning (setting both is an error), the old CLI flags remain as
-  deprecated aliases, and `--resume` / `runs reproduce` on pre-rename run
-  dirs restore through the same alias layer. Training-summary, manifest,
-  and posterior artifact keys are unchanged.
+  `min_train_events` across YAML, CLI flags (`--max-events`, `--min-events`,
+  `--val-events`, `--min-train-events`), and config fields, plus the
+  YAML-only `predict_entity_batch_size`. The old spellings still load with
+  a deprecation warning (setting both is an error), the old CLI flags
+  remain as deprecated aliases, and `--resume` / `runs reproduce` on
+  pre-rename run dirs restore through the same alias layer — including the
+  #296 experiment-identity hash, which translates recorded pre-rename
+  payloads before comparing. Training-summary and posterior artifact keys
+  are unchanged; manifest `flags` and new split-manifest parameters use
+  the new field names, so a cross-boundary `runs diff` reports the renamed
+  knobs once.
 - The preflight audit API takes `entity_idx` / `group_idx_by_entity`
   (#303, #345), translating from the serialized fit-input schema once at
-  assembly.
+  assembly. Breaking for direct keyword callers of the check functions
+  (no shim; the CLI surface is unchanged).
 
 ### Fixed
 

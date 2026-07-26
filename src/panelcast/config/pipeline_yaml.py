@@ -363,9 +363,23 @@ def experiment_config_payload(config: Any) -> dict[str, Any]:
     return payload
 
 
-def experiment_config_hash(config: Any) -> str:
-    """Stable hash of the complete output-affecting resolved config (#296)."""
+def normalize_experiment_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Map a recorded experiment payload's deprecated key spellings (#303) to
+    their canonical ones, so identity comparison spans the rename boundary."""
+    out = dict(payload)
+    for old_key, new_key in DEPRECATED_YAML_KEYS.items():
+        if old_key in out and new_key not in out:
+            out[new_key] = out.pop(old_key)
+    return out
+
+
+def experiment_payload_hash(payload: dict[str, Any]) -> str:
+    """The #296 identity hash of an already-built payload dict."""
     import hashlib
 
-    payload = json.dumps(experiment_config_payload(config), sort_keys=True)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def experiment_config_hash(config: Any) -> str:
+    """Stable hash of the complete output-affecting resolved config (#296)."""
+    return experiment_payload_hash(experiment_config_payload(config))

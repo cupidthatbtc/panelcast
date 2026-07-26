@@ -197,3 +197,39 @@ class TestResumeRestoresCompleteExperiment:
         original = PipelineConfig(num_samples=1234)
         config = self._resume(tmp_path, original, identity=None)
         assert config.num_samples == 1234
+
+    def test_resume_translates_pre_rename_identity(self, tmp_path):
+        # A run recorded before the #303 key rename carries the deprecated
+        # spellings in both resolved_config.yaml and its identity payload;
+        # resume must translate rather than refuse.
+        from panelcast.config.pipeline_yaml import experiment_payload_hash
+
+        renames = (
+            ("max_albums", "max_events"),
+            ("min_albums_filter", "min_events_filter"),
+            ("val_albums", "val_events"),
+            ("min_train_albums", "min_train_events"),
+            ("predict_artist_batch_size", "predict_entity_batch_size"),
+        )
+        original = PipelineConfig(max_events=40, val_events=1)
+        PipelineOrchestrator(original, output_base=tmp_path / "resolve_c")
+        legacy_payload = dict(experiment_config_payload(original))
+        for old_key, new_key in renames:
+            if new_key in legacy_payload:
+                legacy_payload[old_key] = legacy_payload.pop(new_key)
+        identity = {
+            "config_hash": experiment_payload_hash(legacy_payload),
+            "config_payload": legacy_payload,
+        }
+
+        def tamper(run_dir):
+            path = run_dir / "resolved_config.yaml"
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            for old_key, new_key in renames:
+                if new_key in data:
+                    data[old_key] = data.pop(new_key)
+            path.write_text(yaml.safe_dump(data), encoding="utf-8")
+
+        config = self._resume(tmp_path, original, identity=identity, tamper=tamper)
+        assert config.max_events == 40
+        assert config.val_events == 1
