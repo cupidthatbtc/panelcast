@@ -419,7 +419,7 @@ Artists (not albums) are split into train/val/test groups. No artist appears in 
 - `val_size=0.15` → 15% of artists
 - Remaining 70% → training set
 
-**Validation** (`data/split.py:assert_no_artist_overlap`):
+**Validation** (`data/split.py:assert_no_entity_overlap`):
 - Asserts zero intersection between artist sets across all split pairs.
 
 ### 3.2.4 Manifests and Outputs

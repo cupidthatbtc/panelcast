@@ -13,7 +13,7 @@ import pandas as pd
 import pytest
 
 from panelcast.data.split import (
-    assert_no_artist_overlap,
+    assert_no_entity_overlap,
     validate_temporal_split,
 )
 from panelcast.features.album_type import AlbumTypeBlock
@@ -323,7 +323,7 @@ class TestDataFeaturesIntegration:
     def test_entity_disjoint_split_no_overlap(self):
         """Test artist-disjoint split has no artist overlap.
 
-        Uses assert_no_artist_overlap to verify the split property.
+        Uses assert_no_entity_overlap to verify the split property.
         """
         from panelcast.data.split import entity_disjoint_split
 
@@ -337,7 +337,7 @@ class TestDataFeaturesIntegration:
         )
 
         # Should not raise if splits are disjoint
-        assert_no_artist_overlap(train, val, test, entity_col="Artist")
+        assert_no_entity_overlap(train, val, test, entity_col="Artist")
 
         # Verify no shared artists
         train_artists = set(train["Artist"])

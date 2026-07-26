@@ -13,9 +13,9 @@ def within_entity_temporal_split(
     df: pd.DataFrame,
     entity_col: str = "Artist",
     date_col: str = "Release_Date_Parsed",
-    test_albums: int = 1,
-    val_albums: int = 1,
-    min_train_albums: int = 1,
+    test_events: int = 1,
+    val_events: int = 1,
+    min_train_events: int = 1,
     event_col: str | None = "Album",
     origin_offset: int = 0,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -28,10 +28,10 @@ def within_entity_temporal_split(
     Args:
         df: Cleaned event DataFrame with entity and date columns
         entity_col: Column name for entity grouping
-        date_col: Column name for temporal ordering (Release_Date_Parsed)
-        test_albums: Number of most recent events per entity for test set
-        val_albums: Number of second-most-recent events per entity for validation
-        min_train_albums: Minimum events required in training set per entity
+        date_col: Column name for temporal ordering
+        test_events: Number of most recent events per entity for test set
+        val_events: Number of second-most-recent events per entity for validation
+        min_train_events: Minimum events required in training set per entity
         origin_offset: Rolling-origin backtest offset k: drop each entity's
             last k events entirely (they are the future relative to this
             origin) and hold out the (last-k)-th event as test. 0 reproduces
@@ -41,7 +41,7 @@ def within_entity_temporal_split(
         Tuple of (train_df, val_df, test_df)
 
     Note:
-        Entities with fewer than (test_albums + val_albums + min_train_albums
+        Entities with fewer than (test_events + val_events + min_train_events
         + origin_offset) events are excluded from all splits — deeper origins
         shrink the eligible entity set.
 
@@ -83,15 +83,15 @@ def within_entity_temporal_split(
         )
 
     # Count events per entity
-    album_counts = df_sorted.groupby(entity_col).size()
-    min_required = test_albums + val_albums + min_train_albums + origin_offset
-    valid_artists = album_counts[album_counts >= min_required].index
-    df_valid = df_sorted[df_sorted[entity_col].isin(valid_artists)].copy()
+    event_counts = df_sorted.groupby(entity_col).size()
+    min_required = test_events + val_events + min_train_events + origin_offset
+    valid_entities = event_counts[event_counts >= min_required].index
+    df_valid = df_sorted[df_sorted[entity_col].isin(valid_entities)].copy()
     # Exclude entities with fewer dated events than the holdout tail needs:
     # groupby().tail() would otherwise pull NaT rows into val/test, putting
     # events of unknown chronology in the held-out sets. The dropped future
     # events at deeper origins must be dated too, for the same reason.
-    n_holdout = test_albums + val_albums + origin_offset
+    n_holdout = test_events + val_events + origin_offset
     dated_counts = df_valid.groupby(entity_col)[date_col].transform("count")
     insufficient = dated_counts < max(n_holdout, 1)
     if insufficient.any():
@@ -117,11 +117,11 @@ def within_entity_temporal_split(
         )
 
     # Extract last N per entity for test
-    test_df = df_valid.groupby(entity_col).tail(test_albums)
+    test_df = df_valid.groupby(entity_col).tail(test_events)
     remaining = df_valid.drop(test_df.index)
 
     # Extract second-to-last N per entity for validation
-    val_df = remaining.groupby(entity_col).tail(val_albums)
+    val_df = remaining.groupby(entity_col).tail(val_events)
     train_df = remaining.drop(val_df.index)
 
     return train_df, val_df, test_df
@@ -163,9 +163,9 @@ def entity_disjoint_split(
         ... })
         >>> train, val, test = entity_disjoint_split(df, random_state=42)
         >>> # No entity overlap between splits
-        >>> train_a = set(train["Artist"])
-        >>> test_a = set(test["Artist"])
-        >>> len(train_a & test_a)
+        >>> train_e = set(train["Artist"])
+        >>> test_e = set(test["Artist"])
+        >>> len(train_e & test_e)
         0
     """
     groups = df[entity_col].values
@@ -197,7 +197,7 @@ def entity_disjoint_split(
     return train_df, val_df, test_df
 
 
-def assert_no_artist_overlap(
+def assert_no_entity_overlap(
     train_df: pd.DataFrame,
     val_df: pd.DataFrame,
     test_df: pd.DataFrame,
@@ -213,13 +213,13 @@ def assert_no_artist_overlap(
         This should ONLY be called for entity-disjoint splits.
         Within-entity temporal splits intentionally have entity overlap.
     """
-    train_artists = set(train_df[entity_col])
-    val_artists = set(val_df[entity_col])
-    test_artists = set(test_df[entity_col])
+    train_entities = set(train_df[entity_col])
+    val_entities = set(val_df[entity_col])
+    test_entities = set(test_df[entity_col])
 
-    overlap_train_val = train_artists & val_artists
-    overlap_train_test = train_artists & test_artists
-    overlap_val_test = val_artists & test_artists
+    overlap_train_val = train_entities & val_entities
+    overlap_train_test = train_entities & test_entities
+    overlap_val_test = val_entities & test_entities
 
     if overlap_train_val or overlap_train_test or overlap_val_test:
         raise ValueError(
@@ -264,23 +264,23 @@ def validate_temporal_split(
             )
 
     # Get entities that appear in all splits (expected for temporal split)
-    train_artists = set(train_df[entity_col])
-    test_artists = set(test_df[entity_col])
-    val_artists = set(val_df[entity_col])
+    train_entities = set(train_df[entity_col])
+    test_entities = set(test_df[entity_col])
+    val_entities = set(val_df[entity_col])
 
     # Only validate entities present in both train and test
-    common_artists = train_artists & test_artists
+    common_entities = train_entities & test_entities
 
-    for artist in common_artists:
-        train_dates = train_df[train_df[entity_col] == artist][date_col].dropna()
-        test_dates = test_df[test_df[entity_col] == artist][date_col].dropna()
+    for entity in common_entities:
+        train_dates = train_df[train_df[entity_col] == entity][date_col].dropna()
+        test_dates = test_df[test_df[entity_col] == entity][date_col].dropna()
         train_max = train_dates.max() if not train_dates.empty else pd.NaT
         test_min = test_dates.min() if not test_dates.empty else pd.NaT
 
         # Test holdout must have at least one known date per entity for temporal validation.
         if pd.isna(test_min):
             raise ValueError(
-                f"Temporal validation failed for {artist}: missing parsed release dates "
+                f"Temporal validation failed for {entity}: missing parsed release dates "
                 f"(train_max={train_max}, test_min={test_min})."
             )
 
@@ -288,21 +288,21 @@ def validate_temporal_split(
         # Same-date events are OK (tail() provides consistent ordering)
         if pd.notna(train_max) and train_max > test_min:
             raise ValueError(
-                f"Temporal violation for {artist}: "
+                f"Temporal violation for {entity}: "
                 f"train max date {train_max} > test min date {test_min}"
             )
 
         # Check validation if entity present
-        if artist in val_artists:
-            val_dates = val_df[val_df[entity_col] == artist][date_col].dropna()
+        if entity in val_entities:
+            val_dates = val_df[val_df[entity_col] == entity][date_col].dropna()
             val_min = val_dates.min() if not val_dates.empty else pd.NaT
             val_max = val_dates.max() if not val_dates.empty else pd.NaT
 
             if pd.notna(train_max) and pd.notna(val_min) and train_max > val_min:
                 raise ValueError(
-                    f"Temporal violation for {artist}: train max {train_max} > val min {val_min}"
+                    f"Temporal violation for {entity}: train max {train_max} > val min {val_min}"
                 )
             if pd.notna(val_max) and val_max > test_min:
                 raise ValueError(
-                    f"Temporal violation for {artist}: val max {val_max} > test min {test_min}"
+                    f"Temporal violation for {entity}: val max {val_max} > test min {test_min}"
                 )

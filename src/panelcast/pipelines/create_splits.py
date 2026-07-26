@@ -17,7 +17,7 @@ from panelcast.data.manifests import (
     save_manifest,
 )
 from panelcast.data.split import (
-    assert_no_artist_overlap,
+    assert_no_entity_overlap,
     entity_disjoint_split,
     validate_temporal_split,
     within_entity_temporal_split,
@@ -36,14 +36,15 @@ class SplitConfig:
     version: str = "v1"
     random_state: int = 42
 
-    # Within-artist temporal parameters
+    # Within-entity temporal parameters (field names are the serialized
+    # manifest/YAML surface — renaming them is #303 phase 2)
     test_albums: int = 1
     val_albums: int = 0
     min_train_albums: int = 1
     # Rolling-origin backtest offset (0 = the standard split)
     origin_offset: int = 0
 
-    # Artist-disjoint parameters
+    # Entity-disjoint parameters
     disjoint_test_size: float = 0.15
     disjoint_val_size: float = 0.15
 
@@ -93,8 +94,8 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
     Create train/validation/test splits from cleaned dataset.
 
     Produces:
-    - Within-artist temporal splits (primary evaluation)
-    - Artist-disjoint splits (cold-start robustness)
+    - Within-entity temporal splits (primary evaluation)
+    - Entity-disjoint splits (cold-start robustness)
     - Full manifests with per-row assignment reasoning
     - Pipeline summary
 
@@ -120,7 +121,7 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
     log.info(
         "source_loaded",
         rows=len(source_df),
-        artists=source_df[config.entity_col].nunique(),
+        entities=source_df[config.entity_col].nunique(),
         hash=source_hash[:16],
     )
 
@@ -159,9 +160,9 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
         source_df,
         entity_col=config.entity_col,
         date_col=config.date_col,
-        test_albums=config.test_albums,
-        val_albums=config.val_albums,
-        min_train_albums=config.min_train_albums,
+        test_events=config.test_albums,
+        val_events=config.val_albums,
+        min_train_events=config.min_train_albums,
         event_col=config.event_col,
         origin_offset=config.origin_offset,
     )
@@ -236,7 +237,7 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
         train=len(train_t),
         val=len(val_t),
         test=len(test_t),
-        artists_included=train_t[config.entity_col].nunique(),
+        entities_included=train_t[config.entity_col].nunique(),
         manifest=str(temporal_manifest_path.name),
     )
 
@@ -260,7 +261,7 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
     )
 
     # Validate no overlap
-    assert_no_artist_overlap(train_d, val_d, test_d, entity_col=config.entity_col)
+    assert_no_entity_overlap(train_d, val_d, test_d, entity_col=config.entity_col)
     log.info("disjoint_split_validated", overlap="none")
 
     # Save parquet files
@@ -324,9 +325,9 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
         train=len(train_d),
         val=len(val_d),
         test=len(test_d),
-        train_artists=train_d[config.entity_col].nunique(),
-        val_artists=val_d[config.entity_col].nunique(),
-        test_artists=test_d[config.entity_col].nunique(),
+        train_entities=train_d[config.entity_col].nunique(),
+        val_entities=val_d[config.entity_col].nunique(),
+        test_entities=test_d[config.entity_col].nunique(),
         manifest=str(disjoint_manifest_path.name),
     )
 
@@ -401,7 +402,7 @@ def main() -> None:
     s = result.summary
     print(f"\nSource: {s['source']['path']}")
     print(f"  Rows: {s['source']['rows']:,}")
-    print(f"  Artists: {s['source']['artists']:,}")
+    print(f"  Entities: {s['source']['artists']:,}")
 
     print("\nWithin-Entity Temporal Split:")
     print(f"  Train:      {s['within_entity_temporal']['train_rows']:,} rows")
@@ -413,9 +414,9 @@ def main() -> None:
 
     print("\nEntity-Disjoint Split:")
     ad = s["entity_disjoint"]
-    print(f"  Train:      {ad['train_rows']:,} rows ({ad['train_artists']:,} artists)")
-    print(f"  Validation: {ad['val_rows']:,} rows ({ad['val_artists']:,} artists)")
-    print(f"  Test:       {ad['test_rows']:,} rows ({ad['test_artists']:,} artists)")
+    print(f"  Train:      {ad['train_rows']:,} rows ({ad['train_artists']:,} entities)")
+    print(f"  Validation: {ad['val_rows']:,} rows ({ad['val_artists']:,} entities)")
+    print(f"  Test:       {ad['test_rows']:,} rows ({ad['test_artists']:,} entities)")
 
     print(f"\nOutput directory: {result.temporal_splits['train'].parent.parent}")
     print("=" * 60)

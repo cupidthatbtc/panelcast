@@ -197,9 +197,9 @@ def split_datasets(synthetic_albums_df: pd.DataFrame) -> dict:
         synthetic_albums_df,
         entity_col="Artist",
         date_col="Release_Date_Parsed",
-        test_albums=1,
-        val_albums=1,
-        min_train_albums=1,
+        test_events=1,
+        val_events=1,
+        min_train_events=1,
     )
     return {"train": train, "val": val, "test": test}
 

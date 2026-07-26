@@ -140,9 +140,9 @@ def test_consumers_share_the_canonical_event_order():
         entity_col="entity",
         date_col="date",
         event_col="event",
-        test_albums=1,
-        val_albums=1,
-        min_train_albums=2,
+        test_events=1,
+        val_events=1,
+        min_train_events=2,
     )
     assert train[ROW_ID_COL].tolist() == expected[:3]
     assert validation[ROW_ID_COL].tolist() == [20]

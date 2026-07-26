@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from panelcast.data.split import (
-    assert_no_artist_overlap,
+    assert_no_entity_overlap,
     entity_disjoint_split,
     validate_temporal_split,
     within_entity_temporal_split,
@@ -33,9 +33,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=1,
-            val_albums=1,
-            min_train_albums=1,
+            test_events=1,
+            val_events=1,
+            min_train_events=1,
         )
         assert len(train) == 1
         assert train["Release_Date_Parsed"].isna().all()
@@ -54,9 +54,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=1,
-            val_albums=1,
-            min_train_albums=1,
+            test_events=1,
+            val_events=1,
+            min_train_events=1,
         )
         all_artists = set(pd.concat([train["Artist"], val["Artist"], test["Artist"]]))
         assert all_artists == {"A"}
@@ -71,9 +71,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=1,
-            val_albums=1,
-            min_train_albums=1,
+            test_events=1,
+            val_events=1,
+            min_train_events=1,
         )
         assert len(test) == 1
         assert len(val) == 1
@@ -91,9 +91,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=1,
-            val_albums=1,
-            min_train_albums=1,
+            test_events=1,
+            val_events=1,
+            min_train_events=1,
         )
         assert test.iloc[0]["Album"] == "latest"
         assert val.iloc[0]["Album"] == "recent"
@@ -109,9 +109,9 @@ class TestWithinArtistTemporalSplit:
         # B has only 2 albums, needs 3 (1+1+1)
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=1,
-            val_albums=1,
-            min_train_albums=1,
+            test_events=1,
+            val_events=1,
+            min_train_events=1,
         )
         all_artists = set(pd.concat([train["Artist"], val["Artist"], test["Artist"]]))
         assert "B" not in all_artists
@@ -126,9 +126,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=1,
-            val_albums=1,
-            min_train_albums=1,
+            test_events=1,
+            val_events=1,
+            min_train_events=1,
         )
         total = len(train) + len(val) + len(test)
         assert total == 7
@@ -143,9 +143,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=1,
-            val_albums=1,
-            min_train_albums=1,
+            test_events=1,
+            val_events=1,
+            min_train_events=1,
         )
         train_max = train["Release_Date_Parsed"].max()
         test_min = test["Release_Date_Parsed"].min()
@@ -161,9 +161,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=2,
-            val_albums=2,
-            min_train_albums=1,
+            test_events=2,
+            val_events=2,
+            min_train_events=1,
         )
         assert len(test) == 2
         assert len(val) == 2
@@ -181,9 +181,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=1,
-            val_albums=1,
-            min_train_albums=1,
+            test_events=1,
+            val_events=1,
+            min_train_events=1,
         )
         assert len(train) + len(val) + len(test) == 0
 
@@ -197,9 +197,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=2,
-            val_albums=0,
-            min_train_albums=1,
+            test_events=2,
+            val_events=0,
+            min_train_events=1,
         )
         assert not test["Release_Date_Parsed"].isna().any()
         assert len(train) + len(val) + len(test) == 0
@@ -216,9 +216,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=1,
-            val_albums=1,
-            min_train_albums=1,
+            test_events=1,
+            val_events=1,
+            min_train_events=1,
         )
         assert len(test) == 1 and len(val) == 1 and len(train) == 2
         assert not val["Release_Date_Parsed"].isna().any()
@@ -233,9 +233,9 @@ class TestWithinArtistTemporalSplit:
         )
         train, val, test = within_entity_temporal_split(
             df,
-            test_albums=1,
-            val_albums=1,
-            min_train_albums=1,
+            test_events=1,
+            val_events=1,
+            min_train_events=1,
         )
         assert len(train) + len(val) + len(test) == 3
 
@@ -295,45 +295,45 @@ class TestArtistDisjointSplit:
 
 
 # =============================================================================
-# assert_no_artist_overlap tests
+# assert_no_entity_overlap tests
 # =============================================================================
 
 
 class TestAssertNoArtistOverlap:
-    """Tests for assert_no_artist_overlap."""
+    """Tests for assert_no_entity_overlap."""
 
     def test_no_overlap_passes(self):
         train = pd.DataFrame({"Artist": ["A", "B"]})
         val = pd.DataFrame({"Artist": ["C"]})
         test = pd.DataFrame({"Artist": ["D"]})
-        assert_no_artist_overlap(train, val, test)
+        assert_no_entity_overlap(train, val, test)
 
     def test_train_val_overlap_raises(self):
         train = pd.DataFrame({"Artist": ["A", "B"]})
         val = pd.DataFrame({"Artist": ["B"]})
         test = pd.DataFrame({"Artist": ["C"]})
         with pytest.raises(ValueError, match="Entity overlap"):
-            assert_no_artist_overlap(train, val, test)
+            assert_no_entity_overlap(train, val, test)
 
     def test_train_test_overlap_raises(self):
         train = pd.DataFrame({"Artist": ["A", "B"]})
         val = pd.DataFrame({"Artist": ["C"]})
         test = pd.DataFrame({"Artist": ["A"]})
         with pytest.raises(ValueError, match="Entity overlap"):
-            assert_no_artist_overlap(train, val, test)
+            assert_no_entity_overlap(train, val, test)
 
     def test_val_test_overlap_raises(self):
         train = pd.DataFrame({"Artist": ["A"]})
         val = pd.DataFrame({"Artist": ["B"]})
         test = pd.DataFrame({"Artist": ["B"]})
         with pytest.raises(ValueError, match="Entity overlap"):
-            assert_no_artist_overlap(train, val, test)
+            assert_no_entity_overlap(train, val, test)
 
     def test_empty_splits_pass(self):
         train = pd.DataFrame({"Artist": []})
         val = pd.DataFrame({"Artist": []})
         test = pd.DataFrame({"Artist": []})
-        assert_no_artist_overlap(train, val, test)
+        assert_no_entity_overlap(train, val, test)
 
 
 # =============================================================================
