@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] — 2026-07-26
+
+The config surface speaks entity/event, closing the #303 terminology
+campaign, plus the evaluation fix the skewness-trio screens flushed out.
+
+### Changed
+
+- The five domain-flavored public config keys become canonical entity/event
+  spellings (#303, #346): `max_events`, `min_events_filter`, `val_events`,
+  `min_train_events` across YAML, CLI flags (`--max-events`, `--min-events`,
+  `--val-events`, `--min-train-events`), and config fields, plus the
+  YAML-only `predict_entity_batch_size`. The old spellings still load with
+  a deprecation warning (setting both is an error), the old CLI flags
+  remain as deprecated aliases, and `--resume` / `runs reproduce` on
+  pre-rename run dirs restore through the same alias layer — including the
+  #296 experiment-identity hash, which translates recorded pre-rename
+  payloads before comparing. Training-summary and posterior artifact keys
+  are unchanged; manifest `flags` and new split-manifest parameters use
+  the new field names, so a cross-boundary `runs diff` reports the renamed
+  knobs once.
+- The preflight audit API takes `entity_idx` / `group_idx_by_entity`
+  (#303, #345), translating from the serialized fit-input schema once at
+  assembly. Breaking for direct keyword callers of the check functions
+  (no shim; the CLI surface is unchanged).
+
+### Fixed
+
+- Skew-arm evaluation (#347, found by the #232/#233 ladder screens): the
+  log-likelihood replay marginalizes the skew-construction latents instead
+  of dying on their unseeded sites, the entity skew latents stay in the
+  saved fit below the entity cap so test-set predictions condition on the
+  fitted entity effects, and the convergence gate scopes out
+  construction-only latents whose identified deterministic already gates.
+
 ## [0.20.0] — 2026-07-26
 
 Housekeeping minor: the first #303 terminology tranche renames the split

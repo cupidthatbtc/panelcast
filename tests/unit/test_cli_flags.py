@@ -112,6 +112,11 @@ class TestMcmcFlagDispatch:
         assert config.val_events == 1
         assert config.min_train_events == 3
 
+    def test_filter_flags_deprecated_aliases(self, captured_config):
+        config = _invoke(captured_config, "--max-albums", "40", "--min-albums", "3")
+        assert config.max_events == 40
+        assert config.min_events_filter == 3
+
 
 class TestConfigAndCliPrecedence:
     def test_yaml_then_explicit_cli_gate_flag(self, captured_config, tmp_path):

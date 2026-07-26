@@ -328,8 +328,8 @@ class TestCLIInputValidation:
 class TestCLIRunOptions:
     """Tests for various run command option combinations."""
 
-    def test_run_with_max_albums(self):
-        """Run accepts --max-events."""
+    def test_run_with_max_events(self):
+        """Run accepts --max-events (canonical spelling)."""
         result = runner.invoke(app, ["run", "--dry-run", "--max-events", "100"])
         assert result.exit_code == 0
 
