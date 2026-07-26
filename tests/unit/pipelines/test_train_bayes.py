@@ -3010,3 +3010,68 @@ class TestVramBudget:
             lambda device_index=0: types.SimpleNamespace(free_gb=7.5),
         )
         assert _vram_budget_gb() == 7.5
+
+
+class TestIdataExclusions:
+    def _captured_excludes(self, tmp_path, ctx):
+        features_path, splits_path = _make_train_parquets(tmp_path, n_features=2)
+        captured = {}
+
+        def _capture_fit(
+            model,
+            model_args,
+            config,
+            progress_bar,
+            exclude_from_idata,
+            exclude_from_collection=None,
+            **_fit_kwargs,
+        ):
+            captured["exclude_from_idata"] = tuple(exclude_from_idata)
+            return _make_fake_fit_result()
+
+        diagnostics = _make_fake_diagnostics()
+        model_dir = tmp_path / "models"
+        model_dir.mkdir(parents=True, exist_ok=True)
+
+        with (
+            patch("panelcast.pipelines.train_bayes.fit_model", side_effect=_capture_fit),
+            patch(
+                "panelcast.pipelines.train_bayes.check_convergence",
+                return_value=diagnostics,
+            ),
+            patch(
+                "panelcast.pipelines.train_bayes.save_model",
+                return_value=(model_dir / "model.nc", MagicMock()),
+            ),
+            patch(
+                "panelcast.pipelines.train_bayes.hash_dataframe",
+                return_value="abc123",
+            ),
+            patch(
+                "panelcast.pipelines.train_bayes.Path",
+                side_effect=lambda p: tmp_path / p,
+            ),
+        ):
+            train_models(ctx, features_path=features_path, splits_path=splits_path)
+        return captured["exclude_from_idata"]
+
+    def test_entity_skew_latents_stay_in_saved_fit(self, tmp_path):
+        # The fitted per-entity information lives only in these sites under the
+        # skew gate; re-excluding them silently re-breaks the #232 evaluation.
+        excludes = self._captured_excludes(
+            tmp_path, _make_ctx(entity_effect_prior_type="skew_normal")
+        )
+        assert "user_rw_raw" in excludes
+        assert "user_rw_raw_abs" in excludes
+        assert "user_entity_skew_abs" not in excludes
+        assert "user_entity_skew_sym" not in excludes
+
+    def test_entity_skew_latents_drop_above_entity_cap(self, tmp_path, monkeypatch):
+        import panelcast.pipelines.train_bayes as _tb
+
+        monkeypatch.setattr(_tb, "_ENTITY_OBS_KEEP_MAX", 2)  # fixture has 3 entities
+        excludes = self._captured_excludes(
+            tmp_path, _make_ctx(entity_effect_prior_type="skew_normal")
+        )
+        assert "user_entity_skew_abs" in excludes
+        assert "user_entity_skew_sym" in excludes

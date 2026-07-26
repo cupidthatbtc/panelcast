@@ -1211,7 +1211,9 @@ def _compute_info_criteria(
                 return_sites=excluded_latents,
             )
             latents = latent_pred(random.key(seed + start), **args_predictive)
-            chunk = {**chunk, **{s: latents[s] for s in excluded_latents}}
+            # Predictive drops requested sites the model never sampled (e.g.
+            # rw_raw under max_seq <= 1); only merge what actually exists.
+            chunk = {**chunk, **{s: latents[s] for s in excluded_latents if s in latents}}
         log_lik_dict = log_likelihood(
             model,
             chunk,

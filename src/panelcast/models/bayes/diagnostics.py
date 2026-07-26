@@ -203,6 +203,7 @@ def check_convergence(
     rhat_threshold: float = 1.01,
     ess_threshold: int = 400,
     allow_divergences: bool = False,
+    gate_exclude: tuple[str, ...] = (),
 ) -> ConvergenceDiagnostics:
     """Check MCMC convergence using ArviZ diagnostics.
 
@@ -265,6 +266,14 @@ def check_convergence(
     # Get diagnostic summary (R-hat, ESS-bulk, ESS-tail, MCSE)
     # kind="diagnostics" is more efficient than "all"
     summary = az.summary(idata, kind="diagnostics")
+
+    # Construction-only latents (e.g. the skew components, identified by the
+    # likelihood only through their saved deterministic combination) sit on a
+    # prior ridge; their per-component mixing must not gate the fit while the
+    # identified deterministic still does.
+    if gate_exclude:
+        keep = [label for label in summary.index if label.split("[")[0] not in gate_exclude]
+        summary = summary.loc[keep]
 
     # Extract R-hat (max across all parameters)
     rhat_max = float(summary["r_hat"].max())
