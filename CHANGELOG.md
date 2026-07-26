@@ -4,6 +4,28 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] — 2026-07-26
+
+Housekeeping minor: the first #303 terminology tranche renames the split
+layer's importable API, so it ships as a minor rather than sitting
+unreleased on main.
+
+### Changed
+
+- The split layer speaks entity/event (#303 tranche 1, #343):
+  `within_entity_temporal_split` takes `test_events` / `val_events` /
+  `min_train_events`, and `assert_no_artist_overlap` is now
+  `assert_no_entity_overlap`. YAML keys, CLI flags, split-manifest schemas,
+  and column-name defaults are unchanged; the terminology ratchet banks
+  1953 → 1887.
+- The Claude review workflow pins Opus 5 (#342).
+
+### Fixed
+
+- The bump-script test asserts the stamped date in UTC and brackets the
+  call, so it can no longer fail in the nightly window where local and UTC
+  dates differ (#341).
+
 ## [0.19.0] — 2026-07-25
 
 The skewness/max candidate trio: three gated, default-off model seams
