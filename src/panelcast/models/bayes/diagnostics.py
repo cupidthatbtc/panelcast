@@ -24,6 +24,7 @@ References:
 """
 
 from dataclasses import dataclass
+from typing import cast
 
 import arviz as az
 import numpy as np
@@ -272,8 +273,9 @@ def check_convergence(
     # prior ridge; their per-component mixing must not gate the fit while the
     # identified deterministic still does.
     if gate_exclude:
-        keep = [label for label in summary.index if label.split("[")[0] not in gate_exclude]
-        summary = summary.loc[keep]
+        frame = cast("pd.DataFrame", summary)
+        keep = [label for label in frame.index if label.split("[")[0] not in gate_exclude]
+        summary = frame.loc[keep]
 
     # Extract R-hat (max across all parameters)
     rhat_max = float(summary["r_hat"].max())
