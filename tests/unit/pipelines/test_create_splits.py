@@ -217,7 +217,7 @@ class TestCreateSplits:
             ) as mock_temporal,
             patch("panelcast.pipelines.create_splits.entity_disjoint_split") as mock_disjoint,
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch("panelcast.pipelines.create_splits.save_manifest") as mock_save_manifest,
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
@@ -263,7 +263,7 @@ class TestCreateSplits:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -301,7 +301,7 @@ class TestCreateSplits:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -339,7 +339,7 @@ class TestCreateSplits:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -380,7 +380,7 @@ class TestCreateSplits:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -394,9 +394,9 @@ class TestCreateSplits:
 
         mock_temporal.assert_called_once()
         call_kwargs = mock_temporal.call_args
-        assert call_kwargs[1]["test_albums"] == 2
-        assert call_kwargs[1]["val_albums"] == 3
-        assert call_kwargs[1]["min_train_albums"] == 2
+        assert call_kwargs[1]["test_events"] == 2
+        assert call_kwargs[1]["val_events"] == 3
+        assert call_kwargs[1]["min_train_events"] == 2
 
     def test_passes_config_params_to_disjoint_split(self, tmp_path, sample_df, mock_split_results):
         """Disjoint split receives config parameters."""
@@ -420,7 +420,7 @@ class TestCreateSplits:
                 return_value=(train, val, test),
             ) as mock_disjoint,
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -508,7 +508,7 @@ class TestCreateSplitsManifestAndHashing:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -546,7 +546,7 @@ class TestCreateSplitsManifestAndHashing:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -607,7 +607,7 @@ class TestCreateSplitsSavesParquetFiles:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -648,7 +648,7 @@ class TestCreateSplitsSavesParquetFiles:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -692,7 +692,7 @@ class TestCreateSplitsResultFields:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -729,7 +729,7 @@ class TestCreateSplitsResultFields:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -776,7 +776,7 @@ class TestMainCliEntryPoint:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -868,7 +868,7 @@ class TestMainCliOutput:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -891,7 +891,7 @@ class TestMainCliOutput:
         assert "SPLIT PIPELINE COMPLETE" in out
         assert "Source:" in out
         assert "Rows:" in out
-        assert "Artists:" in out
+        assert "Entities:" in out
         assert "Within-Entity Temporal Split:" in out
         assert "Train:" in out
         assert "Validation:" in out
@@ -927,7 +927,7 @@ class TestMainCliOutput:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -976,7 +976,7 @@ class TestSummaryArtistsExcluded:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
@@ -1017,7 +1017,7 @@ class TestSplitResultFields:
                 return_value=(train, val, test),
             ),
             patch("panelcast.pipelines.create_splits.validate_temporal_split"),
-            patch("panelcast.pipelines.create_splits.assert_no_artist_overlap"),
+            patch("panelcast.pipelines.create_splits.assert_no_entity_overlap"),
             patch(
                 "panelcast.pipelines.create_splits.create_split_assignments",
                 return_value=[],
