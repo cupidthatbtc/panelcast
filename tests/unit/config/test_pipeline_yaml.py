@@ -59,9 +59,18 @@ class TestApplyYamlOverrides:
         assert out["min_events_filter"] == 5
 
     def test_deprecated_key_resolves_with_warning(self):
-        # The AOTY-flavored spellings (#303) still apply, onto the new field.
-        out = apply_yaml_overrides({}, {"val_albums": 2})
+        # The AOTY-flavored spellings (#303) still apply, onto the new field,
+        # and the deprecation warning actually fires.
+        from unittest.mock import patch
+
+        with patch("panelcast.config.pipeline_yaml.structlog.get_logger") as get_logger:
+            out = apply_yaml_overrides({}, {"val_albums": 2})
         assert out["val_events"] == 2
+        warning_calls = get_logger.return_value.warning.call_args_list
+        assert any(
+            call.args[:1] == ("deprecated_config_key",) and call.kwargs.get("key") == "val_albums"
+            for call in warning_calls
+        )
         out = apply_yaml_overrides({}, {"max_albums": 30, "min_albums_filter": 3})
         assert out["max_events"] == 30
         assert out["min_events_filter"] == 3

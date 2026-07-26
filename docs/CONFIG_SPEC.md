@@ -107,12 +107,15 @@ Prediction batching (YAML-only)
 - `predictive_batch_size`: int
 - `predict_entity_batch_size`: int
 
-Deprecated aliases (#303): the pre-0.21 AOTY-flavored spellings
-`max_albums`, `min_albums_filter`, `val_albums`, `min_train_albums`, and
-`predict_artist_batch_size` still load (with a deprecation warning) and map
-onto their `*_events` replacements above; setting both spellings of a key is
-an error. The CLI equivalents (`--max-albums`, `--min-albums`, `--val-albums`,
-`--min-train-albums`) remain as hidden aliases of the `--*-events` flags.
+Deprecated aliases (#303): the pre-0.21 AOTY-flavored spellings still load
+(with a deprecation warning) and map onto their canonical keys — `max_albums`
+→ `max_events`, `min_albums_filter` → `min_events_filter`, `val_albums` →
+`val_events`, `min_train_albums` → `min_train_events`,
+`predict_artist_batch_size` → `predict_entity_batch_size`; setting both
+spellings of a key is an error. The CLI equivalents (`--max-albums`,
+`--min-albums`, `--val-albums`, `--min-train-albums`) remain as deprecated
+aliases of the corresponding `--*-events` flags (both long forms parse; help
+text names the canonical one).
 
 "YAML-only" keys have no CLI flag; everything else also exists as a
 `panelcast run` option, and the explicit CLI spelling wins over any YAML value.
