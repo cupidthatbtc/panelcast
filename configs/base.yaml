@@ -10,7 +10,7 @@
 # paths) do NOT belong here — they live in a dataset descriptor under
 # configs/datasets/ and are selected with --dataset.
 
-# max_albums / target_transform are deliberately unset here (#268): they
+# max_events / target_transform are deliberately unset here (#268): they
 # defer to the dataset descriptor, then to the pipeline defaults (50 /
 # offset_logit). Restating them would override every descriptor.
 
@@ -35,7 +35,7 @@ allow_divergences: false
 
 # Data filtering
 min_ratings: 10
-min_albums_filter: 2
+min_events_filter: 2
 
 # Feature ablation (block composition itself comes from the dataset
 # descriptor's feature_blocks list; these flags disable ablation groups)
@@ -92,8 +92,8 @@ entity_group_pooling: null
 gbm_offset: true
 
 # Split configuration
-val_albums: 0
-min_train_albums: 2
+val_events: 0
+min_train_events: 2
 
 # Evaluation configuration
 calibration_intervals: [0.80, 0.95]

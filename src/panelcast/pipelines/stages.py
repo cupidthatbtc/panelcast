@@ -33,7 +33,7 @@ class StageContext:
         strict: If True, fail on convergence warnings.
         verbose: If True, enable verbose logging.
         manifest: Current run manifest for tracking progress.
-        max_albums: Maximum albums per artist for model training.
+        max_events: Maximum events per entity for model training.
         num_chains: Number of parallel MCMC chains.
         num_samples: Post-warmup samples per chain.
         num_warmup: Warmup iterations per chain.
@@ -44,7 +44,7 @@ class StageContext:
         ess_threshold: Minimum ESS per chain.
         allow_divergences: If True, don't fail on divergences.
         min_ratings: Minimum user ratings per album.
-        min_albums_filter: Minimum albums per artist for dynamic effects.
+        min_events_filter: Minimum events per entity for dynamic effects.
         enable_genre: If False, disable genre features.
         enable_artist: If False, disable artist features.
         enable_temporal: If False, disable temporal features.
@@ -65,7 +65,7 @@ class StageContext:
         ...     strict=False,
         ...     verbose=True,
         ...     manifest=manifest,
-        ...     max_albums=50,
+        ...     max_events=50,
         ... )
     """
 
@@ -78,7 +78,7 @@ class StageContext:
     manifest: RunManifest | None
     # MCMC progress bars: None = auto (stderr TTY only), False = disabled.
     progress_bar: bool | None = None
-    max_albums: int = 50
+    max_events: int = 50
     # MCMC configuration
     num_chains: int = 4
     num_samples: int = 1000
@@ -101,7 +101,7 @@ class StageContext:
     allow_divergences: bool = False
     # Data filtering
     min_ratings: int = 10
-    min_albums_filter: int = 2
+    min_events_filter: int = 2
     # Feature flags
     enable_genre: bool = True
     enable_artist: bool = True
@@ -194,12 +194,12 @@ class StageContext:
     warmup_export_path: str | None = None
     warmup_import_path: str | None = None
     # Split configuration
-    val_albums: int = 0
+    val_events: int = 0
     origin_offset: int = 0
     conformal_calibration: bool = False
     # Multi-step ancestral rollout depth for evaluation (#157); 0 = off
     eval_horizon: int = 0
-    min_train_albums: int = 1
+    min_train_events: int = 1
     # Evaluation configuration
     calibration_intervals: tuple[float, ...] = (0.80, 0.95)
     coverage_tolerance: float = 0.03
@@ -207,7 +207,7 @@ class StageContext:
     evaluate_secondary_split: bool = True
     # Prediction batching (memory/speed trade-off, not statistically relevant)
     predictive_batch_size: int = 500
-    predict_artist_batch_size: int = 50
+    predict_entity_batch_size: int = 50
     # Dataset descriptor (default reproduces AOTY behavior exactly)
     descriptor: DatasetDescriptor = field(default_factory=DatasetDescriptor)
     # Artifact roots (flat default reproduces the legacy layout exactly)
@@ -434,9 +434,9 @@ def _run_splits_stage(ctx: StageContext):
     config = SplitConfig(
         random_state=ctx.seed,
         min_ratings=ctx.min_ratings,
-        val_albums=getattr(ctx, "val_albums", 0),
+        val_events=getattr(ctx, "val_events", 0),
         origin_offset=getattr(ctx, "origin_offset", 0),
-        min_train_albums=getattr(ctx, "min_train_albums", 1),
+        min_train_events=getattr(ctx, "min_train_events", 1),
         entity_col=ctx.descriptor.entity_col,
         date_col=ctx.descriptor.parsed_date_col,
         event_col=ctx.descriptor.event_col,

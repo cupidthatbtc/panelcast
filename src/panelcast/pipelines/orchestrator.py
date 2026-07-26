@@ -121,7 +121,7 @@ class PipelineConfig:
         enforce_lockfile: If True, fail if pixi.lock missing (default True).
         verbose: If True, enable DEBUG logging (default False).
         resume: Run ID to resume, or None for fresh run.
-        max_albums: Maximum albums per artist for model training (default 50).
+        max_events: Maximum events per entity for model training (default 50).
         num_chains: Number of parallel MCMC chains (default 4).
         num_samples: Post-warmup samples per chain (default 1000).
         num_warmup: Warmup iterations per chain (default 1000).
@@ -132,7 +132,7 @@ class PipelineConfig:
         allow_divergences: If True, don't fail on divergences (default False).
         min_ratings: Minimum primary observations per event, or None to resolve
             from the descriptor's ``primary_min_obs`` at run time (default None).
-        min_albums_filter: Minimum albums per artist for dynamic effects (default 2).
+        min_events_filter: Minimum events per entity for dynamic effects (default 2).
         enable_genre: If False, disable genre features (default True).
         enable_artist: If False, disable artist features (default True).
         enable_temporal: If False, disable temporal features (default True).
@@ -167,7 +167,7 @@ class PipelineConfig:
     # None (default) keeps the generated timestamp ids. No CLI flag.
     run_id: str | None = None
     # None resolves to the descriptor's max_events, else 50 (#268).
-    max_albums: int | None = None
+    max_events: int | None = None
     # MCMC configuration
     num_chains: int = 4
     num_samples: int = 1000
@@ -196,7 +196,7 @@ class PipelineConfig:
     # (resolved in the orchestrator), so a retargeted domain needs no
     # --min-ratings on the command line. An explicit value (CLI/YAML) wins.
     min_ratings: int | None = None
-    min_albums_filter: int = 2
+    min_events_filter: int = 2
     # Feature flags
     enable_genre: bool = True
     enable_artist: bool = True
@@ -334,13 +334,13 @@ class PipelineConfig:
     # on device during sampling (~96% peak-GPU cut at production settings;
     # posterior parity for all other sites guarded by tests).
     exclude_rw_raw_from_collection: bool = False
-    # Split configuration. min_train_albums matches the documented `run` CLI
+    # Split configuration. min_train_events matches the documented `run` CLI
     # default (2) so `stage splits` / `demo` build the same split population.
-    val_albums: int = 0
-    min_train_albums: int = 2
+    val_events: int = 0
+    min_train_events: int = 2
     # Rolling-origin backtest offset (0 = the standard split)
     origin_offset: int = 0
-    # Conformal calibration wrapper on the predictive (#156; needs val_albums >= 1)
+    # Conformal calibration wrapper on the predictive (#156; needs val_events >= 1)
     conformal_calibration: bool = False
     # Multi-step ancestral rollout depth for evaluation (#157). 0 = off (the
     # default; byte-identical). H > 0 scores h=1..H forecasts into the
@@ -353,7 +353,7 @@ class PipelineConfig:
     evaluate_secondary_split: bool = True
     # Prediction batching (memory/speed trade-off, not statistically relevant)
     predictive_batch_size: int = 500
-    predict_artist_batch_size: int = 50
+    predict_entity_batch_size: int = 50
     # priors: auto (#267): derive sigma lognormal locs from train-data moments
     # at fit time. None resolves to the descriptor's auto_priors, else False.
     auto_priors: bool | None = None
@@ -381,8 +381,8 @@ class PipelineConfig:
                 f"Must be one of {valid_priors}."
             )
         self._validate_run_id()
-        if self.max_albums is not None and self.max_albums < 1:
-            raise ValueError(f"Invalid max_albums: {self.max_albums}. Must be >= 1.")
+        if self.max_events is not None and self.max_events < 1:
+            raise ValueError(f"Invalid max_events: {self.max_events}. Must be >= 1.")
         if not 5 <= self.max_tree_depth <= 15:
             raise ValueError(
                 f"Invalid max_tree_depth: {self.max_tree_depth}. Must be between 5 and 15."
@@ -692,8 +692,8 @@ def resolve_model_facts(config: PipelineConfig, descriptor) -> None:
             if descriptor.target_transform is not None
             else "offset_logit"
         )
-    if config.max_albums is None:
-        config.max_albums = descriptor.max_events if descriptor.max_events is not None else 50
+    if config.max_events is None:
+        config.max_events = descriptor.max_events if descriptor.max_events is not None else 50
     if config.auto_priors is None:
         config.auto_priors = (
             descriptor.auto_priors if descriptor.auto_priors is not None else False
@@ -822,9 +822,9 @@ class PipelineOrchestrator:
 
     def _resolved_event_cap(self) -> int:
         """The per-entity event cap after descriptor resolution (#268)."""
-        if self.config.max_albums is None:
+        if self.config.max_events is None:
             raise PipelineError("event cap unresolved before use", stage="setup")
-        return self.config.max_albums
+        return self.config.max_events
 
     def _resolved_likelihood_family(self) -> str:
         """likelihood_family after descriptor resolution (#268)."""
@@ -1309,8 +1309,8 @@ class PipelineOrchestrator:
             parts.append("--verbose")
         if self.config.progress_bar is False:
             parts.append("--no-progress")
-        if self.config.max_albums != eff_max_events:
-            parts.append(f"--max-albums {self.config.max_albums}")
+        if self.config.max_events != eff_max_events:
+            parts.append(f"--max-events {self.config.max_events}")
         # MCMC config
         if self.config.num_chains != defaults.num_chains:
             parts.append(f"--num-chains {self.config.num_chains}")
@@ -1350,8 +1350,8 @@ class PipelineOrchestrator:
         # is already resolved to an int by __init__).
         if self.config.min_ratings != self.descriptor.primary_min_obs:
             parts.append(f"--min-ratings {self.config.min_ratings}")
-        if self.config.min_albums_filter != defaults.min_albums_filter:
-            parts.append(f"--min-albums {self.config.min_albums_filter}")
+        if self.config.min_events_filter != defaults.min_events_filter:
+            parts.append(f"--min-events {self.config.min_events_filter}")
         # Feature flags
         if not self.config.enable_genre:
             parts.append("--no-genre")
@@ -1451,8 +1451,8 @@ class PipelineOrchestrator:
             parts.append("--impute-missing")
         if self.config.gbm_offset != defaults.gbm_offset:
             parts.append("--gbm-offset" if self.config.gbm_offset else "--no-gbm-offset")
-        if self.config.val_albums != defaults.val_albums:
-            parts.append(f"--val-albums {self.config.val_albums}")
+        if self.config.val_events != defaults.val_events:
+            parts.append(f"--val-events {self.config.val_events}")
         if self.config.origin_offset != defaults.origin_offset:
             parts.append(f"--origin-offset {self.config.origin_offset}")
         if self.config.calibration_intervals != defaults.calibration_intervals:
@@ -1715,7 +1715,7 @@ class PipelineOrchestrator:
             verbose=self.config.verbose,
             progress_bar=self.config.progress_bar,
             manifest=self.manifest,
-            max_albums=self._resolved_event_cap(),
+            max_events=self._resolved_event_cap(),
             # MCMC configuration
             num_chains=self.config.num_chains,
             num_samples=self.config.num_samples,
@@ -1735,7 +1735,7 @@ class PipelineOrchestrator:
             allow_divergences=self.config.allow_divergences,
             # Data filtering
             min_ratings=self._resolved_min_ratings(),
-            min_albums_filter=self.config.min_albums_filter,
+            min_events_filter=self.config.min_events_filter,
             # Feature flags
             enable_genre=self.config.enable_genre,
             enable_artist=self.config.enable_artist,
@@ -1786,17 +1786,17 @@ class PipelineOrchestrator:
             exclude_rw_raw_from_collection=self.config.exclude_rw_raw_from_collection,
             warmup_export_path=self.config.warmup_export_path,
             warmup_import_path=self.config.warmup_import_path,
-            val_albums=self.config.val_albums,
+            val_events=self.config.val_events,
             origin_offset=self.config.origin_offset,
             conformal_calibration=self.config.conformal_calibration,
             eval_horizon=self.config.eval_horizon,
-            min_train_albums=self.config.min_train_albums,
+            min_train_events=self.config.min_train_events,
             calibration_intervals=self.config.calibration_intervals,
             coverage_tolerance=self.config.coverage_tolerance,
             prediction_interval=self.config.prediction_interval,
             evaluate_secondary_split=self.config.evaluate_secondary_split,
             predictive_batch_size=self.config.predictive_batch_size,
-            predict_artist_batch_size=self.config.predict_artist_batch_size,
+            predict_entity_batch_size=self.config.predict_entity_batch_size,
             descriptor=self.descriptor,
         )
 

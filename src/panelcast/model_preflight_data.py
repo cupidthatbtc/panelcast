@@ -95,7 +95,7 @@ def assemble_preflight_inputs(
     model_args, feature_cols, _train_df, _imputation = load_training_data(
         features_path=features_path,
         splits_path=splits_path,
-        min_albums_filter=config.min_albums_filter,
+        min_albums_filter=config.min_events_filter,
         descriptor=descriptor,
         debut_prev_score_source=config.debut_prev_score_source,
         target_transform=config.target_transform,

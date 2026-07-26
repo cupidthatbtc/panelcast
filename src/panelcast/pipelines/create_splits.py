@@ -38,9 +38,9 @@ class SplitConfig:
 
     # Within-entity temporal parameters (field names are the serialized
     # manifest/YAML surface — renaming them is #303 phase 2)
-    test_albums: int = 1
-    val_albums: int = 0
-    min_train_albums: int = 1
+    test_events: int = 1
+    val_events: int = 0
+    min_train_events: int = 1
     # Rolling-origin backtest offset (0 = the standard split)
     origin_offset: int = 0
 
@@ -160,9 +160,9 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
         source_df,
         entity_col=config.entity_col,
         date_col=config.date_col,
-        test_events=config.test_albums,
-        val_events=config.val_albums,
-        min_train_events=config.min_train_albums,
+        test_events=config.test_events,
+        val_events=config.val_events,
+        min_train_events=config.min_train_events,
         event_col=config.event_col,
         origin_offset=config.origin_offset,
     )
@@ -197,9 +197,9 @@ def create_splits(config: SplitConfig | None = None) -> SplitResult:
         created_at=datetime.now(UTC).isoformat(),
         split_type=str(SplitType.WITHIN_ENTITY_TEMPORAL.value),
         parameters={
-            "test_albums": config.test_albums,
-            "val_albums": config.val_albums,
-            "min_train_albums": config.min_train_albums,
+            "test_events": config.test_events,
+            "val_events": config.val_events,
+            "min_train_events": config.min_train_events,
             "origin_offset": config.origin_offset,
         },
         source_dataset={

@@ -742,7 +742,7 @@ class TestResumeConfigRestoration:
                 "strict": False,
                 "verbose": False,
                 "resume": None,
-                "max_albums": 50,
+                "max_events": 50,
                 "num_chains": 4,
                 "num_samples": 1000,
                 "num_warmup": 1000,
@@ -753,7 +753,7 @@ class TestResumeConfigRestoration:
                 "ess_threshold": 400,
                 "allow_divergences": False,
                 "min_ratings": 10,
-                "min_albums_filter": 2,
+                "min_events_filter": 2,
                 "enable_genre": True,
                 "enable_artist": True,
                 "enable_temporal": True,
@@ -838,7 +838,7 @@ class TestResumeConfigRestoration:
                 "strict": False,
                 "verbose": False,
                 "resume": None,
-                "max_albums": 50,
+                "max_events": 50,
                 "num_chains": 4,
                 "num_samples": 1000,
                 "num_warmup": 1000,
@@ -924,7 +924,7 @@ class TestResumeConfigRestoration:
                 "strict": False,
                 "verbose": False,
                 "resume": None,
-                "max_albums": 50,
+                "max_events": 50,
                 "num_chains": 4,
                 "num_samples": 1000,
                 "num_warmup": 1000,
@@ -1254,7 +1254,7 @@ class TestPipelineConfigValidation:
     def test_min_train_albums_default_matches_cli(self):
         """The dataclass default matches the documented `run` CLI default (2),
         so `stage splits` / `demo` build the same split population as `run`."""
-        assert PipelineConfig().min_train_albums == 2
+        assert PipelineConfig().min_train_events == 2
 
 
 class TestMinRatingsThresholdValidation:
@@ -1355,7 +1355,7 @@ class TestOrchestratorCommandString:
         # Default values should NOT appear
         assert "--seed" not in cmd
         assert "--num-chains" not in cmd
-        assert "--max-albums" not in cmd
+        assert "--max-events" not in cmd
         assert "--no-genre" not in cmd
 
     def test_command_with_likelihood_and_dataset(self, tmp_path):
@@ -1439,7 +1439,7 @@ class TestStageContextCreation:
             seed=99,
             strict=True,
             verbose=True,
-            max_albums=100,
+            max_events=100,
             num_chains=8,
             n_exponent=0.3,
             enable_genre=False,
@@ -1457,7 +1457,7 @@ class TestStageContextCreation:
         assert ctx.seed == 99
         assert ctx.strict is True
         assert ctx.verbose is True
-        assert ctx.max_albums == 100
+        assert ctx.max_events == 100
         assert ctx.num_chains == 8
         assert ctx.n_exponent == 0.3
         assert ctx.enable_genre is False

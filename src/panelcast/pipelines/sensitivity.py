@@ -1213,7 +1213,7 @@ def run_sensitivity_suite(ctx) -> dict:
         features_path=paths.features / "train_features.parquet",
         splits_path=resolve_split_dir(paths.splits, SplitType.WITHIN_ENTITY_TEMPORAL)
         / "train.parquet",
-        min_albums_filter=getattr(ctx, "min_albums_filter", 2),
+        min_albums_filter=getattr(ctx, "min_events_filter", 2),
         descriptor=descriptor,
         debut_prev_score_source=summary.get("debut_prev_score_source", "train_mean"),
         target_transform=summary.get("target_transform", "identity"),
@@ -1232,7 +1232,7 @@ def run_sensitivity_suite(ctx) -> dict:
     for key in MODEL_ARGS_METADATA_KEYS:
         model_args.pop(key, None)
     model_args = _apply_max_albums_cap(
-        model_args, getattr(ctx, "max_albums", 50), artist_album_counts
+        model_args, getattr(ctx, "max_events", 50), artist_album_counts
     )
     X = np.asarray(model_args["X"])
     std = X.std(axis=0)

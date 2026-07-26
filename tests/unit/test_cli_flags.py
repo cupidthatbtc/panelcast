@@ -103,9 +103,14 @@ class TestMcmcFlagDispatch:
         assert config.enable_artist is True
 
     def test_split_flags(self, captured_config):
+        config = _invoke(captured_config, "--val-events", "1", "--min-train-events", "3")
+        assert config.val_events == 1
+        assert config.min_train_events == 3
+
+    def test_split_flags_deprecated_aliases(self, captured_config):
         config = _invoke(captured_config, "--val-albums", "1", "--min-train-albums", "3")
-        assert config.val_albums == 1
-        assert config.min_train_albums == 3
+        assert config.val_events == 1
+        assert config.min_train_events == 3
 
 
 class TestConfigAndCliPrecedence:

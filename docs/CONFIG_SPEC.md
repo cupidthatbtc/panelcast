@@ -59,8 +59,8 @@ Convergence gates
 
 Data filtering
 - `min_ratings`: int (default 10)
-- `min_albums_filter`: int (default 2)
-- `max_albums`: int (default 50)
+- `min_events_filter`: int (default 2)
+- `max_events`: int (default 50)
 
 Feature ablation (block composition comes from the dataset descriptor; these
 flags disable ablation groups)
@@ -94,8 +94,8 @@ Likelihood and model gates
 - `exclude_rw_raw_from_collection`: bool (GPU-memory reduction)
 
 Splits
-- `val_albums`: int (default 0)
-- `min_train_albums`: int (default 2)
+- `val_events`: int (default 0)
+- `min_train_events`: int (default 2)
 
 Evaluation
 - `calibration_intervals`: list of floats in (0, 1) (default `[0.80, 0.95]`)
@@ -105,7 +105,17 @@ Evaluation
 
 Prediction batching (YAML-only)
 - `predictive_batch_size`: int
-- `predict_artist_batch_size`: int
+- `predict_entity_batch_size`: int
+
+Deprecated aliases (#303): the pre-0.21 AOTY-flavored spellings still load
+(with a deprecation warning) and map onto their canonical keys — `max_albums`
+→ `max_events`, `min_albums_filter` → `min_events_filter`, `val_albums` →
+`val_events`, `min_train_albums` → `min_train_events`,
+`predict_artist_batch_size` → `predict_entity_batch_size`; setting both
+spellings of a key is an error. The CLI equivalents (`--max-albums`,
+`--min-albums`, `--val-albums`, `--min-train-albums`) remain as deprecated
+aliases of the corresponding `--*-events` flags (both long forms parse; help
+text names the canonical one).
 
 "YAML-only" keys have no CLI flag; everything else also exists as a
 `panelcast run` option, and the explicit CLI spelling wins over any YAML value.

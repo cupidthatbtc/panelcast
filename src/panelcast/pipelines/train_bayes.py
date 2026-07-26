@@ -873,7 +873,7 @@ def _apply_max_albums_cap(
 
     Args:
         model_args: Dictionary from prepare_model_data.
-        max_albums_cap: Maximum albums per artist (from ctx.max_albums).
+        max_albums_cap: Maximum albums per artist (from ctx.max_events).
         artist_album_counts: Series mapping artist index to album count.
 
     Returns:
@@ -1442,8 +1442,8 @@ def train_models(  # noqa: C901  # tracked complexity debt
         "train_pipeline_start",
         seed=ctx.seed,
         strict=ctx.strict,
-        max_albums=ctx.max_albums,
-        min_albums_filter=ctx.min_albums_filter,
+        max_albums=ctx.max_events,
+        min_albums_filter=ctx.min_events_filter,
         num_chains=ctx.num_chains,
         num_samples=ctx.num_samples,
         num_warmup=ctx.num_warmup,
@@ -1493,7 +1493,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
     model_args, feature_cols, train_df, imputation = load_training_data(
         features_path=features_path,
         splits_path=splits_path,
-        min_albums_filter=ctx.min_albums_filter,
+        min_albums_filter=ctx.min_events_filter,
         descriptor=descriptor,
         debut_prev_score_source=debut_prev_score_source,
         target_transform=target_transform,
@@ -1506,7 +1506,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
 
     # Compute artists below threshold for metadata
     artist_counts = train_df.groupby(descriptor.entity_col).size()
-    n_below_threshold = (artist_counts < ctx.min_albums_filter).sum()
+    n_below_threshold = (artist_counts < ctx.min_events_filter).sum()
 
     log.info(
         "data_loaded",
@@ -1530,7 +1530,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
     ar_center_value = model_args.pop("ar_center_value")
 
     # Apply max_albums cap from CLI/config (uses most recent albums per artist)
-    model_args = _apply_max_albums_cap(model_args, ctx.max_albums, artist_album_counts)
+    model_args = _apply_max_albums_cap(model_args, ctx.max_events, artist_album_counts)
 
     # Log n_reviews statistics for diagnostics
     n_reviews = model_args["n_reviews"]
@@ -1919,7 +1919,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
             "caged_chain_boundary_sigma": caged_chains.boundary_sigma,
             "caged_chain_consensus_ratio": caged_chains.consensus_ratio,
         },
-        "min_albums_filter": ctx.min_albums_filter,
+        "min_albums_filter": ctx.min_events_filter,
         "n_artists_below_threshold": int(n_below_threshold),
         "priors": asdict(priors),
         "data_hash": data_hash,
@@ -1929,7 +1929,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
         "feature_scaler": feature_scaler,
         "artist_to_idx": artist_to_idx,
         "max_seq": model_args["max_seq"],
-        "max_albums": ctx.max_albums,
+        "max_albums": ctx.max_events,
         "global_mean_score": float(global_mean_score),
         "global_std_score": float(global_std_score),
         "feature_cols": feature_cols,

@@ -151,7 +151,7 @@ class TestWithinArtistTemporalSplit:
         test_min = test["Release_Date_Parsed"].min()
         assert train_max <= test_min
 
-    def test_custom_test_val_albums(self):
+    def test_custom_test_val_events(self):
         df = pd.DataFrame(
             {
                 "Artist": ["A"] * 6,

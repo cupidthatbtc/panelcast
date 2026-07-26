@@ -279,7 +279,7 @@ class TestExecuteStageRunFn:
                     "strict": False,
                     "verbose": False,
                     "resume": None,
-                    "max_albums": 50,
+                    "max_events": 50,
                     "num_chains": 4,
                     "num_samples": 1000,
                     "num_warmup": 1000,
@@ -290,7 +290,7 @@ class TestExecuteStageRunFn:
                     "ess_threshold": 400,
                     "allow_divergences": False,
                     "min_ratings": 10,
-                    "min_albums_filter": 2,
+                    "min_events_filter": 2,
                     "enable_genre": True,
                     "enable_artist": True,
                     "enable_temporal": True,
@@ -627,7 +627,7 @@ class TestBuildCommandStringExtended:
             entity_group_pooling=True,
             impute_missing=True,
             gbm_offset=False,
-            val_albums=100,
+            val_events=100,
         )
         orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
         cmd = orchestrator._build_command_string()
@@ -655,7 +655,7 @@ class TestBuildCommandStringExtended:
         assert "--entity-group-pooling" in cmd
         assert "--impute-missing" in cmd
         assert "--no-gbm-offset" in cmd
-        assert "--val-albums 100" in cmd
+        assert "--val-events 100" in cmd
 
     def test_command_records_explicit_pooling_off(self, tmp_path):
         """Explicit entity_group_pooling=False (vs the None auto default) is recorded."""
@@ -675,7 +675,7 @@ class TestBuildCommandStringExtended:
             "--sigma-obs-prior-type", "--heteroscedastic-entity-obs",
             "--tau-entity-scale", "--errors-in-variables",
             "--propagate-rw-horizon", "--entity-group-pooling",
-            "--gbm-offset", "--val-albums",
+            "--gbm-offset", "--val-events",
         ):
             assert flag not in cmd
 
@@ -694,11 +694,11 @@ class TestBuildCommandStringExtended:
         assert "--min-ratings 25" in cmd
 
     def test_command_with_min_albums(self, tmp_path):
-        """Non-default min_albums_filter appears in command string."""
-        config = PipelineConfig(min_albums_filter=5)
+        """Non-default min_events_filter appears in command string."""
+        config = PipelineConfig(min_events_filter=5)
         orchestrator = PipelineOrchestrator(config, output_base=tmp_path)
         cmd = orchestrator._build_command_string()
-        assert "--min-albums 5" in cmd
+        assert "--min-events 5" in cmd
 
     def test_command_with_rhat_threshold(self, tmp_path):
         """Non-default rhat_threshold appears in command string."""
@@ -806,7 +806,7 @@ class TestResumeFromFailed:
                     "strict": False,
                     "verbose": False,
                     "resume": None,
-                    "max_albums": 50,
+                    "max_events": 50,
                     "num_chains": 4,
                     "num_samples": 1000,
                     "num_warmup": 1000,
@@ -817,7 +817,7 @@ class TestResumeFromFailed:
                     "ess_threshold": 400,
                     "allow_divergences": False,
                     "min_ratings": 10,
-                    "min_albums_filter": 2,
+                    "min_events_filter": 2,
                     "enable_genre": True,
                     "enable_artist": True,
                     "enable_temporal": True,

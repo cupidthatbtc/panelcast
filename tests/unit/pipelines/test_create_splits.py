@@ -57,10 +57,10 @@ class TestSplitConfig:
         assert config.min_ratings == 10
         assert config.version == "v1"
         assert config.random_state == 42
-        assert config.test_albums == 1
+        assert config.test_events == 1
         # No validation split by default: all pre-test albums stay in train.
-        assert config.val_albums == 0
-        assert config.min_train_albums == 1
+        assert config.val_events == 0
+        assert config.min_train_events == 1
         assert config.disjoint_test_size == 0.15
         assert config.disjoint_val_size == 0.15
 
@@ -93,15 +93,15 @@ class TestSplitConfig:
     def test_custom_split_parameters(self):
         """Custom split parameters are stored."""
         config = SplitConfig(
-            test_albums=2,
-            val_albums=2,
-            min_train_albums=3,
+            test_events=2,
+            val_events=2,
+            min_train_events=3,
             disjoint_test_size=0.2,
             disjoint_val_size=0.1,
         )
-        assert config.test_albums == 2
-        assert config.val_albums == 2
-        assert config.min_train_albums == 3
+        assert config.test_events == 2
+        assert config.val_events == 2
+        assert config.min_train_events == 3
         assert config.disjoint_test_size == 0.2
         assert config.disjoint_val_size == 0.1
 
@@ -364,9 +364,9 @@ class TestCreateSplits:
         config = SplitConfig(
             source_path=tmp_path / "source.parquet",
             output_dir=tmp_path / "splits",
-            test_albums=2,
-            val_albums=3,
-            min_train_albums=2,
+            test_events=2,
+            val_events=3,
+            min_train_events=2,
         )
         sample_df.to_parquet(config.source_path, index=False)
 
