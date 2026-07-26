@@ -27,16 +27,20 @@ def repo(tmp_path):
 
 
 def test_bump_rewrites_all_pinned_files(repo):
+    # UTC to match the script's stamp (#335); bracket the call so a run that
+    # straddles UTC midnight accepts either day instead of flaking.
+    before = datetime.datetime.now(datetime.UTC).date().isoformat()
     bump_version.bump(repo, "0.10.0")
-    today = datetime.date.today().isoformat()
+    after = datetime.datetime.now(datetime.UTC).date().isoformat()
+    days = {before, after}
     assert 'version = "0.10.0"' in (repo / "pyproject.toml").read_text()
     assert 'version = "0.10.0"' in (repo / "pixi.toml").read_text()
     citation = (repo / "CITATION.cff").read_text()
     assert "version: 0.10.0" in citation
-    assert f'date-released: "{today}"' in citation
+    assert any(f'date-released: "{day}"' in citation for day in days)
     card = (repo / "MODEL_CARD.md").read_text()
     assert "- **Version:** 0.10.0" in card
-    assert f"- **Last updated:** {today}" in card
+    assert any(f"- **Last updated:** {day}" in card for day in days)
 
 
 def test_bump_rejects_malformed_version(repo):
