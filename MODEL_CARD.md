@@ -39,7 +39,7 @@
 ## Model Details
 
 - **Model type:** Bayesian Hierarchical Regression with Time-Varying Effects
-- **Version:** 0.20.0
+- **Version:** 0.21.0
 - **Authors:** panelcast project
 - **Created:** 2026-06-11
 - **Last updated:** 2026-07-26
