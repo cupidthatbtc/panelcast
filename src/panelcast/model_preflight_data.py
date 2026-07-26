@@ -3,7 +3,7 @@
 Kept apart from :mod:`panelcast.model_preflight` so the pure check functions
 import without pandas / pyarrow / jax and stay trivially unit-testable. This
 module reuses the run's data-loading and prior-resolution path so the audit
-sees precisely the X / artist_idx / y and PriorConfig the fit would.
+sees precisely the X / entity_idx / y and PriorConfig the fit would.
 """
 
 from __future__ import annotations
@@ -17,10 +17,10 @@ import numpy as np
 @dataclass(frozen=True)
 class PreflightInputs:
     X: np.ndarray
-    artist_idx: np.ndarray
+    entity_idx: np.ndarray
     y: np.ndarray
     feature_names: list[str]
-    group_idx_by_artist: np.ndarray | None
+    group_idx_by_entity: np.ndarray | None
     priors: object
     likelihood_family: str
     n_obs_is_aggregation_count: bool
@@ -120,10 +120,10 @@ def assemble_preflight_inputs(
 
     return PreflightInputs(
         X=np.asarray(model_args["X"], dtype=float),
-        artist_idx=np.asarray(model_args["artist_idx"]),
+        entity_idx=np.asarray(model_args["artist_idx"]),
         y=np.asarray(model_args["y"], dtype=float),
         feature_names=list(feature_cols),
-        group_idx_by_artist=(
+        group_idx_by_entity=(
             np.asarray(model_args["group_idx_by_artist"])
             if "group_idx_by_artist" in model_args
             else None
