@@ -72,6 +72,11 @@ def replicate(
         dir_okay=False,
         help="Also write the verdicts as JSON.",
     ),
+    allow_unlocked_env: bool = typer.Option(
+        False,
+        "--allow-unlocked-env",
+        help="Allow --dataset execution without a pixi.lock.",
+    ),
 ) -> None:
     """Evaluate replication claims against a fitted posterior."""
     from rich.console import Console
@@ -82,6 +87,13 @@ def replicate(
         console.print(
             "[bold red]Error:[/bold red] pass exactly one of PACK_DIR, --all, "
             "--models, or --dataset."
+        )
+        raise typer.Exit(2)
+
+    if allow_unlocked_env and dataset is None:
+        console.print(
+            "[bold red]Error:[/bold red] --allow-unlocked-env only combines "
+            "with --dataset."
         )
         raise typer.Exit(2)
 
@@ -121,7 +133,8 @@ def replicate(
 
     claims_file = load_claims(claims)
     if dataset is not None:
-        models = _run_chain_for(dataset, console)
+        overrides = {"enforce_lockfile": False} if allow_unlocked_env else None
+        models = _run_chain_for(dataset, console, overrides=overrides)
     assert models is not None
     verdicts = evaluate_claims(load_bundle(models), claims_file)
     _print_verdicts(verdicts, str(claims), console)

@@ -543,6 +543,7 @@ panelcast replicate --claims claims.yaml --dataset domain.yaml   # run the chain
 | `--claims` | — | claims.yaml declaring the paper's claims (required with `--models`/`--dataset`) |
 | `--models` | — | Models directory of an existing fit (`training_summary.json` + `.nc`) |
 | `--dataset` | — | Dataset descriptor: run data → train first, then grade the fresh fit |
+| `--allow-unlocked-env` | off | Permit `--dataset` execution without a `pixi.lock`; pack mode already uses its declared lock policy |
 | `--json` | — | Also write the verdicts as JSON |
 
 A **domain pack** is the drop-a-folder-and-run unit: `pack.yaml` (manifest —

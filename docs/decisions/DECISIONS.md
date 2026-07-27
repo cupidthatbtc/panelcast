@@ -115,7 +115,9 @@ Strict mode behavior
   - prediction/evaluation horizon extrapolation beyond trained sequence support
 
 Reproducibility and artifacts
-- Environment lockfile (`pixi.lock`) is required by default (`--allow-unlocked-env` to bypass)
+- `run` and `replicate --dataset` require `pixi.lock` by default
+  (`--allow-unlocked-env` bypasses); external domain packs accept an installed
+  wheel by default and can opt back into strict locking in `fit.yaml` or `run:`
 - Run manifests are written under `outputs/<run_id>/manifest.json`
   (including the dataset descriptor hash; resume hard-errors on descriptor drift)
 - Run-level dataset hash artifact: `outputs/<run_id>/dataset_hash.txt`

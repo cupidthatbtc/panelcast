@@ -37,7 +37,8 @@ Run control
 - `dry_run`: bool
 - `strict`: bool — strict raw-schema validation during ingest
 - `enforce_lockfile`: bool — refuse to run if the environment doesn't match
-  `pixi.lock`
+  `pixi.lock` (default true for `PipelineConfig`, `run`, and `replicate --dataset`;
+  external pack mode supplies a false default unless `fit.yaml` or `run:` overrides it)
 - `verbose`: bool
 - `dataset`: string — dataset descriptor name (same as `--dataset`)
 
