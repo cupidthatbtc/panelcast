@@ -157,6 +157,7 @@ def _run_pack(pack_dir: Path, console) -> list:
     """Build (if needed), run the chain with the pack's overrides, grade."""
     import dataclasses
     import json
+    from contextlib import chdir
 
     from panelcast.replicate import evaluate_claims, load_claims
     from panelcast.replicate.extractors import load_bundle
@@ -164,13 +165,14 @@ def _run_pack(pack_dir: Path, console) -> list:
 
     manifest, resolved = load_pack(pack_dir)
     console.print(f"[bold]pack {manifest.name}[/bold] — {manifest.paper.citation}")
-    ensure_panel(manifest, resolved)
-    models_dir = _run_chain_for(
-        str(resolved / manifest.descriptor),
-        console,
-        fit_config=(resolved / manifest.fit) if manifest.fit else None,
-        overrides=manifest.run,
-    )
+    with chdir(resolved):
+        ensure_panel(manifest, resolved)
+        models_dir = _run_chain_for(
+            str(resolved / manifest.descriptor),
+            console,
+            fit_config=(resolved / manifest.fit) if manifest.fit else None,
+            overrides=manifest.run,
+        )
     if manifest.claims is None:
         console.print("pack declares no claims.yaml — chain ran, nothing to grade.")
         return []
@@ -305,7 +307,7 @@ def _run_chain_for(
     run_dir = orchestrator.run_dir
     if run_dir is None:
         raise typer.Exit(2)
-    models_dir = Path(run_dir) / "models"
+    models_dir = (Path(run_dir) / "models").resolve()
     if not models_dir.exists():
         # Never fall back to a repo-level models/ here: grading a stale fit
         # while claiming it is fresh would be silently wrong.
