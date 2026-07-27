@@ -216,6 +216,8 @@ class TestCliModes:
         return pack_dir
 
     def test_pack_run_grades_and_writes_notes(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
         from typer.testing import CliRunner
 
         import panelcast.cli.replicate_cmd as cmd
@@ -225,8 +227,12 @@ class TestCliModes:
 
         monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
         pack_dir = self._runnable_pack(tmp_path, with_claims=True)
-        models_dir = _write_models_dir(tmp_path)
-        monkeypatch.setattr(cmd, "_run_chain_for", lambda *a, **k: models_dir)
+        run_dir = pack_dir / "outputs" / "run"
+        run_dir.mkdir(parents=True)
+        _write_models_dir(run_dir)
+        monkeypatch.setattr(
+            cmd, "_run_chain_for", lambda *a, **k: Path("outputs/run/models")
+        )
         result = CliRunner().invoke(app, ["replicate", str(pack_dir)])
         assert result.exit_code == 0, result.output
         notes = pack_dir / "notes" / "replicate_verdicts.json"
@@ -245,6 +251,88 @@ class TestCliModes:
         result = CliRunner().invoke(app, ["replicate", str(pack_dir)])
         assert result.exit_code == 0, result.output
         assert "nothing to grade" in result.output
+
+    def test_pack_pipeline_is_rooted_in_pack(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        from rich.console import Console
+
+        import panelcast.cli.replicate_cmd as cmd
+
+        monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
+        pack_dir = self._runnable_pack(tmp_path, with_claims=False)
+        original_cwd = Path.cwd()
+        observed_cwd = []
+
+        def fake_run_chain(*args, **kwargs):
+            observed_cwd.append(Path.cwd())
+            Path("data/runtime.marker").write_text("pack-local", encoding="utf-8")
+            models = Path("outputs/demo/models")
+            models.mkdir(parents=True)
+            return models
+
+        monkeypatch.setattr(cmd, "_run_chain_for", fake_run_chain)
+        assert cmd._run_pack(pack_dir, Console()) == []
+        assert observed_cwd == [pack_dir.resolve()]
+        assert (pack_dir / "data" / "runtime.marker").exists()
+        assert (pack_dir / "outputs" / "demo" / "models").is_dir()
+        assert not (tmp_path / "data").exists()
+        assert Path.cwd() == original_cwd
+
+    def test_pack_panel_resolution_ignores_caller_data(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        from rich.console import Console
+
+        import panelcast.cli.replicate_cmd as cmd
+        from panelcast.config.descriptor import load_descriptor
+
+        monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
+        collection = tmp_path / "collection"
+        collection.mkdir()
+        pack_dir = self._runnable_pack(collection, with_claims=False)
+        with (pack_dir / "pack.yaml").open("a", encoding="utf-8") as manifest:
+            manifest.write("  expected_panel: {rows: 1, entities: 1}\n")
+
+        caller = tmp_path / "caller"
+        caller_data = caller / "data"
+        caller_data.mkdir(parents=True)
+        (caller_data / "panel.csv").write_text(
+            "Artist,User_Score\nwrong-a,10\nwrong-b,20\n", encoding="utf-8"
+        )
+        monkeypatch.chdir(caller)
+        observed_panels = []
+
+        def fake_run_chain(dataset, *args, **kwargs):
+            observed_panels.append(load_descriptor(dataset).resolve_raw_path().resolve())
+            models = Path("outputs/demo/models")
+            models.mkdir(parents=True)
+            return models
+
+        monkeypatch.setattr(cmd, "_run_chain_for", fake_run_chain)
+        assert cmd._run_pack(pack_dir, Console()) == []
+        assert observed_panels == [(pack_dir / "data" / "panel.csv").resolve()]
+        assert Path.cwd() == caller
+
+    def test_pack_restores_cwd_when_pipeline_raises(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        from rich.console import Console
+
+        import panelcast.cli.replicate_cmd as cmd
+
+        monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
+        pack_dir = self._runnable_pack(tmp_path, with_claims=False)
+        original_cwd = Path.cwd()
+
+        def fail(*args, **kwargs):
+            assert Path.cwd() == pack_dir.resolve()
+            raise RuntimeError("pipeline failed")
+
+        monkeypatch.setattr(cmd, "_run_chain_for", fail)
+        with pytest.raises(RuntimeError, match="pipeline failed"):
+            cmd._run_pack(pack_dir, Console())
+        assert Path.cwd() == original_cwd
 
     def test_underscore_pack_still_runs_directly(self, tmp_path, monkeypatch):
         from typer.testing import CliRunner
