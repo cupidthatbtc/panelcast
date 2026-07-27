@@ -81,4 +81,4 @@ jobs:
         run: |
           JAX_PLATFORMS=cpu python scripts/execute_notebook.py examples/quickstart.ipynb 900
           python -m pip check
-          python -c "from pathlib import Path; import jax, numba, numpy; expected = Path('.colab-numpy-version').read_text(); assert numpy.__version__ == expected, (expected, numpy.__version__); print(jax.__version__, numba.__version__, numpy.__version__)"
+          python -c "from pathlib import Path; import jax, numba, numpy; expected = Path('.colab-numpy-version').read_text(); assert tuple(map(int, jax.__version__.split('.')[:2])) == (0, 8), jax.__version__; assert numba.__version__ == '0.60.0', numba.__version__; assert numpy.__version__ == expected, (expected, numpy.__version__); print(jax.__version__, numba.__version__, numpy.__version__)"
