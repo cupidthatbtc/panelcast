@@ -4,6 +4,17 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] — 2026-07-27
+
+A domain-pack collection can now keep its contributor template beside real
+packs without trying to execute it.
+
+### Fixed
+
+- `panelcast replicate --all` skips underscore-prefixed template directories,
+  while direct single-pack execution remains available. CLI help and errors
+  describe the discovery rule (#349, #350).
+
 ## [0.21.0] — 2026-07-26
 
 The config surface speaks entity/event, closing the #303 terminology
