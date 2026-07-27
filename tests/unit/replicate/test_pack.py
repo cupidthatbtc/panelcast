@@ -246,6 +246,20 @@ class TestCliModes:
         assert result.exit_code == 0, result.output
         assert "nothing to grade" in result.output
 
+    def test_underscore_pack_still_runs_directly(self, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+
+        import panelcast.cli.replicate_cmd as cmd
+        from panelcast.cli import app
+
+        monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
+        pack_dir = self._runnable_pack(tmp_path, with_claims=False)
+        template = pack_dir.rename(tmp_path / "_template")
+        monkeypatch.setattr(cmd, "_run_chain_for", lambda *a, **k: tmp_path)
+        result = CliRunner().invoke(app, ["replicate", str(template)])
+        assert result.exit_code == 0, result.output
+        assert "nothing to grade" in result.output
+
     def test_collection_scoreboard(self, tmp_path, monkeypatch):
         from typer.testing import CliRunner
 
@@ -288,6 +302,17 @@ class TestCliModes:
         assert "demo-pack" in result.output
         assert "other-pack" in result.output
         assert "_template" not in result.output
+
+    def test_template_only_collection_is_actionable(self, tmp_path):
+        from typer.testing import CliRunner
+
+        from panelcast.cli import app
+
+        pack_dir = _write_pack(tmp_path)
+        pack_dir.rename(tmp_path / "_template")
+        result = CliRunner().invoke(app, ["replicate", "--all", str(tmp_path)])
+        assert result.exit_code == 2
+        assert "only underscore-prefixed template packs" in result.output
 
     def test_pack_new_bad_name_is_a_clean_error(self, tmp_path):
         from typer.testing import CliRunner
