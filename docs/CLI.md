@@ -563,11 +563,15 @@ or two.
 Named extractors: `group_mean_trend` (slope of the fitted group offsets over
 label-ordered groups — right for zero-padded cohort labels like
 `"1900s"…"2000s"`; don't use it where labels don't sort into their intended
-order), `covariate_vertex(linear, quadratic)` (raw-scale peak
-of a quadratic covariate pair), `entity_contrast` (mean initial-effect gap
-between declared entity sets), `entity_ranking(top_k)` (per-draw top-K
-membership of a declared set), `decline_between_ages(linear, quadratic, a, b)`
-(covariate-curve change between two raw values).
+order), `covariate_coefficient(feature)` (raw-scale coefficient),
+`covariate_vertex(linear, quadratic)` (raw-scale peak of a quadratic pair),
+`covariate_vertex_difference(linear, quadratic, delta_linear,
+delta_quadratic)` (base peak minus the peak after adding interactions — positive
+means the interacted group peaks earlier), `entity_contrast` (mean initial-effect
+gap between declared entity sets), `entity_ranking(top_k)` (per-draw top-K
+membership of a declared set), and
+`decline_between_ages(linear, quadratic, a, b)` (covariate-curve change between
+two raw values).
 
 Exit codes: `0` every claim met its target grade; `1` divergences only;
 `2` a claim failed every rung (or the chained run failed).
@@ -581,6 +585,12 @@ claims:
     quantity: covariate_vertex(age_c, age_sq)
     expect: {in: [30, 40]}
     grade: qualitative
+  - name: distance_penalty
+    quantity: covariate_coefficient(mean_distance)
+    expect: {less_than: 0}
+  - name: women_peak_earlier
+    quantity: covariate_vertex_difference(age_c, age_sq, age_female, age_sq_female)
+    expect: {greater_than: 0}
   - name: elite_premium
     quantity: entity_contrast
     entities: {group_a: [Kasparov, Carlsen], group_b: rest}

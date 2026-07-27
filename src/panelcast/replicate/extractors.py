@@ -171,6 +171,58 @@ def covariate_vertex(bundle: ArtifactBundle, claim: ClaimSpec) -> ExtractedQuant
     )
 
 
+def covariate_coefficient(bundle: ArtifactBundle, claim: ClaimSpec) -> ExtractedQuantity:
+    """Raw-scale coefficient for one standardized covariate."""
+    args = claim.extractor_args
+    if len(args) != 1:
+        raise ValueError(f"claim '{claim.name}': covariate_coefficient(feature).")
+    feature = args[0]
+    beta = bundle.site("beta")
+    _, scale = bundle.feature_moments(feature)
+    draws = beta[:, bundle.feature_index(feature)] / scale
+    return ExtractedQuantity(
+        draws,
+        bool(np.isfinite(draws).all()),
+        f"raw-scale coefficient for {feature}",
+    )
+
+
+def covariate_vertex_difference(
+    bundle: ArtifactBundle, claim: ClaimSpec
+) -> ExtractedQuantity:
+    """Base quadratic vertex minus the vertex after adding interactions."""
+    args = claim.extractor_args
+    if len(args) != 4:
+        raise ValueError(
+            f"claim '{claim.name}': covariate_vertex_difference("
+            "linear, quadratic, delta_linear, delta_quadratic)."
+        )
+    linear, quadratic, delta_linear, delta_quadratic = args
+    beta = bundle.site("beta")
+
+    def raw_coefficient(feature: str) -> np.ndarray:
+        _, scale = bundle.feature_moments(feature)
+        return beta[:, bundle.feature_index(feature)] / scale
+
+    base_linear = raw_coefficient(linear)
+    base_quadratic = raw_coefficient(quadratic)
+    interacted_linear = base_linear + raw_coefficient(delta_linear)
+    interacted_quadratic = base_quadratic + raw_coefficient(delta_quadratic)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        base_vertex = -base_linear / (2.0 * base_quadratic)
+        interacted_vertex = -interacted_linear / (2.0 * interacted_quadratic)
+    draws = base_vertex - interacted_vertex
+    both_concave = float(
+        np.mean((base_quadratic < 0) & (interacted_quadratic < 0))
+    )
+    shape_ok = bool(np.isfinite(draws).all()) and both_concave >= 0.5
+    return ExtractedQuantity(
+        draws,
+        shape_ok,
+        f"base - interacted vertex; P(both curvature<0)={both_concave:.2f}",
+    )
+
+
 def entity_contrast(bundle: ArtifactBundle, claim: ClaimSpec) -> ExtractedQuantity:
     """Difference in mean initial entity effects: group_a minus group_b."""
     if claim.entities is None:
@@ -242,6 +294,8 @@ def decline_between_ages(bundle: ArtifactBundle, claim: ClaimSpec) -> ExtractedQ
 EXTRACTORS = {
     "group_mean_trend": group_mean_trend,
     "covariate_vertex": covariate_vertex,
+    "covariate_coefficient": covariate_coefficient,
+    "covariate_vertex_difference": covariate_vertex_difference,
     "entity_contrast": entity_contrast,
     "entity_ranking": entity_ranking,
     "decline_between_ages": decline_between_ages,
