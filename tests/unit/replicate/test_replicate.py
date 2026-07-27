@@ -17,15 +17,17 @@ def _bundle(rng_seed: int = 0) -> ArtifactBundle:
 
     Entities A..D with effects centered at [2, 1, 0, -1]; groups g0 < g1 < g2
     with offsets centered at [-1, 0, 1]; a quadratic age pair whose raw-scale
-    vertex sits at 35 and declines from 35 to 45.
+    vertex sits at 35, declines from 35 to 45, and shifts to 30 with interactions.
     """
     rng = np.random.default_rng(rng_seed)
     noise = lambda scale=0.05: rng.normal(0.0, scale, _N_DRAWS)  # noqa: E731
     # Standardization: age_c scaled by s_l=10, age_sq by s_q=700.
-    s_l, s_q = 10.0, 700.0
+    s_l, s_q, s_dl, s_dq = 10.0, 700.0, 8.0, 500.0
     # Raw-scale quadratic -0.002*(x-35)^2: beta_q_raw=-0.002, beta_l_raw=0.14.
     beta_q = -0.002 * s_q + noise(0.01)
     beta_l = 0.14 * s_l + noise(0.01)
+    beta_dl = -0.05 * s_dl + noise(0.005)
+    beta_dq = 0.0005 * s_dq + noise(0.005)
     posterior = {
         "perf_init_artist_effect": np.stack(
             [2 + noise(), 1 + noise(), 0 + noise(), -1 + noise()], axis=1
@@ -33,17 +35,17 @@ def _bundle(rng_seed: int = 0) -> ArtifactBundle:
         "perf_group_offset": np.stack(
             [-1 + noise(), 0 + noise(), 1 + noise()], axis=1
         ),
-        "perf_beta": np.stack([beta_l, beta_q], axis=1),
+        "perf_beta": np.stack([beta_l, beta_q, beta_dl, beta_dq], axis=1),
     }
     summary = {
         "dataset": {"model_prefix": "perf"},
         "artist_to_idx": {"A": 0, "B": 1, "C": 2, "D": 3},
         "group_to_idx": {"__rest__": 0, "g0": 0, "g1": 1, "g2": 2},
-        "feature_cols": ["age_c", "age_sq"],
+        "feature_cols": ["age_c", "age_sq", "age_delta", "age_sq_delta"],
         "feature_scaler": {
-            "feature_cols": ["age_c", "age_sq"],
-            "mean": [35.0, 1300.0],
-            "std": [10.0, 700.0],
+            "feature_cols": ["age_c", "age_sq", "age_delta", "age_sq_delta"],
+            "mean": [35.0, 1300.0, 0.0, 0.0],
+            "std": [10.0, 700.0, 8.0, 500.0],
         },
     }
     return ArtifactBundle(posterior=posterior, summary=summary)
@@ -136,6 +138,44 @@ class TestExtractors:
         assert q.shape_ok
         assert 34 < np.median(q.draws) < 36
 
+    def test_covariate_coefficient_lands_on_raw_scale(self):
+        claim = _claim(
+            name="b",
+            quantity="covariate_coefficient(age_c)",
+            expect={"greater_than": 0},
+        )
+        q = extract(_bundle(), claim)
+        assert q.shape_ok
+        assert 0.13 < np.median(q.draws) < 0.15
+
+    def test_covariate_vertex_difference_sign_and_scale(self):
+        claim = _claim(
+            name="v",
+            quantity=(
+                "covariate_vertex_difference("
+                "age_c, age_sq, age_delta, age_sq_delta)"
+            ),
+            expect={"greater_than": 0},
+        )
+        q = extract(_bundle(), claim)
+        assert q.shape_ok
+        assert 4 < np.median(q.draws) < 6
+        assert "base - interacted" in q.detail
+
+    def test_covariate_vertex_difference_requires_both_curves_concave(self):
+        bundle = _bundle()
+        bundle.posterior["perf_beta"][:, 3] = 0.003 * 500.0
+        assert np.mean(bundle.posterior["perf_beta"][:, 1] < 0) > 0.99
+        claim = _claim(
+            name="v",
+            quantity=(
+                "covariate_vertex_difference("
+                "age_c, age_sq, age_delta, age_sq_delta)"
+            ),
+            expect={"greater_than": 0},
+        )
+        assert not extract(bundle, claim).shape_ok
+
     def test_entity_contrast_vs_rest(self):
         claim = _claim(
             name="c",
@@ -199,7 +239,12 @@ class TestExtractorErrors:
             extract(_bundle(), claim)
 
     def test_wrong_arg_counts_raise(self):
-        for quantity in ("covariate_vertex(age_c)", "decline_between_ages(age_c, age_sq, 35)"):
+        for quantity in (
+            "covariate_vertex(age_c)",
+            "covariate_coefficient(age_c, age_sq)",
+            "covariate_vertex_difference(age_c, age_sq, age_delta)",
+            "decline_between_ages(age_c, age_sq, 35)",
+        ):
             claim = _claim(name="c", quantity=quantity, expect={"greater_than": 0})
             with pytest.raises(ValueError):
                 extract(_bundle(), claim)
