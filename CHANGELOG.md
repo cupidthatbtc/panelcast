@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] — 2026-07-27
+
+Domain packs are now self-contained and can grade common regression effects
+without paper-specific posterior code.
+
+### Added
+
+- Replication claims can extract raw-scale `covariate_coefficient(feature)`
+  values and interaction-aware
+  `covariate_vertex_difference(linear, quadratic, delta_linear,
+  delta_quadratic)` peak gaps (#354, #355).
+
+### Fixed
+
+- Pack panel resolution, intermediate data, and run outputs stay rooted inside
+  the pack, so a caller's files cannot hijack a build gate and collection packs
+  cannot share one flat cache. Compatibility: relative `raw_path_env` overrides
+  are now pack-relative; use an absolute path for external deposits (#352, #353).
+
 ## [0.21.1] — 2026-07-27
 
 A domain-pack collection can now keep its contributor template beside real
