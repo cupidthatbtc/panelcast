@@ -20,7 +20,8 @@ without paper-specific posterior code.
 
 - Pack panel resolution, intermediate data, and run outputs stay rooted inside
   the pack, so a caller's files cannot hijack a build gate and collection packs
-  cannot share one flat cache (#352, #353).
+  cannot share one flat cache. Compatibility: relative `raw_path_env` overrides
+  are now pack-relative; use an absolute path for external deposits (#352, #353).
 
 ## [0.21.1] — 2026-07-27
 
