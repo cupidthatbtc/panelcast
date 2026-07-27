@@ -539,7 +539,7 @@ panelcast replicate --claims claims.yaml --dataset domain.yaml   # run the chain
 | Option | Default | Description |
 |--------|---------|-------------|
 | `PACK_DIR` | — | A domain pack folder (contains `pack.yaml`): build the panel if needed (gated on the manifest's `expected_panel`), run the chain with the pack's `fit.yaml`/`run:` overrides, grade its claims, write results to `notes/` |
-| `--all` | — | Collection mode: run every immediate subfolder holding a `pack.yaml`, print one scoreboard; exit code is the worst pack's. Rejects `--json` (per-run; each pack writes its own `notes/replicate_verdicts.json`) |
+| `--all` | — | Collection mode: run every immediate non-underscore-prefixed subfolder holding a `pack.yaml`, print one scoreboard; exit code is the worst pack's. Underscore-prefixed folders are reserved for checked-in templates. Rejects `--json` (per-run; each pack writes its own `notes/replicate_verdicts.json`) |
 | `--claims` | — | claims.yaml declaring the paper's claims (required with `--models`/`--dataset`) |
 | `--models` | — | Models directory of an existing fit (`training_summary.json` + `.nc`) |
 | `--dataset` | — | Dataset descriptor: run data → train first, then grade the fresh fit |
