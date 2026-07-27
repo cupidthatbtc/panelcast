@@ -248,6 +248,51 @@ class TestCliModes:
         assert result.exit_code == 0, result.output
         assert "nothing to grade" in result.output
 
+    @pytest.mark.parametrize(
+        ("fit_value", "manifest_value", "expected"),
+        [(None, None, False), (True, None, True), (True, False, False)],
+    )
+    def test_pack_lock_policy(
+        self, tmp_path, monkeypatch, fit_value, manifest_value, expected
+    ):
+        from pathlib import Path
+
+        from rich.console import Console
+
+        import panelcast.cli.replicate_cmd as cmd
+
+        monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
+        pack_dir = self._runnable_pack(tmp_path, with_claims=False)
+        additions = []
+        if fit_value is not None:
+            (pack_dir / "fit.yaml").write_text(
+                f"enforce_lockfile: {str(fit_value).lower()}\n", encoding="utf-8"
+            )
+            additions.append("fit: fit.yaml")
+        if manifest_value is not None:
+            additions.extend(
+                ["run:", f"  enforce_lockfile: {str(manifest_value).lower()}"]
+            )
+        if additions:
+            with (pack_dir / "pack.yaml").open("a", encoding="utf-8") as manifest:
+                manifest.write("\n".join(additions) + "\n")
+        observed = []
+
+        class FakeOrchestrator:
+            def __init__(self, config) -> None:
+                observed.append(config.enforce_lockfile)
+                self.run_dir = Path("outputs/run")
+
+            def run(self) -> int:
+                (self.run_dir / "models").mkdir(parents=True, exist_ok=True)
+                return 0
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.PipelineOrchestrator", FakeOrchestrator
+        )
+        assert cmd._run_pack(pack_dir, Console()) == []
+        assert observed == [expected]
+
     def test_pack_pipeline_is_rooted_in_pack(self, tmp_path, monkeypatch):
         from pathlib import Path
 
@@ -345,12 +390,14 @@ class TestCliModes:
         descriptor = tmp_path / "descriptor.yaml"
         descriptor.write_text("name: demo\n", encoding="utf-8")
         monkeypatch.chdir(tmp_path)
+        observed = []
 
         class FakeOrchestrator:
-            def __init__(self, config):
+            def __init__(self, config) -> None:
+                observed.append(config.enforce_lockfile)
                 self.run_dir = Path("outputs/run")
 
-            def run(self):
+            def run(self) -> int:
                 (self.run_dir / "models").mkdir(parents=True)
                 return 0
 
@@ -362,6 +409,7 @@ class TestCliModes:
         expected = (tmp_path / "outputs" / "run" / "models").resolve()
         assert models == expected
         assert str(expected) in console.export_text()
+        assert observed == [True]
 
     def test_underscore_pack_still_runs_directly(self, tmp_path, monkeypatch):
         from typer.testing import CliRunner
@@ -455,6 +503,67 @@ class TestCliModes:
         )
         assert result.exit_code == 2
         assert "declare their own claims" in result.output
+
+    def test_dataset_can_allow_unlocked_env(self, tmp_path, monkeypatch):
+        from typer.testing import CliRunner
+
+        import panelcast.cli.replicate_cmd as cmd
+        from panelcast.cli import app
+
+        from .test_replicate import _write_models_dir
+
+        models = _write_models_dir(tmp_path)
+        claims = tmp_path / "claims.yaml"
+        claims.write_text(
+            "claims:\n"
+            "  - name: peak\n"
+            "    quantity: covariate_vertex(age_c, age_sq)\n"
+            "    expect: {in: [30, 40]}\n",
+            encoding="utf-8",
+        )
+        observed = []
+
+        def fake_run_chain(dataset, console, **kwargs):
+            observed.append(kwargs["overrides"])
+            return models
+
+        monkeypatch.setattr(cmd, "_run_chain_for", fake_run_chain)
+        result = CliRunner().invoke(
+            app,
+            [
+                "replicate",
+                "--dataset",
+                "descriptor.yaml",
+                "--claims",
+                str(claims),
+                "--allow-unlocked-env",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert observed == [{"enforce_lockfile": False}]
+
+    def test_allow_unlocked_env_rejected_without_dataset(self, tmp_path):
+        from typer.testing import CliRunner
+
+        from panelcast.cli import app
+
+        models = tmp_path / "models"
+        models.mkdir()
+        claims = tmp_path / "claims.yaml"
+        claims.write_text("claims: []\n", encoding="utf-8")
+        result = CliRunner().invoke(
+            app,
+            [
+                "replicate",
+                "--models",
+                str(models),
+                "--claims",
+                str(claims),
+                "--allow-unlocked-env",
+            ],
+        )
+        assert result.exit_code == 2
+        assert "only combines with --dataset" in result.output
 
     def test_all_rejects_json(self, tmp_path):
         from typer.testing import CliRunner

@@ -33,8 +33,11 @@ End-to-end commands
   ```
 
 Reproducibility notes
-- `pixi.lock` is required by default.
-- Use `--allow-unlocked-env` only for local exploratory runs.
+- `run` and `replicate --dataset` require `pixi.lock` by default; use
+  `--allow-unlocked-env` only for an intentional installed-wheel run.
+- External domain packs accept their installed environment by default, record
+  the missing lock hash, and can require a shipped lock through `fit.yaml` or
+  manifest `run:`.
 
 Expected outputs
 - `data/processed/*`

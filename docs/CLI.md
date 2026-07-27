@@ -543,6 +543,7 @@ panelcast replicate --claims claims.yaml --dataset domain.yaml   # run the chain
 | `--claims` | — | claims.yaml declaring the paper's claims (required with `--models`/`--dataset`) |
 | `--models` | — | Models directory of an existing fit (`training_summary.json` + `.nc`) |
 | `--dataset` | — | Dataset descriptor: run data → train first, then grade the fresh fit |
+| `--allow-unlocked-env` | off | Permit `--dataset` execution without a `pixi.lock`; pack mode already uses its declared lock policy |
 | `--json` | — | Also write the verdicts as JSON |
 
 A **domain pack** is the drop-a-folder-and-run unit: `pack.yaml` (manifest —
@@ -552,8 +553,11 @@ irreducibly per-paper step), optional `fit.yaml` and `claims.yaml`, and
 gitignored `data/` and `outputs/` directories. Pack runs use the pack as their
 working directory, so intermediates never leak into the caller or another pack.
 A relative `raw_path_env` override is therefore pack-relative; use an absolute
-path for a deposit stored outside the pack. `panelcast pack new <name>`
-scaffolds a valid skeleton.
+path for a deposit stored outside the pack. Pack mode accepts an installed-wheel
+environment by default because external packs do not ship panelcast's `pixi.lock`;
+set `enforce_lockfile: true` in `fit.yaml` or `run:` when the pack does carry
+that lock. Precedence is pack defaults < `fit.yaml` < manifest `run:`.
+`panelcast pack new <name>` scaffolds a valid skeleton.
 Note the two override vocabularies: the manifest's `run:` block uses
 **pipeline config field names** with config-native values (e.g.
 `min_ratings: 1`), while `fit.yaml` is a normal pipeline YAML using the
