@@ -6,8 +6,8 @@ verdict table the replication READMEs assemble by hand. Modes:
 - ``panelcast replicate <pack-dir>`` — run a domain pack end-to-end: build
   the panel if needed (gated on the manifest's expected_panel), run the
   leakage-safe chain, grade the pack's claims, write results to notes/.
-- ``panelcast replicate --all <collection-dir>`` — run every immediate
-  subfolder containing a pack.yaml and print a combined scoreboard.
+- ``panelcast replicate --all <collection-dir>`` — run every immediate,
+  non-template subfolder containing a pack.yaml and print a combined scoreboard.
 - ``--models <dir> --claims <yaml>`` — grade an existing fit directly.
 - ``--dataset <yaml> --claims <yaml>`` — run the chain, then grade.
 
@@ -61,7 +61,10 @@ def replicate(
         "--all",
         exists=True,
         file_okay=False,
-        help="Collection mode: run every immediate subfolder holding a pack.yaml.",
+        help=(
+            "Collection mode: run every immediate subfolder holding a pack.yaml; "
+            "underscore-prefixed template folders are skipped."
+        ),
     ),
     output_json: Path | None = typer.Option(
         None,
@@ -190,11 +193,18 @@ def _run_collection(collection_dir: Path, console) -> int:
 
     from panelcast.replicate import exit_code_for
 
-    pack_dirs = sorted(
+    candidates = sorted(
         child for child in collection_dir.iterdir() if (child / "pack.yaml").exists()
     )
+    pack_dirs = [child for child in candidates if not child.name.startswith("_")]
     if not pack_dirs:
-        console.print(f"[bold red]Error:[/bold red] no pack.yaml under {collection_dir}/*.")
+        if candidates:
+            console.print(
+                "[bold red]Error:[/bold red] only underscore-prefixed template "
+                f"packs found under {collection_dir}/*."
+            )
+        else:
+            console.print(f"[bold red]Error:[/bold red] no pack.yaml under {collection_dir}/*.")
         return 2
 
     scoreboard = Table(title=f"Replication scoreboard — {collection_dir}")
