@@ -538,7 +538,7 @@ panelcast replicate --claims claims.yaml --dataset domain.yaml   # run the chain
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `PACK_DIR` | — | A domain pack folder (contains `pack.yaml`): build the panel if needed (gated on the manifest's `expected_panel`), run the chain with the pack's `fit.yaml`/`run:` overrides, grade its claims, write results to `notes/` |
+| `PACK_DIR` | — | A domain pack folder (contains `pack.yaml`): build the panel if needed (gated on the manifest's `expected_panel`), run the chain with the pack's `fit.yaml`/`run:` overrides, keep pipeline artifacts under the pack's `data/` and `outputs/`, grade its claims, write results to `notes/` |
 | `--all` | — | Collection mode: run every immediate non-underscore-prefixed subfolder holding a `pack.yaml`, print one scoreboard; exit code is the worst pack's. Underscore-prefixed folders are reserved for checked-in templates. Rejects `--json` (per-run; each pack writes its own `notes/replicate_verdicts.json`) |
 | `--claims` | — | claims.yaml declaring the paper's claims (required with `--models`/`--dataset`) |
 | `--models` | — | Models directory of an existing fit (`training_summary.json` + `.nc`) |
@@ -548,8 +548,12 @@ panelcast replicate --claims claims.yaml --dataset domain.yaml   # run the chain
 A **domain pack** is the drop-a-folder-and-run unit: `pack.yaml` (manifest —
 citation, data provenance, `expected_panel` sanity gate, `run:` overrides),
 `descriptor.yaml`, an optional `build.py` (raw deposit → tidy panel, the one
-irreducibly per-paper step), optional `fit.yaml` and `claims.yaml`, and a
-gitignored `data/`. `panelcast pack new <name>` scaffolds a valid skeleton.
+irreducibly per-paper step), optional `fit.yaml` and `claims.yaml`, and
+gitignored `data/` and `outputs/` directories. Pack runs use the pack as their
+working directory, so intermediates never leak into the caller or another pack.
+A relative `raw_path_env` override is therefore pack-relative; use an absolute
+path for a deposit stored outside the pack. `panelcast pack new <name>`
+scaffolds a valid skeleton.
 Note the two override vocabularies: the manifest's `run:` block uses
 **pipeline config field names** with config-native values (e.g.
 `min_ratings: 1`), while `fit.yaml` is a normal pipeline YAML using the
