@@ -172,7 +172,7 @@ def _run_pack(pack_dir: Path, console) -> list:
             console,
             fit_config=(resolved / manifest.fit) if manifest.fit else None,
             overrides=manifest.run,
-        ).resolve()
+        )
     if manifest.claims is None:
         console.print("pack declares no claims.yaml — chain ran, nothing to grade.")
         return []
@@ -307,7 +307,7 @@ def _run_chain_for(
     run_dir = orchestrator.run_dir
     if run_dir is None:
         raise typer.Exit(2)
-    models_dir = Path(run_dir) / "models"
+    models_dir = (Path(run_dir) / "models").resolve()
     if not models_dir.exists():
         # Never fall back to a repo-level models/ here: grading a stale fit
         # while claiming it is fresh would be silently wrong.

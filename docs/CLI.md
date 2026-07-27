@@ -551,7 +551,9 @@ citation, data provenance, `expected_panel` sanity gate, `run:` overrides),
 irreducibly per-paper step), optional `fit.yaml` and `claims.yaml`, and
 gitignored `data/` and `outputs/` directories. Pack runs use the pack as their
 working directory, so intermediates never leak into the caller or another pack.
-`panelcast pack new <name>` scaffolds a valid skeleton.
+A relative `raw_path_env` override is therefore pack-relative; use an absolute
+path for a deposit stored outside the pack. `panelcast pack new <name>`
+scaffolds a valid skeleton.
 Note the two override vocabularies: the manifest's `run:` block uses
 **pipeline config field names** with config-native values (e.g.
 `min_ratings: 1`), while `fit.yaml` is a normal pipeline YAML using the

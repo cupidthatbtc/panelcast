@@ -216,8 +216,6 @@ class TestCliModes:
         return pack_dir
 
     def test_pack_run_grades_and_writes_notes(self, tmp_path, monkeypatch):
-        from pathlib import Path
-
         from typer.testing import CliRunner
 
         import panelcast.cli.replicate_cmd as cmd
@@ -229,10 +227,8 @@ class TestCliModes:
         pack_dir = self._runnable_pack(tmp_path, with_claims=True)
         run_dir = pack_dir / "outputs" / "run"
         run_dir.mkdir(parents=True)
-        _write_models_dir(run_dir)
-        monkeypatch.setattr(
-            cmd, "_run_chain_for", lambda *a, **k: Path("outputs/run/models")
-        )
+        models_dir = _write_models_dir(run_dir)
+        monkeypatch.setattr(cmd, "_run_chain_for", lambda *a, **k: models_dir.resolve())
         result = CliRunner().invoke(app, ["replicate", str(pack_dir)])
         assert result.exit_code == 0, result.output
         notes = pack_dir / "notes" / "replicate_verdicts.json"
@@ -261,11 +257,15 @@ class TestCliModes:
 
         monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
         pack_dir = self._runnable_pack(tmp_path, with_claims=False)
+        caller = tmp_path / "caller"
+        caller.mkdir()
+        monkeypatch.chdir(caller)
         original_cwd = Path.cwd()
         observed_cwd = []
 
         def fake_run_chain(*args, **kwargs):
             observed_cwd.append(Path.cwd())
+            Path("data").mkdir(exist_ok=True)
             Path("data/runtime.marker").write_text("pack-local", encoding="utf-8")
             models = Path("outputs/demo/models")
             models.mkdir(parents=True)
@@ -276,7 +276,8 @@ class TestCliModes:
         assert observed_cwd == [pack_dir.resolve()]
         assert (pack_dir / "data" / "runtime.marker").exists()
         assert (pack_dir / "outputs" / "demo" / "models").is_dir()
-        assert not (tmp_path / "data").exists()
+        assert not (caller / "data").exists()
+        assert not (caller / "outputs").exists()
         assert Path.cwd() == original_cwd
 
     def test_pack_panel_resolution_ignores_caller_data(self, tmp_path, monkeypatch):
@@ -333,6 +334,34 @@ class TestCliModes:
         with pytest.raises(RuntimeError, match="pipeline failed"):
             cmd._run_pack(pack_dir, Console())
         assert Path.cwd() == original_cwd
+
+    def test_chain_returns_and_reports_absolute_models_path(self, tmp_path, monkeypatch):
+        from pathlib import Path
+
+        from rich.console import Console
+
+        import panelcast.cli.replicate_cmd as cmd
+
+        descriptor = tmp_path / "descriptor.yaml"
+        descriptor.write_text("name: demo\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        class FakeOrchestrator:
+            def __init__(self, config):
+                self.run_dir = Path("outputs/run")
+
+            def run(self):
+                (self.run_dir / "models").mkdir(parents=True)
+                return 0
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.PipelineOrchestrator", FakeOrchestrator
+        )
+        console = Console(record=True, width=300)
+        models = cmd._run_chain_for(str(descriptor), console)
+        expected = (tmp_path / "outputs" / "run" / "models").resolve()
+        assert models == expected
+        assert str(expected) in console.export_text()
 
     def test_underscore_pack_still_runs_directly(self, tmp_path, monkeypatch):
         from typer.testing import CliRunner
