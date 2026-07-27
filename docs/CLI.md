@@ -571,7 +571,8 @@ means the interacted group peaks earlier), `entity_contrast` (mean initial-effec
 gap between declared entity sets), `entity_ranking(top_k)` (per-draw top-K
 membership of a declared set), and
 `decline_between_ages(linear, quadratic, a, b)` (covariate-curve change between
-two raw values).
+two raw values). Vertex differences are ratio quantities: interpret them only
+when the reported `P(both curvature<0)` is near 1.
 
 Exit codes: `0` every claim met its target grade; `1` divergences only;
 `2` a claim failed every rung (or the chained run failed).

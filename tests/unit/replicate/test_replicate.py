@@ -17,7 +17,7 @@ def _bundle(rng_seed: int = 0) -> ArtifactBundle:
 
     Entities A..D with effects centered at [2, 1, 0, -1]; groups g0 < g1 < g2
     with offsets centered at [-1, 0, 1]; a quadratic age pair whose raw-scale
-    vertex sits at 35 and an interaction pair that shifts the vertex to 30.
+    vertex sits at 35, declines from 35 to 45, and shifts to 30 with interactions.
     """
     rng = np.random.default_rng(rng_seed)
     noise = lambda scale=0.05: rng.normal(0.0, scale, _N_DRAWS)  # noqa: E731
@@ -26,8 +26,8 @@ def _bundle(rng_seed: int = 0) -> ArtifactBundle:
     # Raw-scale quadratic -0.002*(x-35)^2: beta_q_raw=-0.002, beta_l_raw=0.14.
     beta_q = -0.002 * s_q + noise(0.01)
     beta_l = 0.14 * s_l + noise(0.01)
-    beta_dl = -0.02 * s_dl + noise(0.005)
-    beta_dq = noise(0.005)
+    beta_dl = -0.05 * s_dl + noise(0.005)
+    beta_dq = 0.0005 * s_dq + noise(0.005)
     posterior = {
         "perf_init_artist_effect": np.stack(
             [2 + noise(), 1 + noise(), 0 + noise(), -1 + noise()], axis=1
@@ -162,9 +162,10 @@ class TestExtractors:
         assert 4 < np.median(q.draws) < 6
         assert "base - interacted" in q.detail
 
-    def test_covariate_vertex_difference_requires_concavity(self):
+    def test_covariate_vertex_difference_requires_both_curves_concave(self):
         bundle = _bundle()
-        bundle.posterior["perf_beta"][:, 1] *= -1
+        bundle.posterior["perf_beta"][:, 3] = 0.003 * 500.0
+        assert np.mean(bundle.posterior["perf_beta"][:, 1] < 0) > 0.99
         claim = _claim(
             name="v",
             quantity=(
