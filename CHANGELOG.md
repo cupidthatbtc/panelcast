@@ -13,8 +13,10 @@ panelcast development environment.
 
 - Pack replication accepts an installed environment by default while preserving
   strict-lock opt-ins from `fit.yaml` or manifest `run:`; direct
-  `replicate --dataset` gains the explicit `--allow-unlocked-env` escape hatch
-  (#357, #358).
+  `replicate --dataset` gains the explicit `--allow-unlocked-env` escape hatch.
+  Compatibility: pack runs no longer require a `pixi.lock` by default; set
+  `enforce_lockfile: true` in `fit.yaml` or manifest `run:` to restore strict
+  locking (#357, #358).
 
 ## [0.22.0] — 2026-07-27
 
