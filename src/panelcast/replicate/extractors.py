@@ -114,6 +114,18 @@ class ExtractedQuantity:
     detail: str  # human line for the verdict table
 
 
+def _raw_coefficient(bundle: ArtifactBundle, feature: str) -> np.ndarray:
+    """Coefficient on the raw feature scale."""
+    _, scale = bundle.feature_moments(feature)
+    return bundle.site("beta")[:, bundle.feature_index(feature)] / scale
+
+
+def _vertex(linear: np.ndarray, quadratic: np.ndarray) -> np.ndarray:
+    """Vertex from raw-scale linear and quadratic coefficients."""
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return -linear / (2.0 * quadratic)
+
+
 def _ordered_group_columns(bundle: ArtifactBundle, from_label: str | None) -> list[int]:
     group_to_idx: dict[str, int] = bundle.summary["group_to_idx"]
     labels = sorted(label for label in group_to_idx if label != _REST_BUCKET)
@@ -156,13 +168,9 @@ def covariate_vertex(bundle: ArtifactBundle, claim: ClaimSpec) -> ExtractedQuant
     if len(args) != 2:
         raise ValueError(f"claim '{claim.name}': covariate_vertex(linear, quadratic).")
     lin, quad = args
-    beta = bundle.site("beta")
-    beta_l = beta[:, bundle.feature_index(lin)]
-    beta_q = beta[:, bundle.feature_index(quad)]
-    _, s_l = bundle.feature_moments(lin)
-    _, s_q = bundle.feature_moments(quad)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        vertex = -(beta_l / s_l) * s_q / (2.0 * beta_q)
+    beta_l = _raw_coefficient(bundle, lin)
+    beta_q = _raw_coefficient(bundle, quad)
+    vertex = _vertex(beta_l, beta_q)
     # A claimed peak needs downward curvature in most of the posterior.
     curvature_down = float(np.mean(beta_q < 0))
     shape_ok = bool(np.isfinite(vertex).all()) and curvature_down >= 0.5
@@ -177,9 +185,7 @@ def covariate_coefficient(bundle: ArtifactBundle, claim: ClaimSpec) -> Extracted
     if len(args) != 1:
         raise ValueError(f"claim '{claim.name}': covariate_coefficient(feature).")
     feature = args[0]
-    beta = bundle.site("beta")
-    _, scale = bundle.feature_moments(feature)
-    draws = beta[:, bundle.feature_index(feature)] / scale
+    draws = _raw_coefficient(bundle, feature)
     return ExtractedQuantity(
         draws,
         bool(np.isfinite(draws).all()),
@@ -198,19 +204,12 @@ def covariate_vertex_difference(
             "linear, quadratic, delta_linear, delta_quadratic)."
         )
     linear, quadratic, delta_linear, delta_quadratic = args
-    beta = bundle.site("beta")
-
-    def raw_coefficient(feature: str) -> np.ndarray:
-        _, scale = bundle.feature_moments(feature)
-        return beta[:, bundle.feature_index(feature)] / scale
-
-    base_linear = raw_coefficient(linear)
-    base_quadratic = raw_coefficient(quadratic)
-    interacted_linear = base_linear + raw_coefficient(delta_linear)
-    interacted_quadratic = base_quadratic + raw_coefficient(delta_quadratic)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        base_vertex = -base_linear / (2.0 * base_quadratic)
-        interacted_vertex = -interacted_linear / (2.0 * interacted_quadratic)
+    base_linear = _raw_coefficient(bundle, linear)
+    base_quadratic = _raw_coefficient(bundle, quadratic)
+    interacted_linear = base_linear + _raw_coefficient(bundle, delta_linear)
+    interacted_quadratic = base_quadratic + _raw_coefficient(bundle, delta_quadratic)
+    base_vertex = _vertex(base_linear, base_quadratic)
+    interacted_vertex = _vertex(interacted_linear, interacted_quadratic)
     draws = base_vertex - interacted_vertex
     both_concave = float(
         np.mean((base_quadratic < 0) & (interacted_quadratic < 0))
