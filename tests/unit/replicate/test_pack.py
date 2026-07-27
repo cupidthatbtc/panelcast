@@ -260,6 +260,12 @@ class TestCliModes:
             _MINIMAL_MANIFEST.replace("demo-pack", "other-pack"), encoding="utf-8"
         )
         (other / "descriptor.yaml").write_text("name: other\n", encoding="utf-8")
+        template = tmp_path / "_template"
+        template.mkdir()
+        (template / "pack.yaml").write_text(
+            _MINIMAL_MANIFEST.replace("demo-pack", "template"), encoding="utf-8"
+        )
+        (template / "descriptor.yaml").write_text("name: template\n", encoding="utf-8")
 
         def fake_run_pack(pack_dir, console):
             verdict = "PASS" if pack_dir.name == "demo-pack" else "DIVERGENCE"
@@ -281,6 +287,7 @@ class TestCliModes:
         assert result.exit_code == 1  # worst pack: divergence
         assert "demo-pack" in result.output
         assert "other-pack" in result.output
+        assert "_template" not in result.output
 
     def test_pack_new_bad_name_is_a_clean_error(self, tmp_path):
         from typer.testing import CliRunner

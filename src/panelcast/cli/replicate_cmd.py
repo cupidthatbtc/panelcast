@@ -6,8 +6,8 @@ verdict table the replication READMEs assemble by hand. Modes:
 - ``panelcast replicate <pack-dir>`` — run a domain pack end-to-end: build
   the panel if needed (gated on the manifest's expected_panel), run the
   leakage-safe chain, grade the pack's claims, write results to notes/.
-- ``panelcast replicate --all <collection-dir>`` — run every immediate
-  subfolder containing a pack.yaml and print a combined scoreboard.
+- ``panelcast replicate --all <collection-dir>`` — run every immediate,
+  non-template subfolder containing a pack.yaml and print a combined scoreboard.
 - ``--models <dir> --claims <yaml>`` — grade an existing fit directly.
 - ``--dataset <yaml> --claims <yaml>`` — run the chain, then grade.
 
@@ -191,7 +191,9 @@ def _run_collection(collection_dir: Path, console) -> int:
     from panelcast.replicate import exit_code_for
 
     pack_dirs = sorted(
-        child for child in collection_dir.iterdir() if (child / "pack.yaml").exists()
+        child
+        for child in collection_dir.iterdir()
+        if not child.name.startswith("_") and (child / "pack.yaml").exists()
     )
     if not pack_dirs:
         console.print(f"[bold red]Error:[/bold red] no pack.yaml under {collection_dir}/*.")
