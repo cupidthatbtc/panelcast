@@ -248,6 +248,32 @@ class TestCliModes:
         assert result.exit_code == 0, result.output
         assert "nothing to grade" in result.output
 
+    @pytest.mark.parametrize("declared", [None, True])
+    def test_pack_lock_policy(self, tmp_path, monkeypatch, declared):
+        from rich.console import Console
+
+        import panelcast.cli.replicate_cmd as cmd
+
+        monkeypatch.delenv("DEMO_PACK_PATH", raising=False)
+        pack_dir = self._runnable_pack(tmp_path, with_claims=False)
+        if declared is not None:
+            with (pack_dir / "pack.yaml").open("a", encoding="utf-8") as manifest:
+                manifest.write("run:\n  enforce_lockfile: true\n")
+        seen = []
+
+        def fake_run_chain(*args, **kwargs):
+            seen.append(
+                (
+                    kwargs["defaults"]["enforce_lockfile"],
+                    kwargs["overrides"].get("enforce_lockfile"),
+                )
+            )
+            return tmp_path
+
+        monkeypatch.setattr(cmd, "_run_chain_for", fake_run_chain)
+        assert cmd._run_pack(pack_dir, Console()) == []
+        assert seen == [(False, declared)]
+
     def test_pack_pipeline_is_rooted_in_pack(self, tmp_path, monkeypatch):
         from pathlib import Path
 
@@ -362,6 +388,52 @@ class TestCliModes:
         expected = (tmp_path / "outputs" / "run" / "models").resolve()
         assert models == expected
         assert str(expected) in console.export_text()
+
+    @pytest.mark.parametrize(
+        "fit_value, manifest_value, expected",
+        [(None, None, False), (True, None, True), (True, False, False)],
+    )
+    def test_chain_config_precedence(
+        self, tmp_path, monkeypatch, fit_value, manifest_value, expected
+    ):
+        from pathlib import Path
+
+        from rich.console import Console
+
+        import panelcast.cli.replicate_cmd as cmd
+
+        descriptor = tmp_path / "descriptor.yaml"
+        descriptor.write_text("name: demo\n", encoding="utf-8")
+        fit = None
+        if fit_value is not None:
+            fit = tmp_path / "fit.yaml"
+            fit.write_text(f"enforce_lockfile: {str(fit_value).lower()}\n", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        observed = []
+
+        class FakeOrchestrator:
+            def __init__(self, config):
+                observed.append(config.enforce_lockfile)
+                self.run_dir = Path("outputs/run")
+
+            def run(self):
+                (self.run_dir / "models").mkdir(parents=True, exist_ok=True)
+                return 0
+
+        monkeypatch.setattr(
+            "panelcast.pipelines.orchestrator.PipelineOrchestrator", FakeOrchestrator
+        )
+        overrides = (
+            {} if manifest_value is None else {"enforce_lockfile": manifest_value}
+        )
+        cmd._run_chain_for(
+            str(descriptor),
+            Console(),
+            fit_config=fit,
+            defaults={"enforce_lockfile": False},
+            overrides=overrides,
+        )
+        assert observed == [expected]
 
     def test_underscore_pack_still_runs_directly(self, tmp_path, monkeypatch):
         from typer.testing import CliRunner
