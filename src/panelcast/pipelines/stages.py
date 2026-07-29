@@ -396,7 +396,20 @@ class PipelineStage:
             return SkipDecision(False, "inputs changed")
         missing = [p for p in self.output_paths if not p.exists()]
         if missing:
-            return SkipDecision(False, f"output missing: {missing[0]}", True)
+            prefix = f"{self.name}:"
+            recorded = manifest.outputs or {}
+            for path in missing:
+                key = f"{prefix}{path.as_posix()}"
+                recorded_path = recorded.get(key)
+                if recorded_path is None:
+                    continue
+                try:
+                    same_path = Path(recorded_path).resolve() == path.resolve()
+                except OSError:
+                    same_path = False
+                if same_path:
+                    return SkipDecision(False, f"recorded output is missing: {path}", True, key)
+            return SkipDecision(False, "output not produced by the previous run")
 
         return self.verify_recorded_outputs(manifest, allowed_roots)
 

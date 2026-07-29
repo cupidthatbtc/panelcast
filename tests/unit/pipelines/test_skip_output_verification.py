@@ -360,6 +360,57 @@ class TestSkipDecisionReasons:
         assert not decision.skip
         assert not decision.outputs_untrusted
 
+    def test_new_run_scoped_output_is_not_reported_as_corruption(self, tmp_path):
+        source = tmp_path / "features.parquet"
+        source.write_bytes(b"features")
+        previous = tmp_path / "outputs" / "previous" / "models" / "trace.nc"
+        previous.parent.mkdir(parents=True)
+        previous.write_bytes(b"posterior")
+        current = tmp_path / "outputs" / "current" / "models" / "trace.nc"
+        stage = PipelineStage(
+            name="train",
+            description="fake",
+            run_fn=None,
+            input_paths=[source],
+            output_paths=[current],
+        )
+        key = f"train:{previous.as_posix()}"
+        manifest = _manifest(
+            stage_hashes={"train": stage.compute_input_hash()},
+            outputs={key: str(previous)},
+            output_hashes={key: sha256_path(previous)},
+        )
+
+        decision = stage.skip_decision(manifest, allowed_roots=[tmp_path])
+
+        assert not decision.skip
+        assert not decision.outputs_untrusted
+        assert decision.reason == "output not produced by the previous run"
+
+    def test_missing_recorded_output_is_reported_as_corruption(self, tmp_path):
+        source = tmp_path / "features.parquet"
+        source.write_bytes(b"features")
+        missing = tmp_path / "outputs" / "previous" / "models" / "trace.nc"
+        stage = PipelineStage(
+            name="train",
+            description="fake",
+            run_fn=None,
+            input_paths=[source],
+            output_paths=[missing],
+        )
+        key = f"train:{missing.as_posix()}"
+        manifest = _manifest(
+            stage_hashes={"train": stage.compute_input_hash()},
+            outputs={key: str(missing)},
+            output_hashes={key: "0" * 64},
+        )
+
+        decision = stage.skip_decision(manifest, allowed_roots=[tmp_path])
+
+        assert not decision.skip
+        assert decision.outputs_untrusted
+        assert decision.key == key
+
     def test_should_skip_matches_decision(self, parquet_fixture):
         roots = [parquet_fixture.tmp_path]
         assert parquet_fixture.stage.should_skip(
