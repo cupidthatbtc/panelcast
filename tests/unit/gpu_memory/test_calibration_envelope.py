@@ -256,7 +256,10 @@ class TestEnvelopeIsVerifiedNotAssumed:
         cal = refit_constants(records)
         assert cal is not None
         assert cal.collection_overhead_factor == 0.1
-        assert cal.fixed_overhead_gb == 0.0
+        # The scale is what a factor still on its floor rules out. The intercept
+        # is a least-squares residual around zero, and whether it lands on -0.0
+        # (clamped) or a sub-ulp positive is BLAS- and platform-dependent.
+        assert cal.fixed_overhead_gb == pytest.approx(0.0, abs=1e-9)
         assert cal.min_ratio > _MIN_LOCAL_ENVELOPE
         _assert_envelope_holds(cal, records)
 
