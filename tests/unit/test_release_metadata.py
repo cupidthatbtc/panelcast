@@ -84,6 +84,7 @@ def _assert_version_matches(
     path: str, pattern: str, field: str, *, repo: Path | None = None
 ) -> None:
     version = _single_match(path, pattern, field, repo=repo)
+    # Fixtures vary one metadata surface while the real project version stays authoritative.
     expected = _pyproject_version()
     assert _unquote(version) == expected, (
         f"{path} {field} {version!r} does not match pyproject {expected}"
@@ -203,6 +204,34 @@ def test_empty_version_reports_the_file_and_field(tmp_path):
         )
 
 
+def test_empty_model_card_version_reports_the_file_and_field(tmp_path):
+    (tmp_path / "MODEL_CARD.md").write_text("- **Version:**\n", encoding="utf-8")
+    with pytest.raises(AssertionError, match=r"MODEL_CARD.md Version ''"):
+        _assert_version_matches(
+            "MODEL_CARD.md", _MODEL_CARD_VERSION_PATTERN, "Version", repo=tmp_path
+        )
+
+
+def test_duplicate_with_first_empty_model_card_version_is_rejected(tmp_path):
+    (tmp_path / "MODEL_CARD.md").write_text(
+        "- **Version:**\n- **Version:** 0.23.0\n", encoding="utf-8"
+    )
+    with pytest.raises(AssertionError, match="has 2 Version fields"):
+        _single_match(
+            "MODEL_CARD.md", _MODEL_CARD_VERSION_PATTERN, "Version", repo=tmp_path
+        )
+
+
+def test_version_field_rejects_trailing_content(tmp_path):
+    (tmp_path / "CITATION.cff").write_text(
+        "version: 0.23.0 leftover\n", encoding="utf-8"
+    )
+    with pytest.raises(AssertionError, match="has no version field"):
+        _single_match(
+            "CITATION.cff", _CITATION_VERSION_PATTERN, "version", repo=tmp_path
+        )
+
+
 def test_single_match_requires_exactly_one_capture_group(tmp_path):
     (tmp_path / "CITATION.cff").write_text("version: 0.23.0\n", encoding="utf-8")
     with pytest.raises(AssertionError, match="capture exactly one value"):
@@ -284,7 +313,7 @@ def test_changelog_rejects_duplicate_current_release(tmp_path):
 
 def test_release_date_guard_accepts_newer_model_card_and_unquoted_cff(tmp_path):
     _write_date_fixture(
-        tmp_path, model_card="- **Last updated:** 2026-07-30\n"
+        tmp_path, model_card="- **Last updated:** 2026-07-30 (v0.23.0)\n"
     )
     _assert_release_date_consistency(repo=tmp_path, today=date(2026, 7, 29))
 
