@@ -21,7 +21,11 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import date
 from pathlib import Path
+
+import dependency_audit
+from packaging.utils import canonicalize_name
 
 
 def _load(path: Path, problems: list[str]) -> dict | list | None:
@@ -59,7 +63,11 @@ def check_audit(path: Path, problems: list[str]) -> None:
         problems.append(f"{path}: the audit reports its own gate as failed")
 
 
-def check_pip_audit(path: Path, problems: list[str]) -> None:
+def check_pip_audit(
+    path: Path,
+    problems: list[str],
+    accepted: list[dependency_audit.Acceptance],
+) -> None:
     document = _load(path, problems)
     if document is None:
         return
@@ -68,16 +76,20 @@ def check_pip_audit(path: Path, problems: list[str]) -> None:
     if not isinstance(dependencies, list) or not dependencies:
         problems.append(f"{path}: no dependencies audited")
         return
+    known = {
+        acceptance.key
+        for acceptance in accepted
+        if acceptance.scope == "wheel-runtime"
+    }
     for dependency in dependencies:
+        name = canonicalize_name(str(dependency.get("name") or ""))
+        version = str(dependency.get("version") or "")
         for vulnerability in dependency.get("vulns") or []:
-            problems.append(
-                f"{path}: {dependency.get('name')} {dependency.get('version')} "
-                f"{vulnerability.get('id')}"
-            )
+            vuln_id = str(vulnerability.get("id") or "")
+            if ("wheel-runtime", name, version, vuln_id) not in known:
+                problems.append(f"{path}: {name} {version} {vuln_id}")
         if dependency.get("skip_reason"):
-            problems.append(
-                f"{path}: {dependency.get('name')} was skipped ({dependency['skip_reason']})"
-            )
+            problems.append(f"{path}: {name} was skipped ({dependency['skip_reason']})")
 
 
 def check_sbom(spec: str, problems: list[str]) -> None:
@@ -95,10 +107,29 @@ def check_sbom(spec: str, problems: list[str]) -> None:
         problems.append(
             f"{path}: declares scope {properties.get('panelcast:scope')!r}, expected {scope!r}"
         )
+    if scope == "wheel-runtime":
+        component_refs = {
+            component.get("bom-ref") for component in document.get("components") or []
+        }
+        dependencies = document.get("dependencies")
+        dependency_refs = {
+            entry.get("ref") for entry in dependencies or [] if isinstance(entry, dict)
+        }
+        targets = {
+            target
+            for entry in dependencies or []
+            if isinstance(entry, dict)
+            for target in entry.get("dependsOn") or []
+        }
+        if not isinstance(dependencies, list) or dependency_refs != component_refs:
+            problems.append(f"{path}: wheel-runtime dependency graph is missing components")
+        if not targets <= component_refs:
+            problems.append(f"{path}: wheel-runtime dependency graph names unknown components")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--baseline", type=Path, default=dependency_audit.DEFAULT_BASELINE)
     parser.add_argument("--step", action="append", default=[], metavar="LABEL=OUTCOME")
     parser.add_argument("--audit", type=Path, action="append", default=[])
     parser.add_argument("--pip-audit", type=Path, action="append", default=[])
@@ -107,11 +138,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     problems: list[str] = []
+    accepted, ledger_errors, expired = dependency_audit.load_ledger(args.baseline, date.today())
+    problems.extend(ledger_errors)
+    problems.extend(expired)
     check_steps(args.step, problems)
     for path in args.audit:
         check_audit(path, problems)
     for path in args.pip_audit:
-        check_pip_audit(path, problems)
+        check_pip_audit(path, problems, accepted)
     for spec in args.sbom:
         check_sbom(spec, problems)
     for path in args.present:

@@ -112,6 +112,7 @@ def _write_lock(path: Path, entries: dict[str, list[dict[str, Any]]]) -> Path:
 
 def _acceptance(**overrides: Any) -> dict[str, Any]:
     entry = {
+        "scope": "lock",
         "package": "tornado",
         "version": "6.5.7",
         "advisory": "GHSA-0000-0000-0000",
@@ -132,7 +133,7 @@ def _acceptance(**overrides: Any) -> dict[str, Any]:
 
 def _ledger(tmp_path: Path, *entries: dict[str, Any]) -> Path:
     path = tmp_path / "security_baseline.json"
-    path.write_text(json.dumps({"schema": 2, "acceptances": list(entries)}), encoding="utf-8")
+    path.write_text(json.dumps({"schema": 3, "acceptances": list(entries)}), encoding="utf-8")
     return path
 
 
@@ -280,6 +281,19 @@ def test_a_complete_acceptance_suppresses_exactly_its_own_finding(tmp_path: Path
     assert report.failed()
 
 
+def test_wheel_acceptance_cannot_suppress_a_lock_finding(tmp_path: Path) -> None:
+    path = _ledger(tmp_path, _acceptance(scope="wheel-runtime"))
+    accepted, errors, expired = dependency_audit.load_ledger(path, TODAY)
+    assert (errors, expired) == ([], [])
+    finding = dependency_audit.Finding("tornado", "6.5.7", "GHSA-0000-0000-0000")
+
+    report = dependency_audit.adjudicate(
+        pixi_lock.Lock((), {}, "digest"), [finding], [], accepted, [], []
+    )
+
+    assert report.new_pypi == [finding]
+
+
 def test_an_acceptance_does_not_carry_over_to_a_new_version(tmp_path: Path) -> None:
     accepted, _, _ = dependency_audit.load_ledger(tmp_path / "x.json", TODAY)
     path = _ledger(tmp_path, _acceptance())
@@ -300,6 +314,7 @@ def test_an_acceptance_does_not_carry_over_to_a_new_version(tmp_path: Path) -> N
         {"applicability": "n/a"},
         {"applicability": "not applicable"},
         {"remediation": "none"},
+        {"scope": "unknown"},
         {"owner": ""},
         {"decision": "accepted"},
         {"reviewed": "not-a-date"},
@@ -354,6 +369,7 @@ def test_scaffolding_writes_entries_that_still_fail_the_gate(tmp_path: Path) -> 
     added = dependency_audit.write_scaffold(path, [finding], TODAY)
 
     assert added == ["pillow 12.3.0 GHSA-2222-2222-2222"]
+    assert json.loads(path.read_text())["acceptances"][0]["scope"] == "lock"
     accepted, errors, _ = dependency_audit.load_ledger(path, TODAY)
     assert accepted == [], "a scaffolded stub must never count as an acceptance"
     assert errors
@@ -437,6 +453,7 @@ def test_environment_sbom_is_a_pure_function_of_the_lock(lock: pixi_lock.Lock) -
 def test_wheel_sbom_is_a_different_document_that_says_what_it_is() -> None:
     installed = {
         "distributions": {"numpy": "2.4.1", "pip": "26.1.2", "panelcast": "9.9.9"},
+        "requires": {"numpy": [], "pip": [], "panelcast": ["numpy"]},
         "python_version": "3.12.8",
         "implementation": "CPython",
         "platform_tag": "linux-x86_64",
@@ -458,6 +475,9 @@ def test_wheel_sbom_is_a_different_document_that_says_what_it_is() -> None:
         "pip": "venv-bootstrap",
         "panelcast": "wheel-closure",
     }
+    graph = {entry["ref"]: entry["dependsOn"] for entry in sbom["dependencies"]}
+    assert graph["pkg:pypi/panelcast@9.9.9"] == ["pkg:pypi/numpy@2.4.1"]
+    assert graph["pkg:pypi/numpy@2.4.1"] == []
     # Same closure, same serial number: two builds of a tag stay comparable.
     assert (
         sbom["serialNumber"]
@@ -522,7 +542,8 @@ def _evidence(tmp_path: Path) -> dict[str, Path]:
         json.dumps(
             {
                 "bomFormat": "CycloneDX",
-                "components": [{"name": "numpy"}],
+                "components": [{"name": "numpy", "bom-ref": "pkg:pypi/numpy@2.4.1"}],
+                "dependencies": [{"ref": "pkg:pypi/numpy@2.4.1", "dependsOn": []}],
                 "metadata": {"properties": [{"name": "panelcast:scope", "value": "wheel-runtime"}]},
             }
         )
@@ -575,7 +596,13 @@ def test_gate_fails_on_an_audit_that_never_queried_osv(tmp_path: Path) -> None:
 def test_gate_fails_on_a_pip_audit_finding_or_a_skipped_package(tmp_path: Path) -> None:
     paths = _evidence(tmp_path)
     paths["pip_audit"].write_text(
-        json.dumps({"dependencies": [{"name": "pillow", "vulns": [{"id": "GHSA-x"}]}]})
+        json.dumps(
+            {
+                "dependencies": [
+                    {"name": "pillow", "version": "12.3.0", "vulns": [{"id": "GHSA-x"}]}
+                ]
+            }
+        )
     )
     assert _gate(paths) == 1
 
@@ -583,6 +610,31 @@ def test_gate_fails_on_a_pip_audit_finding_or_a_skipped_package(tmp_path: Path) 
         json.dumps({"dependencies": [{"name": "pillow", "skip_reason": "not on PyPI"}]})
     )
     assert _gate(paths) == 1
+
+
+def test_gate_accepts_only_a_matching_wheel_runtime_exception(tmp_path: Path) -> None:
+    paths = _evidence(tmp_path)
+    paths["pip_audit"].write_text(
+        json.dumps(
+            {
+                "dependencies": [
+                    {
+                        "name": "Pillow",
+                        "version": "12.3.0",
+                        "vulns": [{"id": "GHSA-0000-0000-0000"}],
+                    }
+                ]
+            }
+        )
+    )
+    wheel_ledger = _ledger(
+        tmp_path,
+        _acceptance(scope="wheel-runtime", package="pillow", version="12.3.0"),
+    )
+    assert _gate(paths, "--baseline", str(wheel_ledger)) == 0
+
+    lock_ledger = _ledger(tmp_path, _acceptance(scope="lock", package="pillow", version="12.3.0"))
+    assert _gate(paths, "--baseline", str(lock_ledger)) == 1
 
 
 def test_gate_fails_when_an_sbom_is_the_wrong_scope_or_empty(tmp_path: Path) -> None:
@@ -595,6 +647,11 @@ def test_gate_fails_when_an_sbom_is_the_wrong_scope_or_empty(tmp_path: Path) -> 
 
     document["metadata"]["properties"] = [{"name": "panelcast:scope", "value": "wheel-runtime"}]
     document["components"] = []
+    paths["sbom"].write_text(json.dumps(document))
+    assert _gate(paths) == 1
+
+    document["components"] = [{"name": "numpy", "bom-ref": "pkg:pypi/numpy@2.4.1"}]
+    document.pop("dependencies")
     paths["sbom"].write_text(json.dumps(document))
     assert _gate(paths) == 1
 
@@ -720,12 +777,21 @@ def test_publication_waits_on_the_sboms_being_verifiably_attached() -> None:
     assert jobs["release-sbom"]["permissions"] == {"contents": "write"}
     # The release is created rather than waited for, and the upload is read back.
     assert "gh release create" in text
+    assert "--verify-tag" in text
     assert "gh release download" in text
     assert "cmp -s" in text
     assert "security_gate.py" in text
     assert "::warning" not in yaml.safe_dump(jobs["release-sbom"]), (
         "a warning is not a gate: the SBOM has to block the release"
     )
+
+    finalizer = jobs["publish-release"]
+    assert set(finalizer["needs"]) == {"publish", "release-sbom"}
+    assert finalizer["permissions"] == {"contents": "write"}
+    finalizer_run = "\n".join(_run(step) for step in _steps(finalizer))
+    assert "gh release edit" in finalizer_run
+    assert "--draft=false" in finalizer_run
+    assert "--draft=false" not in text, "the release must stay draft until PyPI succeeds"
 
 
 def test_cross_platform_wheel_and_lock_ci_are_still_in_place() -> None:

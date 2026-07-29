@@ -115,19 +115,20 @@ manual, as does `requirements.lock` when `pixi.lock` changed;
 `tests/unit/test_release_metadata.py` fails the build if anything drifts.
 
 Pushing the tag starts the release run, which builds the environment and
-wheel-runtime SBOMs and attaches both to the GitHub Release before it publishes
-to PyPI. If no release exists for the tag yet, the run creates a draft one and
-attaches them there, so don't race it with `gh release create` — let the draft
-appear, then edit its notes and publish. PyPI publication is blocked until the
-SBOMs are verifiably on the release.
+wheel-runtime SBOMs and attaches both to a draft GitHub Release. PyPI
+publication is blocked until those assets are read back and verified; only a
+successful PyPI publication lets the final job publish the GitHub Release. Do
+not race the workflow with `gh release create` or publish the draft manually.
+Amend the generated release notes afterward if the changelog needs more detail.
 
 ## Dependency security
 
 Touching `pixi.lock` means re-running `pixi run audit`. Findings without a
 current acceptance fail the gate. Accepted ones live in `security_baseline.json`
-as entries that name the version, the advisory, what it does or does not reach,
-the remediation, an owner, and an expiry — `pixi run audit --scaffold` writes the
-shape but deliberately cannot grant the acceptance. Prefer upgrading: as of the
+as entries that name the lock or wheel-runtime scope, exact version, advisory,
+applicability, remediation, owner, and expiry — `pixi run audit --scaffold`
+writes the lock-scoped shape but deliberately cannot grant the acceptance.
+Prefer upgrading: as of the
 July 2026 sweep the ledger is empty because every open advisory had a fix. See
 [`docs/DEPENDENCY_SECURITY.md`](docs/DEPENDENCY_SECURITY.md) for what each
 scanner can and cannot see.

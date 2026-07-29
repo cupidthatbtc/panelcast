@@ -48,6 +48,7 @@ from pathlib import Path
 from typing import Any
 
 import pixi_lock
+from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
 from pixi_lock import Lock, LockedPackage
 
@@ -58,8 +59,9 @@ BATCH_SIZE = 500
 ATTEMPTS = 3
 
 DEFAULT_BASELINE = pixi_lock.REPO_ROOT / "security_baseline.json"
-LEDGER_SCHEMA = 2
+LEDGER_SCHEMA = 3
 MAX_ACCEPTANCE_DAYS = 90
+ACCEPTANCE_SCOPES = {"lock", "wheel-runtime"}
 
 ADVISORY_ID = re.compile(r"^[A-Z][A-Z0-9]*-[\w.-]+$")
 DECISIONS = {
@@ -166,6 +168,7 @@ class Finding:
 
 @dataclass(frozen=True)
 class Acceptance:
+    scope: str
     package: str
     version: str
     vuln_id: str
@@ -173,8 +176,8 @@ class Acceptance:
     expires: date
 
     @property
-    def key(self) -> tuple[str, str, str]:
-        return (self.package, self.version, self.vuln_id)
+    def key(self) -> tuple[str, str, str, str]:
+        return (self.scope, canonicalize_name(self.package), self.version, self.vuln_id)
 
 
 @dataclass
@@ -275,13 +278,19 @@ def load_ledger(path: Path, today: date) -> tuple[list[Acceptance], list[str], l
         # Scoped to this entry: a half-written acceptance must not suppress
         # anything, however well-formed its dates happen to be.
         faults: list[str] = []
+        scope = str(entry.get("scope") or "").strip()
         package = str(entry.get("package") or "").strip()
         version = str(entry.get("version") or "").strip()
         vuln_id = str(entry.get("advisory") or "").strip()
         decision = str(entry.get("decision") or "").strip()
         owner = str(entry.get("owner") or "").strip()
-        where = f"{path.name}[{index}] {package or '?'} {version or '?'} {vuln_id or '?'}"
+        where = (
+            f"{path.name}[{index}] {scope or '?'} "
+            f"{package or '?'} {version or '?'} {vuln_id or '?'}"
+        )
 
+        if scope not in ACCEPTANCE_SCOPES:
+            faults.append(f"{where}: scope must be one of {sorted(ACCEPTANCE_SCOPES)}")
         if not package or not version:
             faults.append(f"{where}: package and version are both required")
         if not ADVISORY_ID.match(vuln_id):
@@ -315,7 +324,7 @@ def load_ledger(path: Path, today: date) -> tuple[list[Acceptance], list[str], l
         if expires < today:
             expired.append(f"{where}: acceptance expired on {expires}, re-triage it")
         else:
-            accepted.append(Acceptance(package, version, vuln_id, decision, expires))
+            accepted.append(Acceptance(scope, package, version, vuln_id, decision, expires))
 
     return accepted, errors, expired
 
@@ -327,16 +336,18 @@ def write_scaffold(path: Path, findings: list[Finding], today: date) -> list[str
         document = json.loads(path.read_text(encoding="utf-8"))
         document.setdefault("acceptances", [])
     existing = {
-        (e.get("package"), e.get("version"), e.get("advisory")) for e in document["acceptances"]
+        (e.get("scope"), e.get("package"), e.get("version"), e.get("advisory"))
+        for e in document["acceptances"]
     }
 
     added: list[str] = []
     for finding in sorted(findings, key=lambda f: (f.package, f.version, f.vuln_id)):
-        key = (finding.package, finding.version, finding.vuln_id)
+        key = ("lock", finding.package, finding.version, finding.vuln_id)
         if key in existing:
             continue
         document["acceptances"].append(
             {
+                "scope": "lock",
                 "package": finding.package,
                 "version": finding.version,
                 "advisory": finding.vuln_id,
@@ -461,10 +472,16 @@ def adjudicate(
     )
     # An acceptance is bound to the exact locked version: a version bump has to
     # be re-adjudicated rather than inheriting the old decision.
-    known = {acceptance.key for acceptance in accepted}
-    report.new_pypi = [f for f in pypi if (f.package, f.version, f.vuln_id) not in known]
-    report.new_named = [f for f in named if (f.package, f.version, f.vuln_id) not in known]
-    matched = {(f.package, f.version, f.vuln_id) for f in pypi + named}
+    known = {acceptance.key[1:] for acceptance in accepted if acceptance.scope == "lock"}
+    report.new_pypi = [
+        f for f in pypi if (canonicalize_name(f.package), f.version, f.vuln_id) not in known
+    ]
+    report.new_named = [
+        f for f in named if (canonicalize_name(f.package), f.version, f.vuln_id) not in known
+    ]
+    matched = {
+        (canonicalize_name(f.package), f.version, f.vuln_id) for f in pypi + named
+    }
     report.stale = sorted(
         f"{package} {version} {vuln_id}" for package, version, vuln_id in known - matched
     )

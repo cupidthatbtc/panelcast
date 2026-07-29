@@ -92,17 +92,19 @@ Two separate mechanisms, deliberately:
   (`tests/unit/test_dependency_security.py` proves it). `pixi.toml` carries the
   matching constraint so a re-solve cannot reintroduce a vulnerable version.
 - `security_baseline.json` is the ledger of *accepted* findings. It is not a
-  list of ids. Every entry names the package and the exact locked version, the
-  advisory, what does or does not reach this codebase, the remediation, an
-  owner, the review date, and an expiry no more than 90 days out. The audit
-  rejects entries that are incomplete, that use a stock phrase instead of a
-  rationale, or that have expired — an acceptance is a decision with a deadline,
-  not a parking space.
+  list of ids. Every entry names its scope (`lock` or `wheel-runtime`), package,
+  exact version, advisory, applicability, remediation, owner, review date, and
+  an expiry no more than 90 days out. The audit rejects entries that are
+  incomplete, generic, or expired — an acceptance is a decision with a
+  deadline, not a parking space. Scope is part of the key, so an exception for
+  the installed wheel cannot suppress a finding in the lock audit or vice versa.
 
-`--scaffold` writes new entries in the shape a human has to fill in, and the run
-still fails: the tool cannot grant an acceptance. An acceptance is bound to the
-exact version it was written against, so a version bump has to be re-adjudicated
-rather than inheriting the old decision.
+`--scaffold` writes lock-scoped entries in the shape a human has to fill in, and
+the run still fails: the tool cannot grant an acceptance. An acceptance is bound
+to the exact version it was written against, so a version bump has to be
+re-adjudicated rather than inheriting the old decision. Wheel-runtime findings
+also fail every pull request until the dependency is upgraded or a complete,
+expiring `wheel-runtime` acceptance is added manually.
 
 The July 2026 sweep found no acceptances to write. All 67 advisories that the
 previous baseline listed had a fixed release available, so all 67 were
@@ -123,19 +125,21 @@ not interchangeable:
   published wheel.
 - `--scope wheel` is the runtime closure of the built wheel: the distributions
   `importlib.metadata` reports in an interpreter where only that wheel was
-  installed, with the virtualenv's own bootstrap marked as such. That is a pip
-  resolution for one platform and one Python version at build time, not a lock,
-  and the document says so in its metadata.
+  installed, with the virtualenv's own bootstrap marked as such. Its CycloneDX
+  dependency graph is derived from the active `Requires-Dist` metadata under
+  that interpreter's markers. This is a pip resolution for one platform and one
+  Python version at build time, not a lock, and the document says so.
 
 Each document declares its scope in `metadata.properties` under
 `panelcast:scope`, and `scripts/security_gate.py` refuses one that does not.
 
 The release workflow builds both from the tagged lock and the smoke-tested
-wheel, attaches them to the GitHub Release for the tag — creating the release as
-a draft if it does not exist yet, so nothing waits on a human — and then
-downloads them back and compares them byte for byte before PyPI publication is
-allowed to start. If the SBOMs are not on the release, the release does not
-publish. The run artifact is a 90-day convenience copy, not the record.
+wheel, attaches them to a draft GitHub Release for the tag, and then downloads
+them back and compares them byte for byte before PyPI publication is allowed to
+start. The GitHub Release remains a draft through that publication and is made
+public only after PyPI succeeds. If any earlier step fails, the permanent assets
+remain on the draft and no public release is announced. The run artifact is a
+90-day convenience copy, not the record.
 
 ## When a scanner fails
 

@@ -50,18 +50,29 @@ WHEEL_NOTE = (
     "build time, not a lock: another install may resolve different versions."
 )
 
-# Read in the target interpreter, which may be older than this script's and has
-# no dependency beyond the standard library.
+# Read in the target interpreter. `packaging` is a panelcast runtime dependency,
+# so requirement markers are evaluated under the environment the SBOM describes.
 INSTALLED_QUERY = """
 import json, platform, sys, sysconfig
 from importlib.metadata import distributions
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
 seen = {}
+requires = {}
 for dist in distributions():
-    name = (dist.metadata["Name"] or "").strip()
-    if name:
-        seen[name.lower().replace("_", "-")] = dist.version
+    name = canonicalize_name((dist.metadata["Name"] or "").strip())
+    if not name:
+        continue
+    seen[name] = dist.version
+    dependencies = []
+    for raw in dist.requires or []:
+        requirement = Requirement(raw)
+        if requirement.marker is None or requirement.marker.evaluate():
+            dependencies.append(canonicalize_name(requirement.name))
+    requires[name] = sorted(set(dependencies))
 print(json.dumps({
     "distributions": seen,
+    "requires": requires,
     "python_version": platform.python_version(),
     "implementation": platform.python_implementation(),
     "platform_tag": sysconfig.get_platform(),
@@ -157,14 +168,15 @@ def build_wheel_runtime(installed: dict, version: str) -> dict:
         )
 
     components = []
+    refs = {name: f"pkg:pypi/{name}@{package_version}" for name, package_version in distributions.items()}
     for name, package_version in sorted(distributions.items()):
         components.append(
             {
                 "type": "library",
-                "bom-ref": f"pkg:pypi/{name}@{package_version}",
+                "bom-ref": refs[name],
                 "name": name,
                 "version": package_version,
-                "purl": f"pkg:pypi/{name}@{package_version}",
+                "purl": refs[name],
                 "properties": [
                     {
                         "name": "panelcast:origin",
@@ -174,11 +186,30 @@ def build_wheel_runtime(installed: dict, version: str) -> dict:
             }
         )
 
+    dependency_graph = []
+    requires = installed.get("requires") or {}
+    for name in sorted(distributions):
+        dependency_graph.append(
+            {
+                "ref": refs[name],
+                "dependsOn": sorted(
+                    refs[dependency]
+                    for dependency in requires.get(name, [])
+                    if dependency in refs
+                ),
+            }
+        )
+
     # Deterministic in the resolution, not in time: the same resolved closure on
     # the same interpreter always yields the same serial number.
     fingerprint = hashlib.sha256(
         json.dumps(
-            [installed["python_version"], installed["platform_tag"], sorted(distributions.items())]
+            [
+                installed["python_version"],
+                installed["platform_tag"],
+                sorted(distributions.items()),
+                sorted((name, sorted(dependencies)) for name, dependencies in requires.items()),
+            ]
         ).encode("utf-8")
     ).hexdigest()
 
@@ -195,6 +226,7 @@ def build_wheel_runtime(installed: dict, version: str) -> dict:
         ],
     )
     document["components"] = components
+    document["dependencies"] = dependency_graph
     return document
 
 

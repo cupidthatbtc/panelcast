@@ -128,7 +128,17 @@ jobs:
           # the SBOMs then ride on the release object from the start, and
           # publishing the notes later keeps them.
           if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --draft --title "$tag" --generate-notes
+            if ! gh release create "$tag" --verify-tag --draft --title "$tag" --generate-notes; then
+              # A maintainer may have created the release between view and create.
+              for attempt in 1 2 3; do
+                gh release view "$tag" >/dev/null 2>&1 && break
+                if [ "$attempt" = 3 ]; then
+                  echo "::error::could not create or find the GitHub Release for $tag"
+                  exit 1
+                fi
+                sleep 5
+              done
+            fi
           fi
           gh release upload "$tag" sbom/*.cdx.json --clobber
 
@@ -174,3 +184,23 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247  # release/v1
+
+  publish-release:
+    needs: [publish, release-sbom]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Publish the verified GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          is_draft="$(gh release view "$tag" --json isDraft --jq .isDraft)"
+          if [ "$is_draft" = "true" ]; then
+            gh release edit "$tag" --draft=false
+          fi
+          gh release view "$tag" --json isDraft --jq '.isDraft == false' | grep -qx true

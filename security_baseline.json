@@ -1,8 +1,9 @@
 {
-  "schema": 2,
-  "description": "Accepted advisories against the versions pixi.lock pins (#372). This is a ledger, not a ratchet of bare ids: every entry names the package and the exact locked version, the advisory, what does or does not reach this codebase, the remediation, an owner, when it was reviewed, and when the acceptance expires. scripts/dependency_audit.py rejects entries that are incomplete, generic, or past their expiry, and --scaffold can only stub entries for a human to complete.",
+  "schema": 3,
+  "description": "Accepted advisories against either the versions pixi.lock pins or the installed wheel runtime closure (#372). This is a ledger, not a ratchet of bare ids: every entry names its scope, package, exact version, advisory, applicability, remediation, owner, review date, and expiry. scripts/dependency_audit.py rejects entries that are incomplete, generic, or expired, and --scaffold can only stub lock-scoped entries for a human to complete.",
   "policy": {
     "max_acceptance_days": 90,
+    "acceptance_scopes": ["lock", "wheel-runtime"],
     "gated_tier": "PyPI-identified packages, including conda packages carrying a pkg:pypi purl",
     "reported_tier": "conda packages with no PyPI identity, matched by bare name across every OSV ecosystem; reported only, because the version ranges belong to other distributions and bare names collide"
   },

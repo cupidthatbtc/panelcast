@@ -1,18 +1,25 @@
 import re
 from pathlib import Path
 
+import yaml
+
 WORKFLOW = Path(__file__).resolve().parents[2] / ".github" / "workflows" / "release.yml"
 
 
 def test_publish_job_is_the_only_oidc_boundary() -> None:
-    text = WORKFLOW.read_text(encoding="utf-8")
-    build, publish = text.split("  publish:\n", maxsplit=1)
+    jobs = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))["jobs"]
+    oidc_jobs = {
+        name
+        for name, job in jobs.items()
+        if (job.get("permissions") or {}).get("id-token") == "write"
+    }
+    publish = jobs["publish"]
+    steps = publish["steps"]
 
-    assert "id-token: write" not in build
-    assert "id-token: write" in publish
-    assert "run:" not in publish
-    assert "actions/checkout" not in publish
-    assert "pypa/gh-action-pypi-publish" in publish
+    assert oidc_jobs == {"publish"}
+    assert all("run" not in step for step in steps)
+    assert all("actions/checkout" not in str(step.get("uses", "")) for step in steps)
+    assert any("pypa/gh-action-pypi-publish" in str(step.get("uses", "")) for step in steps)
 
 
 def test_release_fails_closed_on_tag_version_mismatch() -> None:
