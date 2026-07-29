@@ -48,7 +48,9 @@ jobs:
             "packaging==${PACKAGING_VERSION}"
 
       - name: Verify release metadata at the tagged commit
-        run: python -m pytest tests/unit/test_release_metadata.py -q
+        run: >-
+          python -m pytest --confcutdir=tests/unit
+          tests/unit/test_release_metadata.py -q
 
       - name: Build and validate distributions
         run: |

@@ -875,7 +875,8 @@ def test_tag_publication_reruns_advisory_scans_and_metadata_guards() -> None:
     build = _workflow("release.yml")["jobs"]["build"]
     text = "\n".join(_run(step) for step in _steps(build))
 
-    assert "pytest tests/unit/test_release_metadata.py" in text
+    assert "pytest --confcutdir=tests/unit" in text
+    assert "tests/unit/test_release_metadata.py" in text
     assert "dependency_audit.py" in text
     assert "pip-audit-lock.json:lock" in text
     assert "pip-audit-wheel.json:wheel-runtime" in text
