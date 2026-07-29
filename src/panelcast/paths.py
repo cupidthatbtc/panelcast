@@ -70,9 +70,11 @@ class RunPathError(ValueError):
 # minted on Linux stays usable on Windows.
 _RESERVED_RUN_IDS = frozenset({"latest", "failed"})
 _WINDOWS_DEVICE_NAMES = frozenset(
-    {"con", "prn", "aux", "nul"}
+    {"con", "prn", "aux", "nul", "conin$", "conout$", "clock$"}
     | {f"com{i}" for i in range(1, 10)}
     | {f"lpt{i}" for i in range(1, 10)}
+    | {f"com{i}" for i in "¹²³"}
+    | {f"lpt{i}" for i in "¹²³"}
 )
 
 

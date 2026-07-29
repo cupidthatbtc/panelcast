@@ -63,7 +63,21 @@ MALFORMED_IDS = [
     "x" * 256,
 ]
 
-RESERVED_IDS = ["latest", "failed", "LATEST", "Failed", "nul", "CON", "com1", "LPT9", "con.txt"]
+RESERVED_IDS = [
+    "latest",
+    "failed",
+    "LATEST",
+    "Failed",
+    "nul",
+    "CON",
+    "com1",
+    "LPT9",
+    "con.txt",
+    "CONIN$",
+    "clock$",
+    "COM¹",
+    "lpt³.log",
+]
 
 
 def _symlink_dir(link: Path, target: Path) -> None:
