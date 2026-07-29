@@ -33,6 +33,8 @@ Models
 
 Evaluation
 - outputs/<run_id>/evaluation/metrics.json
+  - `calibration.pit` records the randomized-rank method and seed; `mean` and
+    `std` are numbers for nonempty splits and `null` when a split has no rows.
 - outputs/<run_id>/evaluation/diagnostics.json
 - outputs/<run_id>/evaluation/within_entity_temporal/predictions.json
 - outputs/<run_id>/evaluation/within_entity_temporal/calibration.json

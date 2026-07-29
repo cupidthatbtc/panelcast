@@ -32,10 +32,11 @@ Metrics
   count and any amount of tied mass — including the discrete cases (censored
   bounds, interval-discretized targets, count likelihoods) where the observation
   ties with a whole atom and a deterministic PIT would pile onto one value. The
-  randomization is seeded from the run seed and echoed as
-  `randomization_seed` next to every PIT payload; the whole-split histogram,
-  the per-row column, and the sliced PIT deviations all come from that one
-  draw, so a row's PIT is the same number wherever it appears.
+  randomization uses labeled substreams derived from the run seed and echoes
+  `randomization_seed` next to every PIT payload. Primary, secondary, and
+  conformal PIT use independent streams. Within one split, the whole-split
+  histogram, per-row column, and sliced deviations share one draw, so a row's
+  PIT is the same number wherever it appears.
   Provenance: PIT deviations archived under `.audit/` and the PIT figures
   quoted in `MODEL_CARD.md` and `docs/decisions/` predate this convention —
   they were computed as deterministic mid-P, `(below + 0.5 * equal) / n_draws`,

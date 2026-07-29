@@ -34,7 +34,9 @@ Two real fits failed their diagnostics under the published model:
 
 - **IMDb episodes** *under*-covers its intervals (forward 80/95 coverage
   0.68 / 0.87 vs nominal 0.80 / 0.95; PIT max-dev 0.112, the worst in the
-  suite). The episode score series is noisier per entity than the model's
+  suite). This archived PIT value uses the retired deterministic mid-P
+  convention and is not comparable to post-#369 randomized-rank PIT (see
+  [`EVALUATION_PROTOCOL.md`](../EVALUATION_PROTOCOL.md)). The episode score series is noisier per entity than the model's
   single homoscedastic `sigma_obs` allows.
 - **Science / Economics** catastrophically failed to converge (R-hat 27.8,
   ESS 4). Diagnosis: a **variance-component collapse** — `sci_sigma_obs → 0.004`

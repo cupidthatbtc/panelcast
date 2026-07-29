@@ -49,7 +49,9 @@ Bayesian modeling (adopted gates — validated on 2x500 cheap runs, 2026-06-10)
   earlier hold. The promotion rode on the corrected held-out lppd estimator
   (#63): the paired advantage over identity is +22.2 ± 4.5 elpd (z +4.9),
   reproduced at seeds 42/43/44 (+22.3, +22.0), alongside R² 0.428 vs 0.417,
-  RMSE 8.19 vs 8.27, CRPS 4.13 vs 4.19, PIT 0.049 vs 0.056. The transform
+  RMSE 8.19 vs 8.27, CRPS 4.13 vs 4.19, PIT 0.049 vs 0.056. Those PIT
+  values use the retired deterministic mid-P convention and are not comparable
+  to post-#369 randomized-rank PIT (see [`EVALUATION_PROTOCOL.md`](../EVALUATION_PROTOCOL.md)). The transform
   bounds predictions by construction (no soft-clip), mixes cleanly at
   publication settings, and costs ~10× more per step. It reshuffles rather
   than resolves the structural PPC pins (relieves q50, newly pins q10) — the

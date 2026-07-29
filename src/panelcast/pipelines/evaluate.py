@@ -71,6 +71,12 @@ log = structlog.get_logger()
 PRIMARY_SPLIT = str(SplitType.WITHIN_ENTITY_TEMPORAL.value)
 SECONDARY_SPLIT = str(SplitType.ENTITY_DISJOINT.value)
 
+# Labeled NumPy PIT streams stay independent from each other and from the JAX
+# predictive streams while remaining reproducible from the run seed.
+_PIT_CONFORMAL_OFFSET = 3000
+_PIT_PRIMARY_OFFSET = 4000
+_PIT_SECONDARY_OFFSET = 5000
+
 _EVAL_OUTPUT_DIR = "outputs/evaluation"  # str so use sites build Path() at call time (patchable)
 _SAVE_LOG_LIKELIHOOD_ENV = "PANELCAST_SAVE_LOG_LIKELIHOOD"
 
@@ -1625,7 +1631,14 @@ def _conformal_block(
     )
     if transform.name != "identity":
         val_samples = np.asarray(transform.inverse(val_samples))
-    block = conformalize(val_y, val_samples, y_test, test_samples, intervals, seed=ctx.seed)
+    block = conformalize(
+        val_y,
+        val_samples,
+        y_test,
+        test_samples,
+        intervals,
+        seed=ctx.seed + _PIT_CONFORMAL_OFFSET,
+    )
     log.info(
         "conformal_calibration_done",
         n_calibration=block["n_calibration"],
@@ -1697,7 +1710,7 @@ def _evaluate_primary_split(
         prediction_interval=ctx.prediction_interval,
         discretize=discretize_obs,
         row_ids=primary_row_ids,
-        pit_seed=ctx.seed,
+        pit_seed=ctx.seed + _PIT_PRIMARY_OFFSET,
     )
     try:
         # Log-likelihood must be evaluated on the model scale; the ELPDs are
@@ -1758,7 +1771,11 @@ def _evaluate_primary_split(
     # Informational — the strict gate stays on global coverage only.
     try:
         primary_metrics["calibration"]["by_slice"] = calibration_by_slice(
-            primary_y_true, primary_y_samples, primary_row_ids, intervals, seed=ctx.seed
+            primary_y_true,
+            primary_y_samples,
+            primary_row_ids,
+            intervals,
+            seed=ctx.seed + _PIT_PRIMARY_OFFSET,
         )
     except Exception as e:
         log.warning(
@@ -2039,7 +2056,7 @@ def evaluate_models(ctx: StageContext) -> dict:
                 prediction_interval=ctx.prediction_interval,
                 discretize=discretize_obs,
                 row_ids=secondary_row_ids,
-                pit_seed=ctx.seed,
+                pit_seed=ctx.seed + _PIT_SECONDARY_OFFSET,
             )
             try:
                 secondary_metrics["calibration"]["by_slice"] = calibration_by_slice(
@@ -2047,7 +2064,7 @@ def evaluate_models(ctx: StageContext) -> dict:
                     secondary_y_samples,
                     secondary_row_ids,
                     intervals,
-                    seed=ctx.seed,
+                    seed=ctx.seed + _PIT_SECONDARY_OFFSET,
                 )
             except Exception as e:
                 log.warning(

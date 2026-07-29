@@ -80,12 +80,14 @@ def coverage_by_slice(
     min_n: int = MIN_SLICE_N,
     *,
     seed: int = PIT_DEFAULT_SEED,
+    pit_rows: np.ndarray | None = None,
 ) -> list[SliceCoverage]:
     """Per-slice empirical coverage with Wilson CIs for one label vector.
 
     ``seed`` drives the PIT randomization. The PIT is computed once over all
     rows and then masked per slice, so a slice's PIT deviation is exactly the
-    deviation of those rows' PIT values in the whole-split histogram.
+    deviation of those rows' PIT values in the whole-split histogram. A caller
+    auditing several dimensions can pass the same precomputed ``pit_rows``.
     """
     y_true = np.asarray(y_true, dtype=float)
     labels = np.asarray(labels, dtype=object)
@@ -100,7 +102,14 @@ def coverage_by_slice(
         lo = np.percentile(y_samples, 100.0 * a, axis=0)
         hi = np.percentile(y_samples, 100.0 * (1.0 - a), axis=0)
         bounds[prob] = (lo, hi)
-    pit_rows = compute_pit_per_row(y_true, y_samples, seed=seed)
+    if pit_rows is None:
+        pit_rows = compute_pit_per_row(y_true, y_samples, seed=seed)
+    else:
+        pit_rows = np.asarray(pit_rows, dtype=float)
+        if pit_rows.shape != y_true.shape:
+            raise ValueError(
+                f"pit_rows shape {pit_rows.shape} does not match y_true {y_true.shape}"
+            )
 
     out: list[SliceCoverage] = []
     for label in sorted(set(labels.tolist()), key=str):
@@ -159,10 +168,18 @@ def calibration_by_slice(
     if terciles.nunique() > 1:
         dimensions["target_tercile"] = terciles.astype(str).to_numpy(dtype=object)
 
+    pit_rows = compute_pit_per_row(y_true, y_samples, seed=seed) if dimensions else None
     slices: list[SliceCoverage] = []
     for dimension, labels in dimensions.items():
         slices += coverage_by_slice(
-            y_true, y_samples, labels, probs, dimension=dimension, min_n=min_n, seed=seed
+            y_true,
+            y_samples,
+            labels,
+            probs,
+            dimension=dimension,
+            min_n=min_n,
+            seed=seed,
+            pit_rows=pit_rows,
         )
 
     n_tests = sum(len(s.levels) for s in slices)

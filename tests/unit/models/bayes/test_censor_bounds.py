@@ -80,14 +80,14 @@ class TestDistribution:
         # P(Y >= 100 | mu=95, sigma=10) ~ 0.31: a real atom, not a fluke.
         assert (draws == 100.0).mean() > 0.2
 
-    def test_empirical_pit_at_the_bound_is_the_interval_upper_edge(self):
+    def test_predictive_cdf_closes_at_the_censored_bound(self):
         """Clipped replicated draws all count as <= the bound, so the
         predictive CDF closes at 1 there. The reported PIT randomizes inside
         that boundary atom rather than pinning to the edge."""
         censored, _ = self._censored(mu=95.0, sigma=10.0)
         draws = np.asarray(censored.sample(random.key(0), (20_000,)))
-        pit_at_bound = (draws <= 100.0).mean()
-        assert pit_at_bound == 1.0
+        cdf_at_bound = (draws <= 100.0).mean()
+        assert cdf_at_bound == 1.0
 
 
 class TestModelGate:

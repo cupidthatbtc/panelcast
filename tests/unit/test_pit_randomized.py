@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 from scipy import stats
 
+from panelcast.evaluation import slices as slices_mod
 from panelcast.evaluation.calibration import (
     PIT_DEFAULT_SEED,
     PIT_METHOD,
@@ -248,8 +249,27 @@ class TestValidation:
             compute_pit_per_row(y_true, y_samples),
             compute_pit_per_row(y_true, y_samples, seed=PIT_DEFAULT_SEED),
         )
+        pit = compute_pit_per_row(y_true, y_samples)
+        assert summarize_pit(pit)["randomization_seed"] == PIT_DEFAULT_SEED == 0
         summary = compute_pit_values(y_true, y_samples)
         assert summary["randomization_seed"] == PIT_DEFAULT_SEED == 0
+
+    def test_pipeline_split_streams_are_disjoint(self):
+        from panelcast.pipelines.evaluate import (
+            _PIT_CONFORMAL_OFFSET,
+            _PIT_PRIMARY_OFFSET,
+            _PIT_SECONDARY_OFFSET,
+        )
+
+        y_true = np.zeros(20)
+        y_samples = np.zeros((10, 20))
+        streams = [
+            compute_pit_per_row(y_true, y_samples, seed=42 + offset)
+            for offset in (_PIT_CONFORMAL_OFFSET, _PIT_PRIMARY_OFFSET, _PIT_SECONDARY_OFFSET)
+        ]
+
+        assert not np.array_equal(streams[0], streams[1])
+        assert not np.array_equal(streams[1], streams[2])
 
     def test_empty_summary_reports_nulls_not_nan(self):
         summary = summarize_pit(np.array([]), seed=3)
@@ -295,6 +315,27 @@ class TestSliceConsistency:
         devs_first = [s["pit_max_abs_dev"] for s in first["slices"]]
         devs_second = [s["pit_max_abs_dev"] for s in second["slices"]]
         assert devs_first != devs_second
+
+    def test_all_dimensions_share_one_pit_computation(self, monkeypatch):
+        y_true, y_samples, labels = self._fixture()
+        row_ids = pd.DataFrame(
+            {
+                "group": labels,
+                "n_reviews": np.arange(len(y_true)) + 1,
+                "train_history": np.arange(len(y_true)) % 12,
+            }
+        )
+        calls = {"n": 0}
+        real = slices_mod.compute_pit_per_row
+
+        def counted(*args, **kwargs):
+            calls["n"] += 1
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(slices_mod, "compute_pit_per_row", counted)
+        calibration_by_slice(y_true, y_samples, row_ids, (0.8,), seed=31)
+
+        assert calls["n"] == 1
 
     def test_slice_result_is_reproducible(self):
         y_true, y_samples, labels = self._fixture()

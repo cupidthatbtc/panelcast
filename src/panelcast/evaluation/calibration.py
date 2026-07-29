@@ -632,7 +632,9 @@ def compute_pit_per_row(
     return (below + uniforms * (equal + 1)) / (n_draws + 1)
 
 
-def summarize_pit(pit: np.ndarray, n_bins: int = 10, *, seed: int | None = None) -> dict:
+def summarize_pit(
+    pit: np.ndarray, n_bins: int = 10, *, seed: int | None = PIT_DEFAULT_SEED
+) -> dict:
     """Histogram summary of already-computed PIT values.
 
     Split out from :func:`compute_pit_values` so a caller that needs both the
