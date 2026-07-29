@@ -30,7 +30,9 @@ def _single_match(
     root = REPO if repo is None else repo
     text = (root / path).read_text(encoding="utf-8")
     compiled = re.compile(pattern, flags=re.MULTILINE)
-    assert compiled.groups == 1, "release metadata patterns must capture exactly one value"
+    assert compiled.groups == 1, (
+        f"{path} {field} pattern must capture exactly one value"
+    )
     matches = compiled.findall(text)
     assert matches, f"{path} has no {field} field"
     assert len(matches) == 1, f"{path} has {len(matches)} {field} fields; expected one"
@@ -75,14 +77,14 @@ def test_pixi_toml_version_matches_pyproject():
 
 def test_citation_cff_version_matches_pyproject():
     version = _single_match(
-        "CITATION.cff", r"^version:[^\S\n]*(\S*)", "version"
+        "CITATION.cff", r"^version:[^\S\n]*(\S*)[^\S\n]*$", "version"
     )
     assert _unquote(version) == _pyproject_version()
 
 
 def test_model_card_version_matches_pyproject():
     version = _single_match(
-        "MODEL_CARD.md", r"^- \*\*Version:\*\*[^\S\n]*(\S*)", "Version"
+        "MODEL_CARD.md", r"^- \*\*Version:\*\*[^\S\n]*(\S*)[^\S\n]*$", "Version"
     )
     assert _unquote(version) == _pyproject_version()
 
@@ -126,18 +128,24 @@ def _release_dates(*, repo: Path | None = None) -> tuple[date, date, date]:
     )
 
 
-def _assert_release_date_consistency(*, repo: Path | None = None) -> None:
+def _assert_release_date_consistency(
+    *, repo: Path | None = None, today: date | None = None
+) -> None:
     changelog_date, citation_date, model_card_date = _release_dates(repo=repo)
     assert changelog_date == citation_date, (
         "release dates disagree: "
         f"CHANGELOG={changelog_date}, CITATION={citation_date}"
     )
-    # Release dates are equal; the document edit date may be newer, but not future-dated.
+    latest_allowed = (date.today() if today is None else today) + timedelta(days=1)
+    assert changelog_date <= latest_allowed, (
+        "release date is implausibly in the future: "
+        f"release={changelog_date}, latest allowed={latest_allowed}"
+    )
+    # The model-card field is a document edit date, so it may be newer than release.
     assert model_card_date >= changelog_date, (
         "MODEL_CARD Last updated predates the release: "
         f"MODEL_CARD={model_card_date}, release={changelog_date}"
     )
-    latest_allowed = date.today() + timedelta(days=1)
     assert model_card_date <= latest_allowed, (
         "MODEL_CARD Last updated is implausibly in the future: "
         f"MODEL_CARD={model_card_date}, latest allowed={latest_allowed}"
@@ -154,7 +162,7 @@ def test_single_match_rejects_duplicate_release_fields(tmp_path):
     )
     with pytest.raises(AssertionError, match="has 2 version fields"):
         _single_match(
-            "CITATION.cff", r"^version:[^\S\n]*(\S*)", "version", repo=tmp_path
+            "CITATION.cff", r"^version:[^\S\n]*(\S*)[^\S\n]*$", "version", repo=tmp_path
         )
 
 
@@ -162,7 +170,7 @@ def test_single_match_rejects_missing_release_field(tmp_path):
     (tmp_path / "CITATION.cff").write_text("title: panelcast\n", encoding="utf-8")
     with pytest.raises(AssertionError, match="has no version field"):
         _single_match(
-            "CITATION.cff", r"^version:[^\S\n]*(\S*)", "version", repo=tmp_path
+            "CITATION.cff", r"^version:[^\S\n]*(\S*)[^\S\n]*$", "version", repo=tmp_path
         )
 
 
@@ -177,9 +185,8 @@ def test_single_match_requires_exactly_one_capture_group(tmp_path):
         )
 
 
-def test_empty_and_duplicate_empty_date_fields_fail_clearly(tmp_path):
-    citation = tmp_path / "CITATION.cff"
-    citation.write_text("date-released:\n", encoding="utf-8")
+def test_empty_date_field_fails_clearly(tmp_path):
+    (tmp_path / "CITATION.cff").write_text("date-released:\n", encoding="utf-8")
     raw = _single_match(
         "CITATION.cff",
         r"^date-released:[^\S\n]*(\S*)",
@@ -189,7 +196,9 @@ def test_empty_and_duplicate_empty_date_fields_fail_clearly(tmp_path):
     with pytest.raises(AssertionError, match="is not an ISO date"):
         _iso_date(raw, "CITATION.cff date-released")
 
-    citation.write_text(
+
+def test_duplicate_with_first_empty_date_field_is_rejected(tmp_path):
+    (tmp_path / "CITATION.cff").write_text(
         "date-released:\ndate-released: 2026-07-29\n", encoding="utf-8"
     )
     with pytest.raises(AssertionError, match="has 2 date-released fields"):
@@ -241,7 +250,7 @@ def test_release_date_guard_accepts_newer_model_card_and_unquoted_cff(tmp_path):
     (tmp_path / "MODEL_CARD.md").write_text(
         "- **Last updated:** 2026-07-30\n", encoding="utf-8"
     )
-    _assert_release_date_consistency(repo=tmp_path)
+    _assert_release_date_consistency(repo=tmp_path, today=date(2026, 7, 29))
 
 
 def test_release_date_guard_rejects_stale_model_card(tmp_path):
@@ -255,11 +264,10 @@ def test_release_date_guard_rejects_stale_model_card(tmp_path):
         "- **Last updated:** 2026-07-28\n", encoding="utf-8"
     )
     with pytest.raises(AssertionError, match="predates the release"):
-        _assert_release_date_consistency(repo=tmp_path)
+        _assert_release_date_consistency(repo=tmp_path, today=date(2026, 7, 29))
 
 
 def test_release_date_guard_rejects_future_model_card(tmp_path):
-    future = date.today() + timedelta(days=2)
     (tmp_path / "CHANGELOG.md").write_text(
         "## [0.23.0] — 2026-07-29\n", encoding="utf-8"
     )
@@ -267,10 +275,24 @@ def test_release_date_guard_rejects_future_model_card(tmp_path):
         "date-released: 2026-07-29\n", encoding="utf-8"
     )
     (tmp_path / "MODEL_CARD.md").write_text(
-        f"- **Last updated:** {future.isoformat()}\n", encoding="utf-8"
+        "- **Last updated:** 2027-09-02\n", encoding="utf-8"
     )
     with pytest.raises(AssertionError, match="implausibly in the future"):
-        _assert_release_date_consistency(repo=tmp_path)
+        _assert_release_date_consistency(repo=tmp_path, today=date(2026, 7, 29))
+
+
+def test_release_date_guard_rejects_future_release(tmp_path):
+    (tmp_path / "CHANGELOG.md").write_text(
+        "## [0.24.0] — 2027-07-29\n", encoding="utf-8"
+    )
+    (tmp_path / "CITATION.cff").write_text(
+        "date-released: 2027-07-29\n", encoding="utf-8"
+    )
+    (tmp_path / "MODEL_CARD.md").write_text(
+        "- **Last updated:** 2027-07-29\n", encoding="utf-8"
+    )
+    with pytest.raises(AssertionError, match="release date is implausibly in the future"):
+        _assert_release_date_consistency(repo=tmp_path, today=date(2026, 7, 29))
 
 
 def test_release_date_guard_rejects_disagreement(tmp_path):
