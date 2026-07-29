@@ -61,6 +61,8 @@ class TestSampleCount:
             (1000, 0.9501, 951),
             (999, 0.95, 950),
             (3, 0.5, 2),
+            (10, 0.50000000001, 6),  # genuine excess above five draws is not a roundoff
+            (100, 0.07, 7),  # one-ULP decimal multiplication overshoot
             (1, 0.99, 1),
             (10, 0.95, 10),  # ceil(9.5) saturates at the full sample
         ],

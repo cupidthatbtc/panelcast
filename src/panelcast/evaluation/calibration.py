@@ -163,10 +163,11 @@ class WISResult:
 def _hdi_sample_count(n_samples: int, prob: float) -> int:
     """Draws a closed HDI must span: the fewest whose mass reaches ``prob``.
 
-    The tolerance absorbs binary-float error in the product — ``0.95 * 1000``
-    must ask for 950 draws, never 951.
+    Move by one representable float, not a fixed tolerance: this corrects a
+    one-ULP multiplication overshoot without rounding down genuine excess mass.
     """
-    count = int(np.ceil(prob * n_samples - 1e-9))
+    product = np.nextafter(prob * n_samples, -np.inf)
+    count = int(np.ceil(product))
     return min(max(count, 1), n_samples)
 
 
