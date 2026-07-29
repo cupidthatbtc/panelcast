@@ -46,15 +46,19 @@ def latent_site_name(prefix: str, name: str) -> str:
 
 @dataclass(frozen=True)
 class RandomWalkLatentSites:
-    raw: str
+    raw: str | None
     raw_abs: str | None
 
     def present(self) -> tuple[str, ...]:
-        return (self.raw,) if self.raw_abs is None else (self.raw, self.raw_abs)
+        return tuple(site for site in (self.raw, self.raw_abs) if site is not None)
 
 
-def rw_latent_sites(prefix: str, innovation_type: object) -> RandomWalkLatentSites:
+def rw_latent_sites(
+    prefix: str, innovation_type: object, *, has_trajectory: bool
+) -> RandomWalkLatentSites:
     """Return exactly the random-walk latent sites created by the model."""
+    if not has_trajectory:
+        return RandomWalkLatentSites(None, None)
     raw_abs = (
         latent_site_name(prefix, "rw_raw_abs")
         if is_skew_rw_innovation(innovation_type)
@@ -63,7 +67,9 @@ def rw_latent_sites(prefix: str, innovation_type: object) -> RandomWalkLatentSit
     return RandomWalkLatentSites(latent_site_name(prefix, "rw_raw"), raw_abs)
 
 
-def entity_skew_site_names(prefix: str) -> tuple[str, str]:
+def entity_skew_site_names(prefix: str, prior_type: object) -> tuple[str, ...]:
+    if (prior_type or "normal") != "skew_normal":
+        return ()
     return (
         latent_site_name(prefix, "entity_skew_abs"),
         latent_site_name(prefix, "entity_skew_sym"),

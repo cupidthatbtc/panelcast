@@ -1715,15 +1715,21 @@ def train_models(  # noqa: C901  # tracked complexity debt
     # Above the cap they drop like entity_obs_raw and evaluate falls back to
     # gate-detected prior-marginalization. rw_raw_abs follows rw_raw's
     # always-excluded/marginalized treatment.
-    entity_skew_on = (
-        str(getattr(ctx, "entity_effect_prior_type", "normal") or "normal") == "skew_normal"
+    entity_skew_excludes = list(
+        entity_skew_site_names(prefix, priors.entity_effect_prior_type)
     )
+    entity_skew_on = bool(entity_skew_excludes)
     drop_entity_skew = entity_skew_on and n_entities_fit > _ENTITY_OBS_KEEP_MAX
-    rw_excludes = list(rw_latent_sites(prefix, priors.rw_innovation_type).present())
+    rw_excludes = list(
+        rw_latent_sites(
+            prefix,
+            priors.rw_innovation_type,
+            has_trajectory=int(model_args["max_seq"]) > 1,
+        ).present()
+    )
     idata_excludes = list(rw_excludes)
     collection_excludes = list(rw_excludes) if exclude_rw_raw_from_collection else []
     if drop_entity_skew:
-        entity_skew_excludes = list(entity_skew_site_names(prefix))
         idata_excludes += entity_skew_excludes
         if exclude_rw_raw_from_collection:
             collection_excludes += entity_skew_excludes

@@ -51,6 +51,7 @@ from panelcast.models.bayes.priors import (
     PriorConfig,
     entity_skew_site_names,
     get_default_priors,
+    latent_site_name,
     rw_latent_sites,
 )
 from panelcast.models.bayes.transforms import get_transform
@@ -427,7 +428,9 @@ def _sample_init_artist_effect(
             dist.Normal(0.0, priors.entity_skew_alpha_scale),
         )
         delta = alpha / jnp.sqrt(1.0 + alpha**2)
-        skew_abs_site, skew_sym_site = entity_skew_site_names(prefix)
+        skew_abs_site, skew_sym_site = entity_skew_site_names(
+            prefix, priors.entity_effect_prior_type
+        )
         z_abs = numpyro.sample(
             skew_abs_site,
             dist.HalfNormal(1.0).expand((n_artists,)).to_event(1),
@@ -521,7 +524,10 @@ def _build_latent_effects(
         return init_artist_effect[None, :]
 
     # Non-centered trajectory innovations decouple sigma_rw from unit-scale draws.
-    rw_sites = rw_latent_sites(prefix, priors.rw_innovation_type)
+    rw_sites = rw_latent_sites(
+        prefix, priors.rw_innovation_type, has_trajectory=True
+    )
+    assert rw_sites.raw is not None
     rw_raw = numpyro.sample(
         rw_sites.raw,
         dist.Normal(0, 1).expand([n_artists, max_seq - 1]).to_event(2),
@@ -532,7 +538,7 @@ def _build_latent_effects(
         # the learned alpha are new sites. The rollout compounds the same
         # construction via standardized_skew_innovation.
         rw_skew_alpha = numpyro.sample(
-            f"{prefix}rw_skew_alpha",
+            latent_site_name(prefix, "rw_skew_alpha"),
             dist.Normal(0.0, priors.rw_skew_alpha_scale),
         )
         rw_raw_abs = numpyro.sample(

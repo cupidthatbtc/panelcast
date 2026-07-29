@@ -3013,8 +3013,10 @@ class TestVramBudget:
 
 
 class TestIdataExclusions:
-    def _captured_excludes(self, tmp_path, ctx):
-        features_path, splits_path = _make_train_parquets(tmp_path, n_features=2)
+    def _captured_excludes(self, tmp_path, ctx, *, n_albums_per=3):
+        features_path, splits_path = _make_train_parquets(
+            tmp_path, n_features=2, n_albums_per=n_albums_per
+        )
         captured = {}
 
         def _capture_fit(
@@ -3077,6 +3079,14 @@ class TestIdataExclusions:
             ),
         )
         assert captured["exclude_from_collection"] == ("user_rw_raw",)
+
+    def test_single_observation_entities_have_no_rw_exclusions(self, tmp_path):
+        captured = self._captured_excludes(
+            tmp_path,
+            _make_ctx(exclude_rw_raw_from_collection=True),
+            n_albums_per=1,
+        )
+        assert captured["exclude_from_collection"] == ()
 
     def test_null_rw_innovation_type_uses_normal_sites(self, tmp_path):
         captured = self._captured_excludes(
