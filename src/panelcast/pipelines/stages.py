@@ -25,14 +25,15 @@ if TYPE_CHECKING:
 class SkipDecision:
     """Whether a stage may be skipped, and — when it may not — why.
 
-    ``outputs_untrusted`` separates "nothing to reuse" from "what is on disk
-    is not what the manifest describes"; only the latter deserves a warning.
+    ``outputs_untrusted`` means disk disagrees with the manifest and deserves a
+    warning. ``outputs_unverifiable`` is the softer legacy/no-proof path.
     """
 
     skip: bool
     reason: str = ""
     outputs_untrusted: bool = False
     key: str = ""
+    outputs_unverifiable: bool = False
 
 
 def _contained_path(path_str: str, roots: Sequence[Path]) -> Path | None:
@@ -327,7 +328,7 @@ class PipelineStage:
         manifest never hashed, a declared output the manifest never recorded —
         counts as unverifiable rather than unchanged.
         """
-        roots = tuple(allowed_roots) if allowed_roots else self._default_roots()
+        roots = self._default_roots() if allowed_roots is None else tuple(allowed_roots)
         prefix = f"{self.name}:"
         recorded = {k: v for k, v in (manifest.outputs or {}).items() if k.startswith(prefix)}
         hashes = manifest.output_hashes or {}
@@ -335,15 +336,28 @@ class PipelineStage:
 
         if not recorded:
             if self.output_paths:
-                return SkipDecision(False, "manifest recorded no outputs for this stage", True)
+                return SkipDecision(
+                    False,
+                    "manifest recorded no outputs for this stage",
+                    outputs_unverifiable=True,
+                )
             return SkipDecision(True)
         if not hashes:
-            return SkipDecision(False, "manifest records no output hashes (pre-0.9.0)", True)
+            return SkipDecision(
+                False,
+                "manifest records no output hashes (pre-0.9.0)",
+                outputs_unverifiable=True,
+            )
 
         for key, path_str in sorted(recorded.items()):
             expected = hashes.get(key)
             if not expected:
-                return SkipDecision(False, "recorded output has no hash", True, key)
+                return SkipDecision(
+                    False,
+                    "recorded output has no hash",
+                    key=key,
+                    outputs_unverifiable=True,
+                )
             if key in declared:
                 try:
                     if Path(path_str).resolve() != declared[key].resolve():
@@ -367,7 +381,9 @@ class PipelineStage:
         unrecorded = [p for p in self.output_paths if f"{prefix}{p.as_posix()}" not in recorded]
         if unrecorded:
             return SkipDecision(
-                False, f"declared output was never recorded: {unrecorded[0]}", True
+                False,
+                f"declared output was never recorded: {unrecorded[0]}",
+                outputs_unverifiable=True,
             )
         return SkipDecision(True)
 

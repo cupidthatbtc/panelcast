@@ -93,9 +93,8 @@ class _Fixture:
         )
 
     def decision(self, roots=None):
-        return self.stage.skip_decision(
-            self.manifest, allowed_roots=roots or [self.tmp_path]
-        )
+        allowed = [self.tmp_path] if roots is None else roots
+        return self.stage.skip_decision(self.manifest, allowed_roots=allowed)
 
 
 @pytest.fixture
@@ -228,7 +227,8 @@ class TestUnverifiableManifestsFailClosed:
         parquet_fixture.manifest.output_hashes = {}
         decision = parquet_fixture.decision()
         assert not decision.skip
-        assert decision.outputs_untrusted
+        assert not decision.outputs_untrusted
+        assert decision.outputs_unverifiable
         assert "0.9.0" in decision.reason
 
     def test_one_recorded_output_missing_its_hash(self, tmp_path):
@@ -241,19 +241,26 @@ class TestUnverifiableManifestsFailClosed:
         )
         key = next(iter(fx.manifest.output_hashes))
         del fx.manifest.output_hashes[key]
-        assert not fx.decision().skip
+        decision = fx.decision()
+        assert not decision.skip
+        assert decision.outputs_unverifiable
+        assert not decision.outputs_untrusted
 
     def test_stage_with_outputs_but_no_recorded_entries(self, parquet_fixture):
         parquet_fixture.manifest.outputs = {}
         decision = parquet_fixture.decision()
         assert not decision.skip
-        assert decision.outputs_untrusted
+        assert decision.outputs_unverifiable
+        assert not decision.outputs_untrusted
 
     def test_declared_output_never_recorded(self, tmp_path):
         fx = _Fixture(tmp_path, {"table": _write_parquet(tmp_path / "processed" / "d.parquet")})
         extra = _write_json(tmp_path / "evaluation" / "m.json")
         fx.stage.output_paths.append(extra)
-        assert not fx.decision().skip
+        decision = fx.decision()
+        assert not decision.skip
+        assert decision.outputs_unverifiable
+        assert not decision.outputs_untrusted
 
     def test_malformed_hash_value(self, parquet_fixture):
         key = next(iter(parquet_fixture.manifest.output_hashes))
@@ -345,6 +352,32 @@ class TestRecordedPathContainment:
     def test_path_inside_roots_is_accepted(self, tmp_path):
         fx = _Fixture(tmp_path, {"table": _write_parquet(tmp_path / "processed" / "d.parquet")})
         assert fx.decision(roots=[tmp_path / "processed"]).skip
+
+    def test_empty_root_allowlist_fails_closed(self, tmp_path):
+        fx = _Fixture(tmp_path, {"table": _write_parquet(tmp_path / "processed" / "d.parquet")})
+
+        decision = fx.decision(roots=[])
+
+        assert not decision.skip
+        assert decision.outputs_untrusted
+        assert "escapes" in decision.reason
+
+    def test_orchestrator_allows_every_declared_artifact_root(self, tmp_path):
+        from panelcast.paths import ArtifactPaths
+
+        orchestrator = PipelineOrchestrator(PipelineConfig(dry_run=True), output_base=tmp_path)
+        roots = set(orchestrator._output_verification_roots())
+        paths = ArtifactPaths.flat()
+
+        assert {
+            paths.processed,
+            paths.splits,
+            paths.features,
+            paths.models,
+            paths.evaluation,
+            paths.predictions,
+            paths.reports,
+        } <= roots
 
 
 class TestSkipDecisionReasons:
@@ -501,6 +534,20 @@ class TestOrchestratorSkipVerification:
         assert "data" not in executed
         manifest = json.loads((workspace / "runB" / "manifest.json").read_text(encoding="utf-8"))
         assert "data" in manifest["stages_skipped"]
+
+    def test_consecutive_runs_keep_skipping_verified_shared_output(self, workspace):
+        assert _run_pipeline(workspace, "runA", []) == 0
+        second: list[str] = []
+        assert _run_pipeline(workspace, "runB", second, skip_existing=True) == 0
+        third: list[str] = []
+        assert _run_pipeline(workspace, "runC", third, skip_existing=True) == 0
+
+        assert "data" not in second
+        assert "data" not in third
+        manifest = json.loads((workspace / "runB" / "manifest.json").read_text(encoding="utf-8"))
+        assert "data" in manifest["stage_hashes"]
+        assert any(key.startswith("data:") for key in manifest["outputs"])
+        assert any(key.startswith("data:") for key in manifest["output_hashes"])
 
     def test_corrupted_shared_output_forces_rerun(self, workspace, tmp_path):
         assert _run_pipeline(workspace, "runA", []) == 0

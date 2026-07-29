@@ -1450,7 +1450,12 @@ existence is not integrity, so a skip is only granted when the bytes on disk
 still hash to what the manifest recorded. Recorded paths are resolved inside
 the run roots first. A manifest with no output hashes (pre-0.9.0), a recorded
 output that is missing, unreadable, or modified, and a declared output the
-manifest never recorded all block the skip and rerun the stage.
+manifest never recorded all block the skip and rerun the stage. Missing legacy
+hash evidence is logged as an informational upgrade path; an actual mismatch,
+missing artifact, substitution, or root escape is a warning. Verified hashes are
+carried into the new manifest so consecutive runs remain skippable. This check
+fully reads each candidate artifact (including directory trees), so
+`--skip-existing` trades additional startup I/O for corruption detection.
 
 **Hash computation** (`stages.py:PipelineStage.compute_input_hash`):
 1. For each `input_path` (sorted), compute `sha256_file(path)`

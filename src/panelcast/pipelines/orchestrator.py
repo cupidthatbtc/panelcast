@@ -1493,13 +1493,13 @@ class PipelineOrchestrator:
     def _output_verification_roots(self) -> tuple[Path, ...]:
         """Roots a recorded output may legitimately live under (#367).
 
-        Shared products are limited to their three cache roots; accepting the
-        whole working tree would let a rewritten manifest verify an unrelated
-        file while the declared artifact was corrupt. Run products stay under
-        the output base, including the earlier run a skip may reuse.
+        Every declared artifact root is accepted, plus the output base that
+        contains earlier run-scoped products. The whole working tree is not a
+        root, so a rewritten manifest cannot substitute an unrelated file.
         """
         paths = self._artifact_paths()
-        return (paths.processed, paths.splits, paths.features, self.output_base)
+        roots = tuple(getattr(paths, item.name) for item in dataclass_fields(paths))
+        return (*roots, self.output_base)
 
     def _execute_stages(self, stages: list[PipelineStage]) -> None:
         """Execute stages with progress display.
@@ -1585,6 +1585,17 @@ class PipelineOrchestrator:
                         )
                         if self.manifest:
                             self.manifest.stages_skipped.append(stage.name)
+                            if previous_manifest is not None:
+                                previous_hash = previous_manifest.stage_hashes.get(stage.name)
+                                if previous_hash is not None:
+                                    self.manifest.stage_hashes[stage.name] = previous_hash
+                                prefix = f"{stage.name}:"
+                                for key, value in (previous_manifest.outputs or {}).items():
+                                    if key.startswith(prefix):
+                                        self.manifest.outputs[key] = value
+                                for key, value in (previous_manifest.output_hashes or {}).items():
+                                    if key.startswith(prefix):
+                                        self.manifest.output_hashes[key] = value
                             save_run_manifest(self._require_manifest(), self._require_run_dir())
                         progress.advance(task_id, weights[stage.name])
                         continue
@@ -1595,6 +1606,14 @@ class PipelineOrchestrator:
                             reason=decision.reason,
                             output=decision.key or None,
                             message="recorded outputs failed verification; rerunning the stage",
+                        )
+                    elif decision.outputs_unverifiable:
+                        log.info(
+                            "stage_outputs_unverifiable",
+                            stage=stage.name,
+                            reason=decision.reason,
+                            output=decision.key or None,
+                            message="no trusted output hashes available; rerunning the stage",
                         )
 
                 # Execute stage
