@@ -953,12 +953,14 @@ def test_pr_ci_proves_release_metadata_without_project_dependencies() -> None:
     assert metadata_lines[1:] == release_metadata_lines
 
     # The JAX runtime check is the final backstop for disguised installer commands.
-    runs = [_run(step).strip() for step in steps]
-    install_pattern = re.compile(r"\b(?:pip3?|uv(?:\s+pip)?|poetry|pdm|conda)\s+(?:install|sync)\b")
+    runs = [re.sub(r"\\\s*\n|\s+", " ", _run(step)).strip() for step in steps]
+    install_pattern = re.compile(
+        r"\b(?:pip3?|pipx|uv(?:\s+pip)?|poetry|pdm|conda)\b"
+        r"[^;&|]*?\b(?:install|sync)\b"
+    )
     install_runs = [run for run in runs if install_pattern.search(run)]
     assert install_runs == [
-        'python -m pip install "pytest==${PYTEST_VERSION}" '
-        '"packaging==${PACKAGING_VERSION}"'
+        'python -m pip install "pytest==${PYTEST_VERSION}" "packaging==${PACKAGING_VERSION}"'
     ]
 
     action_uses = {str(step.get("uses")) for step in steps if step.get("uses")}
