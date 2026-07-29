@@ -1461,6 +1461,12 @@ For each stage in topological order:
 
 The `--resume {run_id}` flag allows resuming a failed run:
 
+0. Resolve the id through `paths.py:safe_run_dir`, the single containment
+   gate every run lookup, move, and delete goes through. The id must be a bare
+   directory name — no separators, traversal, absolute or drive-relative
+   paths, reserved names — and the resolved candidate must still sit beneath
+   the output base, so a symlinked run name pointing elsewhere is refused
+   before anything is read or moved.
 1. Locate run directory: `outputs/{run_id}/` or `outputs/failed/{run_id}/`
 2. If in `failed/`, move back to `outputs/`
 3. Load existing `manifest.json`

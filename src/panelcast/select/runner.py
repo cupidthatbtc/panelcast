@@ -43,6 +43,7 @@ from typing import Any
 import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
+from panelcast.paths import safe_run_dir
 from panelcast.select.space import (
     KNOBS,
     arm_conflicts,
@@ -141,7 +142,7 @@ class SweepConfig:
 
     @property
     def sweep_dir(self) -> Path:
-        return self.output_root / self.sweep_id
+        return safe_run_dir(self.output_root, self.sweep_id, field="sweep_id")
 
 
 @dataclass

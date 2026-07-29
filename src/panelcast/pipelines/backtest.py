@@ -25,6 +25,8 @@ from typing import Any
 import numpy as np
 import structlog
 
+from panelcast.paths import safe_run_dir
+
 log = structlog.get_logger()
 
 ORIGIN_TIMEOUT_RETURNCODE = -9999
@@ -98,7 +100,7 @@ class BacktestConfig:
 
     @property
     def backtest_dir(self) -> Path:
-        return self.output_root / self.backtest_id
+        return safe_run_dir(self.output_root, self.backtest_id, field="backtest_id")
 
 
 def _dig(payload: dict, path: tuple[str, ...]) -> float | None:
