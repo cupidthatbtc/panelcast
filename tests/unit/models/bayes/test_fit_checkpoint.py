@@ -7,6 +7,7 @@ semantics of the cursor.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 from pathlib import Path
@@ -365,3 +366,67 @@ class TestCheckpointIdentityFitArguments:
         assert {"model.py", "model_math.py", "priors.py", "transforms.py", "likelihoods.py"} <= names
         assert "fit.py" not in names
         assert "checkpoint.py" not in names
+
+    def test_source_module_and_relative_import_resolution(self, tmp_path):
+        bayes_root = Path(fit_mod.__file__).parent
+        assert fit_mod._source_module(bayes_root / "__init__.py") == "panelcast.models.bayes"
+        assert fit_mod._source_module(tmp_path / "outside.py") is None
+        assert fit_mod._bayes_module_path("panelcast.models.bayes") == bayes_root / "__init__.py"
+        assert fit_mod._bayes_module_path("somewhere.else") is None
+
+        relative = ast.parse("from .priors import PriorConfig").body[0]
+        absolute = ast.parse("from panelcast.models.bayes.model_math import x").body[0]
+        too_high = ast.parse("from .....outside import x").body[0]
+        assert isinstance(relative, ast.ImportFrom)
+        assert isinstance(absolute, ast.ImportFrom)
+        assert isinstance(too_high, ast.ImportFrom)
+        assert (
+            fit_mod._imported_module(relative, bayes_root / "model.py")
+            == "panelcast.models.bayes.priors"
+        )
+        assert (
+            fit_mod._imported_module(absolute, bayes_root / "model.py")
+            == "panelcast.models.bayes.model_math"
+        )
+        assert fit_mod._imported_module(too_high, bayes_root / "model.py") is None
+
+    def test_source_closure_retains_unparseable_source_and_ignores_missing(self, tmp_path):
+        invalid = tmp_path / "invalid.py"
+        invalid.write_text("def broken(:\n", encoding="utf-8")
+
+        assert fit_mod._model_source_closure(invalid) == {invalid.resolve()}
+        assert fit_mod._model_source_closure(tmp_path / "missing.py") == set()
+
+    def test_stable_payload_handles_nested_code_bytes_and_callable_objects(self):
+        def model():
+            payload = (b"bytes", ...)
+
+            def inner():
+                return payload
+
+            return inner
+
+        class CallableModel:
+            def __call__(self):
+                return 1
+
+        first = fit_mod._stable_code_payload(model)
+        second = fit_mod._stable_code_payload(model)
+        callable_payload = fit_mod._stable_code_payload(CallableModel())
+
+        assert first == second
+        assert "bytes" in first
+        assert "CallableModel" in callable_payload
+
+    def test_source_fingerprint_hashes_raw_bytes_when_ast_parse_fails(
+        self, tmp_path, monkeypatch
+    ):
+        invalid = tmp_path / "model.py"
+        invalid.write_text("def broken(:\n", encoding="utf-8")
+        monkeypatch.setattr(fit_mod, "_model_source_closure", lambda _: {invalid})
+
+        first = fit_mod._source_fingerprint(make_score_model("user"))
+        invalid.write_text("def broken(::: \n", encoding="utf-8")
+        second = fit_mod._source_fingerprint(make_score_model("user"))
+
+        assert first != second
