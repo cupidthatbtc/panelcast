@@ -2027,22 +2027,16 @@ class PipelineOrchestrator:
             # than rmtree whatever a symlinked quarantine slot points at.
             try:
                 failed_path = safe_run_dir(self.output_base, self.run_dir.name, subdir="failed")
-            except RunPathError as e:
-                log.warning("failed_quarantine_path_rejected", error=str(e))
-                self._print_failure_epilogue(error, stage, final_path)
-                return
-            failed_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Remove existing failed dir if present
-            if failed_path.exists():
-                shutil.rmtree(failed_path)
-
-            try:
+                failed_path.parent.mkdir(parents=True, exist_ok=True)
+                if failed_path.exists():
+                    shutil.rmtree(failed_path)
                 shutil.move(str(self.run_dir), str(failed_path))
                 final_path = failed_path
                 log.info("run_moved_to_failed", path=str(failed_path))
-            except PermissionError as e:
-                # On Windows, file locks can persist; log but don't fail
+            except RunPathError as e:
+                log.warning("failed_quarantine_path_rejected", error=str(e))
+            except OSError as e:
+                # Quarantine is secondary recovery and must not mask the pipeline failure.
                 log.warning(
                     "failed_to_move_to_failed",
                     error=str(e),

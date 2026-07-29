@@ -385,6 +385,27 @@ class TestFailureQuarantineContainment:
         assert (outside / "keep.txt").exists()
         assert (run_dir / "artifact.txt").exists()
 
+    def test_quarantine_cleanup_error_does_not_escape(self, tmp_path, monkeypatch):
+        from panelcast.pipelines import orchestrator as orchestrator_module
+        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+
+        base = tmp_path / "outputs"
+        run_dir = base / "run_a"
+        run_dir.mkdir(parents=True)
+        failed = base / "failed" / "run_a"
+        failed.mkdir(parents=True)
+
+        def refuse_cleanup(path):
+            raise OSError("locked")
+
+        monkeypatch.setattr(orchestrator_module.shutil, "rmtree", refuse_cleanup)
+        orch = PipelineOrchestrator(PipelineConfig(), output_base=base)
+        orch.run_dir = run_dir
+        orch._handle_failure(RuntimeError("original"), "train")
+
+        assert run_dir.exists()
+        assert failed.exists()
+
     def test_normal_quarantine_still_moves(self, tmp_path):
         from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
 
