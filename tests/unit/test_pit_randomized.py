@@ -250,9 +250,20 @@ class TestValidation:
             compute_pit_per_row(y_true, y_samples, seed=PIT_DEFAULT_SEED),
         )
         pit = compute_pit_per_row(y_true, y_samples)
-        assert summarize_pit(pit)["randomization_seed"] == PIT_DEFAULT_SEED == 0
+        with pytest.raises(TypeError, match="seed"):
+            summarize_pit(pit)
+        assert summarize_pit(pit, seed=PIT_DEFAULT_SEED)["randomization_seed"] == 0
         summary = compute_pit_values(y_true, y_samples)
         assert summary["randomization_seed"] == PIT_DEFAULT_SEED == 0
+
+    def test_negative_seed_maps_to_a_reproducible_unsigned_stream(self):
+        y_true = np.zeros(10)
+        y_samples = np.zeros((5, 10))
+
+        negative = compute_pit_per_row(y_true, y_samples, seed=-1)
+        unsigned = compute_pit_per_row(y_true, y_samples, seed=0xFFFF_FFFF_FFFF_FFFF)
+
+        np.testing.assert_array_equal(negative, unsigned)
 
     def test_pipeline_split_streams_are_disjoint(self):
         from panelcast.pipelines.evaluate import (

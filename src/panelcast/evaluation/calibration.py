@@ -628,13 +628,12 @@ def compute_pit_per_row(
         raise ValueError("y_samples must include at least one predictive draw.")
     below = (y_samples < y_true[None, :]).sum(axis=0)
     equal = (y_samples == y_true[None, :]).sum(axis=0)
-    uniforms = np.random.default_rng(seed).random(y_true.shape[0])
+    rng_seed = int(seed) & 0xFFFF_FFFF_FFFF_FFFF
+    uniforms = np.random.default_rng(rng_seed).random(y_true.shape[0])
     return (below + uniforms * (equal + 1)) / (n_draws + 1)
 
 
-def summarize_pit(
-    pit: np.ndarray, n_bins: int = 10, *, seed: int | None = PIT_DEFAULT_SEED
-) -> dict:
+def summarize_pit(pit: np.ndarray, n_bins: int = 10, *, seed: int | None) -> dict:
     """Histogram summary of already-computed PIT values.
 
     Split out from :func:`compute_pit_values` so a caller that needs both the
