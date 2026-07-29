@@ -10,7 +10,6 @@ rule.
 from __future__ import annotations
 
 import copy
-import json
 import re
 import sys
 from collections.abc import Iterator
@@ -253,7 +252,10 @@ def _synthetic_workspace_violations(workflow: dict[str, Any]) -> list[str]:
         "PANELCAST_REVIEW_DIFF_B64",
         'message.method === "tools/list"',
         'message.params?.name === "get_diff"',
-        "git add README.md inline-review-mcp.cjs",
+        'encoded="$(base64 -w0 "$RUNNER_TEMP/panelcast-review.diff")"',
+        "inline-review-mcp.json",
+        '"mcpServers":{"review_diff"',
+        "git add README.md inline-review-mcp.cjs inline-review-mcp.json",
     )
     findings.extend(
         f"synthetic workspace builder omits {required}"
@@ -277,18 +279,12 @@ def _inline_diff_violations(workflow: dict[str, Any]) -> list[str]:
     findings: list[str] = []
     if render.get("id") != "render":
         findings.append("inline diff render step has the wrong id")
-    if (review_input.get("outputs") or {}).get("review_diff_b64") != (
-        "${{ steps.render.outputs.review_diff_b64 }}"
-    ):
-        findings.append("encoded diff job output is not wired to the render step")
-    for required in (
-        'if [ "$size" -gt 200000 ]',
-        "review_diff_b64=%s",
-        'base64 -w0 "$diff_file"',
-        '>> "$GITHUB_OUTPUT"',
-    ):
-        if required not in run:
-            findings.append(f"encoded diff renderer omits {required}")
+    if review_input.get("outputs"):
+        findings.append("raw or encoded diff still crosses a GitHub job output")
+    if 'if [ "$size" -gt 200000 ]' not in run:
+        findings.append("inline diff renderer omits the 200 KB cap")
+    if "GITHUB_OUTPUT" in run:
+        findings.append("inline diff renderer writes PR text to GitHub job outputs")
 
     inputs = _review_action_inputs(jobs(workflow).get("review") or {})
     prompt = str(inputs.get("prompt", ""))
@@ -296,22 +292,13 @@ def _inline_diff_violations(workflow: dict[str, Any]) -> list[str]:
         findings.append("credentialed review prompt does not require the diff tool")
     if "untrusted data" not in prompt:
         findings.append("credentialed review prompt does not label the diff as untrusted data")
-    try:
-        settings = json.loads(str(inputs.get("settings", "")))
-        servers = settings["mcpServers"]
-        decoder = servers["review_diff"]
-    except (KeyError, TypeError, json.JSONDecodeError):
-        findings.append("credentialed review settings omit the diff decoder")
-    else:
-        if set(servers) != {"review_diff"}:
-            findings.append("credentialed review settings enable extra MCP servers")
-        if decoder.get("command") != "node" or decoder.get("args") != [
-            "inline-review-mcp.cjs"
-        ]:
-            findings.append("diff decoder does not run the synthetic server")
-        expected = "${{ needs.review-input.outputs.review_diff_b64 }}"
-        if (decoder.get("env") or {}).get("PANELCAST_REVIEW_DIFF_B64") != expected:
-            findings.append("diff decoder is not wired to the encoded job output")
+    claude_args = str(inputs.get("claude_args", ""))
+    if "--mcp-config inline-review-mcp.json" not in claude_args:
+        findings.append("Claude does not load the dedicated diff MCP config")
+    if "--strict-mcp-config" not in claude_args:
+        findings.append("Claude does not restrict itself to the dedicated MCP config")
+    if inputs.get("settings"):
+        findings.append("diff MCP configuration is incorrectly placed in settings")
     return findings
 
 
@@ -482,18 +469,18 @@ def test_secretless_diff_log_is_complete_and_unforgeably_delimited(
     assert "200000" in run
     assert "300000" not in run and "2000000" not in run
     assert "diff is too large" in run
-    assert 'base64 -w0 "$diff_file"' in run
-    assert "review_diff_b64=%s" in run
-    assert '>> "$GITHUB_OUTPUT"' in run
+    assert 'base64 -w0 "$RUNNER_TEMP/panelcast-review.diff"' in run
+    assert "inline-review-mcp.json" in run
+    assert "GITHUB_OUTPUT" not in run
 
     review_input = jobs(review_workflow)["review-input"]
-    assert review_input["outputs"]["review_diff_b64"] == (
-        "${{ steps.render.outputs.review_diff_b64 }}"
-    )
+    assert not review_input.get("outputs")
     inputs = _review_action_inputs(jobs(review_workflow)["review"])
     assert "mcp__review_diff__get_diff exactly once" in inputs["prompt"]
     assert "untrusted data" in inputs["prompt"]
-    assert "${{ needs.review-input.outputs.review_diff_b64 }}" in inputs["settings"]
+    assert "--mcp-config inline-review-mcp.json" in inputs["claude_args"]
+    assert "--strict-mcp-config" in inputs["claude_args"]
+    assert not inputs.get("settings")
 
 
 def test_reviewer_can_still_read_ci_results_instead_of_running_them(
@@ -705,14 +692,19 @@ def _render_step(workflow: dict[str, Any]) -> dict[str, Any]:
 
 
 def _drop_base64_encoding(workflow: dict[str, Any]) -> None:
-    render = _render_step(workflow)
-    render["run"] = str(render["run"]).replace(
-        'base64 -w0 "$diff_file"', 'cat "$diff_file"'
+    builder = next(
+        step
+        for step in _steps(jobs(workflow)["review-input"])
+        if step.get("name") == SYNTHETIC_BUILDER
+    )
+    builder["run"] = str(builder["run"]).replace(
+        'base64 -w0 "$RUNNER_TEMP/panelcast-review.diff"',
+        'cat "$RUNNER_TEMP/panelcast-review.diff"',
     )
 
 
 def _drop_inline_diff_wiring(workflow: dict[str, Any]) -> None:
-    del jobs(workflow)["review-input"]["outputs"]["review_diff_b64"]
+    _edit_claude_args(workflow, "--mcp-config inline-review-mcp.json\n", "")
 
 
 def _widen_inline_diff_cap(workflow: dict[str, Any]) -> None:
@@ -750,9 +742,9 @@ def _widen_inline_diff_cap(workflow: dict[str, Any]) -> None:
         (_omit_synthetic_git_metadata, "omits its Git metadata"),
         (_add_decoy_artifact_transfer, "exactly one builder, upload, and download"),
         (_move_builder_contract_to_a_decoy, "builder omits"),
-        (_drop_base64_encoding, "renderer omits"),
-        (_drop_inline_diff_wiring, "job output is not wired"),
-        (_widen_inline_diff_cap, "renderer omits"),
+        (_drop_base64_encoding, "builder omits"),
+        (_drop_inline_diff_wiring, "does not load the dedicated diff MCP config"),
+        (_widen_inline_diff_cap, "omits the 200 KB cap"),
     ],
 )
 def test_policy_rejects_a_reviewer_that_can_execute_pull_request_code(
