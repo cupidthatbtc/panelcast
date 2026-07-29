@@ -185,20 +185,30 @@ def _linear_terms(inputs: dict[str, Any]) -> tuple[float, float] | None:
             entity_group_pooling=inputs.get("entity_group_pooling", False),
             n_groups=n_groups,
         )
+        gib = 1024**3
+        live_chains = num_chains if chain_method == "vectorized" else 1
+        raw_base_bytes = n_params * 4 * 4 * live_chains + n_obs * n_features * 4
+        collection_bytes = collected * num_samples * 4
+        # The estimator multiplies collection_bytes by a float before dividing;
+        # prove that conversion is representable too, not only the later quotient.
+        float(collection_bytes)
+        raw_base = raw_base_bytes / gib
+        unit = collection_bytes * num_chains / gib
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
-    gib = 1024**3
-    live_chains = num_chains if chain_method == "vectorized" else 1
-    raw_base = (n_params * 4 * 4 * live_chains + n_obs * n_features * 4) / gib
-    unit = collected * num_samples * 4 * num_chains / gib
-    if not (_is_finite(raw_base) and _is_finite(unit)) or raw_base < 0.0 or unit < 0.0:
+    if not (_is_finite(raw_base) and _is_finite(unit)):
         return None
-    return raw_base, unit
+    return float(raw_base), float(unit)
 
 
-def _is_finite(value: Any) -> TypeGuard[float]:
+def _is_finite(value: Any) -> TypeGuard[int | float]:
     """A real, finite number — bools and NaN/inf telemetry are not measurements."""
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(float(value))
+    except (OverflowError, ValueError):
+        return False
 
 
 def _usable_points(records: list[dict[str, Any]]) -> tuple[list[float], list[float], list[float]]:
@@ -306,7 +316,7 @@ def refit_constants(
     if not (_is_finite(float(slope)) and _is_finite(float(intercept))):
         return None
     factor = max(float(slope), 0.1)
-    fixed = 0.0 if abs(float(intercept)) < 1e-12 else max(float(intercept), 0.0)
+    fixed = max(float(intercept), 0.0)
 
     scale = _envelope_scale(
         base_arr, unit_arr, actual_arr, factor, fixed, jit_buffer_percent

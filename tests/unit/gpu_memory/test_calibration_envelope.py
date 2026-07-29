@@ -16,6 +16,7 @@ import pytest
 from panelcast.gpu_memory.calibration_store import (
     _MIN_LOCAL_ENVELOPE,
     PerMachineCalibration,
+    _envelope_scale,
     refit_constants,
     resolve_calibration,
 )
@@ -81,7 +82,8 @@ def _assert_envelope_holds(cal: PerMachineCalibration, records: list[dict]) -> N
 
 class TestPoisonedRecordsAreRejected:
     @pytest.mark.parametrize(
-        "actual", [float("nan"), float("inf"), float("-inf"), 0.0, -1.0, None, True, "7.4", []]
+        "actual",
+        [float("nan"), float("inf"), float("-inf"), 10**400, 0.0, -1.0, None, True, "7.4", []],
     )
     def test_unusable_peaks_are_not_fit(self, actual):
         records = _exact_records(2.5, 0.2, n=8)
@@ -101,7 +103,7 @@ class TestPoisonedRecordsAreRejected:
         _assert_envelope_holds(cal, records[1:])
 
     @pytest.mark.parametrize(
-        "value", [float("nan"), float("inf"), float("-inf"), "many", None, [1]]
+        "value", [float("nan"), float("inf"), float("-inf"), 10**400, "many", None, [1]]
     )
     def test_unusable_estimate_inputs_are_not_fit(self, value):
         records = _exact_records(2.5, 0.2, n=8)
@@ -141,7 +143,7 @@ class TestPoisonedRecordsAreRejected:
         assert cal is not None
         assert cal.n_points == 7
 
-    @pytest.mark.parametrize("jbp", [float("nan"), float("inf"), -0.5, -1.0])
+    @pytest.mark.parametrize("jbp", [float("nan"), float("inf"), 10**400, -0.5, -1.0])
     def test_unusable_jit_buffer_is_refused(self, jbp):
         assert refit_constants(_exact_records(2.5, 0.2), jit_buffer_percent=jbp) is None
 
@@ -184,6 +186,17 @@ class TestDegenerateDesigns:
 
 
 class TestEnvelopeIsVerifiedNotAssumed:
+    def test_binding_point_with_no_scalable_term_is_refused(self):
+        scale = _envelope_scale(
+            np.array([0.0]),
+            np.array([0.0]),
+            np.array([1.0]),
+            factor=0.0,
+            fixed=0.0,
+            jit_buffer_percent=0.1,
+        )
+        assert scale is None
+
     def test_high_base_leverage_meets_the_envelope(self):
         """A dominant base term needs a large inflation, not five nudges.
 
@@ -354,6 +367,23 @@ class TestFallbackToShippedConstants:
             json.dumps({"version": 1, "records": records}, allow_nan=True), encoding="utf-8"
         )
         factor, fixed, source = resolve_calibration(path)
+        assert factor == COLLECTION_OVERHEAD_FACTOR
+        assert fixed == FIXED_OVERHEAD_GB
+        assert "shipped constants" in source
+
+    def test_huge_integer_store_falls_back(self, tmp_path):
+        import json
+
+        path = tmp_path / "cal.json"
+        records = _exact_records(2.5, 0.2, n=8)
+        for record in records[:4]:
+            record["actual_peak_gb"] = 10**400
+        for record in records[4:]:
+            record["estimate_inputs"]["num_samples"] = 10**400
+        path.write_text(json.dumps({"version": 1, "records": records}), encoding="utf-8")
+
+        factor, fixed, source = resolve_calibration(path)
+
         assert factor == COLLECTION_OVERHEAD_FACTOR
         assert fixed == FIXED_OVERHEAD_GB
         assert "shipped constants" in source
