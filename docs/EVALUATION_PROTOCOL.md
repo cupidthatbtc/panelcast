@@ -23,6 +23,28 @@ Metrics
 - Per-row error decomposition (`panelcast diagnose --errors`): entity / group /
   review-count-decile rollups and a worst-25 table from the identified
   predictions payload — read-only, no refit.
+- PIT (`calibration.pit` in `metrics.json`, `pit` per row in
+  `predictions.json`): the **randomized-rank** transform
+  `(below + U * (equal + 1)) / (n_draws + 1)`, where `below`/`equal` count
+  predictive draws strictly below and tied with the observation and
+  `U ~ Uniform(0, 1)`. Under a calibrated predictive the observation is
+  exchangeable with its own draws, so this is exactly uniform for any draw
+  count and any amount of tied mass — including the discrete cases (censored
+  bounds, interval-discretized targets, count likelihoods) where the observation
+  ties with a whole atom and a deterministic PIT would pile onto one value. The
+  randomization uses labeled substreams derived from the run seed and echoes
+  `pit_method` and `pit_randomization_seed` in every PIT summary. Primary, secondary, and
+  conformal PIT use independent streams. Within one split, the whole-split
+  histogram, per-row column, and sliced deviations share one draw, so a row's
+  PIT is the same number wherever it appears.
+  Provenance: PIT deviations archived under `.audit/` and the PIT figures
+  quoted in `MODEL_CARD.md` and `docs/decisions/` predate this convention —
+  they were computed as deterministic mid-P, `(below + 0.5 * equal) / n_draws`,
+  which is not uniform under calibration. They are internally consistent with
+  each other and the decisions they supported (each comparison used the same
+  convention on both arms), but they are **not** comparable to PIT numbers
+  from this version or later; regenerating them requires re-running the
+  corresponding fits.
 
 Cross-validation
 - Primary evaluation: within-entity temporal holdout (last event per entity)

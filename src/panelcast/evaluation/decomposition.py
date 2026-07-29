@@ -13,7 +13,9 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-# Observed value in the far tails of its own predictive distribution.
+# Observed value in the far tails of its own predictive distribution. Under
+# calibration the randomized-rank PIT gives each row a nominal 5% probability
+# of flagging; the realized finite-sample fraction varies around that rate.
 _PIT_TAIL = 0.025
 
 _IDENTITY_KEYS = ("entity", "n_reviews", "train_history")

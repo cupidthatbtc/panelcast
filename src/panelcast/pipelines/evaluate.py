@@ -36,9 +36,9 @@ from panelcast.evaluation.calibration import (
     compute_coverage,
     compute_interval_score,
     compute_pit_per_row,
-    compute_pit_values,
     compute_reliability_data,
     compute_weighted_interval_score,
+    summarize_pit,
 )
 from panelcast.evaluation.metrics import compute_crps, compute_point_metrics
 from panelcast.evaluation.ppc import compute_ppc_statistics
@@ -70,6 +70,18 @@ log = structlog.get_logger()
 
 PRIMARY_SPLIT = str(SplitType.WITHIN_ENTITY_TEMPORAL.value)
 SECONDARY_SPLIT = str(SplitType.ENTITY_DISJOINT.value)
+
+# Labeled NumPy PIT streams stay independent from each other and from the JAX
+# predictive streams while remaining reproducible from the run seed.
+_PIT_CONFORMAL_STREAM = 1
+_PIT_PRIMARY_STREAM = 2
+_PIT_SECONDARY_STREAM = 3
+
+
+def _pit_stream_seed(seed: int, stream: int) -> int:
+    entropy = [int(seed) & 0xFFFF_FFFF_FFFF_FFFF, int(stream)]
+    return int(np.random.SeedSequence(entropy).generate_state(1, dtype=np.uint64)[0])
+
 
 _EVAL_OUTPUT_DIR = "outputs/evaluation"  # str so use sites build Path() at call time (patchable)
 _SAVE_LOG_LIKELIHOOD_ENV = "PANELCAST_SAVE_LOG_LIKELIHOOD"
@@ -910,6 +922,10 @@ def _resolve_feature_split_dir(split_name: str, features_root: Path | None = Non
     return candidate
 
 
+def _predictive_rng_key(seed: int, batch_start: int) -> jax.Array:
+    return random.fold_in(random.key(seed), batch_start)
+
+
 def _run_known_artist_predictive(
     posterior_samples: dict[str, Any],
     model_args: dict[str, Any],
@@ -963,7 +979,7 @@ def _run_known_artist_predictive(
             else:
                 predictive.posterior_samples = batch_samples
 
-            rng_key = random.key(seed_offset + start)
+            rng_key = _predictive_rng_key(seed_offset, start)
             preds = predictive(rng_key, **model_args)
             y_key = next(k for k in preds if k.endswith("_y"))
             # np.asarray materializes on host, which blocks on this batch's
@@ -1295,8 +1311,15 @@ def _evaluate_predictions(
     prediction_interval: float,
     discretize: bool = False,
     row_ids: pd.DataFrame | None = None,
+    *,
+    pit_seed: int,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Compute metrics and export payloads for one split."""
+    """Compute metrics and export payloads for one split.
+
+    ``pit_seed`` seeds the randomized-rank PIT; the histogram and the per-row
+    column come from the same draw, and the sliced audit reuses the seed so
+    every PIT number in a run traces to one randomization.
+    """
     y_pred_mean = np.mean(y_pred_samples, axis=0)
     point_metrics = compute_point_metrics(y_true, y_pred_mean)
     crps_result = compute_crps(y_true, y_pred_samples)
@@ -1344,7 +1367,8 @@ def _evaluate_predictions(
     }
 
     reliability = compute_reliability_data(y_true, y_pred_samples)
-    pit = compute_pit_values(y_true, y_pred_samples)
+    pit_rows = compute_pit_per_row(y_true, y_pred_samples, seed=pit_seed)
+    pit = summarize_pit(pit_rows, seed=pit_seed)
 
     alpha = (1.0 - prediction_interval) / 2.0
     lower_pct = 100.0 * alpha
@@ -1393,7 +1417,8 @@ def _evaluate_predictions(
         for col in row_ids.columns:
             predictions_payload[col] = row_ids[col].tolist()
         predictions_payload["y_pred_sd"] = np.std(y_pred_samples, axis=0).tolist()
-        predictions_payload["pit"] = compute_pit_per_row(y_true, y_pred_samples).tolist()
+        predictions_payload["pit"] = pit_rows.tolist()
+        predictions_payload["pit_randomization_seed"] = int(pit_seed)
         covered: dict[str, list[bool]] = {}
         for prob in calibration_intervals:
             a = (1.0 - prob) / 2.0
@@ -1616,7 +1641,14 @@ def _conformal_block(
     )
     if transform.name != "identity":
         val_samples = np.asarray(transform.inverse(val_samples))
-    block = conformalize(val_y, val_samples, y_test, test_samples, intervals)
+    block = conformalize(
+        val_y,
+        val_samples,
+        y_test,
+        test_samples,
+        intervals,
+        seed=_pit_stream_seed(ctx.seed, _PIT_CONFORMAL_STREAM),
+    )
     log.info(
         "conformal_calibration_done",
         n_calibration=block["n_calibration"],
@@ -1688,6 +1720,7 @@ def _evaluate_primary_split(
         prediction_interval=ctx.prediction_interval,
         discretize=discretize_obs,
         row_ids=primary_row_ids,
+        pit_seed=_pit_stream_seed(ctx.seed, _PIT_PRIMARY_STREAM),
     )
     try:
         # Log-likelihood must be evaluated on the model scale; the ELPDs are
@@ -1748,7 +1781,11 @@ def _evaluate_primary_split(
     # Informational — the strict gate stays on global coverage only.
     try:
         primary_metrics["calibration"]["by_slice"] = calibration_by_slice(
-            primary_y_true, primary_y_samples, primary_row_ids, intervals
+            primary_y_true,
+            primary_y_samples,
+            primary_row_ids,
+            intervals,
+            seed=_pit_stream_seed(ctx.seed, _PIT_PRIMARY_STREAM),
         )
     except Exception as e:
         log.warning(
@@ -2029,10 +2066,15 @@ def evaluate_models(ctx: StageContext) -> dict:
                 prediction_interval=ctx.prediction_interval,
                 discretize=discretize_obs,
                 row_ids=secondary_row_ids,
+                pit_seed=_pit_stream_seed(ctx.seed, _PIT_SECONDARY_STREAM),
             )
             try:
                 secondary_metrics["calibration"]["by_slice"] = calibration_by_slice(
-                    secondary_y_true, secondary_y_samples, secondary_row_ids, intervals
+                    secondary_y_true,
+                    secondary_y_samples,
+                    secondary_row_ids,
+                    intervals,
+                    seed=_pit_stream_seed(ctx.seed, _PIT_SECONDARY_STREAM),
                 )
             except Exception as e:
                 log.warning(

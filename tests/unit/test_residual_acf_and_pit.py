@@ -58,7 +58,7 @@ class TestPitValues:
         n_obs, n_draws = 2000, 400
         y_true = rng.normal(0, 1, n_obs)
         y_samples = rng.normal(0, 1, (n_draws, n_obs))
-        pit = compute_pit_values(y_true, y_samples)
+        pit = compute_pit_values(y_true, y_samples, seed=0)
         assert pit["mean"] == pytest.approx(0.5, abs=0.02)
         # Uniform std = sqrt(1/12) ~= 0.2887
         assert pit["std"] == pytest.approx(np.sqrt(1 / 12), abs=0.02)
@@ -70,7 +70,7 @@ class TestPitValues:
         n_obs, n_draws = 2000, 400
         y_true = rng.normal(0, 2.0, n_obs)  # truth twice as wide
         y_samples = rng.normal(0, 1.0, (n_draws, n_obs))
-        pit = compute_pit_values(y_true, y_samples, n_bins=10)
+        pit = compute_pit_values(y_true, y_samples, n_bins=10, seed=0)
         counts = np.asarray(pit["counts"], dtype=float)
         freq = counts / counts.sum()
         # Edge bins clearly above uniform, middle clearly below.
@@ -79,4 +79,4 @@ class TestPitValues:
 
     def test_shape_validation(self):
         with pytest.raises(ValueError, match="incompatible"):
-            compute_pit_values(np.zeros(5), np.zeros((10, 4)))
+            compute_pit_values(np.zeros(5), np.zeros((10, 4)), seed=0)

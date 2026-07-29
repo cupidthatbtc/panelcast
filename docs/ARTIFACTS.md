@@ -33,6 +33,8 @@ Models
 
 Evaluation
 - outputs/<run_id>/evaluation/metrics.json
+  - `calibration.pit` records `pit_method` and `pit_randomization_seed`; `mean`
+    and `std` are numbers for nonempty splits and `null` when a split has no rows.
 - outputs/<run_id>/evaluation/diagnostics.json
 - outputs/<run_id>/evaluation/within_entity_temporal/predictions.json
 - outputs/<run_id>/evaluation/within_entity_temporal/calibration.json
@@ -44,7 +46,8 @@ predictions.json carries parallel per-row arrays. Alongside the legacy keys
 (y_true, y_pred_mean, y_pred_lower, y_pred_upper, residuals) it is identified:
 entity, event, n_reviews, train_history (the entity's training-event count),
 group when the descriptor names an entity_group_col, plus per-row y_pred_sd,
-pit, and covered flags per calibration interval. `panelcast diagnose --errors`
+pit (randomized-rank, with the `pit_randomization_seed` that produced it), and
+covered flags per calibration interval. `panelcast diagnose --errors`
 decomposes these into error_decomposition_<split>.csv, per-entity / group /
 review-count-decile rollup CSVs, and a worst-25 Markdown table under the
 run-scoped reports dir — read-only, so it works on any past run whose payload

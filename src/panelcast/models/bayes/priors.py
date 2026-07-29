@@ -344,9 +344,10 @@ class PriorConfig:
     # (P(Y >= high) / P(Y <= low)) instead of density, and replicated draws
     # clip to the bounds so PPC carries the same atoms — the max-pin
     # candidate. LOO per-point log-lik follows automatically (the site's
-    # log_prob IS the censored mass); empirical PIT at a censored bound sits
-    # at the interval's upper edge. Location-scale families only; mutually
-    # exclusive with discretize_observation.
+    # log_prob IS the censored mass); a boundary observation ties with that
+    # atom, so its randomized-rank PIT is uniform inside the censored mass.
+    # Location-scale families only; mutually exclusive with
+    # discretize_observation.
     censor_at_bounds: bool = False
     # Normal prior scale on the learned innovation-skewness alpha. Note:
     # alpha -> 0 recovers the SHAPE of the normal path, not bit-identical

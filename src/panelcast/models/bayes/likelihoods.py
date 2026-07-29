@@ -401,9 +401,10 @@ def _emit_obs(prefix, base, n_obs, y, *, discretize, cdf_fn, priors=None, bounds
     on generation); the ``interval_cdf`` mode is the dormant marginalized fallback.
     ``censor_at_bounds`` (#234) wraps the base so boundary observations
     contribute CDF mass instead of density; LOO per-point log-lik follows
-    automatically (the site's log_prob IS the censored mass), and empirical
-    PIT at a censored bound sits at the interval's upper edge (clipped
-    replicated draws count as <= the bound) — the pinned convention.
+    automatically (the site's log_prob IS the censored mass). Replicated
+    draws clip to the bound, so a boundary observation ties with the whole
+    censored atom and the reported randomized-rank PIT lands uniformly
+    inside it rather than pinning to 1 (see evaluation.calibration).
     """
     censor = priors is not None and priors.censor_at_bounds
     if censor and discretize:
