@@ -100,9 +100,14 @@ jobs:
         id: release_pip_wheel
         continue-on-error: true
         run: |
+          set -o pipefail
           python -m pip --python "$RUNNER_TEMP/wheel-env/bin/python" \
             list --format=freeze \
             | { grep -viE '^panelcast==' || true; } > security/wheel-pins.txt
+          if [[ ! -s security/wheel-pins.txt ]]; then
+            echo "::error::wheel runtime closure is empty"
+            exit 1
+          fi
           python -m pip_audit -r security/wheel-pins.txt \
             --no-deps --strict --progress-spinner off \
             --format json --output security/pip-audit-wheel.json

@@ -873,29 +873,39 @@ def test_release_wheel_venv_uses_outer_pinned_pip() -> None:
     assert create_venv in lines, "wheel smoke venv must not seed ensurepip"
     assert wheel_install in lines, "built wheel must use the outer pinned pip"
     assert lines.index(create_venv) < lines.index(wheel_install)
-    assert "ensurepip" not in smoke_body, (
-        "the wheel smoke venv must never seed ensurepip"
-    )
-    assert not any(
-        re.search(
-            r"wheel-env/bin/(?:pip|python[0-9.]*\"?\s+(?:-[A-Za-z]+\s+)*-m\s+pip)",
-            line,
-        )
-        for line in lines
-    ), "the wheel smoke venv must never run its own pip"
 
-    audit = next(
-        step
-        for step in steps
+    audit_i = next(
+        i
+        for i, step in enumerate(steps)
         if step.get("name") == "Audit the built wheel runtime closure"
     )
-    audit_body = re.sub(r"\\\s*\n\s*", " ", _run(audit))
-    audit_body = re.sub(r"\s+", " ", audit_body).strip()
-    assert (
+    assert smoke_i < audit_i, (
+        "the wheel smoke test must create wheel-env before its closure audit"
+    )
+    audit_body = re.sub(r"\\\s*\n\s*", " ", _run(steps[audit_i]))
+    audit_lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for line in audit_body.splitlines()
+        if line.strip()
+    ]
+    wheel_list = (
         'python -m pip --python "$RUNNER_TEMP/wheel-env/bin/python" '
         "list --format=freeze"
-    ) in audit_body
-    assert 'wheel-env/bin/python" -m pip' not in audit_body
+    )
+    assert any(line.startswith(f"{wheel_list} |") for line in audit_lines), (
+        "the wheel closure must be listed through the outer pinned pip"
+    )
+    assert "set -o pipefail" in audit_lines
+    assert any("wheel runtime closure is empty" in line for line in audit_lines)
+
+    job_body = "\n".join(_run(step) for step in steps)
+    assert "ensurepip" not in job_body, (
+        "no release build step may seed ensurepip into the wheel venv"
+    )
+    assert not re.search(
+        r"wheel-env/bin/(?:pip|python[0-9.]*\"?\s+[^|;&]*-m\s+pip)",
+        job_body,
+    ), "no release build step may run the wheel venv's own pip"
 
 
 def test_the_wheel_closure_is_audited_and_not_just_the_lock() -> None:
