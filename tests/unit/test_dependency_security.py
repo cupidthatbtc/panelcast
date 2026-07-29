@@ -876,11 +876,15 @@ def test_tag_publication_reruns_advisory_scans_and_metadata_guards() -> None:
     steps = _steps(build)
     text = "\n".join(_run(step) for step in steps)
     metadata_step = next(
-        step
-        for step in steps
-        if step.get("name") == "Verify release metadata at the tagged commit"
+        (
+            step
+            for step in steps
+            if step.get("name") == "Verify release metadata at the tagged commit"
+        ),
+        None,
     )
 
+    assert metadata_step is not None, "release workflow has no tag-metadata guard"
     assert (
         "pytest --confcutdir=tests/unit tests/unit/test_release_metadata.py"
         in _run(metadata_step)
@@ -895,15 +899,30 @@ def test_tag_publication_reruns_advisory_scans_and_metadata_guards() -> None:
 
 
 def test_pr_ci_proves_release_metadata_without_project_dependencies() -> None:
-    job = _workflow("ci.yml")["jobs"]["release-metadata"]
-    text = "\n".join(_run(step) for step in _steps(job))
+    ci = _workflow("ci.yml")
+    release = _workflow("release.yml")
+    assert ci["env"]["PYTEST_VERSION"] == release["env"]["PYTEST_VERSION"]
 
-    assert "pytest==9.1.1" in text
-    assert 'find_spec("jax") is None' in text
+    steps = _steps(ci["jobs"]["release-metadata"])
+    metadata_step = next(
+        (
+            step
+            for step in steps
+            if step.get("name") == "Verify tag metadata without project dependencies"
+        ),
+        None,
+    )
+    assert metadata_step is not None, "CI has no dependency-free metadata proof"
+    metadata_run = _run(metadata_step)
+    assert "jax must not be installed" in metadata_run
+    assert "sys.exit" in metadata_run
     assert (
         "pytest --confcutdir=tests/unit tests/unit/test_release_metadata.py"
-        in text
+        in metadata_run
     )
+
+    install_runs = [_run(step) for step in steps if "pip install" in _run(step)]
+    assert install_runs == ['python -m pip install "pytest==${PYTEST_VERSION}"']
 
 
 def test_every_standalone_security_gate_installs_its_imports_first() -> None:
