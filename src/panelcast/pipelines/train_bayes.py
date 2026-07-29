@@ -33,7 +33,11 @@ from panelcast.models.bayes.diagnostics import check_convergence, detect_caged_c
 from panelcast.models.bayes.fit import MCMCConfig, fit_model, resolve_progress_bar
 from panelcast.models.bayes.io import save_model
 from panelcast.models.bayes.model import compute_sigma_scaled, make_score_model
-from panelcast.models.bayes.priors import priors_for_transform, rw_latent_site_names
+from panelcast.models.bayes.priors import (
+    entity_skew_site_names,
+    priors_for_transform,
+    rw_latent_sites,
+)
 from panelcast.models.bayes.transforms import get_transform
 from panelcast.paths import ArtifactPaths
 from panelcast.pipelines.errors import ConvergenceError
@@ -1715,13 +1719,14 @@ def train_models(  # noqa: C901  # tracked complexity debt
         str(getattr(ctx, "entity_effect_prior_type", "normal") or "normal") == "skew_normal"
     )
     drop_entity_skew = entity_skew_on and n_entities_fit > _ENTITY_OBS_KEEP_MAX
-    rw_excludes = list(rw_latent_site_names(prefix, priors.rw_innovation_type))
+    rw_excludes = list(rw_latent_sites(prefix, priors.rw_innovation_type).present())
     idata_excludes = list(rw_excludes)
     collection_excludes = list(rw_excludes) if exclude_rw_raw_from_collection else []
     if drop_entity_skew:
-        idata_excludes += [f"{prefix}_entity_skew_abs", f"{prefix}_entity_skew_sym"]
+        entity_skew_excludes = list(entity_skew_site_names(prefix))
+        idata_excludes += entity_skew_excludes
         if exclude_rw_raw_from_collection:
-            collection_excludes += [f"{prefix}_entity_skew_abs", f"{prefix}_entity_skew_sym"]
+            collection_excludes += entity_skew_excludes
     if entity_skew_on:
         log.info(
             "entity_skew_latent_storage",

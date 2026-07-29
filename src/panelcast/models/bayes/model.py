@@ -49,9 +49,9 @@ from numpyro.infer.reparam import LocScaleReparam
 from panelcast.models.bayes.model_math import _CLIP_SHARPNESS, soft_clip  # noqa: F401
 from panelcast.models.bayes.priors import (
     PriorConfig,
+    entity_skew_site_names,
     get_default_priors,
-    is_skew_rw_innovation,
-    rw_latent_site_names,
+    rw_latent_sites,
 )
 from panelcast.models.bayes.transforms import get_transform
 
@@ -427,12 +427,13 @@ def _sample_init_artist_effect(
             dist.Normal(0.0, priors.entity_skew_alpha_scale),
         )
         delta = alpha / jnp.sqrt(1.0 + alpha**2)
+        skew_abs_site, skew_sym_site = entity_skew_site_names(prefix)
         z_abs = numpyro.sample(
-            f"{prefix}entity_skew_abs",
+            skew_abs_site,
             dist.HalfNormal(1.0).expand((n_artists,)).to_event(1),
         )
         z_sym = numpyro.sample(
-            f"{prefix}entity_skew_sym",
+            skew_sym_site,
             dist.Normal(0.0, 1.0).expand((n_artists,)).to_event(1),
         )
         skew_z = delta * z_abs + jnp.sqrt(1.0 - delta**2) * z_sym
@@ -519,17 +520,13 @@ def _build_latent_effects(
     if max_seq <= 1:
         return init_artist_effect[None, :]
 
-    # Non-centered parameterization for trajectory innovations: sample unit
-    # normal, then scale by sigma_rw to decouple geometry (avoids Neal's
-    # funnel between sigma_rw and the innovations). The site name stays
-    # "{prefix}rw_raw" for BOTH processes so the train stage's idata memory
-    # exclusion (exclude_from_idata) applies regardless of latent_process.
-    rw_sites = rw_latent_site_names(prefix, priors.rw_innovation_type)
+    # Non-centered trajectory innovations decouple sigma_rw from unit-scale draws.
+    rw_sites = rw_latent_sites(prefix, priors.rw_innovation_type)
     rw_raw = numpyro.sample(
-        rw_sites[0],
+        rw_sites.raw,
         dist.Normal(0, 1).expand([n_artists, max_seq - 1]).to_event(2),
     )
-    if is_skew_rw_innovation(priors.rw_innovation_type):
+    if rw_sites.raw_abs is not None:
         # Asymmetric innovations (#233): rw_raw stays the symmetric
         # component (memory exclusions keep applying); the |z| component and
         # the learned alpha are new sites. The rollout compounds the same
@@ -539,7 +536,7 @@ def _build_latent_effects(
             dist.Normal(0.0, priors.rw_skew_alpha_scale),
         )
         rw_raw_abs = numpyro.sample(
-            rw_sites[1],
+            rw_sites.raw_abs,
             dist.HalfNormal(1.0).expand([n_artists, max_seq - 1]).to_event(2),
         )
         innovations = sigma_rw * standardized_skew_innovation(

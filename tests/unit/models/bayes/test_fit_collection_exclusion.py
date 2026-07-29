@@ -26,7 +26,7 @@ def _tiny_model_args(seed: int = 0, priors: PriorConfig | None = None) -> dict:
     X = rng.normal(size=(n_obs, 3)).astype(np.float32)
     y = (70 + 5 * rng.normal(size=n_obs)).astype(np.float32)
     prev_score = (70 + 5 * rng.normal(size=n_obs)).astype(np.float32)
-    return {
+    args = {
         "artist_idx": artist_idx.astype(np.int32),
         "album_seq": album_seq.astype(np.int32),
         "prev_score": prev_score,
@@ -34,8 +34,10 @@ def _tiny_model_args(seed: int = 0, priors: PriorConfig | None = None) -> dict:
         "y": y,
         "n_artists": n_artists,
         "max_seq": albums_per_artist,
-        "priors": priors or PriorConfig(),
     }
+    if priors is not None:
+        args["priors"] = priors
+    return args
 
 
 @pytest.mark.slow

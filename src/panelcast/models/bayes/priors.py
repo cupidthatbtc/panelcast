@@ -36,17 +36,38 @@ DEFAULT_BETA_BOUNDARY_EPS = 1e-3
 
 def is_skew_rw_innovation(value: object) -> bool:
     """The rw_raw_abs site exists exactly when this predicate is true."""
-    normalized = getattr(value, "value", value) or "normal"
-    return str(normalized).strip().lower() == "skew_normal"
+    return (value or "normal") == "skew_normal"
 
 
-def rw_latent_site_names(prefix: str, innovation_type: object) -> tuple[str, ...]:
-    stem = prefix.rstrip("_")
-    stem = f"{stem}_" if stem else ""
-    sites = [f"{stem}rw_raw"]
-    if is_skew_rw_innovation(innovation_type):
-        sites.append(f"{stem}rw_raw_abs")
-    return tuple(sites)
+def latent_site_name(prefix: str, name: str) -> str:
+    separator = "" if not prefix or prefix.endswith("_") else "_"
+    return f"{prefix}{separator}{name}"
+
+
+@dataclass(frozen=True)
+class RandomWalkLatentSites:
+    raw: str
+    raw_abs: str | None
+
+    def present(self) -> tuple[str, ...]:
+        return (self.raw,) if self.raw_abs is None else (self.raw, self.raw_abs)
+
+
+def rw_latent_sites(prefix: str, innovation_type: object) -> RandomWalkLatentSites:
+    """Return exactly the random-walk latent sites created by the model."""
+    raw_abs = (
+        latent_site_name(prefix, "rw_raw_abs")
+        if is_skew_rw_innovation(innovation_type)
+        else None
+    )
+    return RandomWalkLatentSites(latent_site_name(prefix, "rw_raw"), raw_abs)
+
+
+def entity_skew_site_names(prefix: str) -> tuple[str, str]:
+    return (
+        latent_site_name(prefix, "entity_skew_abs"),
+        latent_site_name(prefix, "entity_skew_sym"),
+    )
 
 
 # Beta-Binomial effective-rater cap. The Beta overdispersion phi (not n) sets the
