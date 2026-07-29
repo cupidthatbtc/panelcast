@@ -204,7 +204,12 @@ def test_review_never_runs_on_a_fork_or_base_branch_trigger(
     events = triggers(review_workflow)
 
     assert set(events) == {"pull_request"}
-    assert events["pull_request"]["types"] == ["opened", "reopened", "ready_for_review"]
+    assert events["pull_request"]["types"] == [
+        "opened",
+        "synchronize",
+        "reopened",
+        "ready_for_review",
+    ]
     assert "head.repo.full_name == github.repository" in credentialed_job["if"]
 
 
