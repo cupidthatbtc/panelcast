@@ -76,7 +76,8 @@ DECISIONS = {
 }
 # Stock phrases that say a human looked without saying what they concluded.
 EMPTY_RATIONALE = re.compile(
-    r"^(n/?a|none|tbd|todo|triaged|reviewed|accepted|known|no fix|wont ?fix|by design)\.?$",
+    r"^(?:(?:n/?a|none|tbd|todo|triaged|reviewed|accepted|known|not applicable|"
+    r"no fix|wont ?fix|by design)[\s.,;:—-]*)+$",
     re.IGNORECASE,
 )
 MIN_RATIONALE = 60
@@ -240,12 +241,36 @@ def _iso(value: Any, field_name: str, where: str, errors: list[str]) -> date | N
 
 def _check_text(entry: dict, name: str, minimum: int, where: str, errors: list[str]) -> None:
     text = str(entry.get(name) or "").strip()
-    if len(text) < minimum:
+    if EMPTY_RATIONALE.match(text):
+        errors.append(f"{where}: {name} is a stock phrase ({text!r}), not a rationale")
+    elif len(text) < minimum:
         errors.append(
             f"{where}: {name} must be a concrete sentence of at least {minimum} characters"
         )
-    elif EMPTY_RATIONALE.match(text):
-        errors.append(f"{where}: {name} is a stock phrase ({text!r}), not a rationale")
+
+
+def _shipped_ledger_errors(path: Path, document: dict[str, Any]) -> list[str]:
+    try:
+        if path.resolve() != DEFAULT_BASELINE.resolve():
+            return []
+    except OSError:
+        return []
+
+    errors: list[str] = []
+    policy = document.get("policy") or {}
+    if policy.get("max_acceptance_days") != MAX_ACCEPTANCE_DAYS:
+        errors.append(f"{path.name}: policy.max_acceptance_days must be {MAX_ACCEPTANCE_DAYS}")
+    if set(policy.get("acceptance_scopes") or []) != ACCEPTANCE_SCOPES:
+        errors.append(f"{path.name}: policy.acceptance_scopes must be {sorted(ACCEPTANCE_SCOPES)}")
+    try:
+        lock_digest = pixi_lock.parse(pixi_lock.DEFAULT_LOCK).digest
+    except (OSError, ValueError) as exc:
+        errors.append(f"{path.name}: cannot verify its lock triage digest ({exc})")
+    else:
+        recorded_digest = (document.get("last_triage") or {}).get("pixi_lock_sha256")
+        if recorded_digest != lock_digest:
+            errors.append(f"{path.name}: last_triage.pixi_lock_sha256 does not match pixi.lock")
+    return errors
 
 
 def load_ledger(path: Path, today: date) -> tuple[list[Acceptance], list[str], list[str]]:
@@ -264,6 +289,7 @@ def load_ledger(path: Path, today: date) -> tuple[list[Acceptance], list[str], l
         errors.append(
             f"{path.name}: schema must be {LEDGER_SCHEMA}, got {document.get('schema')!r}"
         )
+    errors.extend(_shipped_ledger_errors(path, document))
     entries = document.get("acceptances")
     if not isinstance(entries, list):
         return [], errors + [f"{path.name}: 'acceptances' must be a list"], []
@@ -336,19 +362,25 @@ def write_scaffold(path: Path, findings: list[Finding], today: date) -> list[str
         document = json.loads(path.read_text(encoding="utf-8"))
         document.setdefault("acceptances", [])
     existing = {
-        (e.get("scope"), e.get("package"), e.get("version"), e.get("advisory"))
+        (
+            e.get("scope"),
+            canonicalize_name(str(e.get("package") or "")),
+            e.get("version"),
+            e.get("advisory"),
+        )
         for e in document["acceptances"]
     }
 
     added: list[str] = []
     for finding in sorted(findings, key=lambda f: (f.package, f.version, f.vuln_id)):
-        key = ("lock", finding.package, finding.version, finding.vuln_id)
+        package = canonicalize_name(finding.package)
+        key = ("lock", package, finding.version, finding.vuln_id)
         if key in existing:
             continue
         document["acceptances"].append(
             {
                 "scope": "lock",
-                "package": finding.package,
+                "package": package,
                 "version": finding.version,
                 "advisory": finding.vuln_id,
                 "summary": finding.summary,
@@ -361,7 +393,7 @@ def write_scaffold(path: Path, findings: list[Finding], today: date) -> list[str
                 "expires": (today + timedelta(days=MAX_ACCEPTANCE_DAYS)).isoformat(),
             }
         )
-        added.append(f"{finding.package} {finding.version} {finding.vuln_id}")
+        added.append(f"{package} {finding.version} {finding.vuln_id}")
 
     document["schema"] = LEDGER_SCHEMA
     document.setdefault(
@@ -572,7 +604,6 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="check the declared minimum versions only, without contacting OSV",
     )
-    parser.add_argument("--check", action="store_true", help="gate on the ledger (the default)")
     parser.add_argument(
         "--scaffold",
         action="store_true",
@@ -592,10 +623,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--today", type=date.fromisoformat, default=date.today())
     args = parser.parse_args(argv)
 
-    if args.scaffold and (args.offline or args.check):
-        parser.error(
-            "--scaffold needs a full scan, so it cannot be combined with --offline/--check"
-        )
+    if args.scaffold and args.offline:
+        parser.error("--scaffold needs a full scan, so it cannot be combined with --offline")
 
     lock = pixi_lock.parse(args.lock)
 

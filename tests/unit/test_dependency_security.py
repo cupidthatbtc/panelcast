@@ -313,6 +313,7 @@ def test_an_acceptance_does_not_carry_over_to_a_new_version(tmp_path: Path) -> N
         {"applicability": "triaged"},
         {"applicability": "n/a"},
         {"applicability": "not applicable"},
+        {"applicability": "Reviewed. " * 8},
         {"remediation": "none"},
         {"scope": "unknown"},
         {"owner": ""},
@@ -375,6 +376,29 @@ def test_scaffolding_writes_entries_that_still_fail_the_gate(tmp_path: Path) -> 
     assert errors
     # Re-scaffolding is idempotent, so a human's edits are not overwritten.
     assert dependency_audit.write_scaffold(path, [finding], TODAY) == []
+
+
+def test_scaffold_deduplicates_canonical_package_names(tmp_path: Path) -> None:
+    path = _ledger(tmp_path, _acceptance(package="Pillow"))
+    finding = dependency_audit.Finding(
+        "pillow", "6.5.7", "GHSA-0000-0000-0000", "summary"
+    )
+
+    assert dependency_audit.write_scaffold(path, [finding], TODAY) == []
+
+
+def test_shipped_ledger_policy_and_lock_digest_cannot_drift(tmp_path: Path, monkeypatch) -> None:
+    path = tmp_path / "security_baseline.json"
+    document = json.loads((REPO / "security_baseline.json").read_text(encoding="utf-8"))
+    document["policy"]["max_acceptance_days"] = 999
+    document["last_triage"]["pixi_lock_sha256"] = "0" * 64
+    path.write_text(json.dumps(document), encoding="utf-8")
+    monkeypatch.setattr(dependency_audit, "DEFAULT_BASELINE", path)
+
+    _, errors, _ = dependency_audit.load_ledger(path, TODAY)
+
+    assert any("max_acceptance_days" in error for error in errors)
+    assert any("pixi_lock_sha256" in error for error in errors)
 
 
 def test_offline_gate_passes_and_says_it_did_not_scan(capsys: pytest.CaptureFixture[str]) -> None:
@@ -559,7 +583,7 @@ def _gate(paths: dict[str, Path], *extra: str) -> int:
             "--audit",
             str(paths["audit"]),
             "--pip-audit",
-            str(paths["pip_audit"]),
+            f"{paths['pip_audit']}:wheel-runtime",
             "--sbom",
             f"{paths['sbom']}:wheel-runtime",
             *extra,
@@ -635,6 +659,25 @@ def test_gate_accepts_only_a_matching_wheel_runtime_exception(tmp_path: Path) ->
 
     lock_ledger = _ledger(tmp_path, _acceptance(scope="lock", package="pillow", version="12.3.0"))
     assert _gate(paths, "--baseline", str(lock_ledger)) == 1
+    assert (
+        security_gate.main(
+            [
+                "--baseline",
+                str(lock_ledger),
+                "--pip-audit",
+                f"{paths['pip_audit']}:lock",
+            ]
+        )
+        == 0
+    )
+
+
+def test_gate_rejects_an_sbom_spec_without_a_scope_separator(tmp_path: Path) -> None:
+    problems: list[str] = []
+
+    security_gate.check_sbom(str(tmp_path / "sbom.json"), problems)
+
+    assert problems == [f"{tmp_path / 'sbom.json'}: expected PATH:SCOPE"]
 
 
 def test_gate_fails_when_an_sbom_is_the_wrong_scope_or_empty(tmp_path: Path) -> None:
@@ -654,6 +697,15 @@ def test_gate_fails_when_an_sbom_is_the_wrong_scope_or_empty(tmp_path: Path) -> 
     document.pop("dependencies")
     paths["sbom"].write_text(json.dumps(document))
     assert _gate(paths) == 1
+
+
+def test_gate_fails_on_valid_json_of_the_wrong_type(tmp_path: Path) -> None:
+    paths = _evidence(tmp_path)
+    for key in ("audit", "pip_audit", "sbom"):
+        original = paths[key].read_text(encoding="utf-8")
+        paths[key].write_text("null", encoding="utf-8")
+        assert _gate(paths) == 1
+        paths[key].write_text(original, encoding="utf-8")
 
 
 def test_gate_fails_on_missing_evidence_rather_than_reporting_nothing(tmp_path: Path) -> None:
@@ -733,12 +785,14 @@ def test_scanner_versions_are_pinned() -> None:
         if "setup-pixi" in str(step.get("uses", ""))
     )
 
-    for name in ("PIP_AUDIT_VERSION", "BUILD_VERSION", "PYYAML_VERSION"):
+    for name in ("PIP_AUDIT_VERSION", "BUILD_VERSION", "PYYAML_VERSION", "PACKAGING_VERSION"):
         assert re.fullmatch(r"\d+\.\d+(\.\d+)?", str(environment[name])), name
     assert "pip-audit==${PIP_AUDIT_VERSION}" in _workflow_text("security.yml")
     assert re.fullmatch(r"v\d+\.\d+\.\d+", str(setup_pixi["with"]["pixi-version"]))
     # The release SBOM is evidence too, so its toolchain is pinned the same way.
-    assert re.fullmatch(r"\d+\.\d+(\.\d+)?", str(_workflow("release.yml")["env"]["PYYAML_VERSION"]))
+    release_env = _workflow("release.yml")["env"]
+    for name in ("PYYAML_VERSION", "PACKAGING_VERSION"):
+        assert re.fullmatch(r"\d+\.\d+(\.\d+)?", str(release_env[name])), name
 
 
 def test_the_wheel_closure_is_audited_and_not_just_the_lock() -> None:
@@ -792,6 +846,24 @@ def test_publication_waits_on_the_sboms_being_verifiably_attached() -> None:
     assert "gh release edit" in finalizer_run
     assert "--draft=false" in finalizer_run
     assert "--draft=false" not in text, "the release must stay draft until PyPI succeeds"
+
+
+def test_every_standalone_security_gate_installs_its_imports_first() -> None:
+    release_job = _workflow("release.yml")["jobs"]["release-sbom"]
+    release_runs = [_run(step) for step in _steps(release_job)]
+    release_install = next(i for i, text in enumerate(release_runs) if "pip install" in text)
+    release_gate = next(i for i, text in enumerate(release_runs) if "security_gate.py" in text)
+    assert release_install < release_gate
+    assert "pyyaml==${PYYAML_VERSION}" in release_runs[release_install]
+    assert "packaging==${PACKAGING_VERSION}" in release_runs[release_install]
+
+    security_job = _workflow("security.yml")["jobs"]["audit"]
+    security_runs = [_run(step) for step in _steps(security_job)]
+    scanner_install = next(i for i, text in enumerate(security_runs) if "pip-audit" in text)
+    aggregate_gate = next(i for i, text in enumerate(security_runs) if "security_gate.py" in text)
+    assert scanner_install < aggregate_gate
+    assert "pyyaml==${PYYAML_VERSION}" in security_runs[scanner_install]
+    assert "packaging==${PACKAGING_VERSION}" in security_runs[scanner_install]
 
 
 def test_cross_platform_wheel_and_lock_ci_are_still_in_place() -> None:

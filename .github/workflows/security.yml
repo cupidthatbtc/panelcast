@@ -19,6 +19,7 @@ env:
   PIP_AUDIT_VERSION: "2.10.1"
   BUILD_VERSION: "1.5.0"
   PYYAML_VERSION: "6.0.3"
+  PACKAGING_VERSION: "25.0"
 
 jobs:
   audit:
@@ -47,7 +48,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p evidence
-          python -m pip install --upgrade "pip-audit==${PIP_AUDIT_VERSION}" "build==${BUILD_VERSION}"
+          python -m pip install --upgrade \
+            "pip-audit==${PIP_AUDIT_VERSION}" \
+            "build==${BUILD_VERSION}" \
+            "pyyaml==${PYYAML_VERSION}" \
+            "packaging==${PACKAGING_VERSION}"
           python -m pip_audit --version | tee evidence/scanner-versions.txt
           pixi --version | tee -a evidence/scanner-versions.txt
           python --version | tee -a evidence/scanner-versions.txt
@@ -93,14 +98,13 @@ jobs:
           python -m venv "$RUNNER_TEMP/wheel-env"
           "$RUNNER_TEMP/wheel-env/bin/pip" install --upgrade "pip==26.1.2"
           "$RUNNER_TEMP/wheel-env/bin/pip" install dist/*.whl
-          python -m pip install "pyyaml==${PYYAML_VERSION}"
           python scripts/generate_sbom.py --scope wheel \
             --python "$RUNNER_TEMP/wheel-env/bin/python" \
             --output evidence/panelcast-wheel-runtime.cdx.json
           # Everything the venv holds except panelcast itself, which is the
           # artifact under test and not a release OSV knows about.
           "$RUNNER_TEMP/wheel-env/bin/python" -m pip list --format=freeze \
-            | grep -viE '^panelcast==' > evidence/wheel-pins.txt
+            | { grep -viE '^panelcast==' || true; } > evidence/wheel-pins.txt
           python -m pip_audit -r evidence/wheel-pins.txt --no-deps --strict \
             --progress-spinner off --format json --output evidence/pip-audit-wheel.json
 
@@ -123,8 +127,8 @@ jobs:
             --step "environment SBOM=${{ steps.sbom_environment.outcome }}" \
             --step "wheel closure=${{ steps.wheel_closure.outcome }}" \
             --audit evidence/osv-findings.json \
-            --pip-audit evidence/pip-audit-lock.json \
-            --pip-audit evidence/pip-audit-wheel.json \
+            --pip-audit evidence/pip-audit-lock.json:lock \
+            --pip-audit evidence/pip-audit-wheel.json:wheel-runtime \
             --sbom evidence/panelcast-environment.cdx.json:pixi-environment \
             --sbom evidence/panelcast-wheel-runtime.cdx.json:wheel-runtime \
             --present evidence/pypi-pins.txt \

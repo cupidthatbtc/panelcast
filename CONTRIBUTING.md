@@ -120,6 +120,8 @@ publication is blocked until those assets are read back and verified; only a
 successful PyPI publication lets the final job publish the GitHub Release. Do
 not race the workflow with `gh release create` or publish the draft manually.
 Amend the generated release notes afterward if the changelog needs more detail.
+The release gate revalidates the acceptance ledger, so re-triage any expired
+entry before tagging even when that package is unrelated to the SBOM edit.
 
 ## Dependency security
 

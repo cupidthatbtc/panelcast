@@ -29,17 +29,26 @@ from packaging.utils import canonicalize_name
 
 
 def _load(path: Path, problems: list[str]) -> dict | list | None:
-    if not path.exists():
-        problems.append(f"{path}: missing; the step that writes it did not get that far")
-        return None
-    if path.stat().st_size == 0:
-        problems.append(f"{path}: empty")
-        return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        if not path.exists():
+            problems.append(f"{path}: missing; the step that writes it did not get that far")
+            return None
+        if not path.is_file():
+            problems.append(f"{path}: not a regular file")
+            return None
+        if path.stat().st_size == 0:
+            problems.append(f"{path}: empty")
+            return None
+        document = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(document, (dict, list)):
+            problems.append(f"{path}: expected a JSON object or array")
+            return None
+        return document
     except json.JSONDecodeError as error:
         problems.append(f"{path}: not valid JSON ({error})")
-        return None
+    except OSError as error:
+        problems.append(f"{path}: unreadable ({error})")
+    return None
 
 
 def check_steps(steps: list[str], problems: list[str]) -> None:
@@ -51,7 +60,10 @@ def check_steps(steps: list[str], problems: list[str]) -> None:
 
 def check_audit(path: Path, problems: list[str]) -> None:
     document = _load(path, problems)
+    if document is None:
+        return
     if not isinstance(document, dict):
+        problems.append(f"{path}: expected a JSON object")
         return
     if not document.get("osv_queried"):
         problems.append(f"{path}: the audit did not query OSV, so it is not a vulnerability scan")
@@ -63,11 +75,26 @@ def check_audit(path: Path, problems: list[str]) -> None:
         problems.append(f"{path}: the audit reports its own gate as failed")
 
 
+def _scoped_path(spec: str, problems: list[str]) -> tuple[Path, str] | None:
+    raw_path, separator, scope = spec.rpartition(":")
+    if not separator or not raw_path or not scope:
+        problems.append(f"{spec}: expected PATH:SCOPE")
+        return None
+    return Path(raw_path), scope
+
+
 def check_pip_audit(
-    path: Path,
+    spec: str,
     problems: list[str],
     accepted: list[dependency_audit.Acceptance],
 ) -> None:
+    parsed = _scoped_path(spec, problems)
+    if parsed is None:
+        return
+    path, scope = parsed
+    if scope not in dependency_audit.ACCEPTANCE_SCOPES:
+        problems.append(f"{spec}: unknown audit scope")
+        return
     document = _load(path, problems)
     if document is None:
         return
@@ -76,27 +103,34 @@ def check_pip_audit(
     if not isinstance(dependencies, list) or not dependencies:
         problems.append(f"{path}: no dependencies audited")
         return
-    known = {
-        acceptance.key
-        for acceptance in accepted
-        if acceptance.scope == "wheel-runtime"
-    }
+    known = {acceptance.key for acceptance in accepted if acceptance.scope == scope}
     for dependency in dependencies:
+        if not isinstance(dependency, dict):
+            problems.append(f"{path}: dependency entry is not a JSON object")
+            continue
         name = canonicalize_name(str(dependency.get("name") or ""))
         version = str(dependency.get("version") or "")
         for vulnerability in dependency.get("vulns") or []:
+            if not isinstance(vulnerability, dict):
+                problems.append(f"{path}: vulnerability entry for {name} is malformed")
+                continue
             vuln_id = str(vulnerability.get("id") or "")
-            if ("wheel-runtime", name, version, vuln_id) not in known:
+            if (scope, name, version, vuln_id) not in known:
                 problems.append(f"{path}: {name} {version} {vuln_id}")
         if dependency.get("skip_reason"):
             problems.append(f"{path}: {name} was skipped ({dependency['skip_reason']})")
 
 
 def check_sbom(spec: str, problems: list[str]) -> None:
-    raw_path, _, scope = spec.rpartition(":")
-    path = Path(raw_path)
+    parsed = _scoped_path(spec, problems)
+    if parsed is None:
+        return
+    path, scope = parsed
     document = _load(path, problems)
+    if document is None:
+        return
     if not isinstance(document, dict):
+        problems.append(f"{path}: expected a JSON object")
         return
     if document.get("bomFormat") != "CycloneDX":
         problems.append(f"{path}: not a CycloneDX document")
@@ -132,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--baseline", type=Path, default=dependency_audit.DEFAULT_BASELINE)
     parser.add_argument("--step", action="append", default=[], metavar="LABEL=OUTCOME")
     parser.add_argument("--audit", type=Path, action="append", default=[])
-    parser.add_argument("--pip-audit", type=Path, action="append", default=[])
+    parser.add_argument("--pip-audit", action="append", default=[], metavar="PATH:SCOPE")
     parser.add_argument("--sbom", action="append", default=[], metavar="PATH:SCOPE")
     parser.add_argument("--present", type=Path, action="append", default=[])
     args = parser.parse_args(argv)
