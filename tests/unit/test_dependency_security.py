@@ -41,6 +41,11 @@ import security_gate  # noqa: E402
 
 PLATFORMS = {"linux-64", "osx-arm64", "win-64"}
 TODAY = date(2026, 7, 29)
+METADATA_COMMAND = (
+    "python -m pytest --confcutdir=tests/unit tests/unit/test_release_metadata.py "
+    '--junitxml="$RUNNER_TEMP/release-metadata.xml" -q'
+)
+METADATA_EVIDENCE_FRAGMENT = "metadata proof was vacuous"
 
 # What the lock shipped before the #372 sweep, and what must never come back.
 PREVIOUSLY_LOCKED = {
@@ -885,10 +890,10 @@ def test_tag_publication_reruns_advisory_scans_and_metadata_guards() -> None:
     )
 
     assert metadata_step is not None, "release workflow has no tag-metadata guard"
-    assert (
-        "pytest --confcutdir=tests/unit tests/unit/test_release_metadata.py"
-        in _run(metadata_step)
-    )
+    metadata_lines = [line.strip() for line in _run(metadata_step).splitlines() if line.strip()]
+    assert metadata_lines[0] == METADATA_COMMAND
+    assert len(metadata_lines) == 2
+    assert METADATA_EVIDENCE_FRAGMENT in metadata_lines[1]
     assert "dependency_audit.py" in text
     assert "pip-audit-lock.json:lock" in text
     assert "pip-audit-wheel.json:wheel-runtime" in text
@@ -929,15 +934,27 @@ def test_pr_ci_proves_release_metadata_without_project_dependencies() -> None:
     )
     assert metadata_step is not None, "CI has no dependency-free metadata proof"
     metadata_run = _run(metadata_step)
-    assert "jax must not be installed" in metadata_run
-    assert "sys.exit" in metadata_run
-    assert (
-        "pytest --confcutdir=tests/unit tests/unit/test_release_metadata.py"
-        in metadata_run
-    )
+    metadata_lines = [line.strip() for line in metadata_run.splitlines() if line.strip()]
+    assert 'find_spec("jax")' in metadata_lines[0]
+    assert "sys.exit" in metadata_lines[0]
+    assert metadata_lines[1] == METADATA_COMMAND
+    assert METADATA_EVIDENCE_FRAGMENT in metadata_lines[2]
 
+    release_metadata_step = next(
+        step
+        for step in release_steps
+        if step.get("name") == "Verify release metadata at the tagged commit"
+    )
+    release_metadata_lines = [
+        line.strip()
+        for line in _run(release_metadata_step).splitlines()
+        if line.strip()
+    ]
+    assert metadata_lines[1:] == release_metadata_lines
+
+    # The JAX runtime check is the final backstop for disguised installer commands.
     runs = [_run(step).strip() for step in steps]
-    install_pattern = re.compile(r"\b(?:pip3?|uv\s+pip|poetry)\s+(?:install|sync)\b")
+    install_pattern = re.compile(r"\b(?:pip3?|uv(?:\s+pip)?|poetry|pdm|conda)\s+(?:install|sync)\b")
     install_runs = [run for run in runs if install_pattern.search(run)]
     assert install_runs == [
         'python -m pip install "pytest==${PYTEST_VERSION}" '
@@ -945,10 +962,14 @@ def test_pr_ci_proves_release_metadata_without_project_dependencies() -> None:
     ]
 
     action_uses = {str(step.get("uses")) for step in steps if step.get("uses")}
-    assert action_uses == {
-        "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
-        "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+    release_action_uses = {
+        str(step.get("uses"))
+        for step in release_steps
+        if str(step.get("uses", "")).startswith(
+            ("actions/checkout@", "actions/setup-python@")
+        )
     }
+    assert action_uses == release_action_uses
 
 
 def test_every_standalone_security_gate_installs_its_imports_first() -> None:

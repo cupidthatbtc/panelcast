@@ -38,7 +38,8 @@ jobs:
       - name: Verify tag metadata without project dependencies
         run: |
           python -c 'import importlib.util, sys; sys.exit("jax must not be installed") if importlib.util.find_spec("jax") else None'
-          python -m pytest --confcutdir=tests/unit tests/unit/test_release_metadata.py -q
+          python -m pytest --confcutdir=tests/unit tests/unit/test_release_metadata.py --junitxml="$RUNNER_TEMP/release-metadata.xml" -q
+          python -c 'import sys, xml.etree.ElementTree as ET; root=ET.parse(sys.argv[1]).getroot(); suites=[root] if root.tag == "testsuite" else root.findall(".//testsuite"); tests=sum(int(s.get("tests", 0)) for s in suites); skipped=sum(int(s.get("skipped", 0)) for s in suites); sys.exit(f"metadata proof was vacuous: {tests} tests, {skipped} skipped") if tests == 0 or skipped else None' "$RUNNER_TEMP/release-metadata.xml"
 
   lint:
     runs-on: ubuntu-latest
