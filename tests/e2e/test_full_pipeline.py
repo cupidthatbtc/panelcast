@@ -15,6 +15,7 @@ import pytest
 
 from panelcast.pipelines.errors import DataValidationError, PipelineError, StageSkipped
 from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+from panelcast.pipelines.stages import SkipDecision
 
 # Register custom markers
 pytestmark = [pytest.mark.e2e]
@@ -182,8 +183,8 @@ class TestFullPipeline:
                 mock_stage.description = "Prepare data"
                 mock_stage.run_fn = counting_run_fn
                 mock_stage.compute_input_hash.return_value = "same_hash_123"
-                # First run: should_skip returns False
-                mock_stage.should_skip.return_value = False
+                # First run: no skip
+                mock_stage.skip_decision.return_value = SkipDecision(False, "inputs changed")
                 mock_order.return_value = [mock_stage]
 
                 # First run: execute normally
@@ -199,8 +200,8 @@ class TestFullPipeline:
                 assert run_count["data"] == 1
                 assert "data" in orchestrator1.manifest.stages_completed
 
-                # Second run: should_skip returns True (simulating unchanged inputs)
-                mock_stage.should_skip.return_value = True
+                # Second run: unchanged inputs and verified outputs
+                mock_stage.skip_decision.return_value = SkipDecision(True)
 
                 config2 = PipelineConfig(
                     seed=42,

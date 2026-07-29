@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 from typer.testing import CliRunner
 
 from panelcast.cli import app
+from panelcast.pipelines.stages import SkipDecision
 
 runner = CliRunner()
 
@@ -624,7 +625,7 @@ class TestOrchestratorSkipExistingManifest:
             mock_stage = MagicMock()
             mock_stage.name = "data"
             mock_stage.description = "Prepare data"
-            mock_stage.should_skip.return_value = True
+            mock_stage.skip_decision.return_value = SkipDecision(True)
             mock_stage.compute_input_hash.return_value = "hash123"
             mock_order.return_value = [mock_stage]
 
@@ -634,7 +635,7 @@ class TestOrchestratorSkipExistingManifest:
 
             assert exit_code == 0
             # Stage should have been checked for skip
-            mock_stage.should_skip.assert_called()
+            mock_stage.skip_decision.assert_called()
 
     @patch("panelcast.pipelines.orchestrator.ensure_environment_locked")
     @patch("panelcast.pipelines.orchestrator.verify_environment")
@@ -762,8 +763,14 @@ class TestOrchestratorSkipExistingManifest:
             exit_code = orchestrator.run()
 
             assert exit_code == 0
-            # should_skip is called with None (since manifest was cleared due to flag diff)
-            mock_stage.should_skip.assert_called_with(None, force=False)
+            # skip_decision is called with None (manifest cleared by the flag diff)
+            mock_stage.skip_decision.assert_called_once()
+            called_manifest, called_kwargs = (
+                mock_stage.skip_decision.call_args.args,
+                mock_stage.skip_decision.call_args.kwargs,
+            )
+            assert called_manifest[0] is None
+            assert called_kwargs["force"] is False
 
 
 # ============================================================================

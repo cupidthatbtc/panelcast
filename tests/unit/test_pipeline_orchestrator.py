@@ -16,6 +16,7 @@ from panelcast.pipelines.orchestrator import (
     PipelineOrchestrator,
     run_pipeline,
 )
+from panelcast.pipelines.stages import SkipDecision
 
 _TINY_DESCRIPTOR_YAML = "name: tiny\nmin_obs_thresholds: [3, 7, 9]\nprimary_min_obs: 7\n"
 
@@ -269,8 +270,8 @@ class TestSkipExisting:
             mock_stage.name = "data"
             mock_stage.description = "Prepare data"
             mock_stage.run_fn = None
-            # Make should_skip return True to simulate unchanged inputs
-            mock_stage.should_skip.return_value = True
+            # Simulate unchanged inputs with recorded outputs that still verify
+            mock_stage.skip_decision.return_value = SkipDecision(True)
             mock_stage.compute_input_hash.return_value = "same_hash"
             mock_order.return_value = [mock_stage]
 
@@ -279,7 +280,7 @@ class TestSkipExisting:
             orchestrator.run()
 
             # Stage should have been checked for skip
-            mock_stage.should_skip.assert_called()
+            mock_stage.skip_decision.assert_called()
 
     def test_skip_flag_differences_detects_output_affecting_changes(self, tmp_path: Path):
         """Changed modeling flags should disable hash-based skip reuse."""

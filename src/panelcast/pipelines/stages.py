@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -19,6 +19,37 @@ from panelcast.utils.hashing import sha256_path
 
 if TYPE_CHECKING:
     from panelcast.pipelines.manifest import RunManifest
+
+
+@dataclass(frozen=True)
+class SkipDecision:
+    """Whether a stage may be skipped, and — when it may not — why.
+
+    ``outputs_untrusted`` separates "nothing to reuse" from "what is on disk
+    is not what the manifest describes"; only the latter deserves a warning.
+    """
+
+    skip: bool
+    reason: str = ""
+    outputs_untrusted: bool = False
+    key: str = ""
+
+
+def _contained_path(path_str: str, roots: Sequence[Path]) -> Path | None:
+    """A recorded output path, but only if it resolves inside one of ``roots``.
+
+    Manifests are just files on disk; a tampered one must not be able to aim
+    the integrity check at something outside the workspace it describes.
+    """
+    path = Path(path_str)
+    try:
+        resolved = path.resolve()
+        for root in roots:
+            if Path(root).resolve() in resolved.parents:
+                return path
+    except OSError:
+        return None
+    return None
 
 
 @dataclass
@@ -281,52 +312,101 @@ class PipelineStage:
         combined = hashlib.sha256("\n".join(pairs).encode()).hexdigest()
         return combined
 
+    def verify_recorded_outputs(
+        self,
+        manifest: RunManifest,
+        allowed_roots: Sequence[Path] | None = None,
+    ) -> SkipDecision:
+        """Re-hash every output this stage recorded in ``manifest`` (#367).
+
+        Existence is not integrity: a truncated, edited, or swapped artifact
+        still exists. Every recorded output is resolved inside the allowed
+        roots and re-hashed against the recorded digest, and anything that
+        cannot be proven — a legacy manifest with no hashes, an output the
+        manifest never hashed, a declared output the manifest never recorded —
+        counts as unverifiable rather than unchanged.
+        """
+        roots = tuple(allowed_roots) if allowed_roots else self._default_roots()
+        prefix = f"{self.name}:"
+        recorded = {k: v for k, v in (manifest.outputs or {}).items() if k.startswith(prefix)}
+        hashes = manifest.output_hashes or {}
+
+        if not recorded:
+            if self.output_paths:
+                return SkipDecision(False, "manifest recorded no outputs for this stage", True)
+            return SkipDecision(True)
+        if not hashes:
+            return SkipDecision(False, "manifest records no output hashes (pre-0.9.0)", True)
+
+        for key, path_str in sorted(recorded.items()):
+            expected = hashes.get(key)
+            if not expected:
+                return SkipDecision(False, "recorded output has no hash", True, key)
+            path = _contained_path(path_str, roots)
+            if path is None:
+                return SkipDecision(False, "recorded output path escapes the run roots", True, key)
+            if not path.exists():
+                return SkipDecision(False, "recorded output is missing", True, key)
+            try:
+                actual = sha256_path(path)
+            except OSError as e:
+                return SkipDecision(False, f"recorded output unreadable: {e}", True, key)
+            if actual != expected:
+                return SkipDecision(False, "recorded output no longer matches its hash", True, key)
+
+        unrecorded = [p for p in self.output_paths if f"{prefix}{p.as_posix()}" not in recorded]
+        if unrecorded:
+            return SkipDecision(
+                False, f"declared output was never recorded: {unrecorded[0]}", True
+            )
+        return SkipDecision(True)
+
+    def skip_decision(
+        self,
+        manifest: RunManifest | None,
+        force: bool = False,
+        allowed_roots: Sequence[Path] | None = None,
+    ) -> SkipDecision:
+        """Whether this stage can be skipped, and why not when it cannot.
+
+        A stage can be skipped only if force is False, a previous manifest
+        recorded it, the current input hash matches the recorded one, every
+        declared output still exists, and every recorded output still hashes
+        to the digest the manifest describes.
+        """
+        if force:
+            return SkipDecision(False, "forced rerun")
+        if manifest is None:
+            return SkipDecision(False, "no previous manifest")
+
+        prev_hash = manifest.stage_hashes.get(self.name)
+        if prev_hash is None:
+            return SkipDecision(False, "stage not recorded in the previous run")
+        if self.compute_input_hash() != prev_hash:
+            return SkipDecision(False, "inputs changed")
+        missing = [p for p in self.output_paths if not p.exists()]
+        if missing:
+            return SkipDecision(False, f"output missing: {missing[0]}", True)
+
+        return self.verify_recorded_outputs(manifest, allowed_roots)
+
     def should_skip(
         self,
         manifest: RunManifest | None,
         force: bool = False,
+        allowed_roots: Sequence[Path] | None = None,
     ) -> bool:
-        """Check if stage can be skipped (outputs exist, inputs unchanged).
-
-        A stage can be skipped only if:
-        1. force is False
-        2. A previous manifest exists
-        3. The stage was run in that manifest
-        4. The current input hash matches the recorded hash
-        5. All output files exist
-
-        Args:
-            manifest: Previous run manifest to compare against, or None.
-            force: If True, never skip (always return False).
-
-        Returns:
-            True if stage can be safely skipped, False otherwise.
+        """Whether this stage can be skipped; see :meth:`skip_decision`.
 
         Example:
             >>> if stage.should_skip(previous_manifest):
             ...     print(f"Skipping {stage.name} (inputs unchanged)")
         """
-        if force:
-            return False
+        return self.skip_decision(manifest, force=force, allowed_roots=allowed_roots).skip
 
-        if manifest is None:
-            return False
-
-        # Check if this stage was run before
-        prev_hash = manifest.stage_hashes.get(self.name)
-        if prev_hash is None:
-            return False
-
-        # Check if inputs have changed
-        current_hash = self.compute_input_hash()
-        if current_hash != prev_hash:
-            return False
-
-        # Check all outputs exist
-        if not all(p.exists() for p in self.output_paths):
-            return False
-
-        return True
+    def _default_roots(self) -> tuple[Path, ...]:
+        """Where recorded outputs may live when the caller names no roots."""
+        return (Path.cwd(), *(p.parent for p in self.output_paths))
 
 
 def _topological_sort(

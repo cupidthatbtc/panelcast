@@ -248,7 +248,9 @@ class TestShouldSkip:
         assert stage.should_skip(mock_manifest) is False
 
     def test_skip_when_all_conditions_met(self, tmp_path: Path):
-        """Skip when hash matches and outputs exist."""
+        """Skip when hash matches and the recorded outputs still match too."""
+        from panelcast.utils.hashing import sha256_path
+
         input_file = tmp_path / "input.csv"
         input_file.write_text("content")
         output_file = tmp_path / "output.parquet"
@@ -264,10 +266,13 @@ class TestShouldSkip:
 
         # Compute actual hash
         actual_hash = stage.compute_input_hash()
+        key = f"test:{output_file.as_posix()}"
         mock_manifest = MagicMock()
         mock_manifest.stage_hashes = {"test": actual_hash}
+        mock_manifest.outputs = {key: str(output_file)}
+        mock_manifest.output_hashes = {key: sha256_path(output_file)}
 
-        assert stage.should_skip(mock_manifest) is True
+        assert stage.should_skip(mock_manifest, allowed_roots=[tmp_path]) is True
 
 
 class TestPipelineStages:

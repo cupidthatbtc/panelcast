@@ -1490,6 +1490,15 @@ class PipelineOrchestrator:
 
         return " ".join(parts)
 
+    def _output_verification_roots(self) -> tuple[Path, ...]:
+        """Roots a recorded output may legitimately live under (#367).
+
+        The shared data roots hang off the working directory; every run's
+        products hang off the output base, including the earlier run whose
+        artifacts a skip would reuse.
+        """
+        return (Path.cwd(), self.output_base)
+
     def _execute_stages(self, stages: list[PipelineStage]) -> None:
         """Execute stages with progress display.
 
@@ -1561,17 +1570,30 @@ class PipelineOrchestrator:
 
                 # Check if stage should be skipped
                 if self.config.skip_existing and not self.config.dry_run:
-                    if stage.should_skip(previous_manifest, force=False):
+                    decision = stage.skip_decision(
+                        previous_manifest,
+                        force=False,
+                        allowed_roots=self._output_verification_roots(),
+                    )
+                    if decision.skip:
                         log.info(
                             "stage_skipped",
                             stage=stage.name,
-                            reason="inputs unchanged",
+                            reason="inputs unchanged, recorded outputs re-hashed",
                         )
                         if self.manifest:
                             self.manifest.stages_skipped.append(stage.name)
                             save_run_manifest(self._require_manifest(), self._require_run_dir())
                         progress.advance(task_id, weights[stage.name])
                         continue
+                    if decision.outputs_untrusted:
+                        log.warning(
+                            "stage_outputs_unverified",
+                            stage=stage.name,
+                            reason=decision.reason,
+                            output=decision.key or None,
+                            message="recorded outputs failed verification; rerunning the stage",
+                        )
 
                 # Execute stage
                 self._execute_stage(stage)
