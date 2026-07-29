@@ -254,6 +254,8 @@ def _synthetic_workspace_violations(workflow: dict[str, Any]) -> list[str]:
         'message.method === "tools/list"',
         'message.params?.name === "get_diff"',
         'path.join(__dirname, "inline-review-diff.b64")',
+        "fs.readFileSync(",
+        'Buffer.from(encoded, "base64")',
         'base64 -w0 "$RUNNER_TEMP/panelcast-review.diff" > inline-review-diff.b64',
         "git add README.md inline-review-mcp.cjs inline-review-diff.b64",
     )
@@ -293,6 +295,12 @@ def _inline_diff_violations(workflow: dict[str, Any]) -> list[str]:
     if "untrusted data" not in prompt:
         findings.append("credentialed review prompt does not label the diff as untrusted data")
     claude_args = str(inputs.get("claude_args", ""))
+    if claude_args.count("--mcp-config ") != 1:
+        findings.append("Claude must receive exactly one merged MCP config")
+    if "inline-review-mcp.json" in claude_args:
+        findings.append("Claude still references the dropped file-path MCP config")
+    if "PANELCAST_REVIEW_DIFF_B64" in _text(workflow):
+        findings.append("workflow still uses the legacy diff environment wiring")
     inline_config = (
         '--mcp-config \'{"mcpServers":{"review_diff":{"command":"node",'
         '"args":["${{ github.workspace }}/inline-review-mcp.cjs"]}}}\''
@@ -476,14 +484,17 @@ def test_secretless_diff_log_is_complete_and_unforgeably_delimited(
     assert 'base64 -w0 "$RUNNER_TEMP/panelcast-review.diff"' in run
     assert "inline-review-diff.b64" in run
     assert "GITHUB_OUTPUT" not in run
+    assert "PANELCAST_REVIEW_DIFF_B64" not in run
 
     review_input = jobs(review_workflow)["review-input"]
     assert not review_input.get("outputs")
     inputs = _review_action_inputs(jobs(review_workflow)["review"])
     assert "mcp__review_diff__get_diff exactly once" in inputs["prompt"]
     assert "untrusted data" in inputs["prompt"]
+    assert inputs["claude_args"].count("--mcp-config ") == 1
     assert '"mcpServers":{"review_diff"' in inputs["claude_args"]
     assert "${{ github.workspace }}/inline-review-mcp.cjs" in inputs["claude_args"]
+    assert "inline-review-mcp.json" not in inputs["claude_args"]
     assert "--strict-mcp-config" in inputs["claude_args"]
     assert not inputs.get("settings")
 
