@@ -1154,7 +1154,7 @@ def _build_resource_usage(
 ) -> dict:
     """Expected-vs-actual fit resources (#78): every fit becomes a calibration
     datapoint for the memory estimator and the wall-clock planning numbers."""
-    estimate_inputs = {
+    estimate_inputs: dict[str, Any] = {
         "n_observations": len(model_args["y"]),
         "n_features": int(model_args["X"].shape[1]),
         "n_artists": int(model_args["n_artists"]),
@@ -1162,6 +1162,7 @@ def _build_resource_usage(
         "num_chains": mcmc_config.num_chains,
         "num_samples": mcmc_config.num_samples,
         "num_warmup": mcmc_config.num_warmup,
+        "chain_method": mcmc_config.chain_method,
         "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
     }
     expected_gb = estimate_memory_gb(**estimate_inputs).total_gb

@@ -1,6 +1,6 @@
 {
   "description": "Per-file, per-code mypy error counts with the globally-disabled codes re-enabled (#302). scripts/typing_ratchet.py --check fails CI on any drift; --update rewrites this file.",
-  "total_errors": 90,
+  "total_errors": 88,
   "files": {
     "src/panelcast/cli/run.py": {
       "arg-type": 1
@@ -56,7 +56,7 @@
       "assignment": 20
     },
     "src/panelcast/pipelines/train_bayes.py": {
-      "arg-type": 7
+      "arg-type": 5
     },
     "src/panelcast/preflight/calibrate.py": {
       "arg-type": 1
