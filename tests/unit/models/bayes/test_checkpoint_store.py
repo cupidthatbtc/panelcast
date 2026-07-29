@@ -312,6 +312,26 @@ class TestLoadValidation:
         start, state = _store(tmp_path).resume()
         assert (start, state) == (0, None)
 
+    def test_resume_removes_orphan_temp_artifacts(self, tmp_path):
+        orphan = tmp_path / "block_0000.npz.tmp-999-deadbeef"
+        orphan.write_bytes(b"partial")
+
+        assert _store(tmp_path).resume() == (0, None)
+        assert not orphan.exists()
+
+    def test_resume_validates_headers_without_decoding_arrays(self, tmp_path, monkeypatch):
+        self._completed(tmp_path)
+        monkeypatch.setattr(
+            CheckpointStore,
+            "_read_block",
+            lambda *_: (_ for _ in ()).throw(AssertionError("decoded block payload")),
+        )
+
+        start, state = _store(tmp_path).resume()
+
+        assert start == len(BLOCK_SIZES)
+        assert state["draws_done"] == sum(BLOCK_SIZES)
+
     def test_unreadable_cursor_refuses(self, tmp_path):
         self._completed(tmp_path)
         (tmp_path / "cursor.json").write_text("{not json", encoding="utf-8")

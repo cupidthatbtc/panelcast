@@ -4,9 +4,9 @@ The store exists so a killed fit resumes at the last block instead of the
 start, which only helps if the resume is provably the same Markov chain. Three
 rules make that true:
 
-- **Immutable per block.** Block ``i`` writes ``block_i.npz`` (its draws) and
-  ``state_i.pkl`` (the sampler state it ended in). Nothing is ever rewritten
-  in place, so a state can never move ahead of the cursor that names it.
+- **Immutable once committed.** Block ``i`` writes ``block_i.npz`` (its draws)
+  and ``state_i.pkl`` (the sampler state it ended in). Nothing named by the
+  cursor is rewritten, so a state can never move ahead of its commit record.
 - **Atomic artifacts.** Every file is written to a temporary name, flushed,
   fsynced, then renamed over its final path. A reader sees the whole file or
   no file, never a truncated one.
@@ -19,7 +19,8 @@ A crash therefore leaves the previous commit or the new one, and load
 validates format, identity, block count, draw counts, chain counts, site
 names, shapes, and hashes before a single draw is trusted. Anything that does
 not check out refuses loudly — silently mixing two fits' draws is the failure
-this module exists to prevent.
+this module exists to prevent. A checkpoint directory is single-writer; two
+concurrent fits sharing it will fail hash/identity checks rather than coordinate.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ import json
 import logging
 import os
 import pickle
+import zipfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -250,15 +252,16 @@ class CheckpointStore:
         block 0 with no state; anything unverifiable raises.
         """
         self.directory.mkdir(parents=True, exist_ok=True)
+        self._remove_orphan_temps()
         if not self.cursor_path.exists():
             return 0, None
 
         payload = self._read_cursor()
         records = self._validate_cursor(payload)
         for record in records:
-            # Hash and validate the archive once before trusting the state that
-            # follows it; load_blocks rechecks it after sampling finishes.
-            self._read_block(record)
+            block_path = self.directory / record.block_file
+            self._verify_artifact(block_path, record.block_sha256, record)
+            self._validate_block_headers(record)
             self._verify_artifact(self.directory / record.state_file, record.state_sha256, record)
         self._records = records
         if not records:
@@ -277,6 +280,18 @@ class CheckpointStore:
             "Resuming from checkpoint: %d/%d blocks done", len(records), len(self.block_sizes)
         )
         return len(records), state
+
+    def _remove_orphan_temps(self) -> None:
+        """Delete uncommitted temp files left by a killed writer."""
+        for path in self.directory.glob(f"*{_TMP_MARKER}*"):
+            try:
+                path.unlink()
+            except OSError as exc:
+                raise CheckpointError(
+                    f"checkpoint temp artifact {path} cannot be removed ({exc}); "
+                    "delete the checkpoint directory to start over"
+                ) from exc
+            logger.info("Removed orphan checkpoint temp artifact %s", path)
 
     def _read_cursor(self) -> dict:
         try:
@@ -364,6 +379,45 @@ class CheckpointStore:
                 f"({actual[:12]} != {expected[:12]}); delete the checkpoint directory to start over"
             )
 
+    def _validate_block_headers(self, record: BlockRecord) -> None:
+        """Validate NPZ keys and shapes without materializing array payloads."""
+        path = self.directory / record.block_file
+        expected = {f"s.{name}": shape for name, shape in record.sample_sites.items()}
+        expected.update({f"e.{name}": shape for name, shape in record.extra_sites.items()})
+        try:
+            with zipfile.ZipFile(path) as archive:
+                found = {
+                    name.removesuffix(".npy")
+                    for name in archive.namelist()
+                    if name.endswith(".npy")
+                }
+                if found != set(expected):
+                    raise CheckpointError(
+                        f"checkpoint block {record.index} holds keys {sorted(found)}, "
+                        f"the cursor committed {sorted(expected)}"
+                    )
+                for name, shape in expected.items():
+                    with archive.open(f"{name}.npy") as handle:
+                        version = np.lib.format.read_magic(handle)
+                        if version == (1, 0):
+                            actual_shape, _, _ = np.lib.format.read_array_header_1_0(handle)
+                        elif version in ((2, 0), (3, 0)):
+                            actual_shape, _, _ = np.lib.format.read_array_header_2_0(handle)
+                        else:
+                            raise ValueError(f"unsupported NPY version {version}")
+                    if list(actual_shape) != list(shape):
+                        raise CheckpointError(
+                            f"checkpoint block {record.index} site '{name[2:]}' has shape "
+                            f"{list(actual_shape)}, the cursor committed {shape}"
+                        )
+        except CheckpointError:
+            raise
+        except (EOFError, KeyError, OSError, ValueError, zipfile.BadZipFile) as exc:
+            raise CheckpointError(
+                f"checkpoint block {record.index} archive {path} is unreadable ({exc}); "
+                "delete the checkpoint directory to start over"
+            ) from exc
+
     # -- append ------------------------------------------------------------
 
     def append(
@@ -400,8 +454,7 @@ class CheckpointStore:
 
         block_path = self.block_path(index)
         with atomic_write(block_path) as handle:
-            # Explicit allow_pickle keeps mypy from binding the payload kwargs to it.
-            np.savez(handle, allow_pickle=True, **payload)
+            np.savez(handle, **payload)
         with np.load(block_path, allow_pickle=True) as written:
             # Parsing the archive directory proves the file landed complete.
             written.files

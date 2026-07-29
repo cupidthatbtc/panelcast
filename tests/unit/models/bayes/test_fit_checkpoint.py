@@ -83,9 +83,10 @@ class TestBlockSizes:
 
 @pytest.mark.slow
 class TestCheckpointParity:
-    def test_blocked_equals_single_shot(self, tmp_path):
+    @pytest.mark.parametrize("checkpoint_every", [10, 7])
+    def test_blocked_equals_single_shot(self, tmp_path, checkpoint_every):
         single = _fit()
-        blocked = _fit(checkpoint_every=10, checkpoint_dir=tmp_path / "ckpt")
+        blocked = _fit(checkpoint_every=checkpoint_every, checkpoint_dir=tmp_path / "ckpt")
         _assert_same_posterior(single, blocked)
         assert not blocked.resumed_from_checkpoint
 
@@ -234,6 +235,25 @@ class TestCheckpointIdentity:
         assert json.loads(json.dumps(identity)) == identity
 
 
+def test_non_checkpointed_fit_skips_identity_trace(monkeypatch):
+    monkeypatch.setattr(
+        fit_mod,
+        "_checkpoint_identity",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("identity traced")),
+    )
+
+    identity = fit_mod._maybe_checkpoint_identity(
+        MCMCConfig(num_samples=20),
+        _tiny_model_args(),
+        model=make_score_model("user"),
+        extra_fields=(),
+        exclude_from_idata=None,
+        warm_start=None,
+    )
+
+    assert identity is None
+
+
 class TestCheckpointIdentityFitArguments:
     """Every output-affecting fit argument, not just the model inputs."""
 
@@ -297,6 +317,7 @@ class TestCheckpointIdentityFitArguments:
     def test_environment_axes_are_recorded(self):
         identity = self._identity()
         assert identity["model"]["source_sha256"]
+        assert identity["python_version"]
         assert identity["jax_backend"]
         assert identity["jax_devices"]
         assert isinstance(identity["jax_x64"], bool)
@@ -318,3 +339,29 @@ class TestCheckpointIdentityFitArguments:
 
         source.write_text("def model():\n    return 2\n", encoding="utf-8")
         assert fit_mod._source_fingerprint(make_score_model("user")) != baseline
+
+    def test_sourceless_callable_fingerprint_has_no_process_address(self, monkeypatch):
+        monkeypatch.setattr(fit_mod.inspect, "getsourcefile", lambda _: None)
+        monkeypatch.setattr(
+            fit_mod.inspect,
+            "getsource",
+            lambda _: (_ for _ in ()).throw(OSError("no source")),
+        )
+        first: dict[str, object] = {}
+        second: dict[str, object] = {}
+        exec("def model(x):\n    return x + 1", first)
+        exec("def model(x):\n    return x + 1", second)
+
+        assert fit_mod._source_fingerprint(first["model"]) == fit_mod._source_fingerprint(
+            second["model"]
+        )
+
+    def test_model_source_closure_is_scoped_to_model_dependencies(self):
+        import panelcast.models.bayes.model as model_module
+
+        paths = fit_mod._model_source_closure(Path(model_module.__file__))
+        names = {path.name for path in paths}
+
+        assert {"model.py", "model_math.py", "priors.py", "transforms.py", "likelihoods.py"} <= names
+        assert "fit.py" not in names
+        assert "checkpoint.py" not in names

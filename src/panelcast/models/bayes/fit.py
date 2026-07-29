@@ -360,8 +360,37 @@ def _bayes_module_path(module: str) -> Path | None:
     return candidate if candidate.exists() else None
 
 
+def _source_module(path: Path) -> str | None:
+    root = Path(__file__).parent.resolve()
+    try:
+        relative = path.resolve().relative_to(root).with_suffix("")
+    except (OSError, ValueError):
+        return None
+    parts = list(relative.parts)
+    if parts and parts[-1] == "__init__":
+        parts.pop()
+    suffix = ".".join(parts)
+    return "panelcast.models.bayes" + (f".{suffix}" if suffix else "")
+
+
+def _imported_module(node: ast.ImportFrom, source_path: Path) -> str | None:
+    if node.level == 0:
+        return node.module
+    current = _source_module(source_path)
+    if current is None:
+        return None
+    package = current if source_path.name == "__init__.py" else current.rpartition(".")[0]
+    parts = package.split(".")
+    if node.level > len(parts):
+        return None
+    base = parts[: len(parts) - node.level + 1]
+    if node.module:
+        base.extend(node.module.split("."))
+    return ".".join(base)
+
+
 def _model_source_closure(source_file: Path) -> set[Path]:
-    """Model source plus the local Bayesian modules it imports."""
+    """Model source plus imported modules inside panelcast.models.bayes."""
     pending = [source_file]
     seen: set[Path] = set()
     while pending:
@@ -371,16 +400,24 @@ def _model_source_closure(source_file: Path) -> set[Path]:
             if path in seen:
                 continue
             source = path.read_text(encoding="utf-8")
-            tree = ast.parse(source)
-        except (OSError, SyntaxError, UnicodeError):
+        except (OSError, UnicodeError) as exc:
+            logger.warning("Could not read model source %s for checkpoint identity: %s", path, exc)
             continue
         seen.add(path)
+        try:
+            tree = ast.parse(source)
+        except (SyntaxError, ValueError) as exc:
+            logger.warning(
+                "Could not parse model source %s for imported dependencies: %s", path, exc
+            )
+            continue
         for node in ast.walk(tree):
             modules: list[str] = []
             if isinstance(node, ast.Import):
                 modules = [alias.name for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module:
-                modules = [node.module]
+            elif isinstance(node, ast.ImportFrom):
+                imported_module = _imported_module(node, path)
+                modules = [imported_module] if imported_module else []
             for module in modules:
                 imported = _bayes_module_path(module)
                 if imported is not None and imported.resolve() not in seen:
@@ -388,36 +425,67 @@ def _model_source_closure(source_file: Path) -> set[Path]:
     return seen
 
 
+def _stable_code_payload(target: Any) -> str:
+    def constant(value: Any) -> Any:
+        if isinstance(value, type((lambda: None).__code__)):
+            return {
+                "name": value.co_name,
+                "code": value.co_code.hex(),
+                "names": value.co_names,
+                "varnames": value.co_varnames,
+                "consts": [constant(item) for item in value.co_consts],
+            }
+        if isinstance(value, tuple):
+            return [constant(item) for item in value]
+        if isinstance(value, bytes):
+            return {"bytes": value.hex()}
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return value
+        return f"{type(value).__module__}.{type(value).__qualname__}"
+
+    code = getattr(target, "__code__", None)
+    payload: dict[str, Any] = {
+        "module": getattr(target, "__module__", type(target).__module__),
+        "qualname": getattr(target, "__qualname__", type(target).__qualname__),
+    }
+    if code is not None:
+        payload["code"] = constant(code)
+    return json.dumps(payload, sort_keys=True, separators=(",", ":"))
+
+
 def _source_fingerprint(model: Callable) -> str:
-    """Hash output-affecting model code while ignoring comments and formatting."""
+    """Hash model syntax and local dependencies without process-local addresses."""
     digest = hashlib.sha256()
-    target: Any = model
-    source_file: str | None = None
+    target: Any = inspect.unwrap(model)
     for _ in range(8):
-        try:
-            source_file = inspect.getsourcefile(target)
-        except TypeError:
-            source_file = None
-        if source_file:
-            break
-        wrapped = getattr(target, "fn", None) or getattr(target, "__wrapped__", None)
+        wrapped = getattr(target, "fn", None) or getattr(target, "func", None)
         if wrapped is None or wrapped is target:
             break
-        target = wrapped
+        target = inspect.unwrap(wrapped)
 
+    try:
+        source_file = inspect.getsourcefile(target)
+    except TypeError:
+        source_file = None
     paths = _model_source_closure(Path(source_file)) if source_file else set()
     for path in sorted(paths):
+        digest.update(path.name.encode())
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"))
-            digest.update(path.name.encode())
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except (OSError, SyntaxError, UnicodeError, ValueError) as exc:
+            logger.warning("Hashing raw model source %s after parse failure: %s", path, exc)
+            try:
+                digest.update(path.read_bytes())
+            except OSError:
+                digest.update(str(path).encode())
+        else:
             digest.update(ast.dump(tree, include_attributes=False).encode())
-        except (OSError, SyntaxError, UnicodeError):
-            continue
     if not paths:
         try:
             digest.update(inspect.getsource(target).encode())
         except (OSError, TypeError):
-            digest.update(repr(getattr(target, "__code__", target)).encode())
+            digest.update(_stable_code_payload(target).encode())
     return digest.hexdigest()
 
 
@@ -479,6 +547,7 @@ def _checkpoint_identity(
         "extra_fields": sorted(extra_fields),
         "exclude_from_idata": sorted(exclude_from_idata or ()),
         "warm_start": _warm_start_fingerprint(warm_start),
+        "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
         "numpyro_version": numpyro.__version__,
         "numpy_version": np.__version__,
         "jax_version": jax.__version__,
