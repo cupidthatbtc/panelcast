@@ -50,7 +50,14 @@ from panelcast.config.gates import (
     SigmaObsPriorType,
 )
 from panelcast.model_preflight import beta_binomial_trial_scale
-from panelcast.paths import ArtifactPaths, resolve_latest
+from panelcast.paths import (
+    ArtifactPaths,
+    RunPathError,
+    path_is_within,
+    resolve_latest,
+    safe_run_dir,
+    validate_run_id,
+)
 from panelcast.pipelines.errors import (
     ConvergenceError,
     EnvironmentError,
@@ -513,20 +520,15 @@ class PipelineConfig:
             )
 
     def _validate_run_id(self) -> None:
-        """A caller-supplied run_id must be a bare directory name (#167)."""
-        if self.run_id is None:
-            return
-        if (
-            not self.run_id
-            or "/" in self.run_id
-            or "\\" in self.run_id
-            or self.run_id.startswith(".")  # covers "." and ".."
-            or self.run_id in ("latest", "failed")
-        ):
-            raise ValueError(
-                f"Invalid run_id: {self.run_id!r}. Must be a bare directory name "
-                "(no path separators, not a reserved name)."
-            )
+        """Caller-supplied run and resume ids must be bare names (#167, #365).
+
+        Resume is validated here too, so a YAML or direct-API id is rejected
+        before anything on disk is looked up, moved, or deleted.
+        """
+        for name in ("run_id", "resume"):
+            value = getattr(self, name)
+            if value is not None:
+                validate_run_id(value, field=name)
 
     def _validate_structural_gates(self) -> None:
         """Enum and coherence checks for the #269/#271 structural gates."""
@@ -963,7 +965,10 @@ class PipelineOrchestrator:
             # up front so it never has to race the mutable `latest` pointer.
             # A collision is a hard error — the caller promised uniqueness.
             run_id = self.config.run_id
-            self.run_dir = self.output_base / run_id
+            try:
+                self.run_dir = safe_run_dir(self.output_base, run_id)
+            except RunPathError as e:
+                raise PipelineError(str(e), stage="setup") from e
             try:
                 self.run_dir.mkdir(parents=True, exist_ok=False)
             except FileExistsError:
@@ -976,7 +981,7 @@ class PipelineOrchestrator:
             run_id = ""
             for _ in range(10):
                 run_id = generate_run_id()
-                self.run_dir = self.output_base / run_id
+                self.run_dir = safe_run_dir(self.output_base, run_id)
                 try:
                     self.run_dir.mkdir(parents=True, exist_ok=False)
                     break
@@ -1088,21 +1093,28 @@ class PipelineOrchestrator:
         if resume_id is None:
             raise PipelineError("resume requested without a run id", stage="setup")
 
-        # Try to find the run directory
-        run_dir = self.output_base / resume_id
-        failed_dir = self.output_base / "failed" / resume_id
+        try:
+            run_dir = safe_run_dir(self.output_base, resume_id, field="resume")
+        except RunPathError as e:
+            raise PipelineError(str(e), stage="setup") from e
 
         if run_dir.exists():
             self.run_dir = run_dir
-        elif failed_dir.exists():
+        else:
+            try:
+                failed_dir = safe_run_dir(
+                    self.output_base, resume_id, subdir="failed", field="resume"
+                )
+            except RunPathError as e:
+                raise PipelineError(str(e), stage="setup") from e
+            if not failed_dir.exists():
+                raise PipelineError(
+                    f"Cannot find run to resume: {resume_id}",
+                    stage="setup",
+                )
             # Move back from failed for retry
             self.run_dir = run_dir
             shutil.move(str(failed_dir), str(run_dir))
-        else:
-            raise PipelineError(
-                f"Cannot find run to resume: {resume_id}",
-                stage="setup",
-            )
 
         # Load existing manifest
         manifest_path = self.run_dir / "manifest.json"
@@ -1708,6 +1720,8 @@ class PipelineOrchestrator:
         for run_dir in candidates:
             if run_dir == self.run_dir or run_dir.name in ("latest", "failed"):
                 continue
+            if not path_is_within(run_dir, self.output_base):
+                continue
             try:
                 manifest = load_run_manifest(run_dir / "manifest.json")
             except Exception:
@@ -2010,20 +2024,25 @@ class PipelineOrchestrator:
         # Move to failed directory
         final_path = self.run_dir
         if self.run_dir and self.run_dir.exists():
-            failed_dir = self.output_base / "failed"
-            failed_dir.mkdir(parents=True, exist_ok=True)
-            failed_path = failed_dir / self.run_dir.name
-
-            # Remove existing failed dir if present
-            if failed_path.exists():
-                shutil.rmtree(failed_path)
-
+            # Quarantine deletes an existing target; refuse outright rather
+            # than rmtree whatever a symlinked quarantine slot points at.
             try:
+                failed_path = safe_run_dir(
+                    self.output_base,
+                    self.run_dir.name,
+                    subdir="failed",
+                    field="failed run dir",
+                )
+                failed_path.parent.mkdir(parents=True, exist_ok=True)
+                if failed_path.exists():
+                    shutil.rmtree(failed_path)
                 shutil.move(str(self.run_dir), str(failed_path))
                 final_path = failed_path
                 log.info("run_moved_to_failed", path=str(failed_path))
-            except PermissionError as e:
-                # On Windows, file locks can persist; log but don't fail
+            except RunPathError as e:
+                log.warning("failed_quarantine_path_rejected", error=str(e))
+            except OSError as e:
+                # Quarantine is secondary recovery and must not mask the pipeline failure.
                 log.warning(
                     "failed_to_move_to_failed",
                     error=str(e),

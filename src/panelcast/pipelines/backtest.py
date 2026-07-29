@@ -19,11 +19,14 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import structlog
+
+from panelcast.paths import safe_run_dir
 
 log = structlog.get_logger()
 
@@ -96,9 +99,12 @@ class BacktestConfig:
     panelcast_bin: str | None = None
     extra_config: dict[str, Any] = field(default_factory=dict)
 
-    @property
+    def __post_init__(self) -> None:
+        _ = self.backtest_dir
+
+    @cached_property
     def backtest_dir(self) -> Path:
-        return self.output_root / self.backtest_id
+        return safe_run_dir(self.output_root, self.backtest_id, field="backtest_id")
 
 
 def _dig(payload: dict, path: tuple[str, ...]) -> float | None:

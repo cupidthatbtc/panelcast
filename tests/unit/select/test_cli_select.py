@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -25,6 +26,17 @@ class TestDryRun:
         assert "beta_ceiling" in out
         assert "errors_in_variables" in out
         assert "one-factor-at-a-time" in out
+
+    def test_invalid_sweep_id_is_a_cli_parameter_error(self):
+        result = runner.invoke(
+            app,
+            ["select", "--dry-run", "--config", CONFIG, "--sweep-id", "../escape"],
+        )
+
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+        assert result.exit_code == 2
+        assert "--sweep-id" in clean
+        assert "Invalid sweep_id" in clean
 
     def test_effort_tier_shown(self):
         result = runner.invoke(

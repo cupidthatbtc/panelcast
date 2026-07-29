@@ -18,14 +18,22 @@ from panelcast.cli import runs_app
 
 def resolve_run_dir(run_id: str, output_base: Path = Path("outputs")) -> Path:
     """Resolve a run id against outputs/, outputs/failed/, or 'latest'."""
-    if run_id == "latest":
-        from panelcast.paths import resolve_latest
+    from panelcast.paths import RunPathError, resolve_latest, safe_run_dir, validate_run_id
 
+    if run_id == "latest":
         run_dir = resolve_latest(output_base)
         if run_dir is None:
             raise typer.BadParameter("no latest run recorded", param_hint="RUN_ID")
         return Path(run_dir)
-    for candidate in (output_base / run_id, output_base / "failed" / run_id):
+    try:
+        validate_run_id(run_id)
+    except RunPathError as exc:
+        raise typer.BadParameter(str(exc), param_hint="RUN_ID") from exc
+    for subdir in (None, "failed"):
+        try:
+            candidate = safe_run_dir(output_base, run_id, subdir=subdir)
+        except RunPathError:
+            continue
         if (candidate / "manifest.json").exists():
             return candidate
     raise typer.BadParameter(
@@ -456,8 +464,17 @@ def _compare_reproduction(old_manifest, output_base: Path, bit_exact: bool) -> N
 
 
 def _load_metrics_from_manifest_dir(manifest, output_base: Path) -> dict:
-    for root in (output_base, output_base / "failed"):
-        candidate = root / manifest.run_id
+    from panelcast.paths import RunPathError, safe_run_dir, validate_run_id
+
+    try:
+        validate_run_id(manifest.run_id)
+    except RunPathError:
+        return {}
+    for subdir in (None, "failed"):
+        try:
+            candidate = safe_run_dir(output_base, manifest.run_id, subdir=subdir)
+        except RunPathError:
+            continue
         if (candidate / "manifest.json").exists():
             return _load_metrics(candidate)
     return {}
@@ -476,9 +493,15 @@ def runs_why(
     import json
 
     if run_id is None:
+        from panelcast.paths import path_is_within
+
         failed_root = output_base / "failed"
         candidates = sorted(
-            (p for p in failed_root.glob("*") if (p / "manifest.json").exists()),
+            (
+                p
+                for p in failed_root.glob("*")
+                if path_is_within(p, output_base) and (p / "manifest.json").exists()
+            ),
             key=lambda p: p.name,
         )
         if not candidates:

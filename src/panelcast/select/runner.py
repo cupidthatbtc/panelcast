@@ -37,12 +37,14 @@ import time
 from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
 import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
+from panelcast.paths import safe_run_dir
 from panelcast.select.space import (
     KNOBS,
     arm_conflicts,
@@ -132,6 +134,7 @@ class SweepConfig:
     warmup_transfer_num_warmup: int = 200
 
     def __post_init__(self) -> None:
+        _ = self.sweep_dir
         if self.rungs and not self.reference_first:
             raise ValueError(
                 "a rung ladder requires reference_first=True: rung-0 arms score "
@@ -139,9 +142,9 @@ class SweepConfig:
                 "the ladder silently collapses."
             )
 
-    @property
+    @cached_property
     def sweep_dir(self) -> Path:
-        return self.output_root / self.sweep_id
+        return safe_run_dir(self.output_root, self.sweep_id, field="sweep_id")
 
 
 @dataclass
