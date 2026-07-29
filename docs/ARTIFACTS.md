@@ -44,7 +44,8 @@ predictions.json carries parallel per-row arrays. Alongside the legacy keys
 (y_true, y_pred_mean, y_pred_lower, y_pred_upper, residuals) it is identified:
 entity, event, n_reviews, train_history (the entity's training-event count),
 group when the descriptor names an entity_group_col, plus per-row y_pred_sd,
-pit, and covered flags per calibration interval. `panelcast diagnose --errors`
+pit (randomized-rank, with the `pit_randomization_seed` that produced it), and
+covered flags per calibration interval. `panelcast diagnose --errors`
 decomposes these into error_decomposition_<split>.csv, per-entity / group /
 review-count-decile rollup CSVs, and a worst-25 Markdown table under the
 run-scoped reports dir — read-only, so it works on any past run whose payload

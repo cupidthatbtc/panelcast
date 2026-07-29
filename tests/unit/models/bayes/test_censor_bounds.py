@@ -81,8 +81,9 @@ class TestDistribution:
         assert (draws == 100.0).mean() > 0.2
 
     def test_empirical_pit_at_the_bound_is_the_interval_upper_edge(self):
-        """The pinned convention: clipped replicated draws count as <= the
-        bound, so empirical PIT at a censored bound sits at 1."""
+        """Clipped replicated draws all count as <= the bound, so the
+        predictive CDF closes at 1 there. The reported PIT randomizes inside
+        that boundary atom rather than pinning to the edge."""
         censored, _ = self._censored(mu=95.0, sigma=10.0)
         draws = np.asarray(censored.sample(random.key(0), (20_000,)))
         pit_at_bound = (draws <= 100.0).mean()

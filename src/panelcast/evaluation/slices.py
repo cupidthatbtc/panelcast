@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from panelcast.evaluation.calibration import compute_pit_values
+from panelcast.evaluation.calibration import compute_pit_per_row, summarize_pit
 
 # Below this many rows a coverage estimate is noise, not evidence.
 MIN_SLICE_N = 20
@@ -74,8 +74,15 @@ def coverage_by_slice(
     probs: tuple[float, ...],
     dimension: str,
     min_n: int = MIN_SLICE_N,
+    *,
+    seed: int,
 ) -> list[SliceCoverage]:
-    """Per-slice empirical coverage with Wilson CIs for one label vector."""
+    """Per-slice empirical coverage with Wilson CIs for one label vector.
+
+    ``seed`` drives the PIT randomization. The PIT is computed once over all
+    rows and then masked per slice, so a slice's PIT deviation is exactly the
+    deviation of those rows' PIT values in the whole-split histogram.
+    """
     y_true = np.asarray(y_true, dtype=float)
     labels = np.asarray(labels, dtype=object)
     if labels.shape[0] != y_true.shape[0]:
@@ -89,6 +96,7 @@ def coverage_by_slice(
         lo = np.percentile(y_samples, 100.0 * a, axis=0)
         hi = np.percentile(y_samples, 100.0 * (1.0 - a), axis=0)
         bounds[prob] = (lo, hi)
+    pit_rows = compute_pit_per_row(y_true, y_samples, seed=seed)
 
     out: list[SliceCoverage] = []
     for label in sorted(set(labels.tolist()), key=str):
@@ -109,8 +117,7 @@ def coverage_by_slice(
                 "mean_interval_width": float(np.mean((hi - lo)[mask])),
                 "flagged": not (ci_lo <= prob <= ci_hi),
             }
-        pit = compute_pit_values(y_true[mask], y_samples[:, mask])
-        sc.pit_max_abs_dev = pit["max_abs_dev_from_uniform"]
+        sc.pit_max_abs_dev = summarize_pit(pit_rows[mask], seed=seed)["max_abs_dev_from_uniform"]
         out.append(sc)
     return out
 
@@ -121,11 +128,15 @@ def calibration_by_slice(
     row_ids: pd.DataFrame | None,
     probs: tuple[float, ...],
     min_n: int = MIN_SLICE_N,
+    *,
+    seed: int,
 ) -> dict:
     """The full audit across every slice dimension the row identities support.
 
     Returns a JSON-ready dict: slices, min-n floor, and the expected number
     of false flags under perfect calibration (5% per slice-level test).
+    ``seed`` is the run's PIT randomization seed; pass the same one the
+    whole-split PIT used so the two agree row for row.
     """
     y_true = np.asarray(y_true, dtype=float)
     dimensions: dict[str, np.ndarray] = {}
@@ -147,7 +158,7 @@ def calibration_by_slice(
     slices: list[SliceCoverage] = []
     for dimension, labels in dimensions.items():
         slices += coverage_by_slice(
-            y_true, y_samples, labels, probs, dimension=dimension, min_n=min_n
+            y_true, y_samples, labels, probs, dimension=dimension, min_n=min_n, seed=seed
         )
 
     n_tests = sum(len(s.levels) for s in slices)
@@ -155,6 +166,7 @@ def calibration_by_slice(
         "min_n": min_n,
         "n_slices": len(slices),
         "n_tests": n_tests,
+        "pit_randomization_seed": int(seed),
         "expected_false_flags": round(0.05 * n_tests, 2),
         "note": (
             "Wilson 95% CIs; coverage events share one posterior so CIs are "

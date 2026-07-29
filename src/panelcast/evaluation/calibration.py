@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 
 __all__ = [
+    "PIT_METHOD",
     "CoverageResult",
     "IntervalScoreResult",
     "ReliabilityData",
@@ -31,9 +32,16 @@ __all__ = [
     "compute_coverage",
     "compute_interval_score",
     "compute_multi_coverage",
+    "compute_pit_per_row",
+    "compute_pit_values",
     "compute_reliability_data",
     "compute_weighted_interval_score",
+    "summarize_pit",
 ]
+
+# Recorded next to every PIT payload so a stored histogram states which
+# convention produced it.
+PIT_METHOD = "randomized_rank"
 
 
 def _validate_probability(prob: float) -> None:
@@ -559,61 +567,130 @@ def compute_weighted_interval_score(
     )
 
 
-def compute_pit_per_row(y_true: np.ndarray, y_samples: np.ndarray) -> np.ndarray:
-    """Per-observation PIT values under the randomized-rank convention.
+def compute_pit_per_row(
+    y_true: np.ndarray,
+    y_samples: np.ndarray,
+    *,
+    seed: int,
+) -> np.ndarray:
+    """Per-observation randomized-rank PIT values, shape (n_obs,).
 
-    PIT = (#draws < y + 0.5 * #draws == y) / n_draws, shape (n_obs,).
+    ``PIT_i = (below_i + U_i * (equal_i + 1)) / (n_draws + 1)`` with
+    ``U_i ~ Uniform(0, 1)``, where ``below`` counts draws strictly below the
+    observation and ``equal`` counts draws tying it. Under a calibrated
+    predictive distribution the observation is exchangeable with its own
+    draws, so its randomized rank is uniform on ``[0, n_draws + 1)`` and the
+    PIT is exactly Uniform(0, 1) — for any draw count and any tied mass.
+
+    This replaces the deterministic mid-P quantity
+    ``(below + 0.5 * equal) / n_draws``, which is not uniform under
+    calibration: it is lattice-valued for continuous draws and collapses
+    every tie block onto its midpoint for discrete ones, so PIT histograms,
+    row-level miscalibration flags, and quantile recalibration all inherited
+    the artefact.
+
+    Predictive families:
+
+    - Continuous (Student-t, normal, skewed): ties have probability zero, so
+      ``equal`` is 0 and the randomization only spreads the observation
+      across its own rank cell — the correction for finite-draw lattice
+      structure.
+    - Censored / interval-discretized targets: draws pile onto the bound and
+      a boundary observation ties with that whole atom, so its PIT is drawn
+      uniformly from inside the censored mass instead of pinning to 1.
+    - Beta-binomial and other count likelihoods: fully discrete, so tie
+      blocks are the rule rather than the exception — the case mid-P
+      distorted most.
+
+    Args:
+        y_true: Observed values, shape (n_obs,).
+        y_samples: Posterior predictive draws, shape (n_draws, n_obs).
+        seed: Seed for the randomization stream. Required, and consumed
+            through a local ``default_rng`` — the module never touches
+            global NumPy randomness, and a stored PIT is only reproducible
+            if its seed travels with it.
+
+    Returns:
+        PIT values in [0, 1), shape (n_obs,).
     """
     y_true = np.asarray(y_true, dtype=float)
     y_samples = np.asarray(y_samples, dtype=float)
+    if y_true.ndim != 1:
+        raise ValueError(f"y_true must be 1D, got shape {y_true.shape}")
     if y_samples.ndim != 2 or y_samples.shape[1] != y_true.shape[0]:
         raise ValueError(
             f"y_samples shape {y_samples.shape} incompatible with y_true {y_true.shape}"
         )
     n_draws = y_samples.shape[0]
+    if n_draws < 1:
+        raise ValueError("y_samples must include at least one predictive draw.")
     below = (y_samples < y_true[None, :]).sum(axis=0)
     equal = (y_samples == y_true[None, :]).sum(axis=0)
-    return (below + 0.5 * equal) / n_draws
+    uniforms = np.random.default_rng(seed).random(y_true.shape[0])
+    return (below + uniforms * (equal + 1)) / (n_draws + 1)
+
+
+def summarize_pit(pit: np.ndarray, n_bins: int = 10, *, seed: int | None = None) -> dict:
+    """Histogram summary of already-computed PIT values.
+
+    Split out from :func:`compute_pit_values` so a caller that needs both the
+    whole-split histogram and per-subgroup histograms computes the PIT once
+    and slices it — one randomization per run, never two disagreeing PIT
+    values for the same observation.
+
+    Args:
+        pit: PIT values, shape (n_obs,).
+        n_bins: Histogram bin count over [0, 1].
+        seed: The seed that produced ``pit``, recorded for provenance.
+
+    Returns:
+        Dict with pit mean/std, histogram counts and bin edges, the max
+        absolute deviation of bin frequency from uniform, and the
+        randomization method/seed that produced the values.
+    """
+    pit = np.asarray(pit, dtype=float)
+    counts, bin_edges = np.histogram(pit, bins=n_bins, range=(0.0, 1.0))
+    freq = counts / counts.sum() if counts.sum() else counts.astype(float)
+    uniform = 1.0 / n_bins
+
+    return {
+        "mean": float(np.mean(pit)) if len(pit) else None,
+        "std": float(np.std(pit)) if len(pit) else None,
+        "n_obs": int(len(pit)),
+        "n_bins": int(n_bins),
+        "counts": counts.tolist(),
+        "bin_edges": bin_edges.tolist(),
+        "max_abs_dev_from_uniform": float(np.max(np.abs(freq - uniform))) if len(pit) else None,
+        "method": PIT_METHOD,
+        "randomization_seed": None if seed is None else int(seed),
+    }
 
 
 def compute_pit_values(
     y_true: np.ndarray,
     y_samples: np.ndarray,
     n_bins: int = 10,
+    *,
+    seed: int,
 ) -> dict:
     """Probability integral transform values and histogram.
 
-    PIT_i = P(Y_rep <= y_obs_i) estimated from the posterior predictive
-    sample. For a perfectly calibrated forecast the PIT values are
-    uniform on [0, 1]; a U-shape means intervals are too narrow, a hump
-    means too wide, and a J/L-shape reveals skew mismatch (the symmetric
-    likelihood against the ceiling shows up here before it moves
+    PIT_i is the randomized rank of y_obs_i among its posterior predictive
+    draws (see :func:`compute_pit_per_row`). For a calibrated forecast the
+    PIT values are uniform on [0, 1]; a U-shape means intervals are too
+    narrow, a hump means too wide, and a J/L-shape reveals skew mismatch (the
+    symmetric likelihood against the ceiling shows up here before it moves
     coverage-at-two-levels).
-
-    Uses the randomized-rank convention for discrete predictive samples:
-    PIT = (#draws < y + 0.5 * #draws == y) / n_draws.
 
     Args:
         y_true: Observed values, shape (n_obs,).
         y_samples: Posterior predictive draws, shape (n_draws, n_obs).
         n_bins: Histogram bin count over [0, 1].
+        seed: Seed for the PIT randomization stream.
 
     Returns:
-        Dict with pit mean/std, histogram counts and bin edges, and the
-        max absolute deviation of bin frequency from uniform.
+        Dict with pit mean/std, histogram counts and bin edges, the max
+        absolute deviation of bin frequency from uniform, and the
+        randomization method/seed.
     """
-    pit = compute_pit_per_row(y_true, y_samples)
-
-    counts, bin_edges = np.histogram(pit, bins=n_bins, range=(0.0, 1.0))
-    freq = counts / counts.sum() if counts.sum() else counts.astype(float)
-    uniform = 1.0 / n_bins
-
-    return {
-        "mean": float(np.mean(pit)),
-        "std": float(np.std(pit)),
-        "n_obs": int(len(pit)),
-        "n_bins": int(n_bins),
-        "counts": counts.tolist(),
-        "bin_edges": bin_edges.tolist(),
-        "max_abs_dev_from_uniform": float(np.max(np.abs(freq - uniform))) if len(pit) else None,
-    }
+    return summarize_pit(compute_pit_per_row(y_true, y_samples, seed=seed), n_bins, seed=seed)

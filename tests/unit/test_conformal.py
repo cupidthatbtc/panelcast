@@ -66,7 +66,7 @@ class TestConformalize:
     def test_block_shape_and_grid(self):
         y_cal, cal_samples = _cal_set(seed=2)
         y_test, test_samples = _cal_set(seed=3)
-        block = conformalize(y_cal, cal_samples, y_test, test_samples, (0.8, 0.95))
+        block = conformalize(y_cal, cal_samples, y_test, test_samples, (0.8, 0.95), seed=0)
         assert block["n_calibration"] == len(y_cal)
         assert set(block["levels"]) == {"0.80", "0.95"}
         for lv in block["levels"].values():
@@ -82,7 +82,7 @@ class TestConformalize:
         # Same misspecification in cal and test: conformal fixes coverage.
         y_cal, cal_samples = _cal_set(pred_scale=1.5, true_scale=5.0, seed=4)
         y_test, test_samples = _cal_set(pred_scale=1.5, true_scale=5.0, seed=5)
-        block = conformalize(y_cal, cal_samples, y_test, test_samples, (0.9,))
+        block = conformalize(y_cal, cal_samples, y_test, test_samples, (0.9,), seed=0)
         lv = block["levels"]["0.90"]
         raw_lo = np.percentile(test_samples, 5, axis=0)
         raw_hi = np.percentile(test_samples, 95, axis=0)
@@ -97,7 +97,7 @@ class TestConformalize:
     def test_recalibration_recovers_nominal_under_mild_misspecification(self):
         y_cal, cal_samples = _cal_set(pred_scale=3.5, true_scale=5.0, seed=6)
         y_test, test_samples = _cal_set(pred_scale=3.5, true_scale=5.0, seed=7)
-        block = conformalize(y_cal, cal_samples, y_test, test_samples, (0.9,))
+        block = conformalize(y_cal, cal_samples, y_test, test_samples, (0.9,), seed=0)
         assert block["levels"]["0.90"]["recalibrated_coverage"] >= 0.85
 
 

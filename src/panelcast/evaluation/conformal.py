@@ -21,7 +21,7 @@ import math
 
 import numpy as np
 
-from panelcast.evaluation.calibration import compute_pit_per_row
+from panelcast.evaluation.calibration import PIT_METHOD, compute_pit_per_row
 
 
 def _interval_bounds(samples: np.ndarray, prob: float) -> tuple[np.ndarray, np.ndarray]:
@@ -79,6 +79,8 @@ def conformalize(
     y_test: np.ndarray,
     test_samples: np.ndarray,
     probs: tuple[float, ...],
+    *,
+    seed: int,
 ) -> dict:
     """Both conformal layers evaluated on the test split, JSON-ready.
 
@@ -86,10 +88,13 @@ def conformalize(
     coverage and mean width, and the recalibrated (Kuleshov) coverage from
     the PIT-remapped quantile levels — next to nothing is refit, so this is
     one predictive pass on the validation split plus array math.
+
+    ``seed`` drives the calibration PIT randomization; it is echoed in the
+    payload because the recalibration map is a function of those draws.
     """
     y_test = np.asarray(y_test, dtype=float)
     test_samples = np.asarray(test_samples, dtype=float)
-    pit_cal = compute_pit_per_row(y_cal, cal_samples)
+    pit_cal = compute_pit_per_row(y_cal, cal_samples, seed=seed)
 
     levels_block: dict[str, dict] = {}
     n_cal = len(pit_cal)
@@ -124,6 +129,8 @@ def conformalize(
     return {
         "n_calibration": int(len(pit_cal)),
         "levels": levels_block,
+        "pit_method": PIT_METHOD,
+        "pit_randomization_seed": int(seed),
         "pit_quantile_grid": {
             "levels": grid.tolist(),
             "values": np.quantile(pit_cal, grid).tolist(),
@@ -132,6 +139,8 @@ def conformalize(
             "Split-conformal guarantee holds under exchangeability; the "
             "within-entity temporal validation/test eras drift, so read the "
             "guarantee as approximate. Calibrated on the validation split "
-            "with train-only history (leakage-safe)."
+            "with train-only history (leakage-safe). The recalibration map "
+            "uses randomized-rank PIT values, so it is reproducible only "
+            "with the recorded seed."
         ),
     }

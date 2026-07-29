@@ -1600,6 +1600,7 @@ class TestEvaluatePredictions:
             calibration_intervals=(0.80, 0.95),
             coverage_tolerance=0.10,
             prediction_interval=0.90,
+            pit_seed=0,
         )
 
         # metrics structure
@@ -1642,6 +1643,7 @@ class TestEvaluatePredictions:
             calibration_intervals=(0.95,),
             coverage_tolerance=0.10,
             prediction_interval=0.95,
+            pit_seed=0,
         )
 
         ppc = metrics["ppc"]
@@ -1663,6 +1665,7 @@ class TestEvaluatePredictions:
             calibration_intervals=(0.80,),
             coverage_tolerance=0.20,  # very generous
             prediction_interval=0.95,
+            pit_seed=0,
         )
         assert metrics["calibration"]["within_tolerance"] is True
 
@@ -3104,6 +3107,7 @@ class TestIdentifiedPredictionsPayload:
             coverage_tolerance=0.05,
             prediction_interval=0.8,
             row_ids=row_ids,
+            pit_seed=0,
         )
 
         assert payload["entity"] == ["A", "A", "B"]
@@ -3126,6 +3130,7 @@ class TestIdentifiedPredictionsPayload:
             calibration_intervals=(0.8,),
             coverage_tolerance=0.05,
             prediction_interval=0.8,
+            pit_seed=0,
         )
         assert "entity" not in payload
         assert "pit" not in payload
@@ -3143,6 +3148,7 @@ class TestIdentifiedPredictionsPayload:
                 coverage_tolerance=0.05,
                 prediction_interval=0.8,
                 row_ids=row_ids,
+                pit_seed=0,
             )
 
 

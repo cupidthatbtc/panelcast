@@ -54,7 +54,7 @@ class TestCoverageBySlice:
         y = rng.normal(70, 5, size=60)
         samples = self._samples(rng, y)
         labels = np.array(["big"] * 55 + ["rare"] * 5, dtype=object)
-        out = coverage_by_slice(y, samples, labels, (0.8,), dimension="group", min_n=20)
+        out = coverage_by_slice(y, samples, labels, (0.8,), dimension="group", min_n=20, seed=0)
         assert [s.label for s in out] == ["big"]
         assert out[0].n == 55
 
@@ -65,7 +65,7 @@ class TestCoverageBySlice:
         # nowhere near empirical.
         samples = rng.normal(70.0, 0.5, size=(400, 200))
         out = coverage_by_slice(
-            y, samples, np.array(["all"] * 200, dtype=object), (0.95,), dimension="group"
+            y, samples, np.array(["all"] * 200, dtype=object), (0.95,), dimension="group", seed=0
         )
         lv = out[0].levels["0.95"]
         assert lv["flagged"]
@@ -76,14 +76,14 @@ class TestCoverageBySlice:
         y = rng.normal(70, 5, size=500)
         samples = rng.normal(70, 5, size=(500, 500))
         out = coverage_by_slice(
-            y, samples, np.array(["all"] * 500, dtype=object), (0.8,), dimension="group"
+            y, samples, np.array(["all"] * 500, dtype=object), (0.8,), dimension="group", seed=0
         )
         assert not out[0].levels["0.80"]["flagged"]
 
     def test_label_length_mismatch_raises(self):
         with pytest.raises(ValueError, match="labels length"):
             coverage_by_slice(
-                np.zeros(3), np.zeros((10, 3)), np.array(["a"]), (0.8,), dimension="x"
+                np.zeros(3), np.zeros((10, 3)), np.array(["a"]), (0.8,), dimension="x", seed=0
             )
 
 
@@ -101,7 +101,7 @@ class TestCalibrationBySlice:
                 "train_history": rng.integers(0, 20, size=n),
             }
         )
-        out = calibration_by_slice(y, samples, row_ids, (0.8, 0.95))
+        out = calibration_by_slice(y, samples, row_ids, (0.8, 0.95), seed=0)
         dims = {s["dimension"] for s in out["slices"]}
         assert {"group", "n_reviews_decile", "train_history", "target_tercile"} <= dims
         assert out["expected_false_flags"] == pytest.approx(0.05 * out["n_tests"], abs=0.01)
@@ -111,7 +111,7 @@ class TestCalibrationBySlice:
         rng = np.random.default_rng(4)
         y = rng.normal(70, 5, size=90)
         samples = rng.normal(70, 5, size=(200, 90))
-        out = calibration_by_slice(y, samples, None, (0.8,))
+        out = calibration_by_slice(y, samples, None, (0.8,), seed=0)
         assert {s["dimension"] for s in out["slices"]} == {"target_tercile"}
 
 
