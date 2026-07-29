@@ -321,6 +321,16 @@ class TestRecordedPathContainment:
         assert not decision.skip
         assert decision.outputs_untrusted
 
+    def test_nul_in_recorded_path_fails_closed(self, tmp_path):
+        fx = _Fixture(tmp_path, {"table": _write_parquet(tmp_path / "processed" / "d.parquet")})
+        key = next(iter(fx.manifest.outputs))
+        fx.manifest.outputs[key] = "bad\x00path"
+
+        decision = fx.decision(roots=[tmp_path])
+
+        assert not decision.skip
+        assert decision.outputs_untrusted
+
     def test_static_output_cannot_be_substituted_with_another_file_in_root(self, tmp_path):
         declared = _write_parquet(tmp_path / "processed" / "declared.parquet")
         substitute = tmp_path / "processed" / "substitute.parquet"
@@ -489,12 +499,17 @@ def _fake_stages(paths, executed):
 
     paths = paths or ArtifactPaths.flat()
 
-    def _run(name, root_attr, filename):
+    def _run(name, root_attr, filename, *, dynamic=False):
         def run_fn(ctx):
             executed.append(name)
             root = getattr(ctx.paths, root_attr)
             root.mkdir(parents=True, exist_ok=True)
             (root / filename).write_text(ctx.manifest.run_id, encoding="utf-8")
+            if dynamic:
+                path = ctx.run_dir / "dataset_hash.txt"
+                path.write_text("dataset", encoding="utf-8")
+                return {"dataset_hash": str(path)}
+            return None
 
         return run_fn
 
@@ -502,7 +517,7 @@ def _fake_stages(paths, executed):
         PipelineStage(
             name="data",
             description="fake data stage",
-            run_fn=_run("data", "processed", "marker.parquet"),
+            run_fn=_run("data", "processed", "marker.parquet", dynamic=True),
             input_paths=[Path("data/raw/raw.csv")],
             output_paths=[Path("data/processed/marker.parquet")],
         ),
@@ -552,6 +567,9 @@ class TestOrchestratorSkipVerification:
         assert _run_pipeline(workspace, "runA", []) == 0
         second: list[str] = []
         assert _run_pipeline(workspace, "runB", second, skip_existing=True) == 0
+        import shutil
+
+        shutil.rmtree(workspace / "runA")
         third: list[str] = []
         assert _run_pipeline(workspace, "runC", third, skip_existing=True) == 0
 
@@ -561,6 +579,7 @@ class TestOrchestratorSkipVerification:
         assert "data" in manifest["stage_hashes"]
         assert any(key.startswith("data:") for key in manifest["outputs"])
         assert any(key.startswith("data:") for key in manifest["output_hashes"])
+        assert not any("dataset_hash" in key for key in manifest["outputs"])
 
     def test_corrupted_shared_output_forces_rerun(self, workspace, tmp_path):
         assert _run_pipeline(workspace, "runA", []) == 0

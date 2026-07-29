@@ -1501,6 +1501,37 @@ class PipelineOrchestrator:
         roots = tuple(getattr(paths, item.name) for item in dataclass_fields(paths))
         return (*roots, self.output_base)
 
+    def _carry_skipped_stage_provenance(
+        self,
+        stage: PipelineStage,
+        previous_manifest: RunManifest,
+        previous_run: Path | None,
+    ) -> None:
+        """Carry reusable evidence, never paths owned by the previous run."""
+        manifest = self._require_manifest()
+        previous_hash = previous_manifest.stage_hashes.get(stage.name)
+        if previous_hash is not None:
+            manifest.stage_hashes[stage.name] = previous_hash
+        prefix = f"{stage.name}:"
+        carried: set[str] = set()
+        previous_root = previous_run.resolve() if previous_run else None
+        for key, value in (previous_manifest.outputs or {}).items():
+            if not key.startswith(prefix):
+                continue
+            try:
+                resolved = Path(value).resolve()
+            except (OSError, ValueError):
+                continue
+            if previous_root is not None and (
+                resolved == previous_root or previous_root in resolved.parents
+            ):
+                continue
+            manifest.outputs[key] = value
+            carried.add(key)
+        for key, value in (previous_manifest.output_hashes or {}).items():
+            if key in carried:
+                manifest.output_hashes[key] = value
+
     def _execute_stages(self, stages: list[PipelineStage]) -> None:
         """Execute stages with progress display.
 
@@ -1509,6 +1540,7 @@ class PipelineOrchestrator:
         """
         # Load previous manifest for skip detection
         previous_manifest: RunManifest | None = None
+        previous_run: Path | None = None
         if self.config.skip_existing and self.run_dir:
             previous_run = resolve_latest(self.output_base)
             if previous_run is not None:
@@ -1586,16 +1618,9 @@ class PipelineOrchestrator:
                         if self.manifest:
                             self.manifest.stages_skipped.append(stage.name)
                             if previous_manifest is not None:
-                                previous_hash = previous_manifest.stage_hashes.get(stage.name)
-                                if previous_hash is not None:
-                                    self.manifest.stage_hashes[stage.name] = previous_hash
-                                prefix = f"{stage.name}:"
-                                for key, value in (previous_manifest.outputs or {}).items():
-                                    if key.startswith(prefix):
-                                        self.manifest.outputs[key] = value
-                                for key, value in (previous_manifest.output_hashes or {}).items():
-                                    if key.startswith(prefix):
-                                        self.manifest.output_hashes[key] = value
+                                self._carry_skipped_stage_provenance(
+                                    stage, previous_manifest, previous_run
+                                )
                             save_run_manifest(self._require_manifest(), self._require_run_dir())
                         progress.advance(task_id, weights[stage.name])
                         continue

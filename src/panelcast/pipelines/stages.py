@@ -49,7 +49,7 @@ def _contained_path(path_str: str, roots: Sequence[Path]) -> Path | None:
             resolved_root = Path(root).resolve()
             if resolved == resolved_root or resolved_root in resolved.parents:
                 return path
-    except OSError:
+    except (OSError, ValueError):
         return None
     return None
 
@@ -364,12 +364,19 @@ class PipelineStage:
                         return SkipDecision(
                             False, "recorded output path disagrees with its manifest key", True, key
                         )
-                except OSError:
+                except (OSError, ValueError):
                     return SkipDecision(False, "recorded output path is unreadable", True, key)
             path = _contained_path(path_str, roots)
             if path is None:
                 return SkipDecision(False, "recorded output path escapes the run roots", True, key)
             if not path.exists():
+                if key not in declared:
+                    return SkipDecision(
+                        False,
+                        "dynamically recorded output is no longer available",
+                        key=key,
+                        outputs_unverifiable=True,
+                    )
                 return SkipDecision(False, "recorded output is missing", True, key)
             try:
                 actual = sha256_path(path)
