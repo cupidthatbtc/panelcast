@@ -112,7 +112,17 @@ The Python runtime reads its version from the installed package metadata
 static copies no code can read — `pixi.toml`, `CITATION.cff` (version +
 date-released), and the `MODEL_CARD.md` header. The CHANGELOG entry stays
 manual, as does `requirements.lock` when `pixi.lock` changed;
-`tests/unit/test_release_metadata.py` fails the build if anything drifts.
+`tests/unit/test_release_metadata.py` fails the build if anything drifts. The
+release run also builds the CycloneDX SBOM and attaches it to the GitHub
+Release, so publish the release while the tag's workflow is still running.
+
+## Dependency security
+
+Touching `pixi.lock` means re-running `pixi run audit`. New advisories fail the
+gate; already-triaged ones live in `security_baseline.json` and are refreshed
+with `pixi run audit --update`. See
+[`docs/DEPENDENCY_SECURITY.md`](docs/DEPENDENCY_SECURITY.md) for what the PyPI
+and conda tiers actually cover.
 
 ## Reporting issues
 

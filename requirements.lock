@@ -1,5 +1,5 @@
 # Canonical environment lock is `pixi.lock` (cross-platform).
-# SHA256(pixi.lock)=983ab0f595f332e480c66424186f944bc77277e62bb228baaccebfc07e5897da
+# SHA256(pixi.lock)=68ef6f79528e88999e0de43c74ec06a8126224277f7ceb667d06b05041e7762d
 #
 # This file is intentionally informational only; do not use it as an installer
 # source for publication runs. Use:

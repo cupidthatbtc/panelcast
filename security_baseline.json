@@ -1,0 +1,89 @@
+{
+  "description": "Advisories OSV reports against the versions pixi.lock pins (#372). scripts/dependency_audit.py --check fails CI on any id not listed here; --update rewrites the file. Listing an id means it has been seen and triaged, not that no fixed release exists: most of these sit in the pinned scientific stack, and moving that stack is a separate, test-gated environment refresh rather than a security floor.",
+  "total_advisories": 67,
+  "packages": {
+    "click": [
+      "PYSEC-2026-2132"
+    ],
+    "pillow": [
+      "GHSA-45hq-cxwh-f6vc",
+      "GHSA-4x4j-2g7c-83w6",
+      "GHSA-5x94-69rx-g8h2",
+      "GHSA-5xmw-vc9v-4wf2",
+      "GHSA-62p4-gmf7-7g93",
+      "GHSA-6r8x-57c9-28j4",
+      "GHSA-8v84-f9pq-wr9x",
+      "GHSA-9hw9-ch79-4vh6",
+      "GHSA-cfh3-3jmp-rvhc",
+      "GHSA-fj7v-r99m-22gq",
+      "GHSA-jjj6-mw9f-p565",
+      "GHSA-pg7v-jwj7-p798",
+      "GHSA-phj9-mv4w-65pm",
+      "GHSA-pwv6-vv43-88gr",
+      "GHSA-r73j-pqj5-w3x7",
+      "GHSA-vjc4-5qp5-m44j",
+      "GHSA-whj4-6x5x-4v2j",
+      "GHSA-wjx4-4jcj-g98j",
+      "GHSA-xj96-63gp-2gmr",
+      "PYSEC-2026-165",
+      "PYSEC-2026-2249",
+      "PYSEC-2026-2250",
+      "PYSEC-2026-2251",
+      "PYSEC-2026-2252",
+      "PYSEC-2026-2253",
+      "PYSEC-2026-2254",
+      "PYSEC-2026-2255",
+      "PYSEC-2026-2256",
+      "PYSEC-2026-2257",
+      "PYSEC-2026-2874",
+      "PYSEC-2026-3451",
+      "PYSEC-2026-3452",
+      "PYSEC-2026-3453",
+      "PYSEC-2026-3454",
+      "PYSEC-2026-3493",
+      "PYSEC-2026-3494",
+      "PYSEC-2026-3495",
+      "PYSEC-2026-3496"
+    ],
+    "pip": [
+      "GHSA-58qw-9mgm-455v",
+      "GHSA-6vgw-5pg2-w6jp",
+      "GHSA-jp4c-xjxw-mgf9",
+      "GHSA-wf93-45jw-7689",
+      "PYSEC-2026-1796",
+      "PYSEC-2026-196",
+      "PYSEC-2026-2875",
+      "PYSEC-2026-2876"
+    ],
+    "pyarrow": [
+      "GHSA-rgxp-2hwp-jwgg",
+      "PYSEC-2026-113"
+    ],
+    "pygments": [
+      "GHSA-5239-wwwm-4pmq",
+      "PYSEC-2026-2987"
+    ],
+    "pytest": [
+      "GHSA-6w46-j5rx-g56g",
+      "PYSEC-2026-1845"
+    ],
+    "setuptools": [
+      "GHSA-h35f-9h28-mq5c",
+      "PYSEC-2026-3447"
+    ],
+    "tornado": [
+      "GHSA-3x9g-8vmp-wqvf",
+      "GHSA-78cv-mqj4-43f7",
+      "GHSA-cx3h-4qpv-8hc9",
+      "GHSA-fqwm-6jpj-5wxc",
+      "GHSA-mgf9-4vpg-hj56",
+      "GHSA-pw6j-qg29-8w7f",
+      "GHSA-qjxf-f2mg-c6mc",
+      "PYSEC-2026-140",
+      "PYSEC-2026-2287",
+      "PYSEC-2026-3387",
+      "PYSEC-2026-3388",
+      "PYSEC-2026-3389"
+    ]
+  }
+}

@@ -27,6 +27,10 @@ typecheck-ratchet = "python scripts/typing_ratchet.py --check"
 terminology-ratchet = "python scripts/terminology_ratchet.py --check"
 # Three-domain replication acceptance suite (#273): GPU-scale, nightly/manual.
 replication-acceptance = "python scripts/replication_acceptance.py --config configs/replication_acceptance.yaml"
+# Dependency-security gate (#372): OSV over the whole lock, PyPI and conda.
+audit = "python scripts/dependency_audit.py"
+# CycloneDX SBOM of everything pixi.lock pins; released alongside the wheel.
+sbom = "python scripts/generate_sbom.py"
 
 [dependencies]
 python = ">=3.11"
@@ -58,10 +62,13 @@ ruff = "*"
 pip = ">=25.3,<26"
 
 [pypi-dependencies]
-gitpython = ">=3.1"
+# Floor set by the 3.1.47-3.1.55 command-injection/exfiltration advisory chain.
+gitpython = ">=3.1.55"
 numpyro = ">=0.19.0"
 jax = ">=0.8.2"
 plotly = ">=6.1.1"
 kaleido = ">=1.0.0"
+# Transitive through kaleido, pinned direct so CVE-2025-67221 cannot come back.
+orjson = ">=3.11.6"
 nvidia-ml-py = ">=13.580.65"
 packaging = ">=23.0"
