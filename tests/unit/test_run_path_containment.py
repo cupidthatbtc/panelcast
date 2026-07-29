@@ -54,6 +54,12 @@ MALFORMED_IDS = [
     "with\x00null",
     "with\nnewline",
     "stream:name",
+    'bad<name',
+    'bad>name',
+    'bad"name',
+    "bad|name",
+    "bad?name",
+    "bad*name",
     "x" * 256,
 ]
 
@@ -211,6 +217,22 @@ class TestMaliciousLatestPointer:
         (base / "latest.json").write_text(
             json.dumps({"run_id": "escape", "run_dir": "escape"}), encoding="utf-8"
         )
+        assert resolve_latest(base) is None
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"run_id": "runA", "run_dir": "runB"},
+            {"run_id": 1, "run_dir": "1"},
+            {"run_id": "1", "run_dir": 1},
+        ],
+    )
+    def test_pointer_identity_must_be_one_bare_string(self, tmp_path, payload):
+        base = self._base(tmp_path)
+        (base / "runA").mkdir()
+        (base / "runB").mkdir()
+        (base / "1").mkdir()
+        (base / "latest.json").write_text(json.dumps(payload), encoding="utf-8")
         assert resolve_latest(base) is None
 
     def test_valid_pointer_still_resolves(self, tmp_path):

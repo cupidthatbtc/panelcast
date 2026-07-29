@@ -86,8 +86,8 @@ def _run_id_rejection(run_id: str) -> str | None:
         return "must be at most 255 characters"
     if "/" in run_id or "\\" in run_id:
         return "must not contain a path separator"
-    if ":" in run_id:
-        return "must not contain ':' (drive letter or NTFS data stream)"
+    if any(ch in '<>:"|?*' for ch in run_id):
+        return "must not contain characters forbidden in Windows file names"
     if any(ord(ch) < 32 or ord(ch) == 127 for ch in run_id):
         return "must not contain control characters"
     if run_id.startswith("."):  # covers "." and ".."
@@ -172,7 +172,11 @@ def resolve_latest(output_base: Path = Path("outputs")) -> Path | None:
     """
     try:
         data = json.loads((output_base / "latest.json").read_text(encoding="utf-8"))
-        run_dir = safe_run_dir(output_base, str(data["run_dir"]), field="latest.json run_dir")
+        run_id = data["run_id"]
+        run_dir_id = data["run_dir"]
+        if not isinstance(run_id, str) or not isinstance(run_dir_id, str) or run_id != run_dir_id:
+            raise RunPathError("latest.json run_id and run_dir must be the same bare string")
+        run_dir = safe_run_dir(output_base, run_dir_id, field="latest.json run_dir")
         if run_dir.exists() and not _is_dry_run_dir(run_dir):
             return run_dir
     except (OSError, ValueError, KeyError, TypeError):
