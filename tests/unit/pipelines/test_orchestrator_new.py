@@ -41,6 +41,7 @@ from panelcast.pipelines.orchestrator import (
     _reset_default_config,
     run_pipeline,
 )
+from panelcast.pipelines.stages import SkipDecision
 
 # ============================================================================
 # Helper: mock environment
@@ -89,7 +90,7 @@ class TestExecuteStagesSkipExisting:
                 mock_stage = MagicMock()
                 mock_stage.name = "data"
                 mock_stage.description = "Data"
-                mock_stage.should_skip.return_value = True
+                mock_stage.skip_decision.return_value = SkipDecision(True)
                 mock_stage.compute_input_hash.return_value = "h"
                 mock_order.return_value = [mock_stage]
                 exit_code = orch2.run()
@@ -160,15 +161,17 @@ class TestExecuteStagesSkipExisting:
                 mock_stage.description = "Data"
                 mock_stage.run_fn = None
                 mock_stage.compute_input_hash.return_value = "h"
-                # Real should_skip returns False when manifest is None
-                mock_stage.should_skip.side_effect = (
-                    lambda manifest, force=False: False if manifest is None else True
+                # Real skip_decision refuses when the manifest is None
+                mock_stage.skip_decision.side_effect = (
+                    lambda manifest, force=False, allowed_roots=None: SkipDecision(
+                        manifest is not None
+                    )
                 )
                 mock_order.return_value = [mock_stage]
                 orch2.run()
 
             # Since flags changed, previous_manifest is set to None,
-            # so should_skip(None) returns False and stage executes
+            # so skip_decision(None) refuses and the stage executes
             assert "data" in orch2.manifest.stages_completed
 
 

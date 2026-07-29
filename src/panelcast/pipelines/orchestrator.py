@@ -1502,6 +1502,48 @@ class PipelineOrchestrator:
 
         return " ".join(parts)
 
+    def _output_verification_roots(self) -> tuple[Path, ...]:
+        """Roots a recorded output may legitimately live under (#367).
+
+        Every declared artifact root is accepted, plus the output base that
+        contains earlier run-scoped products. The whole working tree is not a
+        root, so a rewritten manifest cannot substitute an unrelated file.
+        """
+        paths = self._artifact_paths()
+        roots = tuple(getattr(paths, item.name) for item in dataclass_fields(paths))
+        return (*roots, self.output_base)
+
+    def _carry_skipped_stage_provenance(
+        self,
+        stage: PipelineStage,
+        previous_manifest: RunManifest,
+        previous_run: Path | None,
+    ) -> None:
+        """Carry reusable evidence, never paths owned by the previous run."""
+        manifest = self._require_manifest()
+        previous_hash = previous_manifest.stage_hashes.get(stage.name)
+        if previous_hash is not None:
+            manifest.stage_hashes[stage.name] = previous_hash
+        prefix = f"{stage.name}:"
+        carried: set[str] = set()
+        previous_root = previous_run.resolve() if previous_run else None
+        for key, value in (previous_manifest.outputs or {}).items():
+            if not key.startswith(prefix):
+                continue
+            try:
+                resolved = Path(value).resolve()
+            except (OSError, ValueError):
+                continue
+            if previous_root is not None and (
+                resolved == previous_root or previous_root in resolved.parents
+            ):
+                continue
+            manifest.outputs[key] = value
+            carried.add(key)
+        for key, value in (previous_manifest.output_hashes or {}).items():
+            if key in carried:
+                manifest.output_hashes[key] = value
+
     def _execute_stages(self, stages: list[PipelineStage]) -> None:
         """Execute stages with progress display.
 
@@ -1510,6 +1552,7 @@ class PipelineOrchestrator:
         """
         # Load previous manifest for skip detection
         previous_manifest: RunManifest | None = None
+        previous_run: Path | None = None
         if self.config.skip_existing and self.run_dir:
             previous_run = resolve_latest(self.output_base)
             if previous_run is not None:
@@ -1573,17 +1616,42 @@ class PipelineOrchestrator:
 
                 # Check if stage should be skipped
                 if self.config.skip_existing and not self.config.dry_run:
-                    if stage.should_skip(previous_manifest, force=False):
+                    decision = stage.skip_decision(
+                        previous_manifest,
+                        force=False,
+                        allowed_roots=self._output_verification_roots(),
+                    )
+                    if decision.skip:
                         log.info(
                             "stage_skipped",
                             stage=stage.name,
-                            reason="inputs unchanged",
+                            reason="inputs unchanged, recorded outputs re-hashed",
                         )
                         if self.manifest:
                             self.manifest.stages_skipped.append(stage.name)
+                            if previous_manifest is not None:
+                                self._carry_skipped_stage_provenance(
+                                    stage, previous_manifest, previous_run
+                                )
                             save_run_manifest(self._require_manifest(), self._require_run_dir())
                         progress.advance(task_id, weights[stage.name])
                         continue
+                    if decision.outputs_untrusted:
+                        log.warning(
+                            "stage_outputs_unverified",
+                            stage=stage.name,
+                            reason=decision.reason,
+                            output=decision.key or None,
+                            message="recorded outputs failed verification; rerunning the stage",
+                        )
+                    elif decision.outputs_unverifiable:
+                        log.info(
+                            "stage_outputs_unverifiable",
+                            stage=stage.name,
+                            reason=decision.reason,
+                            output=decision.key or None,
+                            message="no trusted output hashes available; rerunning the stage",
+                        )
 
                 # Execute stage
                 self._execute_stage(stage)
