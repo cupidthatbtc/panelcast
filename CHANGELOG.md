@@ -4,6 +4,75 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] — 2026-07-29
+
+Audit hardening makes resumable fits and incremental runs transactional and
+verifiable, corrects two calibration conventions, and moves dependency/release
+security onto fail-closed evidence.
+
+### Added
+
+- MCMC checkpoints use immutable draw/state blocks committed by a cursor written
+  last, with atomic replacement, fsync ordering, SHA-256 verification, and an
+  identity bound to model source, fit inputs, runtime versions, backend, devices,
+  x64 mode, and warm-start state (#366). Compatibility: format-1 checkpoints
+  cannot prove state/cursor consistency and are refused; delete the interrupted
+  checkpoint directory and restart that fit.
+- Dependency security now audits both the three-platform Pixi lock and the
+  installed-wheel runtime closure with OSV and pip-audit, publishes separate
+  CycloneDX SBOMs with dependency graphs, and uses exact scoped, owned, expiring
+  acceptance records instead of an advisory-id ratchet (#372).
+- Release metadata tests require the newest changelog release heading to match
+  `pyproject.toml`, including at the tagged commit before publication (#361).
+
+### Changed
+
+- PIT uses reproducibly seeded randomized ranks for continuous, tied, discrete,
+  and censored predictions. Primary, secondary, and conformal evaluations use
+  independent labeled streams; every summary records `pit_method` and
+  `pit_randomization_seed` (#369). Compatibility: archived PIT values and figures
+  use deterministic mid-P and are not numerically comparable with 0.23.0+ output;
+  regenerate an artifact before comparing it to a new run.
+- Run, resume, sweep, and backtest identifiers must be portable bare names and
+  resolve inside their output root. Traversal, absolute/drive-relative/UNC paths,
+  symlink escapes, reserved layout stems, Windows device aliases, control or
+  NTFS-illegal characters, and names over 255 UTF-8 bytes are rejected (#365).
+  Compatibility: previously tolerated non-portable identifiers can no longer be
+  created or resumed by name.
+- The multi-platform lock was re-solved with remediated Click, Pillow, pip,
+  PyArrow, Pygments, pytest, setuptools, Tornado, GitPython, and orjson releases.
+  Core JAX/NumPyro/modeling versions and the wheel's broad PyArrow range remain
+  unchanged (#372).
+
+### Fixed
+
+- `--skip-existing` now requires both matching inputs and matching hashes for
+  every reusable output, binds static manifest keys to declared paths, rejects
+  substitutions and root escapes, and carries only reusable evidence across
+  consecutive runs (#367). Compatibility: legacy manifests without output hashes
+  rerun the affected stage once instead of granting a skip.
+- Empirical HDIs span exactly `ceil(prob * n_samples)` draws and search every
+  admissible closed window; decimal-stable counting preserves both exact decimal
+  probabilities and genuinely adjacent floats (#368). Compatibility:
+  `compute_coverage(..., interval_type="hdi")` can return a narrower interval
+  than earlier releases; pipeline evidence uses equal-tailed intervals and is
+  unchanged.
+- Per-machine GPU calibration rejects malformed or unpriceable telemetry and
+  solves the minimum closed-form inflation that over-covers every retained peak,
+  falling back to shipped constants whenever that guarantee cannot be proven
+  (#370).
+
+### Security
+
+- Credential-bearing Claude review has no checkout, shell, filesystem, generic
+  network, plugin, or repository-settings access. A secretless job renders a
+  command-safe, size-bounded diff, and the reviewer reads only that log and CI
+  results through the read-only GitHub CI MCP boundary (#371).
+- Tag publication re-runs advisory scans against the tagged lock and built wheel,
+  creates or retains a draft GitHub Release, uploads and byte-verifies both SBOMs,
+  permits PyPI trusted publishing only after verification, and publishes the
+  GitHub Release only after PyPI succeeds (#372).
+
 ## [0.22.1] — 2026-07-27
 
 External domain packs can run from an installed wheel without carrying the
