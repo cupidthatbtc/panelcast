@@ -1093,27 +1093,28 @@ class PipelineOrchestrator:
         if resume_id is None:
             raise PipelineError("resume requested without a run id", stage="setup")
 
-        # Both candidates are proven to stay under output_base before anything
-        # is read or moved: resume ids reach here from YAML and the API too.
         try:
             run_dir = safe_run_dir(self.output_base, resume_id, field="resume")
-            failed_dir = safe_run_dir(
-                self.output_base, resume_id, subdir="failed", field="resume"
-            )
         except RunPathError as e:
             raise PipelineError(str(e), stage="setup") from e
 
         if run_dir.exists():
             self.run_dir = run_dir
-        elif failed_dir.exists():
+        else:
+            try:
+                failed_dir = safe_run_dir(
+                    self.output_base, resume_id, subdir="failed", field="resume"
+                )
+            except RunPathError as e:
+                raise PipelineError(str(e), stage="setup") from e
+            if not failed_dir.exists():
+                raise PipelineError(
+                    f"Cannot find run to resume: {resume_id}",
+                    stage="setup",
+                )
             # Move back from failed for retry
             self.run_dir = run_dir
             shutil.move(str(failed_dir), str(run_dir))
-        else:
-            raise PipelineError(
-                f"Cannot find run to resume: {resume_id}",
-                stage="setup",
-            )
 
         # Load existing manifest
         manifest_path = self.run_dir / "manifest.json"

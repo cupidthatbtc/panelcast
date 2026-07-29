@@ -350,6 +350,18 @@ class TestResumeContainment:
         orch._setup_resume()
         assert orch.run_dir == base / "run_a"
 
+    def test_active_run_resumes_even_if_failed_root_escapes(self, tmp_path):
+        base = tmp_path / "outputs"
+        self._write_run(base / "run_a")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        _symlink_dir(base / "failed", outside)
+
+        orch = self._orchestrator(base, "run_a")
+        orch._setup_resume()
+
+        assert orch.run_dir == base / "run_a"
+
     def test_failed_run_is_moved_back(self, tmp_path):
         base = tmp_path / "outputs"
         self._write_run(base / "failed" / "run_a")
@@ -452,6 +464,18 @@ class TestRunsCliContainment:
         (base / "failed" / "run_b" / "manifest.json").write_text("{}", encoding="utf-8")
         assert resolve_run_dir("run_a", base) == base / "run_a"
         assert resolve_run_dir("run_b", base) == base / "failed" / "run_b"
+
+    def test_active_lookup_ignores_an_escaping_failed_root(self, tmp_path):
+        from panelcast.cli.runs_cmd import resolve_run_dir
+
+        base = tmp_path / "outputs"
+        (base / "run_a").mkdir(parents=True)
+        (base / "run_a" / "manifest.json").write_text("{}", encoding="utf-8")
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        _symlink_dir(base / "failed", outside)
+
+        assert resolve_run_dir("run_a", base) == base / "run_a"
 
     def test_symlinked_run_is_not_resolved(self, tmp_path):
         from panelcast.cli.runs_cmd import resolve_run_dir

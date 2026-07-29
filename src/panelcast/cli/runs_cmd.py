@@ -18,7 +18,7 @@ from panelcast.cli import runs_app
 
 def resolve_run_dir(run_id: str, output_base: Path = Path("outputs")) -> Path:
     """Resolve a run id against outputs/, outputs/failed/, or 'latest'."""
-    from panelcast.paths import RunPathError, resolve_latest, safe_run_dir
+    from panelcast.paths import RunPathError, resolve_latest, safe_run_dir, validate_run_id
 
     if run_id == "latest":
         run_dir = resolve_latest(output_base)
@@ -26,13 +26,14 @@ def resolve_run_dir(run_id: str, output_base: Path = Path("outputs")) -> Path:
             raise typer.BadParameter("no latest run recorded", param_hint="RUN_ID")
         return Path(run_dir)
     try:
-        candidates = (
-            safe_run_dir(output_base, run_id),
-            safe_run_dir(output_base, run_id, subdir="failed"),
-        )
+        validate_run_id(run_id)
     except RunPathError as exc:
         raise typer.BadParameter(str(exc), param_hint="RUN_ID") from exc
-    for candidate in candidates:
+    for subdir in (None, "failed"):
+        try:
+            candidate = safe_run_dir(output_base, run_id, subdir=subdir)
+        except RunPathError:
+            continue
         if (candidate / "manifest.json").exists():
             return candidate
     raise typer.BadParameter(
