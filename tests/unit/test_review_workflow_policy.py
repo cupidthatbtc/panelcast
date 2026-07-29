@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import copy
 import re
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -79,9 +80,31 @@ def _text(node: Any) -> str:
     return yaml.safe_dump(node, sort_keys=True, default_flow_style=False)
 
 
-def holds_credentials(job: dict[str, Any]) -> bool:
-    permissions = job.get("permissions") or {}
-    return "secrets." in _text(job) or permissions.get("id-token") == "write"
+def _effective_permissions(
+    workflow: dict[str, Any], job: dict[str, Any]
+) -> dict[str, str] | None:
+    raw = job["permissions"] if "permissions" in job else workflow.get("permissions")
+    return raw if isinstance(raw, dict) else None
+
+
+def holds_credentials(job: dict[str, Any], workflow: dict[str, Any] | None = None) -> bool:
+    workflow = workflow or {}
+    permissions = _effective_permissions(workflow, job) or {}
+    inherited = {"env": workflow.get("env"), "job": job}
+    return "secrets." in _text(inherited) or permissions.get("id-token") == "write"
+
+
+def _executes_pull_request_code(job: dict[str, Any]) -> bool:
+    if "uses" in job:
+        return True
+    return any(
+        "run" in step or str(step.get("uses", "")).startswith("./")
+        for step in _steps(job)
+    )
+
+
+def _workflow_paths() -> list[Path]:
+    return sorted({*WORKFLOWS.glob("*.yml"), *WORKFLOWS.glob("*.yaml")})
 
 
 def _steps(job: dict[str, Any]) -> list[dict[str, Any]]:
@@ -213,21 +236,115 @@ def test_review_never_runs_on_a_fork_or_base_branch_trigger(
     assert "head.repo.full_name == github.repository" in credentialed_job["if"]
 
 
-def test_pull_request_code_only_executes_where_there_are_no_credentials() -> None:
-    executing: dict[str, dict[str, Any]] = {}
-    for path in sorted(WORKFLOWS.glob("*.yml")):
-        workflow = load_workflow(path.name)
-        if "pull_request" not in set(triggers(workflow) or {}):
+def _pull_request_workflow_violations(path: Path, workflow: dict[str, Any]) -> list[str]:
+    events = set(triggers(workflow) or {})
+    findings = [
+        f"{path.name}: reacts to unsafe trigger {event}"
+        for event in sorted(events & UNSAFE_TRIGGERS)
+    ]
+    if "pull_request" not in events:
+        return findings
+    for name, job in jobs(workflow).items():
+        if not _executes_pull_request_code(job):
             continue
-        for name, job in jobs(workflow).items():
-            if any("run" in step for step in _steps(job)):
-                executing[f"{path.name}:{name}"] = job
+        label = f"{path.name}:{name}"
+        if holds_credentials(job, workflow):
+            findings.append(f"{label}: runs pull-request code with credentials")
+        permissions = _effective_permissions(workflow, job)
+        if permissions is None:
+            findings.append(f"{label}: has no explicit read-only permissions mapping")
+        elif set(permissions.values()) - {"read"}:
+            findings.append(f"{label}: permissions are not read-only")
+    return findings
+
+
+def test_pull_request_code_only_executes_where_there_are_no_credentials() -> None:
+    workflows = [(path, load_workflow(path.name)) for path in _workflow_paths()]
+    violations = [
+        finding
+        for path, workflow in workflows
+        for finding in _pull_request_workflow_violations(path, workflow)
+    ]
+    executing = [
+        job
+        for _, workflow in workflows
+        if "pull_request" in set(triggers(workflow) or {})
+        for job in jobs(workflow).values()
+        if _executes_pull_request_code(job)
+    ]
 
     assert executing, "secretless CI must run the pull request's own suite"
-    assert any("pixi run pytest" in _text(job) for job in executing.values())
-    for name, job in executing.items():
-        assert not holds_credentials(job), f"{name} runs PR code with credentials"
-        assert set((job.get("permissions") or {}).values()) <= {"read"}, name
+    assert any("pixi run pytest" in _text(job) for job in executing)
+    assert violations == []
+
+
+@pytest.mark.parametrize(
+    ("workflow", "expected"),
+    [
+        (
+            {"on": {"pull_request_target": {}}, "jobs": {}},
+            "reacts to unsafe trigger pull_request_target",
+        ),
+        (
+            {
+                "on": {"pull_request": {}},
+                "permissions": {"contents": "read"},
+                "env": {"TOKEN": "${{ secrets.TOKEN }}"},
+                "jobs": {"test": {"steps": [{"run": "pytest"}]}},
+            },
+            "runs pull-request code with credentials",
+        ),
+        (
+            {
+                "on": {"pull_request": {}},
+                "permissions": "write-all",
+                "jobs": {"test": {"steps": [{"run": "pytest"}]}},
+            },
+            "has no explicit read-only permissions mapping",
+        ),
+        (
+            {
+                "on": {"pull_request": {}},
+                "permissions": {"contents": "read"},
+                "env": {"TOKEN": "${{ secrets.TOKEN }}"},
+                "jobs": {"test": {"steps": [{"uses": "./.github/actions/test"}]}},
+            },
+            "runs pull-request code with credentials",
+        ),
+        (
+            {
+                "on": {"pull_request": {}},
+                "permissions": {"contents": "read"},
+                "env": {"TOKEN": "${{ secrets.TOKEN }}"},
+                "jobs": {"test": {"uses": "./.github/workflows/test.yml"}},
+            },
+            "runs pull-request code with credentials",
+        ),
+    ],
+)
+def test_repository_sweep_rejects_policy_bypasses(workflow, expected) -> None:
+    violations = _pull_request_workflow_violations(Path("evil.yaml"), workflow)
+    assert any(expected in violation for violation in violations), violations
+
+
+def test_workflow_paths_include_yml_and_yaml(tmp_path, monkeypatch) -> None:
+    (tmp_path / "one.yml").write_text("name: one", encoding="utf-8")
+    (tmp_path / "two.yaml").write_text("name: two", encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "WORKFLOWS", tmp_path)
+    assert {path.name for path in _workflow_paths()} == {"one.yml", "two.yaml"}
+
+
+def test_secretless_diff_log_is_complete_and_unforgeably_delimited(
+    review_workflow: dict[str, Any],
+) -> None:
+    run = "\n".join(
+        str(step.get("run", "")) for step in _steps(jobs(review_workflow)["review-input"])
+    )
+
+    assert "--no-ext-diff --no-textconv" in run
+    assert "START $stop" in run and "END $stop" in run
+    assert "2000000" in run
+    assert "diff is too large" in run
 
 
 def test_reviewer_can_still_read_ci_results_instead_of_running_them(

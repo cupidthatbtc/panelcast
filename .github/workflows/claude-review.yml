@@ -29,10 +29,18 @@ jobs:
         run: |
           set -euo pipefail
           stop="$(cat /proc/sys/kernel/random/uuid)"
+          diff_file="$RUNNER_TEMP/panelcast-review.diff"
+          git diff --no-ext-diff --no-textconv --find-renames \
+            "$BASE_SHA...$HEAD_SHA" > "$diff_file"
+          size="$(wc -c < "$diff_file")"
+          if [ "$size" -gt 2000000 ]; then
+            echo "::error::pull-request diff is too large for a complete credentialed review"
+            exit 1
+          fi
           echo "::stop-commands::$stop"
-          printf '%s\n' '--- PANELCAST REVIEW DIFF START ---'
-          git diff --no-ext-diff --no-textconv --find-renames "$BASE_SHA...$HEAD_SHA"
-          printf '%s\n' '--- PANELCAST REVIEW DIFF END ---'
+          printf '%s\n' "--- PANELCAST REVIEW DIFF START $stop ---"
+          cat "$diff_file"
+          printf '%s\n' "--- PANELCAST REVIEW DIFF END $stop ---"
           echo "::$stop::"
 
   review:
@@ -66,8 +74,9 @@ jobs:
           prompt: >
             Review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}.
             Use the GitHub CI tools to download the review-input job log, whose
-            marked section contains the pull-request diff rendered by a secretless
-            job. Read the other CI job results and logs through the same tools.
+            section between matching UUID-bearing markers contains the complete
+            pull-request diff rendered by a secretless job. Read the other CI job
+            results and logs through the same tools.
             Report concrete correctness, security, portability, and test defects
             as a visible pull-request review.
           claude_args: |
