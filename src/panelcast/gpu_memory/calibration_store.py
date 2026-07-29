@@ -154,11 +154,11 @@ def _linear_terms(inputs: dict[str, Any]) -> tuple[float, float] | None:
             return None
         n_obs = values["n_observations"]
         n_features = values["n_features"]
-        n_artists = values["n_artists"]
+        n_entities = values["n_artists"]
         max_seq = values["max_seq"]
         num_chains = values["num_chains"]
         num_samples = values["num_samples"]
-        if min(n_obs, n_artists, max_seq, num_chains, num_samples) <= 0 or n_features < 0:
+        if min(n_obs, n_entities, max_seq, num_chains, num_samples) <= 0 or n_features < 0:
             return None
         chain_method = inputs.get("chain_method", "sequential")
         if chain_method not in ("sequential", "parallel", "vectorized"):
@@ -177,7 +177,7 @@ def _linear_terms(inputs: dict[str, Any]) -> tuple[float, float] | None:
         n_params, collected = _count_params(
             n_observations=n_obs,
             n_features=n_features,
-            n_artists=n_artists,
+            n_artists=n_entities,
             max_seq=max_seq,
             exclude_rw_raw_from_collection=inputs.get("exclude_rw_raw_from_collection", False),
             errors_in_variables=inputs.get("errors_in_variables", False),
