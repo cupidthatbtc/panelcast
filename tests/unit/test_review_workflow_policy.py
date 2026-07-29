@@ -20,6 +20,10 @@ import pytest
 import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+SYNTHETIC_ARTIFACT = "claude-safe-workspace-${{ github.run_id }}"
+SYNTHETIC_BUILDER = "Build a constant synthetic action workspace"
+SYNTHETIC_UPLOAD = "Upload the synthetic action workspace"
+SYNTHETIC_DOWNLOAD = "Download the synthetic action workspace"
 
 # The CI MCP server is action-owned and receives a separate read-only workflow
 # token. The credentialed reviewer gets no filesystem, shell, or network tool.
@@ -135,6 +139,20 @@ def _job_violations(job: dict[str, Any]) -> Iterator[str]:
     if any("run" in step for step in _steps(job)):
         yield "runs a shell step alongside the review credentials"
 
+    downloads = [
+        step
+        for step in _steps(job)
+        if str(step.get("uses", "")).startswith("actions/download-artifact")
+    ]
+    if len(downloads) != 1:
+        yield "does not have exactly one synthetic artifact download"
+    else:
+        download = downloads[0]
+        if download.get("name") != SYNTHETIC_DOWNLOAD:
+            yield "renames the synthetic artifact download step"
+        if (download.get("with") or {}).get("name") != SYNTHETIC_ARTIFACT:
+            yield "downloads an artifact other than the synthetic workspace"
+
     if "head.repo.full_name == github.repository" not in str(job.get("if", "")):
         yield "does not restrict itself to same-repository pull requests"
 
@@ -181,6 +199,61 @@ def _job_violations(job: dict[str, Any]) -> Iterator[str]:
         yield "does not enable the read-only GitHub CI MCP server"
 
 
+def _synthetic_workspace_violations(workflow: dict[str, Any]) -> list[str]:
+    input_steps = _steps(jobs(workflow).get("review-input") or {})
+    review_steps = _steps(jobs(workflow).get("review") or {})
+    uploads = [
+        step
+        for step in input_steps
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    ]
+    downloads = [
+        step
+        for step in review_steps
+        if str(step.get("uses", "")).startswith("actions/download-artifact")
+    ]
+    builders = [step for step in input_steps if step.get("name") == SYNTHETIC_BUILDER]
+    findings: list[str] = []
+    if len(uploads) != 1 or len(downloads) != 1 or len(builders) != 1:
+        return ["synthetic workspace requires exactly one builder, upload, and download"]
+
+    upload, download, builder = uploads[0], downloads[0], builders[0]
+    if upload.get("name") != SYNTHETIC_UPLOAD:
+        findings.append("synthetic workspace upload step has the wrong name")
+    if download.get("name") != SYNTHETIC_DOWNLOAD:
+        findings.append("synthetic workspace download step has the wrong name")
+    upload_with = upload.get("with") or {}
+    download_with = download.get("with") or {}
+    if upload_with.get("name") != SYNTHETIC_ARTIFACT:
+        findings.append("synthetic workspace upload uses the wrong artifact name")
+    if download_with.get("name") != SYNTHETIC_ARTIFACT:
+        findings.append("synthetic workspace download uses the wrong artifact name")
+    if upload_with.get("path") != "${{ runner.temp }}/claude-safe-workspace/":
+        findings.append("synthetic workspace is not isolated under runner temp")
+    if upload_with.get("include-hidden-files") is not True:
+        findings.append("synthetic workspace omits its Git metadata")
+    if download_with.get("path") != "${{ github.workspace }}":
+        findings.append("synthetic workspace is not restored at the action workspace")
+    if input_steps.index(upload) != input_steps.index(builder) + 1:
+        findings.append("synthetic workspace is not uploaded immediately after its builder")
+
+    builder_run = str(builder.get("run", ""))
+    required_lines = (
+        'safe="$RUNNER_TEMP/claude-safe-workspace"',
+        'export HOME="$RUNNER_TEMP/claude-safe-home"',
+        "GIT_CONFIG_NOSYSTEM=1",
+        'rm -rf "$safe" "$HOME"',
+        "git init --bare .review-origin",
+        "Synthetic workspace: no pull-request files.",
+    )
+    findings.extend(
+        f"synthetic workspace builder omits {required}"
+        for required in required_lines
+        if required not in builder_run
+    )
+    return findings
+
+
 def credential_isolation_violations(workflow: dict[str, Any]) -> list[str]:
     credentialed = {name: job for name, job in jobs(workflow).items() if holds_credentials(job)}
     if not credentialed:
@@ -196,6 +269,7 @@ def credential_isolation_violations(workflow: dict[str, Any]) -> list[str]:
         for name, job in credentialed.items()
         for violation in _job_violations(job)
     ]
+    findings += _synthetic_workspace_violations(workflow)
     return findings
 
 
@@ -499,6 +573,51 @@ def _strip_credentials(workflow: dict[str, Any]) -> None:
     _review_action_inputs(job)["claude_code_oauth_token"] = "${{ vars.SOMETHING_ELSE }}"
 
 
+def _upload_pr_workspace(workflow: dict[str, Any]) -> None:
+    upload = next(
+        step
+        for step in _steps(jobs(workflow)["review-input"])
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    )
+    upload["with"]["path"] = "${{ github.workspace }}"
+
+
+def _omit_synthetic_git_metadata(workflow: dict[str, Any]) -> None:
+    upload = next(
+        step
+        for step in _steps(jobs(workflow)["review-input"])
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    )
+    upload["with"]["include-hidden-files"] = False
+
+
+def _add_decoy_artifact_transfer(workflow: dict[str, Any]) -> None:
+    jobs(workflow)["review-input"]["steps"].insert(
+        0,
+        {
+            "name": "Decoy upload",
+            "uses": "actions/upload-artifact@" + "a" * 40,
+            "with": {"name": SYNTHETIC_ARTIFACT, "path": "${{ github.workspace }}"},
+        },
+    )
+    _only_credentialed_job(workflow)["steps"].insert(
+        0,
+        {
+            "name": "Decoy download",
+            "uses": "actions/download-artifact@" + "a" * 40,
+            "with": {"name": SYNTHETIC_ARTIFACT, "path": "${{ github.workspace }}"},
+        },
+    )
+
+
+def _move_builder_contract_to_a_decoy(workflow: dict[str, Any]) -> None:
+    steps = jobs(workflow)["review-input"]["steps"]
+    builder = next(step for step in steps if step.get("name") == SYNTHETIC_BUILDER)
+    original = str(builder["run"])
+    builder["run"] = "printf '%s\\n' unsafe-builder"
+    steps.insert(0, {"name": "Decoy safe text", "run": original})
+
+
 @pytest.mark.parametrize(
     ("mutate", "expected"),
     [
@@ -524,6 +643,10 @@ def _strip_credentials(workflow: dict[str, Any]) -> None:
         (_accept_fork_pull_requests, "does not restrict itself to same-repository"),
         (_switch_to_pull_request_target, "reacts to pull_request_target"),
         (_strip_credentials, "no credential-bearing job found"),
+        (_upload_pr_workspace, "not isolated under runner temp"),
+        (_omit_synthetic_git_metadata, "omits its Git metadata"),
+        (_add_decoy_artifact_transfer, "exactly one builder, upload, and download"),
+        (_move_builder_contract_to_a_decoy, "builder omits"),
     ],
 )
 def test_policy_rejects_a_reviewer_that_can_execute_pull_request_code(
