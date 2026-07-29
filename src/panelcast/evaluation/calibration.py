@@ -20,6 +20,7 @@ Usage:
 """
 
 from dataclasses import dataclass
+from decimal import ROUND_CEILING, Decimal
 
 import numpy as np
 
@@ -163,11 +164,11 @@ class WISResult:
 def _hdi_sample_count(n_samples: int, prob: float) -> int:
     """Draws a closed HDI must span: the fewest whose mass reaches ``prob``.
 
-    Move by one representable float, not a fixed tolerance: this corrects a
-    one-ULP multiplication overshoot without rounding down genuine excess mass.
+    Decimal arithmetic preserves the caller-visible probability, avoiding both
+    binary multiplication overshoot and rounding down a genuine adjacent float.
     """
-    product = np.nextafter(prob * n_samples, -np.inf)
-    count = int(np.ceil(product))
+    product = Decimal(str(prob)) * n_samples
+    count = int(product.to_integral_value(rounding=ROUND_CEILING))
     return min(max(count, 1), n_samples)
 
 
