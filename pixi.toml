@@ -27,13 +27,20 @@ typecheck-ratchet = "python scripts/typing_ratchet.py --check"
 terminology-ratchet = "python scripts/terminology_ratchet.py --check"
 # Three-domain replication acceptance suite (#273): GPU-scale, nightly/manual.
 replication-acceptance = "python scripts/replication_acceptance.py --config configs/replication_acceptance.yaml"
+# Dependency-security gate (#372): OSV over the whole lock, PyPI and conda.
+audit = "python scripts/dependency_audit.py"
+# CycloneDX SBOM; --scope environment (the lock) or wheel (the pip closure).
+sbom = "python scripts/generate_sbom.py"
 
 [dependencies]
 python = ">=3.11"
 numpy = ">=1.26"
 pandas = ">=2.2"
 pandera = ">=0.18"
-pyarrow = ">=15.0"
+# Security floor (GHSA-rgxp-2hwp-jwgg): the wheel still accepts pyarrow >=15,
+# because panelcast only ever touches pyarrow.parquet, but the tested
+# environment takes the fix.
+pyarrow = ">=23.0.1"
 pydantic = ">=2.6"
 pyyaml = ">=6.0"
 scikit-learn = ">=1.4"
@@ -50,18 +57,30 @@ matplotlib = ">=3.8"
 packaging = ">=23.0"
 seaborn = ">=0.13"
 uncertainties = ">=3.1"
-pytest = ">=8.0"
+pytest = ">=9.0.3"
 pytest-cov = ">=4.1"
 pytest-timeout = ">=2.4.0"
 mypy = ">=1.8"
 ruff = "*"
-pip = ">=25.3,<26"
+pip = ">=26.1.2,<27"
+
+# Transitive packages named here only to hold a security floor (#372). Each is
+# the first release fixing every advisory OSV reports against what the lock
+# pinned before; scripts/dependency_audit.py enforces the same floors offline.
+click = ">=8.3.3"
+pillow = ">=12.3.0"
+pygments = ">=2.20.0"
+setuptools = ">=83.0.0"
+tornado = ">=6.5.7"
 
 [pypi-dependencies]
-gitpython = ">=3.1"
+# Floor set by the 3.1.47-3.1.55 command-injection/exfiltration advisory chain.
+gitpython = ">=3.1.55"
 numpyro = ">=0.19.0"
 jax = ">=0.8.2"
 plotly = ">=6.1.1"
 kaleido = ">=1.0.0"
+# Transitive through kaleido, pinned direct so CVE-2025-67221 cannot come back.
+orjson = ">=3.11.6"
 nvidia-ml-py = ">=13.580.65"
 packaging = ">=23.0"

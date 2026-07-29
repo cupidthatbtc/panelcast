@@ -1,0 +1,18 @@
+{
+  "schema": 3,
+  "description": "Accepted advisories against either the versions pixi.lock pins or the installed wheel runtime closure (#372). This is a ledger, not a ratchet of bare ids: every entry names its scope, package, exact version, advisory, applicability, remediation, owner, review date, and expiry. scripts/dependency_audit.py rejects entries that are incomplete, generic, or expired, and --scaffold can only stub lock-scoped entries for a human to complete.",
+  "policy": {
+    "max_acceptance_days": 90,
+    "acceptance_scopes": ["lock", "wheel-runtime"],
+    "gated_tier": "PyPI-identified packages, including conda packages carrying a pkg:pypi purl",
+    "reported_tier": "conda packages with no PyPI identity, matched by bare name across every OSV ecosystem; reported only, because the version ranges belong to other distributions and bare names collide"
+  },
+  "last_triage": {
+    "date": "2026-07-29",
+    "pixi_lock_sha256": "79273463e4f5b6997a3aaf71dd92bb58b344298dc6227a0ffabdb2dc3be1362d",
+    "pypi_identified_findings": 0,
+    "outcome": "All 67 advisories previously parked in this file had a fixed release available, so every one was remediated by upgrade rather than accepted: click 8.3.1 -> 8.4.2, pillow 12.1.0 -> 12.3.0, pip 25.3 -> 26.1.2, pyarrow 22.0.0 -> 25.0.0, pygments 2.19.2 -> 2.20.0, pytest 9.0.2 -> 9.1.1, setuptools 80.9.0 -> 83.0.0, tornado 6.5.3/6.5.4 -> 6.5.7. The floors in scripts/dependency_audit.py hold each of them.",
+    "name_matched_tier": "1257 cross-ecosystem name matches across 49 conda packages, concentrated in openssl, hdf5, libpng, and libssh2. They are reported, never gated, and explicitly not adjudicated: the ranges belong to Debian/Ubuntu/Alpine/SUSE builds rather than to conda-forge, and bare names collide (seaborn matches MAL-2025-4020, yaml an npm CVE, cpython a RUSTSEC advisory). The mitigation is currency, not analysis: this re-solve moved libpng, libjpeg-turbo, freetype, krb5, libcurl, libglib, openldap, lcms2, and zlib to current conda-forge builds, and a full re-solve leaves openssl, hdf5, and libssh2 unchanged. See docs/DEPENDENCY_SECURITY.md."
+  },
+  "acceptances": []
+}

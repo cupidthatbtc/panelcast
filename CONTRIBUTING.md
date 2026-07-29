@@ -114,6 +114,28 @@ date-released), and the `MODEL_CARD.md` header. The CHANGELOG entry stays
 manual, as does `requirements.lock` when `pixi.lock` changed;
 `tests/unit/test_release_metadata.py` fails the build if anything drifts.
 
+Pushing the tag starts the release run, which re-runs OSV and pip-audit on the
+tagged lock and built wheel, then builds the environment and wheel-runtime SBOMs
+and attaches both to a draft GitHub Release. PyPI publication is blocked until
+those scans pass and the assets are read back and verified; only a
+successful PyPI publication lets the final job publish the GitHub Release. Do
+not race the workflow with `gh release create` or publish the draft manually.
+Amend the generated release notes afterward if the changelog needs more detail.
+The release gate revalidates the acceptance ledger, so re-triage any expired
+entry before tagging even when that package is unrelated to the SBOM edit.
+
+## Dependency security
+
+Touching `pixi.lock` means re-running `pixi run audit`. Findings without a
+current acceptance fail the gate. Accepted ones live in `security_baseline.json`
+as entries that name the lock or wheel-runtime scope, exact version, advisory,
+applicability, remediation, owner, and expiry — `pixi run audit --scaffold`
+writes the lock-scoped shape but deliberately cannot grant the acceptance.
+Prefer upgrading: as of the
+July 2026 sweep the ledger is empty because every open advisory had a fix. See
+[`docs/DEPENDENCY_SECURITY.md`](docs/DEPENDENCY_SECURITY.md) for what each
+scanner can and cannot see.
+
 ## Reporting issues
 
 Use the issue templates under `.github/ISSUE_TEMPLATE/`. For bugs, include the
