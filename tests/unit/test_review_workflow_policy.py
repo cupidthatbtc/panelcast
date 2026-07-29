@@ -31,7 +31,6 @@ READ_ONLY_TOOLS = frozenset(
     {
         "mcp__github_ci__get_ci_status",
         "mcp__github_ci__get_workflow_run_details",
-        "mcp__github_ci__download_job_log",
     }
 )
 
@@ -257,6 +256,41 @@ def _synthetic_workspace_violations(workflow: dict[str, Any]) -> list[str]:
     return findings
 
 
+def _inline_diff_violations(workflow: dict[str, Any]) -> list[str]:
+    review_input = jobs(workflow).get("review-input") or {}
+    render_steps = [
+        step
+        for step in _steps(review_input)
+        if step.get("name") == "Render the pull request diff for review"
+    ]
+    if len(render_steps) != 1:
+        return ["inline diff requires exactly one named render step"]
+    render = render_steps[0]
+    run = str(render.get("run", ""))
+    findings: list[str] = []
+    if render.get("id") != "render":
+        findings.append("inline diff render step has the wrong id")
+    if (review_input.get("outputs") or {}).get("review_diff") != (
+        "${{ steps.render.outputs.review_diff }}"
+    ):
+        findings.append("inline diff job output is not wired to the render step")
+    for required in (
+        'if [ "$size" -gt 300000 ]',
+        'output_stop="$(cat /proc/sys/kernel/random/uuid)"',
+        'grep -Fxq "$output_stop" "$diff_file"',
+        "review_diff<<%s",
+        '>> "$GITHUB_OUTPUT"',
+    ):
+        if required not in run:
+            findings.append(f"inline diff renderer omits {required}")
+    prompt = str(_review_action_inputs(jobs(workflow).get("review") or {}).get("prompt", ""))
+    if "${{ needs.review-input.outputs.review_diff }}" not in prompt:
+        findings.append("credentialed review prompt omits the inline diff output")
+    if "untrusted data" not in prompt:
+        findings.append("credentialed review prompt does not label the diff as untrusted data")
+    return findings
+
+
 def credential_isolation_violations(workflow: dict[str, Any]) -> list[str]:
     credentialed = {name: job for name, job in jobs(workflow).items() if holds_credentials(job)}
     if not credentialed:
@@ -273,6 +307,7 @@ def credential_isolation_violations(workflow: dict[str, Any]) -> list[str]:
         for violation in _job_violations(job)
     ]
     findings += _synthetic_workspace_violations(workflow)
+    findings += _inline_diff_violations(workflow)
     return findings
 
 
@@ -420,8 +455,19 @@ def test_secretless_diff_log_is_complete_and_unforgeably_delimited(
 
     assert "--no-ext-diff --no-textconv" in run
     assert "START $stop" in run and "END $stop" in run
-    assert "2000000" in run
+    assert "300000" in run
+    assert "2000000" not in run
     assert "diff is too large" in run
+    assert "output_stop=" in run
+    assert 'grep -Fxq "$output_stop" "$diff_file"' in run
+    assert "review_diff<<%s" in run
+    assert '>> "$GITHUB_OUTPUT"' in run
+
+    review_input = jobs(review_workflow)["review-input"]
+    assert review_input["outputs"]["review_diff"] == "${{ steps.render.outputs.review_diff }}"
+    prompt = _review_action_inputs(jobs(review_workflow)["review"])["prompt"]
+    assert "${{ needs.review-input.outputs.review_diff }}" in prompt
+    assert "untrusted data" in prompt
 
 
 def test_reviewer_can_still_read_ci_results_instead_of_running_them(
@@ -437,7 +483,6 @@ def test_reviewer_can_still_read_ci_results_instead_of_running_them(
     assert ci_tools == {
         "mcp__github_ci__get_ci_status",
         "mcp__github_ci__get_workflow_run_details",
-        "mcp__github_ci__download_job_log",
     }
     assert "actions: read" in inputs["additional_permissions"]
 
@@ -625,6 +670,30 @@ def _move_builder_contract_to_a_decoy(workflow: dict[str, Any]) -> None:
     steps.insert(0, {"name": "Decoy safe text", "run": original})
 
 
+def _render_step(workflow: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        step
+        for step in _steps(jobs(workflow)["review-input"])
+        if step.get("name") == "Render the pull request diff for review"
+    )
+
+
+def _use_predictable_output_delimiter(workflow: dict[str, Any]) -> None:
+    render = _render_step(workflow)
+    render["run"] = str(render["run"]).replace(
+        'output_stop="$(cat /proc/sys/kernel/random/uuid)"', 'output_stop="EOF"'
+    )
+
+
+def _drop_inline_diff_wiring(workflow: dict[str, Any]) -> None:
+    del jobs(workflow)["review-input"]["outputs"]["review_diff"]
+
+
+def _widen_inline_diff_cap(workflow: dict[str, Any]) -> None:
+    render = _render_step(workflow)
+    render["run"] = str(render["run"]).replace("-gt 300000", "-gt 2000000")
+
+
 @pytest.mark.parametrize(
     ("mutate", "expected"),
     [
@@ -655,6 +724,9 @@ def _move_builder_contract_to_a_decoy(workflow: dict[str, Any]) -> None:
         (_omit_synthetic_git_metadata, "omits its Git metadata"),
         (_add_decoy_artifact_transfer, "exactly one builder, upload, and download"),
         (_move_builder_contract_to_a_decoy, "builder omits"),
+        (_use_predictable_output_delimiter, "renderer omits"),
+        (_drop_inline_diff_wiring, "job output is not wired"),
+        (_widen_inline_diff_cap, "renderer omits"),
     ],
 )
 def test_policy_rejects_a_reviewer_that_can_execute_pull_request_code(
