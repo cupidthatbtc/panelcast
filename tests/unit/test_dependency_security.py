@@ -835,21 +835,37 @@ def test_scanner_versions_are_pinned() -> None:
         assert re.fullmatch(r"\d+\.\d+(\.\d+)?", str(release_env[name])), name
 
 
-def test_release_wheel_venv_upgrades_pip_before_install() -> None:
-    steps = _steps(_workflow("release.yml")["jobs"]["build"])
+def test_release_wheel_venv_uses_outer_pinned_pip() -> None:
+    workflow = _workflow("release.yml")
+    assert re.fullmatch(r"\d+\.\d+\.\d+", workflow["env"]["PIP_VERSION"])
+
+    steps = _steps(workflow["jobs"]["build"])
+    toolchain = next(
+        step
+        for step in steps
+        if step.get("name") == "Install the pinned release and scanner toolchain"
+    )
+    assert '"pip==${PIP_VERSION}"' in _run(toolchain)
+
     smoke = next(
         step
         for step in steps
         if step.get("name") == "Smoke-test the wheel from an empty directory"
     )
-    lines = [line.strip() for line in _run(smoke).splitlines() if line.strip()]
-
-    pip_upgrade = (
-        '"$RUNNER_TEMP/wheel-env/bin/python" -m pip install '
-        '"pip==${PIP_VERSION}"'
+    lines = [
+        re.sub(r"\\\s*\n|\s+", " ", line).strip()
+        for line in _run(smoke).splitlines()
+        if line.strip()
+    ]
+    create_venv = 'python -m venv --without-pip "$RUNNER_TEMP/wheel-env"'
+    wheel_install = (
+        'python -m pip --python "$RUNNER_TEMP/wheel-env/bin/python" '
+        "install dist/*.whl"
     )
-    wheel_install = '"$RUNNER_TEMP/wheel-env/bin/python" -m pip install dist/*.whl'
-    assert lines.index(pip_upgrade) < lines.index(wheel_install)
+    assert create_venv in lines, "wheel smoke venv must not seed ensurepip"
+    assert wheel_install in lines, "built wheel must use the outer pinned pip"
+    assert lines.index(create_venv) < lines.index(wheel_install)
+    assert not any('wheel-env/bin/python" -m pip' in line for line in lines)
 
 
 def test_the_wheel_closure_is_audited_and_not_just_the_lock() -> None:

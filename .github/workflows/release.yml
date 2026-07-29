@@ -60,9 +60,8 @@ jobs:
 
       - name: Smoke-test the wheel from an empty directory
         run: |
-          python -m venv "$RUNNER_TEMP/wheel-env"
-          "$RUNNER_TEMP/wheel-env/bin/python" -m pip install "pip==${PIP_VERSION}"
-          "$RUNNER_TEMP/wheel-env/bin/python" -m pip install dist/*.whl
+          python -m venv --without-pip "$RUNNER_TEMP/wheel-env"
+          python -m pip --python "$RUNNER_TEMP/wheel-env/bin/python" install dist/*.whl
           tag_version="${GITHUB_REF_NAME#v}"
           wheel_version="$("$RUNNER_TEMP/wheel-env/bin/python" -c 'import importlib.metadata; print(importlib.metadata.version("panelcast"))')"
           if [[ "$tag_version" != "$wheel_version" ]]; then
