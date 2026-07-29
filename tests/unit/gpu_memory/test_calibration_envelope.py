@@ -109,10 +109,23 @@ class TestPoisonedRecordsAreRejected:
             record["estimate_inputs"]["n_observations"] = value
         assert refit_constants(records) is None
 
-    def test_negative_dimensions_are_not_fit(self):
+    @pytest.mark.parametrize(
+        ("name", "value"),
+        [
+            ("n_observations", 0),
+            ("n_artists", -1),
+            ("max_seq", 0),
+            ("num_chains", 0),
+            ("num_samples", 0),
+            ("n_features", -1),
+            ("n_observations", 1.5),
+            ("num_chains", "2"),
+        ],
+    )
+    def test_non_positive_or_coerced_dimensions_are_not_fit(self, name, value):
         records = _exact_records(2.5, 0.2, n=8)
         for record in records:
-            record["estimate_inputs"]["n_features"] = -40
+            record["estimate_inputs"][name] = value
         assert refit_constants(records) is None
 
     def test_non_dict_records_are_skipped(self):
@@ -193,20 +206,13 @@ class TestEnvelopeIsVerifiedNotAssumed:
         assert cal.min_ratio >= _MIN_LOCAL_ENVELOPE * ENVELOPE_SLACK
         _assert_envelope_holds(cal, records)
 
-    def test_unliftable_point_falls_back_to_shipped_constants(self):
-        """A point with no scalable term at all cannot be covered by scaling.
-
-        num_samples=0 zeroes the collection term, and sitting just under the
-        line pulls the fitted intercept negative, so the fixed term clamps to
-        zero: nothing is left for a scale to act on, at any magnitude.
-        """
-        from panelcast.gpu_memory.calibration_store import _linear_terms
-
-        stuck_inputs = _inputs(num_samples=0, num_warmup=0)
-        base, unit = _linear_terms(stuck_inputs)
-        assert unit == 0.0
-        stuck = _record(stuck_inputs, 1.1 * base * 0.99)
-        assert refit_constants([*_exact_records(2.5, 0.0, n=8), stuck]) is None
+    def test_zero_draw_record_is_rejected_without_poisoning_valid_history(self):
+        records = _exact_records(2.5, 0.2, n=8)
+        records.append(_record(_inputs(num_samples=0, num_warmup=0), 1000.0))
+        cal = refit_constants(records)
+        assert cal is not None
+        assert cal.n_points == 8
+        _assert_envelope_holds(cal, records[:-1])
 
     def test_reported_min_ratio_matches_the_returned_constants(self):
         records = _exact_records(2.2, 0.18, n=10)
@@ -222,6 +228,20 @@ class TestEnvelopeIsVerifiedNotAssumed:
             for r in records
         )
         assert observed == pytest.approx(cal.min_ratio, rel=1e-9)
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"chain_method": "sequential", "num_chains": 4},
+            {"chain_method": "parallel", "num_chains": 4},
+            {"chain_method": "vectorized", "num_chains": 4},
+        ],
+    )
+    def test_terms_match_the_estimator_for_supported_shapes(self, overrides):
+        records = _exact_records(2.5, 0.2, n=8, **overrides)
+        cal = refit_constants(records)
+        assert cal is not None
+        _assert_envelope_holds(cal, records)
 
     def test_single_extreme_leverage_point_binds_the_envelope(self):
         records = _exact_records(2.5, 0.2, n=9)

@@ -139,29 +139,57 @@ def _linear_terms(inputs: dict[str, Any]) -> tuple[float, float] | None:
     the flags being recorded are read as gate-off.
     """
     try:
-        n_obs = int(inputs["n_observations"])
-        n_features = int(inputs["n_features"])
-        n_artists = int(inputs["n_artists"])
-        max_seq = int(inputs["max_seq"])
-        num_chains = int(inputs["num_chains"])
-        num_samples = int(inputs["num_samples"])
+        values = {
+            name: inputs[name]
+            for name in (
+                "n_observations",
+                "n_features",
+                "n_artists",
+                "max_seq",
+                "num_chains",
+                "num_samples",
+            )
+        }
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in values.values()):
+            return None
+        n_obs = values["n_observations"]
+        n_features = values["n_features"]
+        n_artists = values["n_artists"]
+        max_seq = values["max_seq"]
+        num_chains = values["num_chains"]
+        num_samples = values["num_samples"]
+        if min(n_obs, n_artists, max_seq, num_chains, num_samples) <= 0 or n_features < 0:
+            return None
+        chain_method = inputs.get("chain_method", "sequential")
+        if chain_method not in ("sequential", "parallel", "vectorized"):
+            return None
+        gate_names = (
+            "exclude_rw_raw_from_collection",
+            "errors_in_variables",
+            "heteroscedastic_entity_obs",
+            "entity_group_pooling",
+        )
+        if any(name in inputs and not isinstance(inputs[name], bool) for name in gate_names):
+            return None
+        n_groups = inputs.get("n_groups", 0)
+        if isinstance(n_groups, bool) or not isinstance(n_groups, int) or n_groups < 0:
+            return None
         n_params, collected = _count_params(
             n_observations=n_obs,
             n_features=n_features,
             n_artists=n_artists,
             max_seq=max_seq,
-            exclude_rw_raw_from_collection=bool(
-                inputs.get("exclude_rw_raw_from_collection", False)
-            ),
-            errors_in_variables=bool(inputs.get("errors_in_variables", False)),
-            heteroscedastic_entity_obs=bool(inputs.get("heteroscedastic_entity_obs", False)),
-            entity_group_pooling=bool(inputs.get("entity_group_pooling", False)),
-            n_groups=int(inputs.get("n_groups", 0) or 0),
+            exclude_rw_raw_from_collection=inputs.get("exclude_rw_raw_from_collection", False),
+            errors_in_variables=inputs.get("errors_in_variables", False),
+            heteroscedastic_entity_obs=inputs.get("heteroscedastic_entity_obs", False),
+            entity_group_pooling=inputs.get("entity_group_pooling", False),
+            n_groups=n_groups,
         )
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
     gib = 1024**3
-    raw_base = (n_params * 4 * 4 + n_obs * n_features * 4) / gib
+    live_chains = num_chains if chain_method == "vectorized" else 1
+    raw_base = (n_params * 4 * 4 * live_chains + n_obs * n_features * 4) / gib
     unit = collected * num_samples * 4 * num_chains / gib
     if not (_is_finite(raw_base) and _is_finite(unit)) or raw_base < 0.0 or unit < 0.0:
         return None
@@ -278,7 +306,7 @@ def refit_constants(
     if not (_is_finite(float(slope)) and _is_finite(float(intercept))):
         return None
     factor = max(float(slope), 0.1)
-    fixed = max(float(intercept), 0.0)
+    fixed = 0.0 if abs(float(intercept)) < 1e-12 else max(float(intercept), 0.0)
 
     scale = _envelope_scale(
         base_arr, unit_arr, actual_arr, factor, fixed, jit_buffer_percent

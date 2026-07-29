@@ -1162,6 +1162,7 @@ def _build_resource_usage(
         "num_chains": mcmc_config.num_chains,
         "num_samples": mcmc_config.num_samples,
         "num_warmup": mcmc_config.num_warmup,
+        "chain_method": mcmc_config.chain_method,
         "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
     }
     expected_gb = estimate_memory_gb(**estimate_inputs).total_gb
