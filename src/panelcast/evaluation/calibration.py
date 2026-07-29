@@ -160,14 +160,26 @@ class WISResult:
     n_obs: int
 
 
+def _hdi_sample_count(n_samples: int, prob: float) -> int:
+    """Draws a closed HDI must span: the fewest whose mass reaches ``prob``.
+
+    The tolerance absorbs binary-float error in the product — ``0.95 * 1000``
+    must ask for 950 draws, never 951.
+    """
+    count = int(np.ceil(prob * n_samples - 1e-9))
+    return min(max(count, 1), n_samples)
+
+
 def _hdi_per_observation(
     y_samples: np.ndarray,
     prob: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Compute highest density interval per observation via sliding window.
 
-    Sorts samples once, then finds the narrowest window containing
-    ``prob`` fraction of samples for each observation.
+    Sorts samples once, then finds the narrowest window spanning
+    ``ceil(prob * n_samples)`` draws for each observation. Both endpoints are
+    order statistics and are themselves inside the interval, so a window of
+    ``k`` draws runs from index ``start`` to ``start + k - 1``.
 
     Returns (lower, upper) arrays of shape (n_obs,).
     """
@@ -175,19 +187,19 @@ def _hdi_per_observation(
     # Sort once (O(n_samples * log(n_samples) * n_obs))
     sorted_samples = np.sort(y_samples, axis=0)
 
-    # Window size: number of samples in the HDI
-    window = max(1, int(np.ceil(prob * n_samples)))
+    window = _hdi_sample_count(n_samples, prob)
     if window >= n_samples:
         return sorted_samples[0], sorted_samples[-1]
 
-    # For each observation, find the start index minimizing interval width
-    # widths[i, j] = sorted_samples[i + window, j] - sorted_samples[i, j]
-    widths = sorted_samples[window:] - sorted_samples[: n_samples - window]
+    # For each observation, find the start index minimizing interval width.
+    # There are n_samples - window + 1 placements of a window-wide interval.
+    offset = window - 1
+    widths = sorted_samples[offset:] - sorted_samples[: n_samples - offset]
     best_starts = np.argmin(widths, axis=0)  # shape (n_obs,)
 
     obs_indices = np.arange(n_obs)
     lower = sorted_samples[best_starts, obs_indices]
-    upper = sorted_samples[best_starts + window, obs_indices]
+    upper = sorted_samples[best_starts + offset, obs_indices]
     return lower, upper
 
 
@@ -242,7 +254,9 @@ def compute_coverage(
     - upper = 97.5th percentile
 
     The HDI is the narrowest interval containing ``prob`` mass.  It is
-    computed per observation using a sliding-window scan on sorted samples.
+    computed per observation using a sliding-window scan on sorted samples;
+    the closed interval spans exactly ``ceil(prob * n_samples)`` draws, the
+    fewest whose empirical mass reaches ``prob``.
     """
     y_true = np.asarray(y_true)
     y_samples = np.asarray(y_samples)
