@@ -56,7 +56,7 @@ class RandomWalkLatentSites:
 def rw_latent_sites(
     prefix: str, innovation_type: object, *, max_seq: int
 ) -> RandomWalkLatentSites:
-    """Return exactly the random-walk latent sites created by the model."""
+    """Return the random-walk latent sites eligible for memory exclusion."""
     if max_seq <= 1:
         return RandomWalkLatentSites(None, None)
     raw_abs = (

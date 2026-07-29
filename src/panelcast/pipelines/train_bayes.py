@@ -1713,8 +1713,8 @@ def train_models(  # noqa: C901  # tracked complexity debt
     # entity effect from the prior without them. The log-lik replay was safe
     # either way — substitute() honors the saved init-effect deterministic.
     # Above the cap they drop like entity_obs_raw and evaluate falls back to
-    # gate-detected prior-marginalization. rw_raw_abs follows rw_raw's
-    # always-excluded/marginalized treatment.
+    # gate-detected prior-marginalization. rw_raw_abs shares rw_raw's storage
+    # and marginalization policy when the skew innovation creates it.
     entity_skew_excludes = list(
         entity_skew_sites(prefix, priors.entity_effect_prior_type).present()
     )

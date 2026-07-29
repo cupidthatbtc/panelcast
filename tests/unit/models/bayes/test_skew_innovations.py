@@ -66,6 +66,7 @@ def test_random_walk_site_names_cover_both_prefix_conventions():
         "user_rw_raw",
     )
     assert rw_latent_sites("user", "normal", max_seq=1).present() == ()
+    assert rw_latent_sites("user_", "skew_normal", max_seq=1).present() == ()
 
 
 def test_entity_skew_site_names_follow_the_resolved_prior_type():

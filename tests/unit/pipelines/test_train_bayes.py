@@ -3013,10 +3013,11 @@ class TestVramBudget:
 
 
 class TestIdataExclusions:
-    def _captured_excludes(self, tmp_path, ctx, *, n_albums_per=3):
-        features_path, splits_path = _make_train_parquets(
-            tmp_path, n_features=2, n_albums_per=n_albums_per
-        )
+    def _captured_excludes(self, tmp_path, ctx, *, n_albums_per=None):
+        fixture_kwargs = {"n_features": 2}
+        if n_albums_per is not None:
+            fixture_kwargs["n_albums_per"] = n_albums_per
+        features_path, splits_path = _make_train_parquets(tmp_path, **fixture_kwargs)
         captured = {}
 
         def _capture_fit(
