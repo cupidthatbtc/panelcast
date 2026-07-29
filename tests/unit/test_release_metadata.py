@@ -43,12 +43,15 @@ def test_model_card_version_matches_pyproject():
 
 def test_changelog_version_matches_pyproject():
     text = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
-    # Skip an optional [Unreleased] section and select the newest release heading.
-    m = re.search(r"^## \[(\d+\.\d+\.\d+[^\]]*)\]", text, flags=re.MULTILINE)
-    assert m, "CHANGELOG.md has no versioned release heading"
+    headings = re.findall(r"^## \[([^\]]+)\]", text, flags=re.MULTILINE)
+    newest = next((heading for heading in headings if heading.lower() != "unreleased"), None)
+    assert newest, "CHANGELOG.md has no release heading"
+    assert re.fullmatch(r"\d+\.\d+\.\d+[^\]]*", newest), (
+        f"CHANGELOG.md's newest release heading {newest!r} is not a version"
+    )
     version = _pyproject_version()
-    assert m.group(1) == version, (
-        f"CHANGELOG.md's newest release heading is {m.group(1)}, but "
+    assert newest == version, (
+        f"CHANGELOG.md's newest release heading is {newest}, but "
         f"pyproject.toml declares {version}; add the release's changelog entry"
     )
 
