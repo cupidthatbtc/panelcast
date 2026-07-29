@@ -54,10 +54,10 @@ class RandomWalkLatentSites:
 
 
 def rw_latent_sites(
-    prefix: str, innovation_type: object, *, has_trajectory: bool
+    prefix: str, innovation_type: object, *, max_seq: int
 ) -> RandomWalkLatentSites:
     """Return exactly the random-walk latent sites created by the model."""
-    if not has_trajectory:
+    if max_seq <= 1:
         return RandomWalkLatentSites(None, None)
     raw_abs = (
         latent_site_name(prefix, "rw_raw_abs")
@@ -67,10 +67,21 @@ def rw_latent_sites(
     return RandomWalkLatentSites(latent_site_name(prefix, "rw_raw"), raw_abs)
 
 
-def entity_skew_site_names(prefix: str, prior_type: object) -> tuple[str, ...]:
+@dataclass(frozen=True)
+class EntitySkewLatentSites:
+    absolute: str | None
+    symmetric: str | None
+
+    def present(self) -> tuple[str, ...]:
+        return tuple(
+            site for site in (self.absolute, self.symmetric) if site is not None
+        )
+
+
+def entity_skew_sites(prefix: str, prior_type: object) -> EntitySkewLatentSites:
     if (prior_type or "normal") != "skew_normal":
-        return ()
-    return (
+        return EntitySkewLatentSites(None, None)
+    return EntitySkewLatentSites(
         latent_site_name(prefix, "entity_skew_abs"),
         latent_site_name(prefix, "entity_skew_sym"),
     )

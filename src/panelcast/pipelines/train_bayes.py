@@ -34,7 +34,7 @@ from panelcast.models.bayes.fit import MCMCConfig, fit_model, resolve_progress_b
 from panelcast.models.bayes.io import save_model
 from panelcast.models.bayes.model import compute_sigma_scaled, make_score_model
 from panelcast.models.bayes.priors import (
-    entity_skew_site_names,
+    entity_skew_sites,
     priors_for_transform,
     rw_latent_sites,
 )
@@ -1716,7 +1716,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
     # gate-detected prior-marginalization. rw_raw_abs follows rw_raw's
     # always-excluded/marginalized treatment.
     entity_skew_excludes = list(
-        entity_skew_site_names(prefix, priors.entity_effect_prior_type)
+        entity_skew_sites(prefix, priors.entity_effect_prior_type).present()
     )
     entity_skew_on = bool(entity_skew_excludes)
     drop_entity_skew = entity_skew_on and n_entities_fit > _ENTITY_OBS_KEEP_MAX
@@ -1724,7 +1724,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
         rw_latent_sites(
             prefix,
             priors.rw_innovation_type,
-            has_trajectory=int(model_args["max_seq"]) > 1,
+            max_seq=int(model_args["max_seq"]),
         ).present()
     )
     idata_excludes = list(rw_excludes)

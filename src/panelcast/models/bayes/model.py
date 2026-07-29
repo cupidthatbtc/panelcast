@@ -49,7 +49,7 @@ from numpyro.infer.reparam import LocScaleReparam
 from panelcast.models.bayes.model_math import _CLIP_SHARPNESS, soft_clip  # noqa: F401
 from panelcast.models.bayes.priors import (
     PriorConfig,
-    entity_skew_site_names,
+    entity_skew_sites,
     get_default_priors,
     latent_site_name,
     rw_latent_sites,
@@ -411,7 +411,8 @@ def _sample_init_artist_effect(
             removing the mu_artist <-> effects location ridge (the exported
             "{prefix}init_artist_effect" becomes a deterministic site).
     """
-    if priors.entity_effect_prior_type == "skew_normal":
+    skew_sites = entity_skew_sites(prefix, priors.entity_effect_prior_type)
+    if skew_sites.absolute is not None and skew_sites.symmetric is not None:
         # Additive construction (#232): delta*|z0| + sqrt(1-delta^2)*z1 is
         # SkewNormal(0, 1, alpha) with delta = alpha/sqrt(1+alpha^2) — a
         # non-centered generative form needing no special distribution.
@@ -424,19 +425,16 @@ def _sample_init_artist_effect(
                 "itself a draw of the symmetric population."
             )
         alpha = numpyro.sample(
-            f"{prefix}entity_skew_alpha",
+            latent_site_name(prefix, "entity_skew_alpha"),
             dist.Normal(0.0, priors.entity_skew_alpha_scale),
         )
         delta = alpha / jnp.sqrt(1.0 + alpha**2)
-        skew_abs_site, skew_sym_site = entity_skew_site_names(
-            prefix, priors.entity_effect_prior_type
-        )
         z_abs = numpyro.sample(
-            skew_abs_site,
+            skew_sites.absolute,
             dist.HalfNormal(1.0).expand((n_artists,)).to_event(1),
         )
         z_sym = numpyro.sample(
-            skew_sym_site,
+            skew_sites.symmetric,
             dist.Normal(0.0, 1.0).expand((n_artists,)).to_event(1),
         )
         skew_z = delta * z_abs + jnp.sqrt(1.0 - delta**2) * z_sym
@@ -519,15 +517,11 @@ def _build_latent_effects(
             f"Unknown latent_process: '{priors.latent_process}'. Registered: ['rw', 'ar1']."
         )
 
-    # Only one time step: no trajectory needed under either process.
-    if max_seq <= 1:
+    rw_sites = rw_latent_sites(prefix, priors.rw_innovation_type, max_seq=max_seq)
+    if rw_sites.raw is None:
         return init_artist_effect[None, :]
 
     # Non-centered trajectory innovations decouple sigma_rw from unit-scale draws.
-    rw_sites = rw_latent_sites(
-        prefix, priors.rw_innovation_type, has_trajectory=True
-    )
-    assert rw_sites.raw is not None
     rw_raw = numpyro.sample(
         rw_sites.raw,
         dist.Normal(0, 1).expand([n_artists, max_seq - 1]).to_event(2),

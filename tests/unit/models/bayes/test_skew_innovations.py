@@ -17,7 +17,7 @@ from numpyro import handlers
 from panelcast.models.bayes.model import make_score_model, standardized_skew_innovation
 from panelcast.models.bayes.priors import (
     PriorConfig,
-    entity_skew_site_names,
+    entity_skew_sites,
     is_skew_rw_innovation,
     rw_latent_sites,
 )
@@ -57,23 +57,23 @@ def test_skew_random_walk_gate_is_exact():
 def test_random_walk_site_names_cover_both_prefix_conventions():
     expected_skew = ("user_rw_raw", "user_rw_raw_abs")
     assert rw_latent_sites(
-        "user", "skew_normal", has_trajectory=True
+        "user", "skew_normal", max_seq=3
     ).present() == expected_skew
     assert rw_latent_sites(
-        "user_", "skew_normal", has_trajectory=True
+        "user_", "skew_normal", max_seq=3
     ).present() == expected_skew
-    assert rw_latent_sites("user_", "normal", has_trajectory=True).present() == (
+    assert rw_latent_sites("user_", "normal", max_seq=3).present() == (
         "user_rw_raw",
     )
-    assert rw_latent_sites("user", "normal", has_trajectory=False).present() == ()
+    assert rw_latent_sites("user", "normal", max_seq=1).present() == ()
 
 
 def test_entity_skew_site_names_follow_the_resolved_prior_type():
-    assert entity_skew_site_names("user_", "skew_normal") == (
+    assert entity_skew_sites("user_", "skew_normal").present() == (
         "user_entity_skew_abs",
         "user_entity_skew_sym",
     )
-    assert entity_skew_site_names("user", "normal") == ()
+    assert entity_skew_sites("user", "normal").present() == ()
 
 
 class TestNormalParity:
