@@ -283,6 +283,7 @@ class TestValidation:
 
         assert not np.array_equal(streams[0], streams[1])
         assert not np.array_equal(streams[1], streams[2])
+        assert not np.array_equal(streams[0], streams[2])
         assert _pit_stream_seed(42, _PIT_PRIMARY_STREAM) != _pit_stream_seed(
             1042, _PIT_CONFORMAL_STREAM
         )

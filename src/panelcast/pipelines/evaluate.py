@@ -922,7 +922,7 @@ def _resolve_feature_split_dir(split_name: str, features_root: Path | None = Non
     return candidate
 
 
-def _predictive_rng_key(seed: int, batch_start: int):
+def _predictive_rng_key(seed: int, batch_start: int) -> jax.Array:
     return random.fold_in(random.key(seed), batch_start)
 
 
