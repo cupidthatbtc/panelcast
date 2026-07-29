@@ -21,6 +21,7 @@ import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, is_dataclass
 from pathlib import Path
+from typing import Any
 
 import arviz as az
 import jax
@@ -390,7 +391,7 @@ def _model_source_closure(source_file: Path) -> set[Path]:
 def _source_fingerprint(model: Callable) -> str:
     """Hash output-affecting model code while ignoring comments and formatting."""
     digest = hashlib.sha256()
-    target: object = model
+    target: Any = model
     source_file: str | None = None
     for _ in range(8):
         try:
