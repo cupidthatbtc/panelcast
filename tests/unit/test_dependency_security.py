@@ -837,7 +837,7 @@ def test_scanner_versions_are_pinned() -> None:
 
 def test_release_wheel_venv_uses_outer_pinned_pip() -> None:
     workflow = _workflow("release.yml")
-    environment = workflow.get("env", {})
+    environment = workflow.get("env") or {}
     assert "PIP_VERSION" in environment, (
         "release.yml must pin PIP_VERSION at the workflow level"
     )
@@ -875,7 +875,7 @@ def test_release_wheel_venv_uses_outer_pinned_pip() -> None:
     assert lines.index(create_venv) < lines.index(wheel_install)
     assert not any(
         re.search(
-            r"wheel-env/bin/(?:pip|python\"?\s+-m\s+(?:pip|ensurepip))",
+            r"wheel-env/bin/(?:pip|python[0-9.]*\"?\s+(?:-[A-Za-z]+\s+)*-m\s+(?:pip|ensurepip))",
             line,
         )
         for line in lines
