@@ -51,6 +51,7 @@ jobs:
           safe="$RUNNER_TEMP/claude-safe-workspace"
           export HOME="$RUNNER_TEMP/claude-safe-home"
           export GIT_CONFIG_NOSYSTEM=1
+          rm -rf "$safe" "$HOME"
           mkdir -p "$HOME"
           git check-ref-format --branch "$SAFE_HEAD_REF" >/dev/null
           git init --initial-branch=review-safe "$safe"
