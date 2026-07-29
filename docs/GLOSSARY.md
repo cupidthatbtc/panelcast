@@ -248,7 +248,7 @@ highlights; this section is the complete inventory.
 
 **Coverage** — "Does the 95% credible interval actually contain the true value 95% of the time?" We compute this at multiple levels: 50%, 80%, 95%. A well-calibrated model hits all three. Overcoverage (e.g., 99% empirical at 95% nominal) means intervals are too wide — the model is underconfident.
 
-**compute_coverage(y_true, y_samples, prob=0.95)** — Computes credible intervals from posterior samples and checks what fraction of true values fall inside. Returns CoverageResult with nominal, empirical coverage, interval bounds, and mean interval width (sharpness). Supports both equal-tailed and HDI intervals. The pipeline uses the equal-tailed default, while publication figures use ArviZ HDIs, so the corrected internal HDI path does not alter archived evidence.
+**compute_coverage(y_true, y_samples, prob=0.95)** — Computes credible intervals from posterior samples and checks what fraction of true values fall inside. Returns CoverageResult with nominal, empirical coverage, interval bounds, and mean interval width (sharpness). Supports both equal-tailed and HDI intervals. The pipeline uses the equal-tailed default, while publication figures use ArviZ HDIs.
 
 **Equal-tailed interval** — The default credible interval type. For 95%: lower = 2.5th percentile, upper = 97.5th percentile. Simple and symmetric, but wastes width for skewed posteriors.
 

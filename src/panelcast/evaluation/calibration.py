@@ -162,7 +162,7 @@ class WISResult:
 
 
 def _hdi_sample_count(n_samples: int, prob: float) -> int:
-    """Draws a closed HDI must span: the fewest whose mass reaches ``prob``.
+    """Return the fewest draws whose empirical mass reaches ``prob``.
 
     Decimal arithmetic preserves the caller-visible probability, avoiding both
     binary multiplication overshoot and rounding down a genuine adjacent float.
@@ -192,6 +192,11 @@ def _hdi_per_observation(
     window = _hdi_sample_count(n_samples, prob)
     if window >= n_samples:
         return sorted_samples[0], sorted_samples[-1]
+    if window == 1:
+        # Every one-draw interval has zero width. Resolve the arbitrary tie to a
+        # central order statistic rather than systematically choosing the tail.
+        center = (n_samples - 1) // 2
+        return sorted_samples[center], sorted_samples[center]
 
     # For each observation, find the start index minimizing interval width.
     # There are n_samples - window + 1 placements of a window-wide interval.

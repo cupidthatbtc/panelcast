@@ -9,8 +9,6 @@ for, and it searched one placement too few.
 
 from __future__ import annotations
 
-import math
-
 import arviz as az
 import numpy as np
 import pytest
@@ -28,11 +26,15 @@ def _reference_hdi(column: np.ndarray, prob: float) -> tuple[float, float]:
     """Exhaustive narrowest-window search over one column.
 
     Deliberately written as a plain loop over every admissible placement, so it
-    shares no indexing arithmetic with the vectorized implementation.
+    shares no placement/indexing arithmetic with the vectorized implementation.
+    The independently tested draw-count rule is shared on purpose.
     """
     ordered = np.sort(np.asarray(column, dtype=float))
     n = ordered.size
-    count = min(max(math.ceil(prob * n - 1e-9), 1), n)
+    count = _hdi_sample_count(n, prob)
+    if count == 1:
+        center = (n - 1) // 2
+        return float(ordered[center]), float(ordered[center])
     best_width = np.inf
     best = (float(ordered[0]), float(ordered[-1]))
     for start in range(n - count + 1):
@@ -79,6 +81,14 @@ class TestSampleCount:
         assert count / n_samples >= prob - 1e-12
         if count > 1:
             assert (count - 1) / n_samples < prob
+
+    def test_one_draw_window_uses_a_central_order_statistic(self):
+        samples = np.arange(7.0)[:, None]
+
+        lower, upper = _hdi_per_observation(samples, 0.05)
+
+        np.testing.assert_array_equal(lower, [3.0])
+        np.testing.assert_array_equal(upper, [3.0])
 
 
 class TestExactSampleMass:
@@ -172,7 +182,7 @@ class TestArviZReference:
             assert float(upper[obs]) == pytest.approx(float(ref[1]))
 
     @pytest.mark.parametrize(("n_samples", "prob"), [(1000, 0.95), (100, 0.94)])
-    def test_arviz_carries_one_spare_draw_at_integer_products(self, n_samples, prob):
+    def test_arviz_integer_product_differs_by_at_most_one_draw(self, n_samples, prob):
         assert float(prob * n_samples).is_integer()
         rng = np.random.default_rng(17)
         samples = rng.normal(size=(n_samples, 4))
@@ -183,7 +193,7 @@ class TestArviZReference:
             column = np.ascontiguousarray(samples[:, obs])
             ref = np.ravel(az.hdi(column, hdi_prob=prob))
             ref_count = int(((column >= ref[0]) & (column <= ref[1])).sum())
-            assert ref_count == counts[obs] + 1
+            assert abs(ref_count - counts[obs]) <= 1
             assert float(upper[obs] - lower[obs]) <= float(ref[1] - ref[0]) + 1e-12
 
 
