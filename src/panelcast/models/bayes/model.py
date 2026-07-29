@@ -47,7 +47,11 @@ from numpyro.handlers import reparam
 from numpyro.infer.reparam import LocScaleReparam
 
 from panelcast.models.bayes.model_math import _CLIP_SHARPNESS, soft_clip  # noqa: F401
-from panelcast.models.bayes.priors import PriorConfig, get_default_priors
+from panelcast.models.bayes.priors import (
+    PriorConfig,
+    get_default_priors,
+    is_skew_rw_innovation,
+)
 from panelcast.models.bayes.transforms import get_transform
 
 __all__ = [
@@ -523,7 +527,7 @@ def _build_latent_effects(
         f"{prefix}rw_raw",
         dist.Normal(0, 1).expand([n_artists, max_seq - 1]).to_event(2),
     )
-    if priors.rw_innovation_type == "skew_normal":
+    if is_skew_rw_innovation(priors.rw_innovation_type):
         # Asymmetric innovations (#233): rw_raw stays the symmetric
         # component (memory exclusions keep applying); the |z| component and
         # the learned alpha are new sites. The rollout compounds the same

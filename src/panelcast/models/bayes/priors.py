@@ -33,6 +33,11 @@ from dataclasses import dataclass
 # (likelihoods._beta_predict_draws) stay consistent at the default.
 DEFAULT_BETA_BOUNDARY_EPS = 1e-3
 
+
+def is_skew_rw_innovation(value: object) -> bool:
+    return str(value or "normal") == "skew_normal"
+
+
 # Beta-Binomial effective-rater cap. The Beta overdispersion phi (not n) sets the
 # implied-score precision, so capping the rater count past ~1e4/span costs almost
 # no information while bounding total_count (= span*n) out of the range where the
