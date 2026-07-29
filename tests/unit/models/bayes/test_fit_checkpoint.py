@@ -7,7 +7,10 @@ semantics of the cursor.
 
 from __future__ import annotations
 
+import ast
 import json
+import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -81,9 +84,10 @@ class TestBlockSizes:
 
 @pytest.mark.slow
 class TestCheckpointParity:
-    def test_blocked_equals_single_shot(self, tmp_path):
+    @pytest.mark.parametrize("checkpoint_every", [10, 7])
+    def test_blocked_equals_single_shot(self, tmp_path, checkpoint_every):
         single = _fit()
-        blocked = _fit(checkpoint_every=10, checkpoint_dir=tmp_path / "ckpt")
+        blocked = _fit(checkpoint_every=checkpoint_every, checkpoint_dir=tmp_path / "ckpt")
         _assert_same_posterior(single, blocked)
         assert not blocked.resumed_from_checkpoint
 
@@ -129,6 +133,40 @@ class TestCheckpointParity:
         _fit(checkpoint_every=10, checkpoint_dir=ckpt)
         with pytest.raises(ValueError, match="different fit"):
             _fit(checkpoint_every=10, checkpoint_dir=ckpt, seed=124)
+
+    def test_crash_between_state_and_cursor_resumes_to_single_shot(self, tmp_path, monkeypatch):
+        """The window the audit found: draws and state on disk, cursor stale.
+
+        The old layout overwrote one shared state.pkl before the cursor, so a
+        kill here left a state a block ahead of the cursor and the resume
+        replayed block 1 from the wrong point. Now the resume must land on the
+        block-0 state and reproduce the single-shot chain exactly.
+        """
+        real_replace = os.replace
+        seen = {"n": 0}
+
+        def guarded(src, dst, *args, **kwargs):
+            if Path(dst).name == "cursor.json":
+                seen["n"] += 1
+                if seen["n"] == 2:  # block 1's commit
+                    raise RuntimeError("simulated kill before the cursor commit")
+            return real_replace(src, dst, *args, **kwargs)
+
+        ckpt = tmp_path / "ckpt"
+        monkeypatch.setattr(os, "replace", guarded)
+        with pytest.raises(RuntimeError, match="simulated kill"):
+            _fit(checkpoint_every=10, checkpoint_dir=ckpt)
+        monkeypatch.setattr(os, "replace", real_replace)
+
+        cursor = json.loads((ckpt / "cursor.json").read_text(encoding="utf-8"))
+        assert cursor["blocks_done"] == 1
+        # Block 1's artifacts landed but were never committed.
+        assert (ckpt / "block_0001.npz").exists()
+        assert (ckpt / "state_0001.pkl").exists()
+
+        resumed = _fit(checkpoint_every=10, checkpoint_dir=ckpt)
+        assert resumed.resumed_from_checkpoint
+        _assert_same_posterior(_fit(), resumed)
 
 
 class TestCheckpointGuards:
@@ -183,5 +221,212 @@ class TestCheckpointIdentity:
         # The cursor compares identities after a json round trip; a non-JSON-
         # stable identity would refuse every legitimate resume.
         config = MCMCConfig(num_samples=20, checkpoint_every_draws=10)
-        identity = _checkpoint_identity(config, self._run_args())
+        identity = _checkpoint_identity(
+            config,
+            self._run_args(),
+            model=make_score_model("user"),
+            extra_fields=("diverging", "num_steps", "~z.rw_raw"),
+            exclude_from_idata=("rw_raw",),
+            warm_start={
+                "step_size": 0.25,
+                "adapt_mass_matrix": False,
+                "inverse_mass_matrix": np.ones(4),
+            },
+        )
         assert json.loads(json.dumps(identity)) == identity
+
+
+def test_non_checkpointed_fit_skips_identity_trace(monkeypatch):
+    monkeypatch.setattr(
+        fit_mod,
+        "_checkpoint_identity",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("identity traced")),
+    )
+
+    identity = fit_mod._maybe_checkpoint_identity(
+        MCMCConfig(num_samples=20),
+        _tiny_model_args(),
+        model=make_score_model("user"),
+        extra_fields=(),
+        exclude_from_idata=None,
+        warm_start=None,
+    )
+
+    assert identity is None
+
+
+class TestCheckpointIdentityFitArguments:
+    """Every output-affecting fit argument, not just the model inputs."""
+
+    def _identity(self, **overrides):
+        config = overrides.pop("config", MCMCConfig(num_samples=20, checkpoint_every_draws=10))
+        kwargs = {
+            "model": make_score_model("user"),
+            "extra_fields": ("diverging", "num_steps"),
+            "exclude_from_idata": None,
+            "warm_start": None,
+        }
+        kwargs.update(overrides)
+        return _checkpoint_identity(config, _tiny_model_args(), **kwargs)
+
+    def test_model_change_changes_identity(self):
+        # Different site prefixes are a different posterior; the run_args are
+        # byte-identical, so only the model fingerprint can catch it.
+        assert self._identity(model=make_score_model("critic")) != self._identity()
+
+    def test_collected_fields_change_identity(self):
+        # exclude_from_collection reaches the sampler as "~z.<site>" entries,
+        # so a change to it changes which draws the blocks even contain.
+        excluded = self._identity(extra_fields=("diverging", "num_steps", "~z.user_rw_raw"))
+        assert excluded != self._identity()
+
+    def test_idata_filter_changes_identity(self):
+        assert self._identity(exclude_from_idata=("user_rw_raw",)) != self._identity()
+
+    def test_idata_filter_order_does_not_change_identity(self):
+        assert self._identity(exclude_from_idata=("a", "b")) == self._identity(
+            exclude_from_idata=("b", "a")
+        )
+
+    def test_warm_start_changes_identity(self):
+        warm = {
+            "step_size": 0.25,
+            "adapt_mass_matrix": False,
+            "inverse_mass_matrix": np.ones(4),
+        }
+        assert self._identity(warm_start=warm) != self._identity()
+
+    def test_warm_start_contents_change_identity(self):
+        base = {
+            "step_size": 0.25,
+            "adapt_mass_matrix": False,
+            "inverse_mass_matrix": np.ones(4),
+        }
+        shifted = {**base, "inverse_mass_matrix": np.full(4, 2.0)}
+        assert self._identity(warm_start=shifted) != self._identity(warm_start=base)
+
+    def test_warm_start_step_size_changes_identity(self):
+        base = {
+            "step_size": 0.25,
+            "adapt_mass_matrix": False,
+            "inverse_mass_matrix": np.ones(4),
+        }
+        assert self._identity(warm_start={**base, "step_size": 0.5}) != self._identity(
+            warm_start=base
+        )
+
+    def test_environment_axes_are_recorded(self):
+        identity = self._identity()
+        assert identity["model"]["source_sha256"]
+        assert identity["python_version"]
+        assert identity["jax_backend"]
+        assert identity["jax_devices"]
+        assert isinstance(identity["jax_x64"], bool)
+        assert identity["numpyro_version"]
+        assert identity["numpy_version"]
+        assert identity["jax_version"]
+        assert identity["jaxlib_version"]
+        assert "platform" not in identity
+        assert "machine" not in identity
+
+    def test_source_fingerprint_ignores_comments_but_not_code(self, tmp_path, monkeypatch):
+        source = tmp_path / "model.py"
+        source.write_text("def model():\n    return 1\n", encoding="utf-8")
+        monkeypatch.setattr(fit_mod, "_model_source_closure", lambda _: {source})
+
+        baseline = fit_mod._source_fingerprint(make_score_model("user"))
+        source.write_text("# explanation\ndef model():\n    return 1\n", encoding="utf-8")
+        assert fit_mod._source_fingerprint(make_score_model("user")) == baseline
+
+        source.write_text("def model():\n    return 2\n", encoding="utf-8")
+        assert fit_mod._source_fingerprint(make_score_model("user")) != baseline
+
+    def test_sourceless_callable_fingerprint_has_no_process_address(self, monkeypatch):
+        monkeypatch.setattr(fit_mod.inspect, "getsourcefile", lambda _: None)
+        monkeypatch.setattr(
+            fit_mod.inspect,
+            "getsource",
+            lambda _: (_ for _ in ()).throw(OSError("no source")),
+        )
+        first: dict[str, object] = {}
+        second: dict[str, object] = {}
+        exec("def model(x):\n    return x + 1", first)
+        exec("def model(x):\n    return x + 1", second)
+
+        assert fit_mod._source_fingerprint(first["model"]) == fit_mod._source_fingerprint(
+            second["model"]
+        )
+
+    def test_model_source_closure_is_scoped_to_model_dependencies(self):
+        import panelcast.models.bayes.model as model_module
+
+        paths = fit_mod._model_source_closure(Path(model_module.__file__))
+        names = {path.name for path in paths}
+
+        assert {"model.py", "model_math.py", "priors.py", "transforms.py", "likelihoods.py"} <= names
+        assert "fit.py" not in names
+        assert "checkpoint.py" not in names
+
+    def test_source_module_and_relative_import_resolution(self, tmp_path):
+        bayes_root = Path(fit_mod.__file__).parent
+        assert fit_mod._source_module(bayes_root / "__init__.py") == "panelcast.models.bayes"
+        assert fit_mod._source_module(tmp_path / "outside.py") is None
+        assert fit_mod._bayes_module_path("panelcast.models.bayes") == bayes_root / "__init__.py"
+        assert fit_mod._bayes_module_path("somewhere.else") is None
+
+        relative = ast.parse("from .priors import PriorConfig").body[0]
+        absolute = ast.parse("from panelcast.models.bayes.model_math import x").body[0]
+        too_high = ast.parse("from .....outside import x").body[0]
+        assert isinstance(relative, ast.ImportFrom)
+        assert isinstance(absolute, ast.ImportFrom)
+        assert isinstance(too_high, ast.ImportFrom)
+        assert (
+            fit_mod._imported_module(relative, bayes_root / "model.py")
+            == "panelcast.models.bayes.priors"
+        )
+        assert (
+            fit_mod._imported_module(absolute, bayes_root / "model.py")
+            == "panelcast.models.bayes.model_math"
+        )
+        assert fit_mod._imported_module(too_high, bayes_root / "model.py") is None
+
+    def test_source_closure_retains_unparseable_source_and_ignores_missing(self, tmp_path):
+        invalid = tmp_path / "invalid.py"
+        invalid.write_text("def broken(:\n", encoding="utf-8")
+
+        assert fit_mod._model_source_closure(invalid) == {invalid.resolve()}
+        assert fit_mod._model_source_closure(tmp_path / "missing.py") == set()
+
+    def test_stable_payload_handles_nested_code_bytes_and_callable_objects(self):
+        def model():
+            payload = (b"bytes", ...)
+
+            def inner():
+                return payload
+
+            return inner
+
+        class CallableModel:
+            def __call__(self):
+                return 1
+
+        first = fit_mod._stable_code_payload(model)
+        second = fit_mod._stable_code_payload(model)
+        callable_payload = fit_mod._stable_code_payload(CallableModel())
+
+        assert first == second
+        assert "bytes" in first
+        assert "CallableModel" in callable_payload
+
+    def test_source_fingerprint_hashes_raw_bytes_when_ast_parse_fails(
+        self, tmp_path, monkeypatch
+    ):
+        invalid = tmp_path / "model.py"
+        invalid.write_text("def broken(:\n", encoding="utf-8")
+        monkeypatch.setattr(fit_mod, "_model_source_closure", lambda _: {invalid})
+
+        first = fit_mod._source_fingerprint(make_score_model("user"))
+        invalid.write_text("def broken(::: \n", encoding="utf-8")
+        second = fit_mod._source_fingerprint(make_score_model("user"))
+
+        assert first != second
