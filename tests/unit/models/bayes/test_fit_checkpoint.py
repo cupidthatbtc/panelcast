@@ -8,6 +8,8 @@ semantics of the cursor.
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -130,6 +132,40 @@ class TestCheckpointParity:
         with pytest.raises(ValueError, match="different fit"):
             _fit(checkpoint_every=10, checkpoint_dir=ckpt, seed=124)
 
+    def test_crash_between_state_and_cursor_resumes_to_single_shot(self, tmp_path, monkeypatch):
+        """The window the audit found: draws and state on disk, cursor stale.
+
+        The old layout overwrote one shared state.pkl before the cursor, so a
+        kill here left a state a block ahead of the cursor and the resume
+        replayed block 1 from the wrong point. Now the resume must land on the
+        block-0 state and reproduce the single-shot chain exactly.
+        """
+        real_replace = os.replace
+        seen = {"n": 0}
+
+        def guarded(src, dst, *args, **kwargs):
+            if Path(dst).name == "cursor.json":
+                seen["n"] += 1
+                if seen["n"] == 2:  # block 1's commit
+                    raise RuntimeError("simulated kill before the cursor commit")
+            return real_replace(src, dst, *args, **kwargs)
+
+        ckpt = tmp_path / "ckpt"
+        monkeypatch.setattr(os, "replace", guarded)
+        with pytest.raises(RuntimeError, match="simulated kill"):
+            _fit(checkpoint_every=10, checkpoint_dir=ckpt)
+        monkeypatch.setattr(os, "replace", real_replace)
+
+        cursor = json.loads((ckpt / "cursor.json").read_text(encoding="utf-8"))
+        assert cursor["blocks_done"] == 1
+        # Block 1's artifacts landed but were never committed.
+        assert (ckpt / "block_0001.npz").exists()
+        assert (ckpt / "state_0001.pkl").exists()
+
+        resumed = _fit(checkpoint_every=10, checkpoint_dir=ckpt)
+        assert resumed.resumed_from_checkpoint
+        _assert_same_posterior(_fit(), resumed)
+
 
 class TestCheckpointGuards:
     def test_checkpoint_requires_dir(self):
@@ -183,5 +219,84 @@ class TestCheckpointIdentity:
         # The cursor compares identities after a json round trip; a non-JSON-
         # stable identity would refuse every legitimate resume.
         config = MCMCConfig(num_samples=20, checkpoint_every_draws=10)
-        identity = _checkpoint_identity(config, self._run_args())
+        identity = _checkpoint_identity(
+            config,
+            self._run_args(),
+            model=make_score_model("user"),
+            extra_fields=("diverging", "num_steps", "~z.rw_raw"),
+            exclude_from_idata=("rw_raw",),
+            warm_start={
+                "step_size": 0.25,
+                "adapt_mass_matrix": False,
+                "inverse_mass_matrix": np.ones(4),
+            },
+        )
         assert json.loads(json.dumps(identity)) == identity
+
+
+class TestCheckpointIdentityFitArguments:
+    """Every output-affecting fit argument, not just the model inputs."""
+
+    def _identity(self, **overrides):
+        config = overrides.pop("config", MCMCConfig(num_samples=20, checkpoint_every_draws=10))
+        kwargs = {
+            "model": make_score_model("user"),
+            "extra_fields": ("diverging", "num_steps"),
+            "exclude_from_idata": None,
+            "warm_start": None,
+        }
+        kwargs.update(overrides)
+        return _checkpoint_identity(config, _tiny_model_args(), **kwargs)
+
+    def test_model_change_changes_identity(self):
+        # Different site prefixes are a different posterior; the run_args are
+        # byte-identical, so only the model fingerprint can catch it.
+        assert self._identity(model=make_score_model("critic")) != self._identity()
+
+    def test_collected_fields_change_identity(self):
+        # exclude_from_collection reaches the sampler as "~z.<site>" entries,
+        # so a change to it changes which draws the blocks even contain.
+        excluded = self._identity(extra_fields=("diverging", "num_steps", "~z.user_rw_raw"))
+        assert excluded != self._identity()
+
+    def test_idata_filter_changes_identity(self):
+        assert self._identity(exclude_from_idata=("user_rw_raw",)) != self._identity()
+
+    def test_idata_filter_order_does_not_change_identity(self):
+        assert self._identity(exclude_from_idata=("a", "b")) == self._identity(
+            exclude_from_idata=("b", "a")
+        )
+
+    def test_warm_start_changes_identity(self):
+        warm = {
+            "step_size": 0.25,
+            "adapt_mass_matrix": False,
+            "inverse_mass_matrix": np.ones(4),
+        }
+        assert self._identity(warm_start=warm) != self._identity()
+
+    def test_warm_start_contents_change_identity(self):
+        base = {
+            "step_size": 0.25,
+            "adapt_mass_matrix": False,
+            "inverse_mass_matrix": np.ones(4),
+        }
+        shifted = {**base, "inverse_mass_matrix": np.full(4, 2.0)}
+        assert self._identity(warm_start=shifted) != self._identity(warm_start=base)
+
+    def test_warm_start_step_size_changes_identity(self):
+        base = {
+            "step_size": 0.25,
+            "adapt_mass_matrix": False,
+            "inverse_mass_matrix": np.ones(4),
+        }
+        assert self._identity(warm_start={**base, "step_size": 0.5}) != self._identity(
+            warm_start=base
+        )
+
+    def test_environment_axes_are_recorded(self):
+        identity = self._identity()
+        assert identity["jax_backend"]
+        assert isinstance(identity["jax_x64"], bool)
+        assert identity["numpyro_version"]
+        assert identity["jax_version"]

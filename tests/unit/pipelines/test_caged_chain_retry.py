@@ -117,7 +117,7 @@ def test_retry_attempt_gets_fresh_isolated_checkpoint_and_no_warmup_import(tmp_p
     checkpoint_dir = tmp_path / "checkpoint"
     stale_retry = checkpoint_dir / "attempt_1"
     stale_retry.mkdir(parents=True)
-    (stale_retry / "state.pkl").write_bytes(b"caged adapted state")
+    (stale_retry / "state_0000.pkl").write_bytes(b"caged adapted state")
     warmup_import = tmp_path / "imported-warmup.npz"
 
     initial_checkpoint, initial_import = _prepare_retry_attempt_io(

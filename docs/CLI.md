@@ -149,7 +149,7 @@ These features are **enabled by default**. Use these flags to disable them:
 | Option | Default | Range | Description |
 |--------|---------|-------|-------------|
 | `--chain-method` | `sequential` | | `sequential`, `vectorized`, `parallel` (multi-GPU), or `auto` (memory-informed: vectorized when all chains fit the JAX pool budget, else sequential) |
-| `--checkpoint-every` | single-shot | ≥1 | Checkpoint the fit every N post-warmup draws so an interrupted run resumes from the last block (default: a single-shot fit) |
+| `--checkpoint-every` | single-shot | ≥1 | Checkpoint the fit every N post-warmup draws so an interrupted run resumes from the last block (default: a single-shot fit). Each block commits its draws and the state it ended in immutably, with the cursor naming both by SHA-256 last, so a resume continues the same chain or refuses. A resume must match the fit exactly — model, data, config, collected fields, warm start, and the numpyro/JAX/backend environment — and a checkpoint from an older panelcast layout is refused; delete the directory to start over |
 | `--max-tree-depth` | `10` | 5–15 | Maximum NUTS tree depth |
 | `--likelihood-df` | `4.0` | ≥1.0 | Student-t degrees of freedom; ≥100 ≈ Normal |
 

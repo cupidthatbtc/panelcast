@@ -27,6 +27,8 @@ import xarray as xr
 from jax import random
 from numpyro.infer import MCMC, NUTS, init_to_feasible, init_to_median, init_to_uniform
 
+from panelcast.models.bayes.checkpoint import CheckpointStore
+
 __all__ = [
     "MCMCConfig",
     "FitResult",
@@ -325,12 +327,55 @@ def _block_sizes(num_samples: int, block: int) -> list[int]:
     return [block] * full + ([rem] if rem else [])
 
 
-def _checkpoint_identity(config: MCMCConfig, run_args: dict) -> dict:
+def _warm_start_fingerprint(warm_start: dict | None) -> str | None:
+    """Digest of an imported adaptation — it changes the kernel, so it is identity."""
+    if not warm_start:
+        return None
+    digest = hashlib.sha256()
+    digest.update(f"step_size:{float(warm_start['step_size']):.17g}".encode())
+    digest.update(f"adapt_mass_matrix:{warm_start.get('adapt_mass_matrix')}".encode())
+    imm = warm_start["inverse_mass_matrix"]
+    items = sorted(imm.items()) if isinstance(imm, dict) else [("", imm)]
+    for name, value in items:
+        arr = np.asarray(value)
+        digest.update(f"{name}:{arr.dtype}:{arr.shape}".encode())
+        digest.update(np.ascontiguousarray(arr).tobytes())
+    return digest.hexdigest()[:16]
+
+
+def _model_fingerprint(model: Callable, run_args: dict) -> dict:
+    """Name plus latent-site signature: two posteriors must not share a checkpoint."""
+    return {
+        "module": getattr(model, "__module__", None),
+        "qualname": getattr(model, "__qualname__", None),
+        "latents": [
+            [name, list(shape)] for name, shape in _model_latent_signature(model, run_args)
+        ],
+    }
+
+
+def _checkpoint_identity(
+    config: MCMCConfig,
+    run_args: dict,
+    *,
+    model: Callable | None = None,
+    extra_fields: tuple[str, ...] = (),
+    exclude_from_idata: tuple[str, ...] | None = None,
+    warm_start: dict | None = None,
+) -> dict:
     """What must match for a checkpoint to belong to this fit.
 
-    Covers every model input, not just y/X: priors, likelihood knobs, and the
-    other arrays all define the posterior, and a resume that ignores them would
-    silently concatenate draws from two different models.
+    Every output-affecting fit argument is in here. The model itself (name and
+    latent-site signature), every model input — priors, likelihood knobs, and
+    the other arrays all define the posterior — the collected-field set (which
+    carries ``exclude_from_collection`` as its ``~z.`` entries), the
+    InferenceData filter, and any imported warm-start adaptation. So are the
+    environment axes that change the arithmetic: a chain continued under a
+    different numpyro/jax, a different backend, or flipped x64 is a different
+    chain, and resuming across one would silently splice two of them.
+
+    JSON-stable by construction — the cursor compares identities after a round
+    trip, so nothing here may serialize to a different type than it holds.
     """
     import numpyro
 
@@ -350,26 +395,37 @@ def _checkpoint_identity(config: MCMCConfig, run_args: dict) -> dict:
     return {
         "config": config.to_dict(),
         "data_hash": digest.hexdigest()[:16],
+        "model": _model_fingerprint(model, run_args) if model is not None else None,
+        "extra_fields": sorted(extra_fields),
+        "exclude_from_idata": sorted(exclude_from_idata or ()),
+        "warm_start": _warm_start_fingerprint(warm_start),
         "numpyro_version": numpyro.__version__,
         "jax_version": jax.__version__,
+        "jax_backend": jax.default_backend(),
+        "jax_x64": bool(getattr(jax.config, "jax_enable_x64", False)),
     }
 
 
-def _load_blocks(checkpoint_dir: Path, n_blocks: int) -> tuple[dict, dict]:
-    """(grouped samples, chain-major-flat extra fields) concatenated across blocks."""
-    samples: dict[str, list] = {}
-    extra: dict[str, list] = {}
-    for i in range(n_blocks):
-        with np.load(checkpoint_dir / f"block_{i:04d}.npz") as payload:
-            for key in payload.files:
-                kind, name = key.split(".", 1)
-                (samples if kind == "s" else extra).setdefault(name, []).append(payload[key])
-    samples_grouped = {k: np.concatenate(v, axis=1) for k, v in samples.items()}
-    extra_flat = {}
-    for k, v in extra.items():
-        grouped = np.concatenate(v, axis=1)
-        extra_flat[k] = grouped.reshape(-1, *grouped.shape[2:])
-    return samples_grouped, extra_flat
+def _maybe_checkpoint_identity(
+    config: MCMCConfig,
+    run_args: dict,
+    *,
+    model: Callable,
+    extra_fields: tuple[str, ...],
+    exclude_from_idata: tuple[str, ...] | None,
+    warm_start: dict | None,
+) -> dict | None:
+    """Identity for checkpointed fits only — it costs a forward trace of the model."""
+    if not config.checkpoint_every_draws:
+        return None
+    return _checkpoint_identity(
+        config,
+        run_args,
+        model=model,
+        extra_fields=extra_fields,
+        exclude_from_idata=exclude_from_idata,
+        warm_start=warm_start,
+    )
 
 
 def _run_blocked(
@@ -380,36 +436,27 @@ def _run_blocked(
     extra_fields: tuple[str, ...],
     progress_bar: bool,
     checkpoint_dir: Path,
+    identity: dict,
 ) -> tuple[MCMC | None, dict, dict, bool]:
     """Sample in blocks via ``post_warmup_state``, checkpointing after each.
 
     Continuing through post_warmup_state is the same Markov chain, so blocked
-    draws equal the single-shot draws for the same seed (parity-tested). A
-    matching cursor resumes at the first missing block; any config/data/version
-    mismatch refuses loudly rather than silently mixing two fits.
+    draws equal the single-shot draws for the same seed (parity-tested). Each
+    block commits its draws and the state it ended in immutably, and the
+    cursor naming both lands last, so a crash anywhere resumes from a state
+    that provably matches the draws already banked. Any identity mismatch
+    refuses loudly rather than silently mixing two fits.
     Returns (last block's MCMC or None, grouped samples, flat extras, resumed).
     """
     assert config.checkpoint_every_draws is not None
     sizes = _block_sizes(config.num_samples, config.checkpoint_every_draws)
-    cursor_path = checkpoint_dir / "cursor.json"
-    state_path = checkpoint_dir / "state.pkl"
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-    identity = _checkpoint_identity(config, run_args)
-
-    start_block = 0
-    state = None
-    if cursor_path.exists():
-        cursor = json.loads(cursor_path.read_text(encoding="utf-8"))
-        if cursor.get("identity") != identity:
-            raise ValueError(
-                f"checkpoint at {checkpoint_dir} belongs to a different fit "
-                "(config, data, or numpyro/jax version changed); delete it to start over"
-            )
-        start_block = int(cursor.get("blocks_done", 0))
-        if start_block > 0:
-            with state_path.open("rb") as fh:
-                state = pickle.load(fh)
-            logger.info("Resuming from checkpoint: %d/%d blocks done", start_block, len(sizes))
+    store = CheckpointStore(
+        checkpoint_dir,
+        identity=identity,
+        block_sizes=sizes,
+        num_chains=config.num_chains,
+    )
+    start_block, state = store.resume()
 
     mcmc: MCMC | None = None
     for i in range(start_block, len(sizes)):
@@ -427,26 +474,14 @@ def _run_blocked(
             mcmc.post_warmup_state = state
             mcmc.run(mcmc.post_warmup_state.rng_key, extra_fields=extra_fields, **run_args)
         state = jax.device_get(mcmc.last_state)
-        block_payload = {
-            f"s.{k}": np.asarray(v) for k, v in mcmc.get_samples(group_by_chain=True).items()
-        }
-        block_payload.update(
-            {
-                f"e.{k}": np.asarray(v)
-                for k, v in mcmc.get_extra_fields(group_by_chain=True).items()
-            }
+        store.append(
+            i,
+            {k: np.asarray(v) for k, v in mcmc.get_samples(group_by_chain=True).items()},
+            {k: np.asarray(v) for k, v in mcmc.get_extra_fields(group_by_chain=True).items()},
+            state,
         )
-        # Explicit allow_pickle keeps mypy from binding the payload kwargs to it.
-        np.savez(checkpoint_dir / f"block_{i:04d}.npz", allow_pickle=True, **block_payload)
-        with state_path.open("wb") as fh:
-            pickle.dump(state, fh)
-        cursor_path.write_text(
-            json.dumps({"identity": identity, "blocks_done": i + 1, "block_sizes": sizes}),
-            encoding="utf-8",
-        )
-        logger.info("Checkpoint block %d/%d written", i + 1, len(sizes))
 
-    samples, extra_flat = _load_blocks(checkpoint_dir, len(sizes))
+    samples, extra_flat = store.load_blocks()
     return mcmc, samples, extra_flat, start_block > 0
 
 
@@ -489,14 +524,17 @@ def _run_sampling(
     extra_field_names: tuple[str, ...],
     progress_bar: bool,
     checkpoint_dir: Path | None,
+    checkpoint_identity: dict | None = None,
 ) -> tuple[MCMC | None, dict, dict, bool]:
     """(mcmc, grouped samples, extra fields, resumed) — blocked or single-shot."""
     if config.checkpoint_every_draws:
         if checkpoint_dir is None:
             raise ValueError("checkpoint_every_draws requires a checkpoint_dir")
+        if checkpoint_identity is None:
+            raise ValueError("checkpointed sampling requires a checkpoint identity")
         return _run_blocked(
             kernel, config, rng_key, run_args, extra_field_names, progress_bar,
-            Path(checkpoint_dir),
+            Path(checkpoint_dir), checkpoint_identity,
         )
     mcmc = MCMC(
         kernel,
@@ -562,9 +600,12 @@ def fit_model(
         get_samples(), so the post-hoc exclude_from_idata filter for the
         same site becomes a no-op fallback.
     checkpoint_dir : Path, optional
-        Where checkpointed sampling persists per-block draws, the sampler
-        state, and its cursor. Required when
-        ``config.checkpoint_every_draws`` is set; ignored otherwise.
+        Where checkpointed sampling persists per-block draws, the per-block
+        sampler state, and the cursor that commits them. Required when
+        ``config.checkpoint_every_draws`` is set; ignored otherwise. A resume
+        must match this fit exactly — model, data, config, collected fields,
+        InferenceData filter, warm start, and the numpyro/jax/backend
+        environment — or it refuses rather than splicing two chains.
     warmup_export_path : Path, optional
         Persist this fit's adapted step size / inverse mass matrix (plus the
         latent signature that scopes its reuse) after sampling.
@@ -638,8 +679,24 @@ def fit_model(
             extra_field_names.append(f"~z.{site}")
             logger.info("Excluding '%s' from in-sampler collection (~z.)", site)
 
+    checkpoint_identity = _maybe_checkpoint_identity(
+        config,
+        run_args,
+        model=model,
+        extra_fields=tuple(extra_field_names),
+        exclude_from_idata=exclude_from_idata,
+        warm_start=warm_start_kwargs,
+    )
+
     mcmc, samples, extra_fields, resumed_from_checkpoint = _run_sampling(
-        kernel, config, rng_key, run_args, tuple(extra_field_names), progress_bar, checkpoint_dir
+        kernel,
+        config,
+        rng_key,
+        run_args,
+        tuple(extra_field_names),
+        progress_bar,
+        checkpoint_dir,
+        checkpoint_identity,
     )
 
     runtime_seconds = time.perf_counter() - start_time
