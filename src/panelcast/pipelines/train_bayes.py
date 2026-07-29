@@ -1715,13 +1715,11 @@ def train_models(  # noqa: C901  # tracked complexity debt
         str(getattr(ctx, "entity_effect_prior_type", "normal") or "normal") == "skew_normal"
     )
     drop_entity_skew = entity_skew_on and n_entities_fit > _ENTITY_OBS_KEEP_MAX
-    idata_excludes = [
-        f"{prefix}_rw_raw",
-        f"{prefix}_rw_raw_abs",
-    ]
-    collection_excludes = (
-        [f"{prefix}_rw_raw", f"{prefix}_rw_raw_abs"] if exclude_rw_raw_from_collection else []
-    )
+    rw_excludes = [f"{prefix}_rw_raw"]
+    if str(getattr(ctx, "rw_innovation_type", "normal")) == "skew_normal":
+        rw_excludes.append(f"{prefix}_rw_raw_abs")
+    idata_excludes = list(rw_excludes)
+    collection_excludes = list(rw_excludes) if exclude_rw_raw_from_collection else []
     if drop_entity_skew:
         idata_excludes += [f"{prefix}_entity_skew_abs", f"{prefix}_entity_skew_sym"]
         if exclude_rw_raw_from_collection:
