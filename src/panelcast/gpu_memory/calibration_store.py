@@ -313,6 +313,14 @@ def refit_constants(
     )
     if scale is None:
         return None
+    if scale > 2.0:
+        logger.warning(
+            "local GPU calibration envelope requires %.2fx inflation; "
+            "inspect the telemetry store for co-resident allocation peaks",
+            scale,
+        )
+    else:
+        logger.info("local GPU calibration envelope inflation: %.3fx", scale)
     factor *= scale
     fixed *= scale
     if not (_is_finite(factor) and _is_finite(fixed)):
