@@ -33,7 +33,7 @@ Metrics
   bounds, interval-discretized targets, count likelihoods) where the observation
   ties with a whole atom and a deterministic PIT would pile onto one value. The
   randomization uses labeled substreams derived from the run seed and echoes
-  `randomization_seed` next to every PIT payload. Primary, secondary, and
+  `pit_method` and `pit_randomization_seed` in every PIT summary. Primary, secondary, and
   conformal PIT use independent streams. Within one split, the whole-split
   histogram, per-row column, and sliced deviations share one draw, so a row's
   PIT is the same number wherever it appears.

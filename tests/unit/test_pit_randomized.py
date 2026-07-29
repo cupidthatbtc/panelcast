@@ -219,8 +219,8 @@ class TestReproducibility:
         rng = np.random.default_rng(4)
         y_true, y_samples = _calibrated_poisson(rng, n_obs=200, n_draws=20)
         summary = compute_pit_values(y_true, y_samples, seed=77)
-        assert summary["method"] == PIT_METHOD == "randomized_rank"
-        assert summary["randomization_seed"] == 77
+        assert summary["pit_method"] == PIT_METHOD == "randomized_rank"
+        assert summary["pit_randomization_seed"] == 77
 
     def test_summary_matches_per_row_computation(self):
         rng = np.random.default_rng(5)
@@ -252,9 +252,9 @@ class TestValidation:
         pit = compute_pit_per_row(y_true, y_samples)
         with pytest.raises(TypeError, match="seed"):
             summarize_pit(pit)
-        assert summarize_pit(pit, seed=PIT_DEFAULT_SEED)["randomization_seed"] == 0
+        assert summarize_pit(pit, seed=PIT_DEFAULT_SEED)["pit_randomization_seed"] == 0
         summary = compute_pit_values(y_true, y_samples)
-        assert summary["randomization_seed"] == PIT_DEFAULT_SEED == 0
+        assert summary["pit_randomization_seed"] == PIT_DEFAULT_SEED == 0
 
     def test_negative_seed_maps_to_a_reproducible_unsigned_stream(self):
         y_true = np.zeros(10)
@@ -436,5 +436,5 @@ class TestPipelinePayload:
         np.testing.assert_array_equal(np.asarray(payload["pit"]), expected)
         assert payload["pit_randomization_seed"] == 55
         # The histogram and the per-row column come from the same draw.
-        assert metrics["calibration"]["pit"]["randomization_seed"] == 55
+        assert metrics["calibration"]["pit"]["pit_randomization_seed"] == 55
         assert metrics["calibration"]["pit"] == summarize_pit(expected, seed=55)

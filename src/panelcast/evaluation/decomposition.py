@@ -13,10 +13,9 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-# Observed value in the far tails of its own predictive distribution. The PIT
-# column is the randomized rank the evaluate stage recorded, so under perfect
-# calibration exactly 5% of rows flag — the threshold is an exact rate now,
-# not the conservative one the old mid-P convention produced.
+# Observed value in the far tails of its own predictive distribution. Under
+# calibration the randomized-rank PIT gives each row a nominal 5% probability
+# of flagging; the realized finite-sample fraction varies around that rate.
 _PIT_TAIL = 0.025
 
 _IDENTITY_KEYS = ("entity", "n_reviews", "train_history")

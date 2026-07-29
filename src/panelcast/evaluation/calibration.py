@@ -660,12 +660,12 @@ def summarize_pit(pit: np.ndarray, n_bins: int = 10, *, seed: int | None) -> dic
         "mean": float(np.mean(pit)) if len(pit) else None,
         "std": float(np.std(pit)) if len(pit) else None,
         "n_obs": int(len(pit)),
-        "n_bins": int(n_bins),
+        "n_bins": n_bins,
         "counts": counts.tolist(),
         "bin_edges": bin_edges.tolist(),
         "max_abs_dev_from_uniform": float(np.max(np.abs(freq - uniform))) if len(pit) else None,
-        "method": PIT_METHOD,
-        "randomization_seed": None if seed is None else int(seed),
+        "pit_method": PIT_METHOD,
+        "pit_randomization_seed": None if seed is None else int(seed),
     }
 
 
