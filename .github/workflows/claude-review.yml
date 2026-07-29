@@ -61,6 +61,8 @@ jobs:
           git config user.email review@invalid.example
           printf '%s\n' 'Synthetic workspace: no pull-request files.' > README.md
           cat > inline-review-mcp.cjs <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
           const readline = require("node:readline");
           const rl = readline.createInterface({ input: process.stdin });
           const send = (id, result) => process.stdout.write(
@@ -86,7 +88,12 @@ jobs:
                 inputSchema: { type: "object", properties: {}, additionalProperties: false }
               }] });
             } else if (message.method === "tools/call" && message.params?.name === "get_diff") {
-              const encoded = process.env.PANELCAST_REVIEW_DIFF_B64 || "";
+              let encoded = "";
+              try {
+                encoded = fs.readFileSync(
+                  path.join(__dirname, "inline-review-diff.b64"), "utf8"
+                ).trim();
+              } catch {}
               if (!encoded) {
                 send(message.id, {
                   content: [{ type: "text", text: "ERROR: review diff was not delivered" }],
@@ -102,10 +109,8 @@ jobs:
             }
           });
           NODE
-          encoded="$(base64 -w0 "$RUNNER_TEMP/panelcast-review.diff")"
-          printf '{"mcpServers":{"review_diff":{"command":"node","args":["inline-review-mcp.cjs"],"env":{"PANELCAST_REVIEW_DIFF_B64":"%s"}}}}\n' \
-            "$encoded" > inline-review-mcp.json
-          git add README.md inline-review-mcp.cjs inline-review-mcp.json
+          base64 -w0 "$RUNNER_TEMP/panelcast-review.diff" > inline-review-diff.b64
+          git add README.md inline-review-mcp.cjs inline-review-diff.b64
           git commit -m 'synthetic review workspace'
           git branch -m "$SAFE_HEAD_REF"
           git init --bare .review-origin
@@ -174,7 +179,7 @@ jobs:
             --model claude-opus-5
             --effort xhigh
             --setting-sources user
-            --mcp-config inline-review-mcp.json
+            --mcp-config '{"mcpServers":{"review_diff":{"command":"node","args":["${{ github.workspace }}/inline-review-mcp.cjs"]}}}'
             --strict-mcp-config
             --allowedTools "mcp__review_diff__get_diff,mcp__github_ci__get_ci_status,mcp__github_ci__get_workflow_run_details"
             --disallowedTools "Read,Grep,Glob,Write,Edit,MultiEdit,NotebookEdit,Bash,WebFetch,WebSearch"
