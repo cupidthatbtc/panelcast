@@ -22,8 +22,10 @@ security onto fail-closed evidence.
   installed-wheel runtime closure with OSV and pip-audit, publishes separate
   CycloneDX SBOMs with dependency graphs, and uses exact scoped, owned, expiring
   acceptance records instead of an advisory-id ratchet (#372).
-- Release metadata tests require the newest changelog release heading to match
-  `pyproject.toml`, including at the tagged commit before publication (#361).
+- Release metadata tests bind every hand-synced version to `pyproject.toml`,
+  require the changelog and citation release dates to agree, reject a model card
+  older than the release, and run again at the tagged commit before publication
+  (#361, #401).
 
 ### Changed
 
@@ -61,13 +63,17 @@ security onto fail-closed evidence.
   solves the minimum closed-form inflation that over-covers every retained peak,
   falling back to shipped constants whenever that guarantee cannot be proven
   (#370).
+- In-sampler random-walk exclusions now request only sites created by the chosen
+  innovation construction, so the memory-only switch works for both normal and
+  skew-normal fits instead of failing on an absent optional latent (#399).
 
 ### Security
 
-- Credential-bearing Claude review has no checkout, shell, filesystem, generic
-  network, plugin, or repository-settings access. A secretless job renders a
-  command-safe, size-bounded diff, and the reviewer reads only that log and CI
-  results through the read-only GitHub CI MCP boundary (#371).
+- Credential-bearing Claude review has no PR checkout, shell, generic
+  filesystem/network tool, plugin, or repository-settings access. A secretless
+  job renders a command-safe bounded diff into a synthetic repository, and one
+  fixed decoder tool returns it in memory while read-only GitHub CI tools expose
+  check metadata (#371, #387, #389, #391, #393, #395, #397).
 - Tag publication re-runs advisory scans against the tagged lock and built wheel,
   creates or retains a draft GitHub Release, uploads and byte-verifies both SBOMs,
   permits PyPI trusted publishing only after verification, and publishes the
