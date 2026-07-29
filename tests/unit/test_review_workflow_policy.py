@@ -10,6 +10,7 @@ rule.
 from __future__ import annotations
 
 import copy
+import json
 import re
 import sys
 from collections.abc import Iterator
@@ -29,6 +30,7 @@ SYNTHETIC_DOWNLOAD = "Download the synthetic action workspace"
 # token. The credentialed reviewer gets no filesystem, shell, or network tool.
 READ_ONLY_TOOLS = frozenset(
     {
+        "mcp__review_diff__get_diff",
         "mcp__github_ci__get_ci_status",
         "mcp__github_ci__get_workflow_run_details",
     }
@@ -247,6 +249,11 @@ def _synthetic_workspace_violations(workflow: dict[str, Any]) -> list[str]:
         'rm -rf "$safe" "$HOME"',
         "git init --bare .review-origin",
         "Synthetic workspace: no pull-request files.",
+        "cat > inline-review-mcp.cjs <<'NODE'",
+        "PANELCAST_REVIEW_DIFF_B64",
+        'message.method === "tools/list"',
+        'message.params?.name === "get_diff"',
+        "git add README.md inline-review-mcp.cjs",
     )
     findings.extend(
         f"synthetic workspace builder omits {required}"
@@ -270,24 +277,41 @@ def _inline_diff_violations(workflow: dict[str, Any]) -> list[str]:
     findings: list[str] = []
     if render.get("id") != "render":
         findings.append("inline diff render step has the wrong id")
-    if (review_input.get("outputs") or {}).get("review_diff") != (
-        "${{ steps.render.outputs.review_diff }}"
+    if (review_input.get("outputs") or {}).get("review_diff_b64") != (
+        "${{ steps.render.outputs.review_diff_b64 }}"
     ):
-        findings.append("inline diff job output is not wired to the render step")
+        findings.append("encoded diff job output is not wired to the render step")
     for required in (
-        'if [ "$size" -gt 300000 ]',
-        'output_stop="$(cat /proc/sys/kernel/random/uuid)"',
-        'grep -Fxq "$output_stop" "$diff_file"',
-        "review_diff<<%s",
+        'if [ "$size" -gt 200000 ]',
+        "review_diff_b64=%s",
+        'base64 -w0 "$diff_file"',
         '>> "$GITHUB_OUTPUT"',
     ):
         if required not in run:
-            findings.append(f"inline diff renderer omits {required}")
-    prompt = str(_review_action_inputs(jobs(workflow).get("review") or {}).get("prompt", ""))
-    if "${{ needs.review-input.outputs.review_diff }}" not in prompt:
-        findings.append("credentialed review prompt omits the inline diff output")
+            findings.append(f"encoded diff renderer omits {required}")
+
+    inputs = _review_action_inputs(jobs(workflow).get("review") or {})
+    prompt = str(inputs.get("prompt", ""))
+    if "call mcp__review_diff__get_diff exactly once" not in prompt:
+        findings.append("credentialed review prompt does not require the diff tool")
     if "untrusted data" not in prompt:
         findings.append("credentialed review prompt does not label the diff as untrusted data")
+    try:
+        settings = json.loads(str(inputs.get("settings", "")))
+        servers = settings["mcpServers"]
+        decoder = servers["review_diff"]
+    except (KeyError, TypeError, json.JSONDecodeError):
+        findings.append("credentialed review settings omit the diff decoder")
+    else:
+        if set(servers) != {"review_diff"}:
+            findings.append("credentialed review settings enable extra MCP servers")
+        if decoder.get("command") != "node" or decoder.get("args") != [
+            "inline-review-mcp.cjs"
+        ]:
+            findings.append("diff decoder does not run the synthetic server")
+        expected = "${{ needs.review-input.outputs.review_diff_b64 }}"
+        if (decoder.get("env") or {}).get("PANELCAST_REVIEW_DIFF_B64") != expected:
+            findings.append("diff decoder is not wired to the encoded job output")
     return findings
 
 
@@ -455,19 +479,21 @@ def test_secretless_diff_log_is_complete_and_unforgeably_delimited(
 
     assert "--no-ext-diff --no-textconv" in run
     assert "START $stop" in run and "END $stop" in run
-    assert "300000" in run
-    assert "2000000" not in run
+    assert "200000" in run
+    assert "300000" not in run and "2000000" not in run
     assert "diff is too large" in run
-    assert "output_stop=" in run
-    assert 'grep -Fxq "$output_stop" "$diff_file"' in run
-    assert "review_diff<<%s" in run
+    assert 'base64 -w0 "$diff_file"' in run
+    assert "review_diff_b64=%s" in run
     assert '>> "$GITHUB_OUTPUT"' in run
 
     review_input = jobs(review_workflow)["review-input"]
-    assert review_input["outputs"]["review_diff"] == "${{ steps.render.outputs.review_diff }}"
-    prompt = _review_action_inputs(jobs(review_workflow)["review"])["prompt"]
-    assert "${{ needs.review-input.outputs.review_diff }}" in prompt
-    assert "untrusted data" in prompt
+    assert review_input["outputs"]["review_diff_b64"] == (
+        "${{ steps.render.outputs.review_diff_b64 }}"
+    )
+    inputs = _review_action_inputs(jobs(review_workflow)["review"])
+    assert "mcp__review_diff__get_diff exactly once" in inputs["prompt"]
+    assert "untrusted data" in inputs["prompt"]
+    assert "${{ needs.review-input.outputs.review_diff_b64 }}" in inputs["settings"]
 
 
 def test_reviewer_can_still_read_ci_results_instead_of_running_them(
@@ -528,8 +554,8 @@ def _edit_claude_args(workflow: dict[str, Any], old: str, new: str) -> None:
 def _allow_tool(workflow: dict[str, Any], tool: str) -> None:
     _edit_claude_args(
         workflow,
-        '--allowedTools "mcp__github_ci__',
-        f'--allowedTools "{tool},mcp__github_ci__',
+        '--allowedTools "',
+        f'--allowedTools "{tool},',
     )
 
 
@@ -678,20 +704,20 @@ def _render_step(workflow: dict[str, Any]) -> dict[str, Any]:
     )
 
 
-def _use_predictable_output_delimiter(workflow: dict[str, Any]) -> None:
+def _drop_base64_encoding(workflow: dict[str, Any]) -> None:
     render = _render_step(workflow)
     render["run"] = str(render["run"]).replace(
-        'output_stop="$(cat /proc/sys/kernel/random/uuid)"', 'output_stop="EOF"'
+        'base64 -w0 "$diff_file"', 'cat "$diff_file"'
     )
 
 
 def _drop_inline_diff_wiring(workflow: dict[str, Any]) -> None:
-    del jobs(workflow)["review-input"]["outputs"]["review_diff"]
+    del jobs(workflow)["review-input"]["outputs"]["review_diff_b64"]
 
 
 def _widen_inline_diff_cap(workflow: dict[str, Any]) -> None:
     render = _render_step(workflow)
-    render["run"] = str(render["run"]).replace("-gt 300000", "-gt 2000000")
+    render["run"] = str(render["run"]).replace("-gt 200000", "-gt 2000000")
 
 
 @pytest.mark.parametrize(
@@ -724,7 +750,7 @@ def _widen_inline_diff_cap(workflow: dict[str, Any]) -> None:
         (_omit_synthetic_git_metadata, "omits its Git metadata"),
         (_add_decoy_artifact_transfer, "exactly one builder, upload, and download"),
         (_move_builder_contract_to_a_decoy, "builder omits"),
-        (_use_predictable_output_delimiter, "renderer omits"),
+        (_drop_base64_encoding, "renderer omits"),
         (_drop_inline_diff_wiring, "job output is not wired"),
         (_widen_inline_diff_cap, "renderer omits"),
     ],
