@@ -35,7 +35,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, cast
 from uuid import uuid4
 
 import numpy as np
@@ -454,7 +454,9 @@ class CheckpointStore:
 
         block_path = self.block_path(index)
         with atomic_write(block_path) as handle:
-            np.savez(handle, **payload)
+            # NumPy <2.2 treats `allow_pickle` as an archive member, so do not
+            # pass it merely to satisfy newer stubs; the runtime default is True.
+            cast(Any, np.savez)(handle, **payload)
         with np.load(block_path, allow_pickle=True) as written:
             # Parsing the archive directory proves the file landed complete.
             written.files
