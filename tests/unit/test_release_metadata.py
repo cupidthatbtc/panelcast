@@ -1,9 +1,9 @@
 """Guard for the hand-synced release metadata.
 
 pyproject.toml is the version's source of truth; CONTRIBUTING's release
-procedure hand-syncs pixi.toml, CITATION.cff, and the MODEL_CARD.md header.
-requirements.lock likewise attests the SHA256 of pixi.lock. This test fails
-the build when any of them drifts.
+procedure hand-syncs pixi.toml, CITATION.cff, the MODEL_CARD.md header, and
+the CHANGELOG.md entry. requirements.lock likewise attests the SHA256 of
+pixi.lock. This test fails the build when any of them drifts.
 """
 
 from __future__ import annotations
@@ -39,6 +39,21 @@ def test_model_card_version_matches_pyproject():
     m = re.search(r"^- \*\*Version:\*\* (\S+)$", text, flags=re.MULTILINE)
     assert m, "MODEL_CARD.md has no Version header line"
     assert m.group(1) == _pyproject_version()
+
+
+def test_changelog_version_matches_pyproject():
+    text = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+    headings = re.findall(r"^## \[([^\]]+)\]", text, flags=re.MULTILINE)
+    newest = next((heading for heading in headings if heading.lower() != "unreleased"), None)
+    assert newest, "CHANGELOG.md has no release heading"
+    assert re.fullmatch(r"\d+\.\d+\.\d+[^\]]*", newest), (
+        f"CHANGELOG.md's newest release heading {newest!r} is not a version"
+    )
+    version = _pyproject_version()
+    assert newest == version, (
+        f"CHANGELOG.md's newest release heading is {newest}, but "
+        f"pyproject.toml declares {version}; add the release's changelog entry"
+    )
 
 
 def test_requirements_lock_attests_actual_pixi_lock_digest():
