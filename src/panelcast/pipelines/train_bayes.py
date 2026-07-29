@@ -33,7 +33,11 @@ from panelcast.models.bayes.diagnostics import check_convergence, detect_caged_c
 from panelcast.models.bayes.fit import MCMCConfig, fit_model, resolve_progress_bar
 from panelcast.models.bayes.io import save_model
 from panelcast.models.bayes.model import compute_sigma_scaled, make_score_model
-from panelcast.models.bayes.priors import priors_for_transform
+from panelcast.models.bayes.priors import (
+    entity_skew_sites,
+    priors_for_transform,
+    rw_latent_sites,
+)
 from panelcast.models.bayes.transforms import get_transform
 from panelcast.paths import ArtifactPaths
 from panelcast.pipelines.errors import ConvergenceError
@@ -1709,23 +1713,26 @@ def train_models(  # noqa: C901  # tracked complexity debt
     # entity effect from the prior without them. The log-lik replay was safe
     # either way — substitute() honors the saved init-effect deterministic.
     # Above the cap they drop like entity_obs_raw and evaluate falls back to
-    # gate-detected prior-marginalization. rw_raw_abs follows rw_raw's
-    # always-excluded/marginalized treatment.
-    entity_skew_on = (
-        str(getattr(ctx, "entity_effect_prior_type", "normal") or "normal") == "skew_normal"
+    # gate-detected prior-marginalization. rw_raw_abs shares rw_raw's storage
+    # and marginalization policy when the skew innovation creates it.
+    entity_skew_excludes = list(
+        entity_skew_sites(prefix, priors.entity_effect_prior_type).present()
     )
+    entity_skew_on = bool(entity_skew_excludes)
     drop_entity_skew = entity_skew_on and n_entities_fit > _ENTITY_OBS_KEEP_MAX
-    idata_excludes = [
-        f"{prefix}_rw_raw",
-        f"{prefix}_rw_raw_abs",
-    ]
-    collection_excludes = (
-        [f"{prefix}_rw_raw", f"{prefix}_rw_raw_abs"] if exclude_rw_raw_from_collection else []
+    rw_excludes = list(
+        rw_latent_sites(
+            prefix,
+            priors.rw_innovation_type,
+            max_seq=int(model_args["max_seq"]),
+        ).present()
     )
+    idata_excludes = list(rw_excludes)
+    collection_excludes = list(rw_excludes) if exclude_rw_raw_from_collection else []
     if drop_entity_skew:
-        idata_excludes += [f"{prefix}_entity_skew_abs", f"{prefix}_entity_skew_sym"]
+        idata_excludes += entity_skew_excludes
         if exclude_rw_raw_from_collection:
-            collection_excludes += [f"{prefix}_entity_skew_abs", f"{prefix}_entity_skew_sym"]
+            collection_excludes += entity_skew_excludes
     if entity_skew_on:
         log.info(
             "entity_skew_latent_storage",

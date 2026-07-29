@@ -47,7 +47,13 @@ from numpyro.handlers import reparam
 from numpyro.infer.reparam import LocScaleReparam
 
 from panelcast.models.bayes.model_math import _CLIP_SHARPNESS, soft_clip  # noqa: F401
-from panelcast.models.bayes.priors import PriorConfig, get_default_priors
+from panelcast.models.bayes.priors import (
+    PriorConfig,
+    entity_skew_sites,
+    get_default_priors,
+    latent_site_name,
+    rw_latent_sites,
+)
 from panelcast.models.bayes.transforms import get_transform
 
 __all__ = [
@@ -405,7 +411,8 @@ def _sample_init_artist_effect(
             removing the mu_artist <-> effects location ridge (the exported
             "{prefix}init_artist_effect" becomes a deterministic site).
     """
-    if priors.entity_effect_prior_type == "skew_normal":
+    skew_sites = entity_skew_sites(prefix, priors.entity_effect_prior_type)
+    if skew_sites.absolute is not None and skew_sites.symmetric is not None:
         # Additive construction (#232): delta*|z0| + sqrt(1-delta^2)*z1 is
         # SkewNormal(0, 1, alpha) with delta = alpha/sqrt(1+alpha^2) — a
         # non-centered generative form needing no special distribution.
@@ -418,16 +425,16 @@ def _sample_init_artist_effect(
                 "itself a draw of the symmetric population."
             )
         alpha = numpyro.sample(
-            f"{prefix}entity_skew_alpha",
+            latent_site_name(prefix, "entity_skew_alpha"),
             dist.Normal(0.0, priors.entity_skew_alpha_scale),
         )
         delta = alpha / jnp.sqrt(1.0 + alpha**2)
         z_abs = numpyro.sample(
-            f"{prefix}entity_skew_abs",
+            skew_sites.absolute,
             dist.HalfNormal(1.0).expand((n_artists,)).to_event(1),
         )
         z_sym = numpyro.sample(
-            f"{prefix}entity_skew_sym",
+            skew_sites.symmetric,
             dist.Normal(0.0, 1.0).expand((n_artists,)).to_event(1),
         )
         skew_z = delta * z_abs + jnp.sqrt(1.0 - delta**2) * z_sym
@@ -510,30 +517,26 @@ def _build_latent_effects(
             f"Unknown latent_process: '{priors.latent_process}'. Registered: ['rw', 'ar1']."
         )
 
-    # Only one time step: no trajectory needed under either process.
-    if max_seq <= 1:
+    rw_sites = rw_latent_sites(prefix, priors.rw_innovation_type, max_seq=max_seq)
+    if rw_sites.raw is None:
         return init_artist_effect[None, :]
 
-    # Non-centered parameterization for trajectory innovations: sample unit
-    # normal, then scale by sigma_rw to decouple geometry (avoids Neal's
-    # funnel between sigma_rw and the innovations). The site name stays
-    # "{prefix}rw_raw" for BOTH processes so the train stage's idata memory
-    # exclusion (exclude_from_idata) applies regardless of latent_process.
+    # Non-centered trajectory innovations decouple sigma_rw from unit-scale draws.
     rw_raw = numpyro.sample(
-        f"{prefix}rw_raw",
+        rw_sites.raw,
         dist.Normal(0, 1).expand([n_artists, max_seq - 1]).to_event(2),
     )
-    if priors.rw_innovation_type == "skew_normal":
+    if rw_sites.raw_abs is not None:
         # Asymmetric innovations (#233): rw_raw stays the symmetric
         # component (memory exclusions keep applying); the |z| component and
         # the learned alpha are new sites. The rollout compounds the same
         # construction via standardized_skew_innovation.
         rw_skew_alpha = numpyro.sample(
-            f"{prefix}rw_skew_alpha",
+            latent_site_name(prefix, "rw_skew_alpha"),
             dist.Normal(0.0, priors.rw_skew_alpha_scale),
         )
         rw_raw_abs = numpyro.sample(
-            f"{prefix}rw_raw_abs",
+            rw_sites.raw_abs,
             dist.HalfNormal(1.0).expand([n_artists, max_seq - 1]).to_event(2),
         )
         innovations = sigma_rw * standardized_skew_innovation(
