@@ -267,20 +267,34 @@ class TestValidation:
 
     def test_pipeline_split_streams_are_disjoint(self):
         from panelcast.pipelines.evaluate import (
-            _PIT_CONFORMAL_OFFSET,
-            _PIT_PRIMARY_OFFSET,
-            _PIT_SECONDARY_OFFSET,
+            _PIT_CONFORMAL_STREAM,
+            _PIT_PRIMARY_STREAM,
+            _PIT_SECONDARY_STREAM,
+            _pit_stream_seed,
+            _predictive_rng_key,
         )
 
         y_true = np.zeros(20)
         y_samples = np.zeros((10, 20))
         streams = [
-            compute_pit_per_row(y_true, y_samples, seed=42 + offset)
-            for offset in (_PIT_CONFORMAL_OFFSET, _PIT_PRIMARY_OFFSET, _PIT_SECONDARY_OFFSET)
+            compute_pit_per_row(y_true, y_samples, seed=_pit_stream_seed(42, stream))
+            for stream in (_PIT_CONFORMAL_STREAM, _PIT_PRIMARY_STREAM, _PIT_SECONDARY_STREAM)
         ]
 
         assert not np.array_equal(streams[0], streams[1])
         assert not np.array_equal(streams[1], streams[2])
+        assert _pit_stream_seed(42, _PIT_PRIMARY_STREAM) != _pit_stream_seed(
+            1042, _PIT_CONFORMAL_STREAM
+        )
+        primary_keys = [_predictive_rng_key(42, start) for start in range(0, 4000, 500)]
+        conformal_keys = [
+            _predictive_rng_key(2042, start) for start in range(0, 4000, 500)
+        ]
+        assert not any(
+            np.array_equal(primary, conformal)
+            for primary in primary_keys
+            for conformal in conformal_keys
+        )
 
     def test_empty_summary_reports_nulls_not_nan(self):
         summary = summarize_pit(np.array([]), seed=3)

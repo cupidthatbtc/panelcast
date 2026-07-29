@@ -73,9 +73,15 @@ SECONDARY_SPLIT = str(SplitType.ENTITY_DISJOINT.value)
 
 # Labeled NumPy PIT streams stay independent from each other and from the JAX
 # predictive streams while remaining reproducible from the run seed.
-_PIT_CONFORMAL_OFFSET = 3000
-_PIT_PRIMARY_OFFSET = 4000
-_PIT_SECONDARY_OFFSET = 5000
+_PIT_CONFORMAL_STREAM = 1
+_PIT_PRIMARY_STREAM = 2
+_PIT_SECONDARY_STREAM = 3
+
+
+def _pit_stream_seed(seed: int, stream: int) -> int:
+    entropy = [int(seed) & 0xFFFF_FFFF_FFFF_FFFF, int(stream)]
+    return int(np.random.SeedSequence(entropy).generate_state(1, dtype=np.uint64)[0])
+
 
 _EVAL_OUTPUT_DIR = "outputs/evaluation"  # str so use sites build Path() at call time (patchable)
 _SAVE_LOG_LIKELIHOOD_ENV = "PANELCAST_SAVE_LOG_LIKELIHOOD"
@@ -916,6 +922,10 @@ def _resolve_feature_split_dir(split_name: str, features_root: Path | None = Non
     return candidate
 
 
+def _predictive_rng_key(seed: int, batch_start: int):
+    return random.fold_in(random.key(seed), batch_start)
+
+
 def _run_known_artist_predictive(
     posterior_samples: dict[str, Any],
     model_args: dict[str, Any],
@@ -969,7 +979,7 @@ def _run_known_artist_predictive(
             else:
                 predictive.posterior_samples = batch_samples
 
-            rng_key = random.key(seed_offset + start)
+            rng_key = _predictive_rng_key(seed_offset, start)
             preds = predictive(rng_key, **model_args)
             y_key = next(k for k in preds if k.endswith("_y"))
             # np.asarray materializes on host, which blocks on this batch's
@@ -1637,7 +1647,7 @@ def _conformal_block(
         y_test,
         test_samples,
         intervals,
-        seed=ctx.seed + _PIT_CONFORMAL_OFFSET,
+        seed=_pit_stream_seed(ctx.seed, _PIT_CONFORMAL_STREAM),
     )
     log.info(
         "conformal_calibration_done",
@@ -1710,7 +1720,7 @@ def _evaluate_primary_split(
         prediction_interval=ctx.prediction_interval,
         discretize=discretize_obs,
         row_ids=primary_row_ids,
-        pit_seed=ctx.seed + _PIT_PRIMARY_OFFSET,
+        pit_seed=_pit_stream_seed(ctx.seed, _PIT_PRIMARY_STREAM),
     )
     try:
         # Log-likelihood must be evaluated on the model scale; the ELPDs are
@@ -1775,7 +1785,7 @@ def _evaluate_primary_split(
             primary_y_samples,
             primary_row_ids,
             intervals,
-            seed=ctx.seed + _PIT_PRIMARY_OFFSET,
+            seed=_pit_stream_seed(ctx.seed, _PIT_PRIMARY_STREAM),
         )
     except Exception as e:
         log.warning(
@@ -2056,7 +2066,7 @@ def evaluate_models(ctx: StageContext) -> dict:
                 prediction_interval=ctx.prediction_interval,
                 discretize=discretize_obs,
                 row_ids=secondary_row_ids,
-                pit_seed=ctx.seed + _PIT_SECONDARY_OFFSET,
+                pit_seed=_pit_stream_seed(ctx.seed, _PIT_SECONDARY_STREAM),
             )
             try:
                 secondary_metrics["calibration"]["by_slice"] = calibration_by_slice(
@@ -2064,7 +2074,7 @@ def evaluate_models(ctx: StageContext) -> dict:
                     secondary_y_samples,
                     secondary_row_ids,
                     intervals,
-                    seed=ctx.seed + _PIT_SECONDARY_OFFSET,
+                    seed=_pit_stream_seed(ctx.seed, _PIT_SECONDARY_STREAM),
                 )
             except Exception as e:
                 log.warning(
