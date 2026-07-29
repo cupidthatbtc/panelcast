@@ -3070,7 +3070,11 @@ class TestIdataExclusions:
 
     def test_normal_rw_collection_excludes_only_the_present_site(self, tmp_path):
         captured = self._captured_excludes(
-            tmp_path, _make_ctx(exclude_rw_raw_from_collection=True)
+            tmp_path,
+            _make_ctx(
+                exclude_rw_raw_from_collection=True,
+                rw_innovation_type="normal",
+            ),
         )
         assert captured["exclude_from_collection"] == ("user_rw_raw",)
 

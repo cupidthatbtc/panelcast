@@ -35,7 +35,18 @@ DEFAULT_BETA_BOUNDARY_EPS = 1e-3
 
 
 def is_skew_rw_innovation(value: object) -> bool:
-    return str(value or "normal") == "skew_normal"
+    """The rw_raw_abs site exists exactly when this predicate is true."""
+    normalized = getattr(value, "value", value) or "normal"
+    return str(normalized).strip().lower() == "skew_normal"
+
+
+def rw_latent_site_names(prefix: str, innovation_type: object) -> tuple[str, ...]:
+    stem = prefix.rstrip("_")
+    stem = f"{stem}_" if stem else ""
+    sites = [f"{stem}rw_raw"]
+    if is_skew_rw_innovation(innovation_type):
+        sites.append(f"{stem}rw_raw_abs")
+    return tuple(sites)
 
 
 # Beta-Binomial effective-rater cap. The Beta overdispersion phi (not n) sets the

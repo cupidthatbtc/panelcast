@@ -51,6 +51,7 @@ from panelcast.models.bayes.priors import (
     PriorConfig,
     get_default_priors,
     is_skew_rw_innovation,
+    rw_latent_site_names,
 )
 from panelcast.models.bayes.transforms import get_transform
 
@@ -523,8 +524,9 @@ def _build_latent_effects(
     # funnel between sigma_rw and the innovations). The site name stays
     # "{prefix}rw_raw" for BOTH processes so the train stage's idata memory
     # exclusion (exclude_from_idata) applies regardless of latent_process.
+    rw_sites = rw_latent_site_names(prefix, priors.rw_innovation_type)
     rw_raw = numpyro.sample(
-        f"{prefix}rw_raw",
+        rw_sites[0],
         dist.Normal(0, 1).expand([n_artists, max_seq - 1]).to_event(2),
     )
     if is_skew_rw_innovation(priors.rw_innovation_type):
@@ -537,7 +539,7 @@ def _build_latent_effects(
             dist.Normal(0.0, priors.rw_skew_alpha_scale),
         )
         rw_raw_abs = numpyro.sample(
-            f"{prefix}rw_raw_abs",
+            rw_sites[1],
             dist.HalfNormal(1.0).expand([n_artists, max_seq - 1]).to_event(2),
         )
         innovations = sigma_rw * standardized_skew_innovation(

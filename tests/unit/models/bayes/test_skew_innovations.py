@@ -8,6 +8,8 @@ horizon rollout.
 
 from __future__ import annotations
 
+from enum import Enum
+
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -15,7 +17,11 @@ from jax import random
 from numpyro import handlers
 
 from panelcast.models.bayes.model import make_score_model, standardized_skew_innovation
-from panelcast.models.bayes.priors import PriorConfig
+from panelcast.models.bayes.priors import (
+    PriorConfig,
+    is_skew_rw_innovation,
+    rw_latent_site_names,
+)
 
 _N_OBS, _N_FEAT, _N_ART = 12, 2, 4
 
@@ -41,6 +47,19 @@ def _seeded_trace(args: dict) -> dict:
     model = make_score_model("user")
     with handlers.seed(rng_seed=0):
         return handlers.trace(model).get_trace(**args)
+
+
+def test_random_walk_site_names_share_normalization_and_separator():
+    class Innovation(str, Enum):
+        SKEW = "skew_normal"
+
+    assert is_skew_rw_innovation(Innovation.SKEW)
+    assert is_skew_rw_innovation(" SKEW_NORMAL ")
+    assert rw_latent_site_names("user", Innovation.SKEW) == (
+        "user_rw_raw",
+        "user_rw_raw_abs",
+    )
+    assert rw_latent_site_names("user_", "normal") == ("user_rw_raw",)
 
 
 class TestNormalParity:
