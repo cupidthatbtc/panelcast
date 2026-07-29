@@ -7,7 +7,9 @@ import json
 import numpy as np
 import pandas as pd
 import pytest
+from typer.testing import CliRunner
 
+from panelcast.cli import app
 from panelcast.data.split import within_entity_temporal_split
 from panelcast.pipelines import backtest as bt
 
@@ -170,3 +172,11 @@ def test_dig_paths_match_the_real_metrics_shape():
         "wis": 4.2,
         "elpd_per_obs": -4.115,
     }
+
+
+def test_invalid_backtest_id_is_a_cli_parameter_error():
+    result = CliRunner().invoke(app, ["backtest", "--backtest-id", "../escape"])
+
+    assert result.exit_code == 2
+    assert "--backtest-id" in result.output
+    assert "Invalid backtest_id" in result.output

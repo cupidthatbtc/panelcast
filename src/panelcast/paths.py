@@ -84,8 +84,10 @@ def _run_id_rejection(run_id: str) -> str | None:
         return "must be a string"
     if not run_id:
         return "must not be empty"
-    if len(run_id) > 255:
-        return "must be at most 255 characters"
+    if len(run_id.encode("utf-8")) > 255:
+        return "must be at most 255 UTF-8 bytes"
+    if PurePosixPath(run_id).is_absolute() or PureWindowsPath(run_id).is_absolute():
+        return "must not be an absolute path"
     if "/" in run_id or "\\" in run_id:
         return "must not contain a path separator"
     if any(ch in '<>:"|?*' for ch in run_id):
@@ -97,12 +99,11 @@ def _run_id_rejection(run_id: str) -> str | None:
     # Windows silently strips these, so two distinct ids can name one directory.
     if run_id != run_id.strip() or run_id.endswith("."):
         return "must not start or end with whitespace, nor end with '.'"
-    if run_id.lower() in _RESERVED_RUN_IDS:
+    stem = run_id.split(".", 1)[0].lower()
+    if stem in _RESERVED_RUN_IDS:
         return "is reserved by the output layout"
-    if run_id.split(".", 1)[0].lower() in _WINDOWS_DEVICE_NAMES:
+    if stem in _WINDOWS_DEVICE_NAMES:
         return "is a reserved Windows device name"
-    if PurePosixPath(run_id).is_absolute() or PureWindowsPath(run_id).is_absolute():
-        return "must not be an absolute path"
     return None
 
 

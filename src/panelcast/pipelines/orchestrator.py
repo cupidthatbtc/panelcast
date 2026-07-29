@@ -2026,7 +2026,12 @@ class PipelineOrchestrator:
             # Quarantine deletes an existing target; refuse outright rather
             # than rmtree whatever a symlinked quarantine slot points at.
             try:
-                failed_path = safe_run_dir(self.output_base, self.run_dir.name, subdir="failed")
+                failed_path = safe_run_dir(
+                    self.output_base,
+                    self.run_dir.name,
+                    subdir="failed",
+                    field="failed run dir",
+                )
                 failed_path.parent.mkdir(parents=True, exist_ok=True)
                 if failed_path.exists():
                     shutil.rmtree(failed_path)

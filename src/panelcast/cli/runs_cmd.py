@@ -463,13 +463,17 @@ def _compare_reproduction(old_manifest, output_base: Path, bit_exact: bool) -> N
 
 
 def _load_metrics_from_manifest_dir(manifest, output_base: Path) -> dict:
-    from panelcast.paths import RunPathError, safe_run_dir
+    from panelcast.paths import RunPathError, safe_run_dir, validate_run_id
 
+    try:
+        validate_run_id(manifest.run_id)
+    except RunPathError:
+        return {}
     for subdir in (None, "failed"):
         try:
             candidate = safe_run_dir(output_base, manifest.run_id, subdir=subdir)
         except RunPathError:
-            return {}
+            continue
         if (candidate / "manifest.json").exists():
             return _load_metrics(candidate)
     return {}

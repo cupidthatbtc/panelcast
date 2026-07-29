@@ -61,11 +61,15 @@ MALFORMED_IDS = [
     "bad?name",
     "bad*name",
     "x" * 256,
+    "é" * 128,
 ]
 
 RESERVED_IDS = [
     "latest",
+    "latest.json",
+    "latest.json.tmp",
     "failed",
+    "failed.log",
     "LATEST",
     "Failed",
     "nul",
@@ -206,6 +210,13 @@ class TestPathIsWithin:
         assert path_is_within(tmp_path / "a" / "b", tmp_path)
         assert not path_is_within(tmp_path, tmp_path)
         assert not path_is_within(tmp_path.parent, tmp_path)
+
+    def test_resolution_error_fails_closed(self, tmp_path, monkeypatch):
+        def fail(_path):
+            raise OSError("symlink loop")
+
+        monkeypatch.setattr(Path, "resolve", fail)
+        assert not path_is_within(tmp_path / "a", tmp_path)
 
 
 class TestMaliciousLatestPointer:
@@ -463,11 +474,14 @@ class TestSweepAndBacktestIds:
             SweepConfig(sweep_id="../escape", output_root=tmp_path)
 
     def test_sweep_dir_resolves_bare_id_once(self, tmp_path):
+        from dataclasses import asdict
+
         from panelcast.select.runner import SweepConfig
 
         cfg = SweepConfig(sweep_id="s1", output_root=tmp_path)
         assert cfg.sweep_dir == tmp_path / "s1"
         assert cfg.sweep_dir is cfg.sweep_dir
+        assert "_sweep_dir" not in asdict(cfg)
 
     def test_backtest_dir_rejects_traversal(self, tmp_path):
         from panelcast.pipelines.backtest import BacktestConfig
@@ -476,11 +490,14 @@ class TestSweepAndBacktestIds:
             BacktestConfig(backtest_id="../escape", output_root=tmp_path)
 
     def test_backtest_dir_resolves_bare_id_once(self, tmp_path):
+        from dataclasses import asdict
+
         from panelcast.pipelines.backtest import BacktestConfig
 
         cfg = BacktestConfig(backtest_id="nightly", output_root=tmp_path)
         assert cfg.backtest_dir == tmp_path / "nightly"
         assert cfg.backtest_dir is cfg.backtest_dir
+        assert "_backtest_dir" not in asdict(cfg)
 
 
 class TestWindowsPathShapes:

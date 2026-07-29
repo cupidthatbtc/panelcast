@@ -19,6 +19,7 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
+from functools import cached_property
 from pathlib import Path
 from typing import Any
 
@@ -97,16 +98,13 @@ class BacktestConfig:
     origin_timeout_seconds: float | None = None
     panelcast_bin: str | None = None
     extra_config: dict[str, Any] = field(default_factory=dict)
-    _backtest_dir: Path = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._backtest_dir = safe_run_dir(
-            self.output_root, self.backtest_id, field="backtest_id"
-        )
+        _ = self.backtest_dir
 
-    @property
+    @cached_property
     def backtest_dir(self) -> Path:
-        return self._backtest_dir
+        return safe_run_dir(self.output_root, self.backtest_id, field="backtest_id")
 
 
 def _dig(payload: dict, path: tuple[str, ...]) -> float | None:

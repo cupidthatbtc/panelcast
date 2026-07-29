@@ -26,6 +26,16 @@ class TestDryRun:
         assert "errors_in_variables" in out
         assert "one-factor-at-a-time" in out
 
+    def test_invalid_sweep_id_is_a_cli_parameter_error(self):
+        result = runner.invoke(
+            app,
+            ["select", "--dry-run", "--config", CONFIG, "--sweep-id", "../escape"],
+        )
+
+        assert result.exit_code == 2
+        assert "--sweep-id" in result.output
+        assert "Invalid sweep_id" in result.output
+
     def test_effort_tier_shown(self):
         result = runner.invoke(
             app, ["select", "--dry-run", "--effort", "quick", "--config", CONFIG]
