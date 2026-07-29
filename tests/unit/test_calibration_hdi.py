@@ -164,8 +164,8 @@ class TestArviZReference:
     """Cross-check against ArviZ, whose convention differs by at most one draw.
 
     ArviZ takes ``floor(prob * n)`` as an inclusive *offset*, so it spans
-    ``floor(prob * n) + 1`` draws. Whenever ``prob * n`` is not an integer that
-    equals ``ceil(prob * n)`` and the two implementations must agree exactly;
+    ``floor(prob * n) + 1`` draws. When ``prob * n`` is not an integer, that
+    count equals ``ceil(prob * n)`` and the implementations must agree exactly;
     at integer products ArviZ carries one spare draw.
     """
 
