@@ -20,14 +20,13 @@ import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 
-# Git object reads cannot follow a pull-request symlink into /proc. The CI MCP
-# server is action-owned and receives a separate read-only workflow token.
+# The CI MCP server is action-owned and receives a separate read-only workflow
+# token. The credentialed reviewer gets no filesystem, shell, or network tool.
 READ_ONLY_TOOLS = frozenset(
     {
-        "Bash(git log:*)",
-        "Bash(git show:*)",
         "mcp__github_ci__get_ci_status",
         "mcp__github_ci__get_workflow_run_details",
+        "mcp__github_ci__download_job_log",
     }
 )
 
@@ -42,20 +41,9 @@ REQUIRED_DENIALS = frozenset(
         "Edit",
         "MultiEdit",
         "NotebookEdit",
-        "Bash(pixi:*)",
-        "Bash(pytest:*)",
-        "Bash(python:*)",
-        "Bash(python3:*)",
-        "Bash(pip:*)",
-        "Bash(uv:*)",
-        "Bash(make:*)",
-        "Bash(bash:*)",
-        "Bash(sh:*)",
-        "Bash(git diff:*)",
-        "Bash(git fetch:*)",
-        "Bash(git add:*)",
-        "Bash(git commit:*)",
-        "Bash(git rm:*)",
+        "Bash",
+        "WebFetch",
+        "WebSearch",
     }
 )
 
@@ -133,6 +121,8 @@ def _job_violations(job: dict[str, Any]) -> Iterator[str]:
             continue
         if not PINNED.fullmatch(uses):
             yield f"uses an action that is not commit-pinned: {uses}"
+        if uses.startswith("actions/checkout"):
+            yield "checks out pull-request code alongside review credentials"
         if uses.startswith(TOOLCHAIN_ACTIONS):
             yield f"installs a project toolchain: {uses}"
 
@@ -248,13 +238,14 @@ def test_reviewer_can_still_read_ci_results_instead_of_running_them(
     assert ci_tools == {
         "mcp__github_ci__get_ci_status",
         "mcp__github_ci__get_workflow_run_details",
+        "mcp__github_ci__download_job_log",
     }
     assert "actions: read" in inputs["additional_permissions"]
 
     briefing = re.search(r'--append-system-prompt\s+"([^"]*)"', claude_args)
     assert briefing is not None
     assert "CI" in briefing.group(1)
-    assert "never execute" in briefing.group(1)
+    assert "never execute" in briefing.group(1).lower()
 
 
 def test_visible_review_output_is_preserved(credentialed_job: dict[str, Any]) -> None:
@@ -290,8 +281,32 @@ def _edit_claude_args(workflow: dict[str, Any], old: str, new: str) -> None:
     inputs["claude_args"] = inputs["claude_args"].replace(old, new)
 
 
+def _allow_tool(workflow: dict[str, Any], tool: str) -> None:
+    _edit_claude_args(
+        workflow,
+        '--allowedTools "mcp__github_ci__',
+        f'--allowedTools "{tool},mcp__github_ci__',
+    )
+
+
 def _reallow_test_commands(workflow: dict[str, Any]) -> None:
-    _edit_claude_args(workflow, '--allowedTools "Bash', '--allowedTools "Bash(pixi run *),Bash')
+    _allow_tool(workflow, "Bash(pixi run *)")
+
+
+def _allow_git_output(workflow: dict[str, Any]) -> None:
+    _allow_tool(workflow, "Bash(git show --output=*)")
+
+
+def _allow_git_external_diff(workflow: dict[str, Any]) -> None:
+    _allow_tool(workflow, "Bash(git show --ext-diff:*)")
+
+
+def _allow_shell_redirection(workflow: dict[str, Any]) -> None:
+    _allow_tool(workflow, "Bash(git show *>*)")
+
+
+def _allow_command_composition(workflow: dict[str, Any]) -> None:
+    _allow_tool(workflow, "Bash(git show:*;*)")
 
 
 def _drop_allowlist(workflow: dict[str, Any]) -> None:
@@ -317,6 +332,12 @@ def _install_toolchain(workflow: dict[str, Any]) -> None:
     )
 
 
+def _checkout_pr_code(workflow: dict[str, Any]) -> None:
+    _only_credentialed_job(workflow)["steps"].insert(
+        0, {"uses": "actions/checkout@" + "a" * 40}
+    )
+
+
 def _unpin_action(workflow: dict[str, Any]) -> None:
     _only_credentialed_job(workflow)["steps"][0]["uses"] = "actions/checkout@v4"
 
@@ -326,7 +347,7 @@ def _load_repo_settings(workflow: dict[str, Any]) -> None:
 
 
 def _drop_a_denial(workflow: dict[str, Any]) -> None:
-    _edit_claude_args(workflow, "Bash(pixi:*),", "")
+    _edit_claude_args(workflow, "Bash,", "")
 
 
 def _drop_env_scrub(workflow: dict[str, Any]) -> None:
@@ -360,13 +381,21 @@ def _strip_credentials(workflow: dict[str, Any]) -> None:
     ("mutate", "expected"),
     [
         (_reallow_test_commands, "allows a tool that is not read-only: Bash(pixi run *)"),
+        (_allow_git_output, "allows a tool that is not read-only: Bash(git show --output=*)"),
+        (
+            _allow_git_external_diff,
+            "allows a tool that is not read-only: Bash(git show --ext-diff:*)",
+        ),
+        (_allow_shell_redirection, "allows a tool that is not read-only: Bash(git show *>*)"),
+        (_allow_command_composition, "allows a tool that is not read-only: Bash(git show:*;*)"),
         (_drop_allowlist, "omits the allowlist"),
         (_install_mutable_plugin, "installs mutable plugin code"),
         (_add_test_step, "runs a shell step alongside the review credentials"),
         (_install_toolchain, "installs a project toolchain: prefix-dev/setup-pixi"),
+        (_checkout_pr_code, "checks out pull-request code alongside review credentials"),
         (_unpin_action, "not commit-pinned: actions/checkout@v4"),
         (_load_repo_settings, "loads in-repo Claude settings"),
-        (_drop_a_denial, "does not deny Bash(pixi:*)"),
+        (_drop_a_denial, "does not deny Bash"),
         (_drop_env_scrub, "does not enable subprocess environment scrubbing"),
         (_widen_permissions, "requests contents: write"),
         (_widen_app_token, "does not enable the read-only GitHub CI MCP server"),
