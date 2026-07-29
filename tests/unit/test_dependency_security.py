@@ -835,6 +835,23 @@ def test_scanner_versions_are_pinned() -> None:
         assert re.fullmatch(r"\d+\.\d+(\.\d+)?", str(release_env[name])), name
 
 
+def test_release_wheel_venv_upgrades_pip_before_install() -> None:
+    steps = _steps(_workflow("release.yml")["jobs"]["build"])
+    smoke = next(
+        step
+        for step in steps
+        if step.get("name") == "Smoke-test the wheel from an empty directory"
+    )
+    lines = [line.strip() for line in _run(smoke).splitlines() if line.strip()]
+
+    pip_upgrade = (
+        '"$RUNNER_TEMP/wheel-env/bin/python" -m pip install '
+        '"pip==${PIP_VERSION}"'
+    )
+    wheel_install = '"$RUNNER_TEMP/wheel-env/bin/python" -m pip install dist/*.whl'
+    assert lines.index(pip_upgrade) < lines.index(wheel_install)
+
+
 def test_the_wheel_closure_is_audited_and_not_just_the_lock() -> None:
     job = _workflow("security.yml")["jobs"]["audit"]
     step = next(step for step in _steps(job) if step.get("id") == "wheel_closure")
