@@ -164,8 +164,8 @@ def _job_violations(job: dict[str, Any]) -> Iterator[str]:
     if inputs.get("plugins") or inputs.get("plugin_marketplaces"):
         yield "installs mutable plugin code alongside the review credentials"
 
-    if "contents: read" not in str(inputs.get("additional_permissions", "")):
-        yield "does not narrow the minted app token to contents: read"
+    if "actions: read" not in str(inputs.get("additional_permissions", "")):
+        yield "does not enable the read-only GitHub CI MCP server"
 
 
 def credential_isolation_violations(workflow: dict[str, Any]) -> list[str]:
@@ -236,9 +236,18 @@ def test_reviewer_can_still_read_ci_results_instead_of_running_them(
 ) -> None:
     assert credentialed_job["permissions"]["actions"] == "read"
 
-    claude_args = _review_action_inputs(credentialed_job)["claude_args"]
-    briefing = re.search(r'--append-system-prompt\s+"([^"]*)"', claude_args)
+    inputs = _review_action_inputs(credentialed_job)
+    claude_args = inputs["claude_args"]
+    allowed = set(_tools(claude_args, "--allowedTools"))
+    ci_tools = {tool for tool in allowed if tool.startswith("mcp__github_ci__")}
 
+    assert ci_tools == {
+        "mcp__github_ci__get_ci_status",
+        "mcp__github_ci__get_workflow_run_details",
+    }
+    assert "actions: read" in inputs["additional_permissions"]
+
+    briefing = re.search(r'--append-system-prompt\s+"([^"]*)"', claude_args)
     assert briefing is not None
     assert "CI" in briefing.group(1)
     assert "never execute" in briefing.group(1)
@@ -356,7 +365,7 @@ def _strip_credentials(workflow: dict[str, Any]) -> None:
         (_drop_a_denial, "does not deny Bash(pixi:*)"),
         (_drop_env_scrub, "does not enable subprocess environment scrubbing"),
         (_widen_permissions, "requests contents: write"),
-        (_widen_app_token, "does not narrow the minted app token"),
+        (_widen_app_token, "does not enable the read-only GitHub CI MCP server"),
         (_accept_fork_pull_requests, "does not restrict itself to same-repository"),
         (_switch_to_pull_request_target, "reacts to pull_request_target"),
         (_strip_credentials, "no credential-bearing job found"),

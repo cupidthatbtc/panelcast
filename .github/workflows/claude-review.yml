@@ -46,11 +46,10 @@ jobs:
           claude_code_oauth_token: ${{ vars.ANTHROPIC_ORGANIZATION_ID == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
           anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
-          # The app token the action mints defaults to contents/issues/pull_requests
-          # write regardless of this job's permissions block; this narrows the
-          # contents scope, which also neuters the action's own git-push wrapper.
+          # The pinned action registers its read-only CI MCP server only when
+          # actions:read is also requested through this input.
           additional_permissions: |
-            contents: read
+            actions: read
           prompt: >
             Review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}.
             Inspect tracked source only through git log and git show; do not read the
