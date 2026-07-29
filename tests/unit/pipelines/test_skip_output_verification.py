@@ -314,6 +314,20 @@ class TestRecordedPathContainment:
         assert not decision.skip
         assert decision.outputs_untrusted
 
+    def test_static_output_cannot_be_substituted_with_another_file_in_root(self, tmp_path):
+        declared = _write_parquet(tmp_path / "processed" / "declared.parquet")
+        substitute = tmp_path / "processed" / "substitute.parquet"
+        substitute.write_bytes(declared.read_bytes())
+        fx = _Fixture(tmp_path, {"table": declared})
+        key = next(iter(fx.manifest.outputs))
+        fx.manifest.outputs[key] = str(substitute)
+        fx.manifest.output_hashes[key] = sha256_path(substitute)
+
+        decision = fx.decision(roots=[tmp_path / "processed"])
+        assert not decision.skip
+        assert decision.outputs_untrusted
+        assert "manifest key" in decision.reason
+
     def test_symlink_escaping_roots_is_refused(self, tmp_path):
         outside = tmp_path / "outside"
         outside.mkdir()

@@ -45,7 +45,8 @@ def _contained_path(path_str: str, roots: Sequence[Path]) -> Path | None:
     try:
         resolved = path.resolve()
         for root in roots:
-            if Path(root).resolve() in resolved.parents:
+            resolved_root = Path(root).resolve()
+            if resolved == resolved_root or resolved_root in resolved.parents:
                 return path
     except OSError:
         return None
@@ -330,6 +331,7 @@ class PipelineStage:
         prefix = f"{self.name}:"
         recorded = {k: v for k, v in (manifest.outputs or {}).items() if k.startswith(prefix)}
         hashes = manifest.output_hashes or {}
+        declared = {f"{prefix}{path.as_posix()}": path for path in self.output_paths}
 
         if not recorded:
             if self.output_paths:
@@ -342,6 +344,14 @@ class PipelineStage:
             expected = hashes.get(key)
             if not expected:
                 return SkipDecision(False, "recorded output has no hash", True, key)
+            if key in declared:
+                try:
+                    if Path(path_str).resolve() != declared[key].resolve():
+                        return SkipDecision(
+                            False, "recorded output path disagrees with its manifest key", True, key
+                        )
+                except OSError:
+                    return SkipDecision(False, "recorded output path is unreadable", True, key)
             path = _contained_path(path_str, roots)
             if path is None:
                 return SkipDecision(False, "recorded output path escapes the run roots", True, key)

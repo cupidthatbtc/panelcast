@@ -1493,11 +1493,13 @@ class PipelineOrchestrator:
     def _output_verification_roots(self) -> tuple[Path, ...]:
         """Roots a recorded output may legitimately live under (#367).
 
-        The shared data roots hang off the working directory; every run's
-        products hang off the output base, including the earlier run whose
-        artifacts a skip would reuse.
+        Shared products are limited to their three cache roots; accepting the
+        whole working tree would let a rewritten manifest verify an unrelated
+        file while the declared artifact was corrupt. Run products stay under
+        the output base, including the earlier run a skip may reuse.
         """
-        return (Path.cwd(), self.output_base)
+        paths = self._artifact_paths()
+        return (paths.processed, paths.splits, paths.features, self.output_base)
 
     def _execute_stages(self, stages: list[PipelineStage]) -> None:
         """Execute stages with progress display.
