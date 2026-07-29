@@ -874,9 +874,12 @@ def test_release_wheel_venv_uses_outer_pinned_pip() -> None:
     assert wheel_install in lines, "built wheel must use the outer pinned pip"
     assert lines.index(create_venv) < lines.index(wheel_install)
     assert not any(
-        re.search(r"wheel-env/bin/(?:pip|python\"?\s+-m\s+pip)", line)
+        re.search(
+            r"wheel-env/bin/(?:pip|python\"?\s+-m\s+(?:pip|ensurepip))",
+            line,
+        )
         for line in lines
-    ), "the wheel smoke venv must never run its own pip"
+    ), "the wheel smoke venv must never run pip or seed ensurepip"
 
 
 def test_the_wheel_closure_is_audited_and_not_just_the_lock() -> None:
