@@ -892,19 +892,45 @@ def test_release_wheel_venv_uses_outer_pinned_pip() -> None:
         'python -m pip --python "$RUNNER_TEMP/wheel-env/bin/python" '
         "list --format=freeze"
     )
-    assert any(line.startswith(f"{wheel_list} |") for line in audit_lines), (
-        "the wheel closure must be listed through the outer pinned pip"
+    wheel_list_i = next(
+        i
+        for i, line in enumerate(audit_lines)
+        if line.startswith(f"{wheel_list} |")
     )
-    assert "set -o pipefail" in audit_lines
-    assert any("wheel runtime closure is empty" in line for line in audit_lines)
+    guard_i = next(
+        i
+        for i, line in enumerate(audit_lines)
+        if "[[ ! -s security/wheel-pins.txt ]]" in line
+    )
+    assert audit_lines.index("set -o pipefail") < wheel_list_i < guard_i
+    assert "exit 1" in audit_lines[guard_i : guard_i + 4], (
+        "an empty wheel closure must abort instead of only annotating"
+    )
 
-    job_body = "\n".join(_run(step) for step in steps)
-    assert "ensurepip" not in job_body, (
+    gate = next(
+        step
+        for step in steps
+        if step.get("name") == "Fail closed on release-time advisories and evidence"
+    )
+    assert "steps.release_pip_wheel.outcome" in _run(gate), (
+        "the release gate must consume the wheel-audit step outcome"
+    )
+
+    job_lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for step in steps
+        for line in re.sub(r"\\\s*\n\s*", " ", _run(step)).splitlines()
+        if line.strip()
+    ]
+    assert not any("ensurepip" in line for line in job_lines), (
         "no release build step may seed ensurepip into the wheel venv"
     )
-    assert not re.search(
-        r"wheel-env/bin/(?:pip|python[0-9.]*\"?\s+[^|;&]*-m\s+pip)",
-        job_body,
+    assert not any(
+        re.search(
+            r"wheel-env/bin/(?:pip\b|python[0-9.]*\"?\s+[^|;&]*-m\s+pip\b)",
+            line,
+        )
+        for line in job_lines
     ), "no release build step may run the wheel venv's own pip"
 
 
