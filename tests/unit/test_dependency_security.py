@@ -873,10 +873,18 @@ def test_publication_waits_on_the_sboms_being_verifiably_attached() -> None:
 
 def test_tag_publication_reruns_advisory_scans_and_metadata_guards() -> None:
     build = _workflow("release.yml")["jobs"]["build"]
-    text = "\n".join(_run(step) for step in _steps(build))
+    steps = _steps(build)
+    text = "\n".join(_run(step) for step in steps)
+    metadata_step = next(
+        step
+        for step in steps
+        if step.get("name") == "Verify release metadata at the tagged commit"
+    )
 
-    assert "pytest --confcutdir=tests/unit" in text
-    assert "tests/unit/test_release_metadata.py" in text
+    assert (
+        "pytest --confcutdir=tests/unit tests/unit/test_release_metadata.py"
+        in _run(metadata_step)
+    )
     assert "dependency_audit.py" in text
     assert "pip-audit-lock.json:lock" in text
     assert "pip-audit-wheel.json:wheel-runtime" in text
@@ -884,6 +892,18 @@ def test_tag_publication_reruns_advisory_scans_and_metadata_guards() -> None:
     assert "steps.release_osv.outcome" in text
     assert "steps.release_pip_lock.outcome" in text
     assert "steps.release_pip_wheel.outcome" in text
+
+
+def test_pr_ci_proves_release_metadata_without_project_dependencies() -> None:
+    job = _workflow("ci.yml")["jobs"]["release-metadata"]
+    text = "\n".join(_run(step) for step in _steps(job))
+
+    assert "pytest==9.1.1" in text
+    assert 'find_spec("jax") is None' in text
+    assert (
+        "pytest --confcutdir=tests/unit tests/unit/test_release_metadata.py"
+        in text
+    )
 
 
 def test_every_standalone_security_gate_installs_its_imports_first() -> None:
