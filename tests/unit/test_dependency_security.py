@@ -837,24 +837,32 @@ def test_scanner_versions_are_pinned() -> None:
 
 def test_release_wheel_venv_uses_outer_pinned_pip() -> None:
     workflow = _workflow("release.yml")
-    assert re.fullmatch(r"\d+\.\d+\.\d+", workflow["env"]["PIP_VERSION"])
+    environment = workflow.get("env", {})
+    assert "PIP_VERSION" in environment, (
+        "release.yml must pin PIP_VERSION at the workflow level"
+    )
+    assert re.fullmatch(r"\d+\.\d+\.\d+", str(environment["PIP_VERSION"]))
 
     steps = _steps(workflow["jobs"]["build"])
-    toolchain = next(
-        step
-        for step in steps
+    toolchain_i = next(
+        i
+        for i, step in enumerate(steps)
         if step.get("name") == "Install the pinned release and scanner toolchain"
     )
-    assert '"pip==${PIP_VERSION}"' in _run(toolchain)
-
-    smoke = next(
-        step
-        for step in steps
+    smoke_i = next(
+        i
+        for i, step in enumerate(steps)
         if step.get("name") == "Smoke-test the wheel from an empty directory"
     )
+    assert toolchain_i < smoke_i, (
+        "the pinned outer pip must be installed before the wheel smoke test"
+    )
+    assert '"pip==${PIP_VERSION}"' in _run(steps[toolchain_i])
+
+    smoke_body = re.sub(r"\\\s*\n\s*", " ", _run(steps[smoke_i]))
     lines = [
-        re.sub(r"\\\s*\n|\s+", " ", line).strip()
-        for line in _run(smoke).splitlines()
+        re.sub(r"\s+", " ", line).strip()
+        for line in smoke_body.splitlines()
         if line.strip()
     ]
     create_venv = 'python -m venv --without-pip "$RUNNER_TEMP/wheel-env"'
@@ -865,7 +873,10 @@ def test_release_wheel_venv_uses_outer_pinned_pip() -> None:
     assert create_venv in lines, "wheel smoke venv must not seed ensurepip"
     assert wheel_install in lines, "built wheel must use the outer pinned pip"
     assert lines.index(create_venv) < lines.index(wheel_install)
-    assert not any('wheel-env/bin/python" -m pip' in line for line in lines)
+    assert not any(
+        re.search(r"wheel-env/bin/(?:pip|python\"?\s+-m\s+pip)", line)
+        for line in lines
+    ), "the wheel smoke venv must never run its own pip"
 
 
 def test_the_wheel_closure_is_audited_and_not_just_the_lock() -> None:
