@@ -8,13 +8,13 @@ with GPU acceleration via JAX. Key features:
 - ArviZ InferenceData conversion with observed/constant data groups
 """
 
+import ast
 import gc
 import hashlib
 import inspect
 import json
 import logging
 import pickle
-import platform
 import subprocess
 import sys
 import time
@@ -345,8 +345,50 @@ def _warm_start_fingerprint(warm_start: dict | None) -> str | None:
     return digest.hexdigest()[:16]
 
 
+def _bayes_module_path(module: str) -> Path | None:
+    prefix = "panelcast.models.bayes"
+    if module == prefix:
+        candidate = Path(__file__).parent / "__init__.py"
+    elif module.startswith(f"{prefix}."):
+        relative = module.removeprefix(f"{prefix}.").replace(".", "/")
+        candidate = Path(__file__).parent / f"{relative}.py"
+        if not candidate.exists():
+            candidate = Path(__file__).parent / relative / "__init__.py"
+    else:
+        return None
+    return candidate if candidate.exists() else None
+
+
+def _model_source_closure(source_file: Path) -> set[Path]:
+    """Model source plus the local Bayesian modules it imports."""
+    pending = [source_file]
+    seen: set[Path] = set()
+    while pending:
+        path = pending.pop()
+        try:
+            path = path.resolve()
+            if path in seen:
+                continue
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source)
+        except (OSError, SyntaxError, UnicodeError):
+            continue
+        seen.add(path)
+        for node in ast.walk(tree):
+            modules: list[str] = []
+            if isinstance(node, ast.Import):
+                modules = [alias.name for alias in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                modules = [node.module]
+            for module in modules:
+                imported = _bayes_module_path(module)
+                if imported is not None and imported.resolve() not in seen:
+                    pending.append(imported)
+    return seen
+
+
 def _source_fingerprint(model: Callable) -> str:
-    """Hash the model source and the local Bayesian implementation it calls."""
+    """Hash output-affecting model code while ignoring comments and formatting."""
     digest = hashlib.sha256()
     target: object = model
     source_file: str | None = None
@@ -361,20 +403,16 @@ def _source_fingerprint(model: Callable) -> str:
         if wrapped is None or wrapped is target:
             break
         target = wrapped
-    roots = [Path(source_file)] if source_file else []
-    roots.extend(sorted(Path(__file__).parent.glob("*.py")))
-    seen: set[Path] = set()
-    for path in roots:
+
+    paths = _model_source_closure(Path(source_file)) if source_file else set()
+    for path in sorted(paths):
         try:
-            resolved = path.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            digest.update(str(resolved.name).encode())
-            digest.update(resolved.read_bytes())
-        except OSError:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            digest.update(path.name.encode())
+            digest.update(ast.dump(tree, include_attributes=False).encode())
+        except (OSError, SyntaxError, UnicodeError):
             continue
-    if not seen:
+    if not paths:
         try:
             digest.update(inspect.getsource(target).encode())
         except (OSError, TypeError):
@@ -448,8 +486,6 @@ def _checkpoint_identity(
         "jax_devices": sorted(
             f"{device.platform}:{getattr(device, 'device_kind', '')}" for device in jax.devices()
         ),
-        "platform": platform.platform(),
-        "machine": platform.machine(),
         "jax_x64": bool(getattr(jax.config, "jax_enable_x64", False)),
     }
 

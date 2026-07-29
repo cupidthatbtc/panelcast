@@ -25,7 +25,6 @@ this module exists to prevent.
 from __future__ import annotations
 
 import hashlib
-import io
 import json
 import logging
 import os
@@ -257,11 +256,10 @@ class CheckpointStore:
         payload = self._read_cursor()
         records = self._validate_cursor(payload)
         for record in records:
-            self._verify_artifact(self.directory / record.block_file, record.block_sha256, record)
-            self._verify_artifact(self.directory / record.state_file, record.state_sha256, record)
-            # A matching archive hash proves identity, not structure. Validate the
-            # committed keys and shapes before trusting the state that follows it.
+            # Hash and validate the archive once before trusting the state that
+            # follows it; load_blocks rechecks it after sampling finishes.
             self._read_block(record)
+            self._verify_artifact(self.directory / record.state_file, record.state_sha256, record)
         self._records = records
         if not records:
             return 0, None
@@ -483,20 +481,11 @@ class CheckpointStore:
 
     def _read_block(self, record: BlockRecord) -> tuple[dict, dict]:
         path = self.directory / record.block_file
-        if not path.exists():
-            raise CheckpointError(f"checkpoint block {record.index} file {path} is missing")
-        raw = path.read_bytes()
-        actual = hashlib.sha256(raw).hexdigest()
-        if actual != record.block_sha256:
-            raise CheckpointError(
-                f"checkpoint block {record.index} at {path} does not match its committed hash "
-                f"({actual[:12]} != {record.block_sha256[:12]}); delete the checkpoint "
-                "directory to start over"
-            )
+        self._verify_artifact(path, record.block_sha256, record)
 
         expected_keys = {f"s.{name}" for name in record.sample_sites}
         expected_keys |= {f"e.{name}" for name in record.extra_sites}
-        with np.load(io.BytesIO(raw), allow_pickle=True) as archive:
+        with np.load(path, allow_pickle=True) as archive:
             found = set(archive.files)
             if found != expected_keys:
                 raise CheckpointError(

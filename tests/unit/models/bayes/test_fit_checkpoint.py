@@ -304,5 +304,17 @@ class TestCheckpointIdentityFitArguments:
         assert identity["numpy_version"]
         assert identity["jax_version"]
         assert identity["jaxlib_version"]
-        assert identity["platform"]
-        assert identity["machine"]
+        assert "platform" not in identity
+        assert "machine" not in identity
+
+    def test_source_fingerprint_ignores_comments_but_not_code(self, tmp_path, monkeypatch):
+        source = tmp_path / "model.py"
+        source.write_text("def model():\n    return 1\n", encoding="utf-8")
+        monkeypatch.setattr(fit_mod, "_model_source_closure", lambda _: {source})
+
+        baseline = fit_mod._source_fingerprint(make_score_model("user"))
+        source.write_text("# explanation\ndef model():\n    return 1\n", encoding="utf-8")
+        assert fit_mod._source_fingerprint(make_score_model("user")) == baseline
+
+        source.write_text("def model():\n    return 2\n", encoding="utf-8")
+        assert fit_mod._source_fingerprint(make_score_model("user")) != baseline
