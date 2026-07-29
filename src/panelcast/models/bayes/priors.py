@@ -33,6 +33,60 @@ from dataclasses import dataclass
 # (likelihoods._beta_predict_draws) stay consistent at the default.
 DEFAULT_BETA_BOUNDARY_EPS = 1e-3
 
+
+def is_skew_rw_innovation(value: object) -> bool:
+    """The rw_raw_abs site exists exactly when this predicate is true."""
+    return (value or "normal") == "skew_normal"
+
+
+def latent_site_name(prefix: str, name: str) -> str:
+    separator = "" if not prefix or prefix.endswith("_") else "_"
+    return f"{prefix}{separator}{name}"
+
+
+@dataclass(frozen=True)
+class RandomWalkLatentSites:
+    raw: str | None
+    raw_abs: str | None
+
+    def present(self) -> tuple[str, ...]:
+        return tuple(site for site in (self.raw, self.raw_abs) if site is not None)
+
+
+def rw_latent_sites(
+    prefix: str, innovation_type: object, *, max_seq: int
+) -> RandomWalkLatentSites:
+    """Return the random-walk latent sites eligible for memory exclusion."""
+    if max_seq <= 1:
+        return RandomWalkLatentSites(None, None)
+    raw_abs = (
+        latent_site_name(prefix, "rw_raw_abs")
+        if is_skew_rw_innovation(innovation_type)
+        else None
+    )
+    return RandomWalkLatentSites(latent_site_name(prefix, "rw_raw"), raw_abs)
+
+
+@dataclass(frozen=True)
+class EntitySkewLatentSites:
+    absolute: str | None
+    symmetric: str | None
+
+    def present(self) -> tuple[str, ...]:
+        return tuple(
+            site for site in (self.absolute, self.symmetric) if site is not None
+        )
+
+
+def entity_skew_sites(prefix: str, prior_type: object) -> EntitySkewLatentSites:
+    if (prior_type or "normal") != "skew_normal":
+        return EntitySkewLatentSites(None, None)
+    return EntitySkewLatentSites(
+        latent_site_name(prefix, "entity_skew_abs"),
+        latent_site_name(prefix, "entity_skew_sym"),
+    )
+
+
 # Beta-Binomial effective-rater cap. The Beta overdispersion phi (not n) sets the
 # implied-score precision, so capping the rater count past ~1e4/span costs almost
 # no information while bounding total_count (= span*n) out of the range where the
