@@ -64,18 +64,22 @@ def backtest(
         panelcast backtest --origins 5 --num-chains 2 --num-samples 500
         panelcast backtest --backtest-id nightly  # rerun to resume
     """
+    from panelcast.paths import RunPathError
     from panelcast.pipelines.backtest import BacktestConfig, run_backtest
 
-    cfg = BacktestConfig(
-        origins=origins,
-        backtest_id=backtest_id,
-        output_root=Path(output_root),
-        dataset=dataset,
-        num_chains=num_chains,
-        num_samples=num_samples,
-        num_warmup=num_warmup,
-        origin_timeout_seconds=origin_timeout,
-    )
+    try:
+        cfg = BacktestConfig(
+            origins=origins,
+            backtest_id=backtest_id,
+            output_root=Path(output_root),
+            dataset=dataset,
+            num_chains=num_chains,
+            num_samples=num_samples,
+            num_warmup=num_warmup,
+            origin_timeout_seconds=origin_timeout,
+        )
+    except RunPathError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--backtest-id") from exc
     aggregate = run_backtest(cfg)
 
     typer.echo(

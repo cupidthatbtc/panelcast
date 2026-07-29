@@ -97,10 +97,16 @@ class BacktestConfig:
     origin_timeout_seconds: float | None = None
     panelcast_bin: str | None = None
     extra_config: dict[str, Any] = field(default_factory=dict)
+    _backtest_dir: Path = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        self._backtest_dir = safe_run_dir(
+            self.output_root, self.backtest_id, field="backtest_id"
+        )
 
     @property
     def backtest_dir(self) -> Path:
-        return safe_run_dir(self.output_root, self.backtest_id, field="backtest_id")
+        return self._backtest_dir
 
 
 def _dig(payload: dict, path: tuple[str, ...]) -> float | None:

@@ -86,6 +86,7 @@ def select(
         panelcast select --dataset examples/aerospace/descriptor.yaml --effort quick
     """
     from panelcast.config.descriptor import load_descriptor
+    from panelcast.paths import RunPathError
     from panelcast.select.orchestrate import build_plan, render_plan, resolve_dims, run_select
     from panelcast.select.rules import DecisionRules
     from panelcast.select.tiers import resolve_tier, tier_to_sweep_config
@@ -104,17 +105,20 @@ def select(
     descriptor = load_descriptor(dataset)
     label = dataset or descriptor.name
 
-    cfg = tier_to_sweep_config(
-        tier,
-        sweep_id=sweep_id,
-        dataset=dataset,
-        max_fits=max_fits,
-        budget_hours=budget_hours,
-        promote_z=rules.promote_z,
-        arm_timeout_seconds=_parse_arm_timeout(arm_timeout),
-        warmup_transfer=warmup_transfer,
-        parallel_arms=parallel_arms,
-    )
+    try:
+        cfg = tier_to_sweep_config(
+            tier,
+            sweep_id=sweep_id,
+            dataset=dataset,
+            max_fits=max_fits,
+            budget_hours=budget_hours,
+            promote_z=rules.promote_z,
+            arm_timeout_seconds=_parse_arm_timeout(arm_timeout),
+            warmup_transfer=warmup_transfer,
+            parallel_arms=parallel_arms,
+        )
+    except RunPathError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--sweep-id") from exc
 
     dims = resolve_dims(_prepared_paths(descriptor))
     plan = build_plan(

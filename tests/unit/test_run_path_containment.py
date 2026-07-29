@@ -459,28 +459,28 @@ class TestSweepAndBacktestIds:
     def test_sweep_dir_rejects_traversal(self, tmp_path):
         from panelcast.select.runner import SweepConfig
 
-        cfg = SweepConfig(sweep_id="../escape", output_root=tmp_path)
         with pytest.raises(RunPathError):
-            _ = cfg.sweep_dir
+            SweepConfig(sweep_id="../escape", output_root=tmp_path)
 
-    def test_sweep_dir_resolves_bare_id(self, tmp_path):
+    def test_sweep_dir_resolves_bare_id_once(self, tmp_path):
         from panelcast.select.runner import SweepConfig
 
         cfg = SweepConfig(sweep_id="s1", output_root=tmp_path)
         assert cfg.sweep_dir == tmp_path / "s1"
+        assert cfg.sweep_dir is cfg.sweep_dir
 
     def test_backtest_dir_rejects_traversal(self, tmp_path):
         from panelcast.pipelines.backtest import BacktestConfig
 
-        cfg = BacktestConfig(backtest_id="../escape", output_root=tmp_path)
         with pytest.raises(RunPathError):
-            _ = cfg.backtest_dir
+            BacktestConfig(backtest_id="../escape", output_root=tmp_path)
 
-    def test_backtest_dir_resolves_bare_id(self, tmp_path):
+    def test_backtest_dir_resolves_bare_id_once(self, tmp_path):
         from panelcast.pipelines.backtest import BacktestConfig
 
         cfg = BacktestConfig(backtest_id="nightly", output_root=tmp_path)
         assert cfg.backtest_dir == tmp_path / "nightly"
+        assert cfg.backtest_dir is cfg.backtest_dir
 
 
 class TestWindowsPathShapes:
