@@ -4,6 +4,8 @@ on:
   pull_request:
     types: [opened, reopened, ready_for_review]
 
+permissions: {}
+
 jobs:
   review:
     # Own-repo, non-draft PRs only: fork PRs can't read the OAuth secret, so a
@@ -16,32 +18,53 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # Lets the action's CI MCP server read this PR's checks and job logs. That
+      # is how the reviewer sees test results now that ci.yml — which has no
+      # secrets and no OIDC — is the only place PR-controlled code ever runs.
+      actions: read
       # The action exchanges an OIDC token for its GitHub token.
       id-token: write
+    env:
+      # Best-effort scrub of Anthropic/GitHub/cloud credentials out of any
+      # subprocess the session spawns. At the pinned action version the
+      # bubblewrap sandbox is only pre-installed alongside allowed_non_write_users,
+      # so this backs up the tool policy below rather than being the boundary.
+      CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1"
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
           persist-credentials: false
 
-      # The reviewer can execute targeted tests (pixi run pytest ...) to verify
-      # findings instead of reasoning from the diff alone.
-      - name: Install pixi
-        uses: prefix-dev/setup-pixi@ba3bb36eb2066252b2363392b7739741bb777659  # v0.8.1
-        with:
-          cache: true
-
       - name: Claude review
         uses: anthropics/claude-code-action@ba0aafd4308cbba7165f9f2cdb0cfbed5a3c99ce  # v1
         with:
-          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # Federation is silently ignored whenever an OAuth token is also
+          # present, so hand over the long-lived token only while the repo has
+          # no workload-identity variables configured.
+          claude_code_oauth_token: ${{ vars.ANTHROPIC_ORGANIZATION_ID == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          anthropic_federation_rule_id: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+          anthropic_organization_id: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+          # The app token the action mints defaults to contents/issues/pull_requests
+          # write regardless of this job's permissions block; this narrows the
+          # contents scope, which also neuters the action's own git-push wrapper.
+          additional_permissions: |
+            contents: read
           plugin_marketplaces: "https://github.com/anthropics/claude-code.git"
           plugins: "code-review@claude-code-plugins"
           prompt: "/code-review:code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}"
+          # Read, search, and diff only. Nothing here runs repository code, and
+          # --setting-sources keeps the PR's own .claude settings (and their
+          # hooks) out of a session holding the review credentials. The deny
+          # list also overrides the interactive-write tools the action adds for
+          # its tag mode.
           claude_args: |
             --model claude-opus-5
             --effort xhigh
-            --allowedTools "Bash(pixi run *),Bash(pytest *),Bash(python -m pytest *),Bash(git fetch --deepen*),Read,Grep,Glob"
+            --setting-sources user
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git fetch --deepen:*)"
+            --disallowedTools "Write,Edit,MultiEdit,NotebookEdit,Bash(pixi:*),Bash(pytest:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(uv:*),Bash(make:*),Bash(bash:*),Bash(sh:*),Bash(git add:*),Bash(git commit:*),Bash(git rm:*)"
+            --append-system-prompt "You are reviewing a pull request whose code you must never execute: this job holds the review credentials. Do not try to run tests, builds, or any project command. The repository's own CI workflow runs the suite for this PR without secrets, so read its results with the CI tools and otherwise verify findings by reading, searching, and diffing the code."
           # display_report only surfaces the report on the Actions job
           # summary; track_progress is what posts a visible PR comment
           # (progress + final report), so a clean review still responds.
