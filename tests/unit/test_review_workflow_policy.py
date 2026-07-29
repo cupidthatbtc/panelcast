@@ -20,17 +20,14 @@ import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 
-# Everything the reviewer may reach: each entry reads or diffs the checkout,
-# none of them run code the pull request supplied.
+# Git object reads cannot follow a pull-request symlink into /proc. The CI MCP
+# server is action-owned and receives a separate read-only workflow token.
 READ_ONLY_TOOLS = frozenset(
     {
-        "Read",
-        "Grep",
-        "Glob",
-        "Bash(git diff:*)",
         "Bash(git log:*)",
         "Bash(git show:*)",
-        "Bash(git fetch --deepen:*)",
+        "mcp__github_ci__get_ci_status",
+        "mcp__github_ci__get_workflow_run_details",
     }
 )
 
@@ -38,6 +35,9 @@ READ_ONLY_TOOLS = frozenset(
 # its own tag mode, which include workspace writes and git add/commit/rm.
 REQUIRED_DENIALS = frozenset(
     {
+        "Read",
+        "Grep",
+        "Glob",
         "Write",
         "Edit",
         "MultiEdit",
@@ -51,6 +51,8 @@ REQUIRED_DENIALS = frozenset(
         "Bash(make:*)",
         "Bash(bash:*)",
         "Bash(sh:*)",
+        "Bash(git diff:*)",
+        "Bash(git fetch:*)",
         "Bash(git add:*)",
         "Bash(git commit:*)",
         "Bash(git rm:*)",
@@ -148,11 +150,19 @@ def _job_violations(job: dict[str, Any]) -> Iterator[str]:
     if not sources or any(source != {"user"} for source in sources):
         yield "loads in-repo Claude settings from the pull request checkout"
 
-    for tool in sorted(set(_tools(claude_args, "--allowedTools")) - READ_ONLY_TOOLS):
+    allowed = set(_tools(claude_args, "--allowedTools"))
+    if not allowed:
+        yield "omits the allowlist, so the pinned action enables its default tools"
+    for tool in sorted(allowed - READ_ONLY_TOOLS):
         yield f"allows a tool that is not read-only: {tool}"
+    for tool in sorted(READ_ONLY_TOOLS - allowed):
+        yield f"omits required review tool: {tool}"
 
     for tool in sorted(REQUIRED_DENIALS - set(_tools(claude_args, "--disallowedTools"))):
         yield f"does not deny {tool}"
+
+    if inputs.get("plugins") or inputs.get("plugin_marketplaces"):
+        yield "installs mutable plugin code alongside the review credentials"
 
     if "contents: read" not in str(inputs.get("additional_permissions", "")):
         yield "does not narrow the minted app token to contents: read"
@@ -239,7 +249,9 @@ def test_visible_review_output_is_preserved(credentialed_job: dict[str, Any]) ->
 
     assert inputs["display_report"] == "true"
     assert inputs["track_progress"] == "true"
-    assert inputs["prompt"].startswith("/code-review:code-review ")
+    assert inputs["prompt"].startswith("Review ")
+    assert not inputs.get("plugins")
+    assert not inputs.get("plugin_marketplaces")
 
 
 def test_long_lived_token_is_withheld_when_workload_identity_is_configured(
@@ -266,7 +278,20 @@ def _edit_claude_args(workflow: dict[str, Any], old: str, new: str) -> None:
 
 
 def _reallow_test_commands(workflow: dict[str, Any]) -> None:
-    _edit_claude_args(workflow, '--allowedTools "Read', '--allowedTools "Bash(pixi run *),Read')
+    _edit_claude_args(workflow, '--allowedTools "Bash', '--allowedTools "Bash(pixi run *),Bash')
+
+
+def _drop_allowlist(workflow: dict[str, Any]) -> None:
+    inputs = _review_action_inputs(_only_credentialed_job(workflow))
+    inputs["claude_args"] = re.sub(
+        r'^\s*--allowedTools "[^"]*"\s*$', "", inputs["claude_args"], flags=re.MULTILINE
+    )
+
+
+def _install_mutable_plugin(workflow: dict[str, Any]) -> None:
+    inputs = _review_action_inputs(_only_credentialed_job(workflow))
+    inputs["plugin_marketplaces"] = "https://github.com/example/plugins.git"
+    inputs["plugins"] = "review@example"
 
 
 def _add_test_step(workflow: dict[str, Any]) -> None:
@@ -322,6 +347,8 @@ def _strip_credentials(workflow: dict[str, Any]) -> None:
     ("mutate", "expected"),
     [
         (_reallow_test_commands, "allows a tool that is not read-only: Bash(pixi run *)"),
+        (_drop_allowlist, "omits the allowlist"),
+        (_install_mutable_plugin, "installs mutable plugin code"),
         (_add_test_step, "runs a shell step alongside the review credentials"),
         (_install_toolchain, "installs a project toolchain: prefix-dev/setup-pixi"),
         (_unpin_action, "not commit-pinned: actions/checkout@v4"),
