@@ -8,6 +8,11 @@ concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # Pinned like the scanners in security.yml: the SBOM is evidence, so the
+  # toolchain that writes it does not drift between releases.
+  PYYAML_VERSION: "6.0.3"
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -55,16 +60,28 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-      # Kept out of dist/: everything there goes to PyPI, which rejects
-      # anything that is not a distribution.
-      - name: Build the CycloneDX SBOM for this release
+      # Two SBOMs, because they describe different software: the pixi
+      # environment the results come from, and the runtime closure a
+      # `pip install panelcast` actually gets. Kept out of dist/, since
+      # everything there goes to PyPI, which rejects non-distributions.
+      - name: Build the environment and wheel-runtime SBOMs
         run: |
-          python -m pip install pyyaml
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          python -m pip install "pyyaml==${PYYAML_VERSION}"
           mkdir -p sbom
-          python scripts/generate_sbom.py \
-            --output "sbom/panelcast-${GITHUB_REF_NAME#v}-sbom.cdx.json"
+          python scripts/generate_sbom.py --scope environment \
+            --expect-version "$version" \
+            --output "sbom/panelcast-$version-environment.cdx.json"
+          python scripts/generate_sbom.py --scope wheel \
+            --expect-version "$version" \
+            --python "$RUNNER_TEMP/wheel-env/bin/python" \
+            --output "sbom/panelcast-$version-wheel-runtime.cdx.json"
+          python scripts/security_gate.py \
+            --sbom "sbom/panelcast-$version-environment.cdx.json:pixi-environment" \
+            --sbom "sbom/panelcast-$version-wheel-runtime.cdx.json:wheel-runtime"
 
-      - name: Upload the SBOM
+      - name: Upload the SBOMs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: sbom-${{ github.sha }}
@@ -72,37 +89,73 @@ jobs:
           if-no-files-found: error
           retention-days: 90
 
-  sbom:
+  # Publication is gated on this job: a release whose SBOM did not make it onto
+  # the release itself does not ship. A run artifact expires, so it is a
+  # convenience copy, never the record.
+  release-sbom:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
-      - name: Download the SBOM
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.12"
+
+      - name: Download the SBOMs
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: sbom-${{ github.sha }}
           path: sbom
 
-      - name: Attach the SBOM to the release
+      - name: Attach the SBOMs to the release and read them back
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          # The tag is pushed before the release is written, so wait a bounded
-          # while for it instead of racing. The run artifact is the fallback.
-          for _ in $(seq 1 10); do
-            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-              gh release upload "$GITHUB_REF_NAME" sbom/*.cdx.json --clobber
-              exit 0
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          # The tag exists (it triggered this run) but the release may not be
+          # written yet. Create it as a draft rather than waiting on a human:
+          # the SBOMs then ride on the release object from the start, and
+          # publishing the notes later keeps them.
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --draft --title "$tag" --generate-notes
+          fi
+          gh release upload "$tag" sbom/*.cdx.json --clobber
+
+          # Read the assets back off the release. A freshly uploaded asset can
+          # take a moment to become downloadable, so retry a bounded few times --
+          # but a mismatch or a still-missing asset fails the job either way.
+          for attempt in 1 2 3; do
+            rm -rf attached && mkdir attached
+            gh release download "$tag" --pattern '*.cdx.json' --dir attached || true
+            if cmp -s "sbom/panelcast-$version-environment.cdx.json" \
+                      "attached/panelcast-$version-environment.cdx.json" \
+               && cmp -s "sbom/panelcast-$version-wheel-runtime.cdx.json" \
+                         "attached/panelcast-$version-wheel-runtime.cdx.json"; then
+              break
             fi
-            sleep 30
+            if [ "$attempt" = 3 ]; then
+              echo "::error::the SBOMs on $tag do not match the ones built from it"
+              exit 1
+            fi
+            sleep 15
           done
-          echo "::warning::no published release for $GITHUB_REF_NAME after 5 minutes; the SBOM remains as the sbom-${{ github.sha }} run artifact"
+          python scripts/security_gate.py \
+            --sbom "attached/panelcast-$version-environment.cdx.json:pixi-environment" \
+            --sbom "attached/panelcast-$version-wheel-runtime.cdx.json:wheel-runtime"
 
   publish:
-    needs: build
+    needs: [build, release-sbom]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment:

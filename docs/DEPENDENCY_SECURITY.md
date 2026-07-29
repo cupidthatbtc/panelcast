@@ -1,76 +1,147 @@
 # Dependency security
 
-`pixi.lock` is the authoritative environment, so it is also the thing that gets
-audited. Two tools read it, both driven from the lock alone:
+`pixi.lock` is the authoritative environment, so it is the thing that gets
+audited — but it is not the only thing that ships. A `pip install panelcast`
+resolves its own closure from `pyproject.toml`, and that closure is audited
+separately. Both are described by their own SBOM.
 
 | Command | What it does |
 | --- | --- |
 | `pixi run audit` | Queries OSV for every locked package and gates on the result |
 | `pixi run audit --offline` | Checks the declared version floors only, no network |
-| `pixi run audit --update` | Rewrites `security_baseline.json` from the current scan |
+| `pixi run audit --scaffold` | Stubs ledger entries for findings a human still has to triage |
 | `pixi run audit --requirements pins.txt` | Exports the lock's PyPI pins for `pip-audit` |
-| `pixi run sbom --output panelcast-sbom.cdx.json` | Writes a CycloneDX 1.6 SBOM |
+| `pixi run sbom --scope environment --output env.cdx.json` | CycloneDX 1.6 SBOM of the lock |
+| `pixi run sbom --scope wheel --python .venv/bin/python --output whl.cdx.json` | CycloneDX 1.6 SBOM of an installed wheel's closure |
 
 `.github/workflows/security.yml` runs all of it on every pull request, on pushes
 to `main`, and weekly on a schedule — advisories are published long after a lock
 is written, so the gate cannot only fire when someone edits a dependency.
 
-## The two halves, and why they are gated differently
+## What each scanner can actually see
 
-**PyPI-aware.** Every `pypi:` entry in the lock, plus every conda package pixi
-maps to a `pkg:pypi/...` purl, is queried against OSV's PyPI ecosystem. Those
-records describe exactly the distribution the lock pins. Anything new here fails
-the audit. The purl mapping is what makes this conda-aware where it counts:
-almost the whole scientific stack installs from conda-forge, not from PyPI, and
-this is what reaches it. `pip-audit` runs in CI as a second, independent opinion
-over the `pypi:` half.
+**PyPI-identified — gated.** Every `pypi:` entry in the lock, plus every conda
+package carrying a `pkg:pypi/...` purl, is queried against OSV's PyPI ecosystem.
+Those records describe exactly the distribution the lock pins, so a match that is
+not an explicit, unexpired acceptance fails the audit. This is what reaches the
+conda half: nearly the whole scientific stack installs from conda-forge, and
+pixi records the PyPI identity of each Python package it resolves there.
 
-**Native conda.** Conda packages with no PyPI mapping are C libraries — zlib,
-openssl, libpng. OSV has no conda ecosystem, so they are matched by name across
-every ecosystem, which surfaces the Debian, Ubuntu, Alpine, and SUSE advisories
-tracking the same upstream source. This tier is reported, not gated, and the
-reasons are worth stating plainly:
+Two limits are worth stating rather than assuming away:
 
-- A distro's affected/fixed version range describes *that distro's* package. It
-  says nothing about what conda-forge built, patched, or backported, so a match
-  is a prompt to investigate rather than a finding.
-- A bare name collides across ecosystems. The scan matches an npm package called
-  `seaborn` and a Ruby `zlib` gem that have nothing to do with this environment.
-- The volume is high for the same reason: openssl and libpng carry hundreds of
-  historical distro advisories between them.
+- pixi does not write the `purls` field consistently. conda-forge's `pyarrow`
+  declares `pkg:pypi/pyarrow` on osx-arm64 and an empty `purls` on linux-64 and
+  win-64, so the same distribution was PyPI-audited on one platform and silently
+  demoted on the other two. `scripts/pixi_lock.py` now propagates a mapping
+  across every entry sharing a conda name, and a test pins that behaviour.
+- an advisory's affected range is stated for the *PyPI* release. conda-forge
+  sometimes patches a build without changing the version, so this tier can
+  report a finding that a particular conda build has already fixed. It errs
+  toward reporting, which is the right direction for a gate.
+- the interpreter is not in this tier at all. There is no `pkg:pypi/python`, so
+  CPython itself only ever appears in the name-matched tier below, and it is not
+  gated. What covers it is conda-forge tracking upstream releases and the lock
+  pinning a current one (3.14.2 today).
 
-`--strict-conda` gates on this tier for anyone who wants the stricter reading;
-`--strict-conda --update` baselines it first.
+**pip-audit over the locked pins — gated.** A second, independent PyPI-aware
+opinion over the same wheels, from a different advisory pipeline. It reads the
+exported `name==version` pins with `--no-deps --strict`, so it audits what the
+lock pins rather than re-resolving.
 
-## Floors and the baseline
+**pip-audit over the wheel's runtime closure — gated.** The lock is not what a
+PyPI user installs. CI builds the wheel, installs it into a clean virtualenv,
+and audits *that* closure. Without this step nothing in the repository ever
+scanned the dependency set the published package actually resolves.
+
+**Name-matched across ecosystems — reported, never gated.** Conda packages with
+no PyPI identity are C libraries: openssl, zlib, libpng. OSV has no conda
+ecosystem, so the only available handle is a bare-name lookup across every
+ecosystem at once. The current lock produces ~1250 such matches across ~49
+packages, and they are not evidence about this environment:
+
+- the affected/fixed ranges belong to Debian, Ubuntu, Alpine, or SUSE builds and
+  say nothing about what conda-forge compiled, patched, or backported;
+- bare names collide outright — `seaborn` matches a malicious-npm-package
+  advisory, `yaml` an npm CVE, `cpython` a RUSTSEC advisory;
+- the volume is dominated by historical records: openssl (313) and hdf5 (281)
+  are close to half of it between them.
+
+Gating on that tier would be a claim of coverage the data cannot support, so the
+audit reports it, labels it, and does not fail on it. `--strict-conda` gates on
+it locally for anyone who wants to read it as a gate, and the report is written
+into the CI evidence artifact either way.
+
+Be clear about what that leaves: **the native tier is not adjudicated, and no
+tool here can adjudicate it.** What the project does instead is keep conda-forge
+current — the July 2026 re-solve moved libpng, libjpeg-turbo, freetype, krb5,
+libcurl, libglib, openldap, lcms2, and zlib to their newest conda-forge builds,
+and a full re-solve leaves openssl, hdf5, and libssh2 where they are, which is
+the evidence that those are already current. That is currency, not analysis, and
+the weekly workflow audits the lock rather than re-solving it: moving native
+libraries is a deliberate lock refresh someone has to run and review.
+
+## Floors and the acceptance ledger
 
 Two separate mechanisms, deliberately:
 
-- `MINIMUM_VERSIONS` in `scripts/dependency_audit.py` are hard floors. They are
-  enforced offline, on every locked platform, and through either half of the
-  environment — switching a package from PyPI to conda-forge does not dodge them
+- `MINIMUM_VERSIONS` in `scripts/dependency_audit.py` are hard floors, each
+  carrying the advisories that set it and a sentence on how the package is
+  reached from this codebase. They are enforced offline, on every locked
+  platform, and through either half of the environment — switching a package
+  from PyPI to conda-forge does not dodge them
   (`tests/unit/test_dependency_security.py` proves it). `pixi.toml` carries the
   matching constraint so a re-solve cannot reintroduce a vulnerable version.
-- `security_baseline.json` is a ratchet, the same shape as the typing and
-  terminology baselines. It lists advisory ids that are already known against the
-  currently pinned builds. New ids fail; ids that disappear are reported so the
-  file can be tightened with `--update`.
+- `security_baseline.json` is the ledger of *accepted* findings. It is not a
+  list of ids. Every entry names the package and the exact locked version, the
+  advisory, what does or does not reach this codebase, the remediation, an
+  owner, the review date, and an expiry no more than 90 days out. The audit
+  rejects entries that are incomplete, that use a stock phrase instead of a
+  rationale, or that have expired — an acceptance is a decision with a deadline,
+  not a parking space.
 
-Listing an id in the baseline means it has been seen and triaged, **not** that no
-fixed release exists. Most of the current entries sit in the pinned scientific
-stack (Pillow, Tornado, pyarrow, and friends), where moving a version is an
-environment refresh that has to clear the full test suite — a separate change
-from a security floor, and one that should not be smuggled into an unrelated PR.
+`--scaffold` writes new entries in the shape a human has to fill in, and the run
+still fails: the tool cannot grant an acceptance. An acceptance is bound to the
+exact version it was written against, so a version bump has to be re-adjudicated
+rather than inheriting the old decision.
 
-## SBOM
+The July 2026 sweep found no acceptances to write. All 67 advisories that the
+previous baseline listed had a fixed release available, so all 67 were
+remediated by upgrade — click, Pillow, pip, pyarrow, Pygments, pytest,
+setuptools, and Tornado moved, the floors hold them, and the ledger is empty.
 
-`scripts/generate_sbom.py` emits CycloneDX 1.6 JSON: one component per locked
-artifact, with its purl, its SHA-256, the distribution URL, and the platforms it
-installs on. The document is a pure function of the lock — no timestamp, and a
-serial number derived from the lock digest — so the same lock always produces
-byte-identical output and two releases can be diffed directly.
+## SBOMs
 
-The release workflow builds it from the tagged lock, keeps it as a 90-day run
-artifact, and attaches it to the GitHub Release. The tag is pushed before the
-release is written, so the attach step waits a bounded five minutes for the
-release to appear; if it never does, the run artifact is the copy of record.
+`scripts/generate_sbom.py` emits CycloneDX 1.6 JSON in two scopes, and they are
+not interchangeable:
+
+- `--scope environment` is `pixi.lock`: one component per locked artifact, with
+  its purl, SHA-256, distribution URL, and the platforms it installs on, across
+  all three locked platforms and including the test and plotting toolchain. It
+  is a pure function of the lock — no timestamp, serial number derived from the
+  lock digest — so the same lock always produces byte-identical output and two
+  releases can be diffed directly. It is *not* the dependency set of the
+  published wheel.
+- `--scope wheel` is the runtime closure of the built wheel: the distributions
+  `importlib.metadata` reports in an interpreter where only that wheel was
+  installed, with the virtualenv's own bootstrap marked as such. That is a pip
+  resolution for one platform and one Python version at build time, not a lock,
+  and the document says so in its metadata.
+
+Each document declares its scope in `metadata.properties` under
+`panelcast:scope`, and `scripts/security_gate.py` refuses one that does not.
+
+The release workflow builds both from the tagged lock and the smoke-tested
+wheel, attaches them to the GitHub Release for the tag — creating the release as
+a draft if it does not exist yet, so nothing waits on a human — and then
+downloads them back and compares them byte for byte before PyPI publication is
+allowed to start. If the SBOMs are not on the release, the release does not
+publish. The run artifact is a 90-day convenience copy, not the record.
+
+## When a scanner fails
+
+Every scanner and SBOM step in `security.yml` runs to completion and records its
+own outcome; none of them stops the others. A single aggregate step,
+`scripts/security_gate.py`, then fails the job if any scanner errored, any
+finding lacks a current acceptance, or any evidence file is missing, empty, or
+mislabelled. "No findings" from a scanner that never ran is treated as a
+failure, not a pass.

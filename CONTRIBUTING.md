@@ -112,17 +112,25 @@ The Python runtime reads its version from the installed package metadata
 static copies no code can read — `pixi.toml`, `CITATION.cff` (version +
 date-released), and the `MODEL_CARD.md` header. The CHANGELOG entry stays
 manual, as does `requirements.lock` when `pixi.lock` changed;
-`tests/unit/test_release_metadata.py` fails the build if anything drifts. The
-release run also builds the CycloneDX SBOM and attaches it to the GitHub
-Release, so publish the release while the tag's workflow is still running.
+`tests/unit/test_release_metadata.py` fails the build if anything drifts.
+
+Pushing the tag starts the release run, which builds the environment and
+wheel-runtime SBOMs and attaches both to the GitHub Release before it publishes
+to PyPI. If no release exists for the tag yet, the run creates a draft one and
+attaches them there, so don't race it with `gh release create` — let the draft
+appear, then edit its notes and publish. PyPI publication is blocked until the
+SBOMs are verifiably on the release.
 
 ## Dependency security
 
-Touching `pixi.lock` means re-running `pixi run audit`. New advisories fail the
-gate; already-triaged ones live in `security_baseline.json` and are refreshed
-with `pixi run audit --update`. See
-[`docs/DEPENDENCY_SECURITY.md`](docs/DEPENDENCY_SECURITY.md) for what the PyPI
-and conda tiers actually cover.
+Touching `pixi.lock` means re-running `pixi run audit`. Findings without a
+current acceptance fail the gate. Accepted ones live in `security_baseline.json`
+as entries that name the version, the advisory, what it does or does not reach,
+the remediation, an owner, and an expiry — `pixi run audit --scaffold` writes the
+shape but deliberately cannot grant the acceptance. Prefer upgrading: as of the
+July 2026 sweep the ledger is empty because every open advisory had a fix. See
+[`docs/DEPENDENCY_SECURITY.md`](docs/DEPENDENCY_SECURITY.md) for what each
+scanner can and cannot see.
 
 ## Reporting issues
 

@@ -4,12 +4,18 @@ pixi records conda packages by URL only, so channel, subdir, name, version, and
 build all come from the artifact URL. The `purls` field is the one authoritative
 bridge from a conda package to its PyPI identity; native libraries carry no purl
 at all, which is what forces the two-tier treatment in `dependency_audit.py`.
+
+That field is not written consistently: conda-forge's `pyarrow` carries
+`pkg:pypi/pyarrow` on osx-arm64 and an empty `purls` on linux-64 and win-64, so
+the same distribution would be PyPI-audited on one platform and demoted to the
+name-matched tier on the other two. `parse` therefore propagates a mapping
+across every entry sharing a conda name.
 """
 
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import yaml
@@ -89,6 +95,20 @@ def _mapped_pypi_name(entry: dict) -> str | None:
     return None
 
 
+def _propagate_pypi_names(packages: list[LockedPackage]) -> list[LockedPackage]:
+    """Give every conda entry the PyPI identity its same-named siblings declare."""
+    known: dict[str, str] = {}
+    for package in packages:
+        if package.kind == "conda" and package.pypi_name:
+            known.setdefault(package.name, package.pypi_name)
+    return [
+        replace(package, pypi_name=known[package.name])
+        if package.kind == "conda" and not package.pypi_name and package.name in known
+        else package
+        for package in packages
+    ]
+
+
 def parse(path: Path | str = DEFAULT_LOCK) -> Lock:
     path = Path(path)
     raw = path.read_bytes().replace(b"\r\n", b"\n")
@@ -124,6 +144,8 @@ def parse(path: Path | str = DEFAULT_LOCK) -> Lock:
                     build=build,
                 )
             )
+
+    packages = _propagate_pypi_names(packages)
 
     environments: dict[str, dict[str, tuple[str, ...]]] = {}
     for environment, spec in (document.get("environments") or {}).items():
