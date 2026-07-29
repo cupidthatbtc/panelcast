@@ -45,7 +45,19 @@ METADATA_COMMAND = (
     "python -m pytest --confcutdir=tests/unit tests/unit/test_release_metadata.py "
     '--junitxml="$RUNNER_TEMP/release-metadata.xml" -q'
 )
-METADATA_EVIDENCE_FRAGMENT = "metadata proof was vacuous"
+JAX_ABSENCE_COMMAND = (
+    "python -c 'import importlib.util, sys; "
+    'sys.exit("jax must not be installed") if '
+    'importlib.util.find_spec("jax") else None\''
+)
+METADATA_EVIDENCE_COMMAND = (
+    "python -c 'import sys, xml.etree.ElementTree as ET; "
+    'root=ET.parse(sys.argv[1]).getroot(); suites=[root] if root.tag == "testsuite" '
+    'else root.findall(".//testsuite"); tests=sum(int(s.get("tests", 0)) for s in suites); '
+    'skipped=sum(int(s.get("skipped", 0)) for s in suites); '
+    'sys.exit(f"metadata proof was vacuous: {tests} tests, {skipped} skipped") '
+    'if tests == 0 or skipped else None\' "$RUNNER_TEMP/release-metadata.xml"'
+)
 
 # What the lock shipped before the #372 sweep, and what must never come back.
 PREVIOUSLY_LOCKED = {
@@ -893,7 +905,7 @@ def test_tag_publication_reruns_advisory_scans_and_metadata_guards() -> None:
     metadata_lines = [line.strip() for line in _run(metadata_step).splitlines() if line.strip()]
     assert metadata_lines[0] == METADATA_COMMAND
     assert len(metadata_lines) == 2
-    assert METADATA_EVIDENCE_FRAGMENT in metadata_lines[1]
+    assert metadata_lines[1] == METADATA_EVIDENCE_COMMAND
     assert "dependency_audit.py" in text
     assert "pip-audit-lock.json:lock" in text
     assert "pip-audit-wheel.json:wheel-runtime" in text
@@ -935,10 +947,9 @@ def test_pr_ci_proves_release_metadata_without_project_dependencies() -> None:
     assert metadata_step is not None, "CI has no dependency-free metadata proof"
     metadata_run = _run(metadata_step)
     metadata_lines = [line.strip() for line in metadata_run.splitlines() if line.strip()]
-    assert 'find_spec("jax")' in metadata_lines[0]
-    assert "sys.exit" in metadata_lines[0]
+    assert metadata_lines[0] == JAX_ABSENCE_COMMAND
     assert metadata_lines[1] == METADATA_COMMAND
-    assert METADATA_EVIDENCE_FRAGMENT in metadata_lines[2]
+    assert metadata_lines[2] == METADATA_EVIDENCE_COMMAND
 
     release_metadata_step = next(
         step
