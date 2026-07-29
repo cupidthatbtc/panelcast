@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -32,9 +33,10 @@ class TestDryRun:
             ["select", "--dry-run", "--config", CONFIG, "--sweep-id", "../escape"],
         )
 
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
         assert result.exit_code == 2
-        assert "--sweep-id" in result.output
-        assert "Invalid sweep_id" in result.output
+        assert "--sweep-id" in clean
+        assert "Invalid sweep_id" in clean
 
     def test_effort_tier_shown(self):
         result = runner.invoke(
