@@ -219,12 +219,16 @@ def test_review_never_runs_on_a_fork_or_base_branch_trigger(
 
 
 def test_pull_request_code_only_executes_where_there_are_no_credentials() -> None:
-    ci = load_workflow("ci.yml")
-    executing = {
-        name: job for name, job in jobs(ci).items() if any("run" in s for s in _steps(job))
-    }
+    executing: dict[str, dict[str, Any]] = {}
+    for path in sorted(WORKFLOWS.glob("*.yml")):
+        workflow = load_workflow(path.name)
+        if "pull_request" not in set(triggers(workflow) or {}):
+            continue
+        for name, job in jobs(workflow).items():
+            if any("run" in step for step in _steps(job)):
+                executing[f"{path.name}:{name}"] = job
 
-    assert executing, "CI must be the place the pull request's own suite runs"
+    assert executing, "secretless CI must run the pull request's own suite"
     assert any("pixi run pytest" in _text(job) for job in executing.values())
     for name, job in executing.items():
         assert not holds_credentials(job), f"{name} runs PR code with credentials"
