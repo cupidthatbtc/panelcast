@@ -181,6 +181,51 @@ def _job_violations(job: dict[str, Any]) -> Iterator[str]:
         yield "does not enable the read-only GitHub CI MCP server"
 
 
+def _synthetic_workspace_violations(workflow: dict[str, Any]) -> list[str]:
+    review_input = jobs(workflow).get("review-input") or {}
+    review = jobs(workflow).get("review") or {}
+    upload = next(
+        (
+            step
+            for step in _steps(review_input)
+            if str(step.get("uses", "")).startswith("actions/upload-artifact")
+        ),
+        None,
+    )
+    download = next(
+        (
+            step
+            for step in _steps(review)
+            if str(step.get("uses", "")).startswith("actions/download-artifact")
+        ),
+        None,
+    )
+    findings: list[str] = []
+    if upload is None or download is None:
+        return ["synthetic workspace artifact transfer is incomplete"]
+    upload_with = upload.get("with") or {}
+    download_with = download.get("with") or {}
+    if upload_with.get("name") != download_with.get("name"):
+        findings.append("synthetic workspace artifact names do not match")
+    if upload_with.get("path") != "${{ runner.temp }}/claude-safe-workspace/":
+        findings.append("synthetic workspace is not isolated under runner temp")
+    if upload_with.get("include-hidden-files") is not True:
+        findings.append("synthetic workspace omits its Git metadata")
+    if download_with.get("path") != "${{ github.workspace }}":
+        findings.append("synthetic workspace is not restored at the action workspace")
+    builder = "\n".join(str(step.get("run", "")) for step in _steps(review_input))
+    for required in (
+        'safe="$RUNNER_TEMP/claude-safe-workspace"',
+        'export HOME="$RUNNER_TEMP/claude-safe-home"',
+        "GIT_CONFIG_NOSYSTEM=1",
+        "git init --bare .review-origin",
+        "Synthetic workspace: no pull-request files.",
+    ):
+        if required not in builder:
+            findings.append(f"synthetic workspace builder omits {required}")
+    return findings
+
+
 def credential_isolation_violations(workflow: dict[str, Any]) -> list[str]:
     credentialed = {name: job for name, job in jobs(workflow).items() if holds_credentials(job)}
     if not credentialed:
@@ -196,6 +241,7 @@ def credential_isolation_violations(workflow: dict[str, Any]) -> list[str]:
         for name, job in credentialed.items()
         for violation in _job_violations(job)
     ]
+    findings += _synthetic_workspace_violations(workflow)
     return findings
 
 
@@ -499,6 +545,24 @@ def _strip_credentials(workflow: dict[str, Any]) -> None:
     _review_action_inputs(job)["claude_code_oauth_token"] = "${{ vars.SOMETHING_ELSE }}"
 
 
+def _upload_pr_workspace(workflow: dict[str, Any]) -> None:
+    upload = next(
+        step
+        for step in _steps(jobs(workflow)["review-input"])
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    )
+    upload["with"]["path"] = "${{ github.workspace }}"
+
+
+def _omit_synthetic_git_metadata(workflow: dict[str, Any]) -> None:
+    upload = next(
+        step
+        for step in _steps(jobs(workflow)["review-input"])
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    )
+    upload["with"]["include-hidden-files"] = False
+
+
 @pytest.mark.parametrize(
     ("mutate", "expected"),
     [
@@ -524,6 +588,8 @@ def _strip_credentials(workflow: dict[str, Any]) -> None:
         (_accept_fork_pull_requests, "does not restrict itself to same-repository"),
         (_switch_to_pull_request_target, "reacts to pull_request_target"),
         (_strip_credentials, "no credential-bearing job found"),
+        (_upload_pr_workspace, "not isolated under runner temp"),
+        (_omit_synthetic_git_metadata, "omits its Git metadata"),
     ],
 )
 def test_policy_rejects_a_reviewer_that_can_execute_pull_request_code(
