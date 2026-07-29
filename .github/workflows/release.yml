@@ -100,7 +100,8 @@ jobs:
         id: release_pip_wheel
         continue-on-error: true
         run: |
-          "$RUNNER_TEMP/wheel-env/bin/python" -m pip list --format=freeze \
+          python -m pip --python "$RUNNER_TEMP/wheel-env/bin/python" \
+            list --format=freeze \
             | { grep -viE '^panelcast==' || true; } > security/wheel-pins.txt
           python -m pip_audit -r security/wheel-pins.txt \
             --no-deps --strict --progress-spinner off \

@@ -873,13 +873,29 @@ def test_release_wheel_venv_uses_outer_pinned_pip() -> None:
     assert create_venv in lines, "wheel smoke venv must not seed ensurepip"
     assert wheel_install in lines, "built wheel must use the outer pinned pip"
     assert lines.index(create_venv) < lines.index(wheel_install)
+    assert "ensurepip" not in smoke_body, (
+        "the wheel smoke venv must never seed ensurepip"
+    )
     assert not any(
         re.search(
-            r"wheel-env/bin/(?:pip|python[0-9.]*\"?\s+(?:-[A-Za-z]+\s+)*-m\s+(?:pip|ensurepip))",
+            r"wheel-env/bin/(?:pip|python[0-9.]*\"?\s+(?:-[A-Za-z]+\s+)*-m\s+pip)",
             line,
         )
         for line in lines
-    ), "the wheel smoke venv must never run pip or seed ensurepip"
+    ), "the wheel smoke venv must never run its own pip"
+
+    audit = next(
+        step
+        for step in steps
+        if step.get("name") == "Audit the built wheel runtime closure"
+    )
+    audit_body = re.sub(r"\\\s*\n\s*", " ", _run(audit))
+    audit_body = re.sub(r"\s+", " ", audit_body).strip()
+    assert (
+        'python -m pip --python "$RUNNER_TEMP/wheel-env/bin/python" '
+        "list --format=freeze"
+    ) in audit_body
+    assert 'wheel-env/bin/python" -m pip' not in audit_body
 
 
 def test_the_wheel_closure_is_audited_and_not_just_the_lock() -> None:
