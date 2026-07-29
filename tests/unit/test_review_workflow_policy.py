@@ -195,6 +195,9 @@ def _job_violations(job: dict[str, Any]) -> Iterator[str]:
     if inputs.get("plugins") or inputs.get("plugin_marketplaces"):
         yield "installs mutable plugin code alongside the review credentials"
 
+    if inputs.get("allowed_non_write_users") != "${{ github.repository_owner }}":
+        yield "allows sandbox-bootstrap actors beyond the repository owner"
+
     if "actions: read" not in str(inputs.get("additional_permissions", "")):
         yield "does not enable the read-only GitHub CI MCP server"
 
@@ -558,6 +561,10 @@ def _widen_app_token(workflow: dict[str, Any]) -> None:
     del _review_action_inputs(_only_credentialed_job(workflow))["additional_permissions"]
 
 
+def _allow_every_non_write_user(workflow: dict[str, Any]) -> None:
+    _review_action_inputs(_only_credentialed_job(workflow))["allowed_non_write_users"] = "*"
+
+
 def _accept_fork_pull_requests(workflow: dict[str, Any]) -> None:
     _only_credentialed_job(workflow)["if"] = "github.event.pull_request.draft == false"
 
@@ -640,6 +647,7 @@ def _move_builder_contract_to_a_decoy(workflow: dict[str, Any]) -> None:
         (_drop_env_scrub, "does not enable subprocess environment scrubbing"),
         (_widen_permissions, "requests contents: write"),
         (_widen_app_token, "does not enable the read-only GitHub CI MCP server"),
+        (_allow_every_non_write_user, "beyond the repository owner"),
         (_accept_fork_pull_requests, "does not restrict itself to same-repository"),
         (_switch_to_pull_request_target, "reacts to pull_request_target"),
         (_strip_credentials, "no credential-bearing job found"),

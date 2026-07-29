@@ -100,6 +100,9 @@ jobs:
       - name: Claude review
         uses: anthropics/claude-code-action@ba0aafd4308cbba7165f9f2cdb0cfbed5a3c99ce  # v1
         with:
+          # Non-empty makes the pinned action install bubblewrap; limiting it to
+          # the repository owner grants nothing beyond their existing admin role.
+          allowed_non_write_users: ${{ github.repository_owner }}
           # Federation is silently ignored whenever an OAuth token is also
           # present, so hand over the long-lived token only while the repo has
           # no workload-identity variables configured.
