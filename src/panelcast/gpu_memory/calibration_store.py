@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeGuard
 
 from panelcast.gpu_memory.estimate import (
     COLLECTION_OVERHEAD_FACTOR,
@@ -31,6 +32,9 @@ _MAX_RECORDS = 200
 # Local refits stay conservative: every stored point must be over-covered by
 # at least this ratio (mirrors the never-under ladder discipline of #104).
 _MIN_LOCAL_ENVELOPE = 1.05
+# Slack allowed when re-checking the envelope on the returned constants: the
+# scale is solved in closed form, so only float rounding should ever show up.
+_ENVELOPE_TOLERANCE = 1e-9
 
 
 def default_store_path() -> Path:
@@ -154,12 +158,88 @@ def _linear_terms(inputs: dict[str, Any]) -> tuple[float, float] | None:
             entity_group_pooling=bool(inputs.get("entity_group_pooling", False)),
             n_groups=int(inputs.get("n_groups", 0) or 0),
         )
-    except (KeyError, TypeError, ValueError):
+    except (KeyError, TypeError, ValueError, OverflowError):
         return None
     gib = 1024**3
     raw_base = (n_params * 4 * 4 + n_obs * n_features * 4) / gib
     unit = collected * num_samples * 4 * num_chains / gib
+    if not (_is_finite(raw_base) and _is_finite(unit)) or raw_base < 0.0 or unit < 0.0:
+        return None
     return raw_base, unit
+
+
+def _is_finite(value: Any) -> TypeGuard[float]:
+    """A real, finite number — bools and NaN/inf telemetry are not measurements."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _usable_points(records: list[dict[str, Any]]) -> tuple[list[float], list[float], list[float]]:
+    """(bases, units, actuals) for records that are real, positive measurements."""
+    bases: list[float] = []
+    units: list[float] = []
+    actuals: list[float] = []
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        actual = record.get("actual_peak_gb")
+        if not _is_finite(actual) or float(actual) <= 0.0:
+            continue
+        inputs = record.get("estimate_inputs", {})
+        terms = _linear_terms(inputs) if isinstance(inputs, dict) else None
+        if terms is None:
+            continue
+        bases.append(terms[0])
+        units.append(terms[1])
+        actuals.append(float(actual))
+    return bases, units, actuals
+
+
+def _envelope_scale(
+    base_arr: Any,
+    unit_arr: Any,
+    actual_arr: Any,
+    factor: float,
+    fixed: float,
+    jit_buffer_percent: float,
+) -> float | None:
+    """Smallest s >= 1 making every point over-covered, or None if none exists.
+
+    Scaling both constants by s gives, per point,
+    ``(1+jbp) * (base + s*(fixed + factor*unit)) >= envelope * actual``,
+    which is linear in s — so the binding constraint solves directly instead
+    of being chased by a fixed number of shrinking correction passes. A point
+    whose scalable term is zero cannot be lifted at all, and no amount of
+    iteration would have found that out.
+    """
+    import numpy as np
+
+    required = _MIN_LOCAL_ENVELOPE * actual_arr / (1.0 + jit_buffer_percent) - base_arr
+    scalable = fixed + factor * unit_arr
+    binding = required > 0.0
+    if bool(np.any(binding & (scalable <= 0.0))):
+        return None
+    ratios = np.where(binding, required / np.where(scalable > 0.0, scalable, 1.0), 0.0)
+    scale = float(np.max(ratios))
+    if not math.isfinite(scale):
+        return None
+    if scale <= 1.0:
+        return 1.0
+    # A hair of overshoot so the binding point cannot land under the envelope
+    # by one ulp; the caller's re-check is what actually decides.
+    return scale * (1.0 + 1e-12)
+
+
+def _min_envelope_ratio(
+    base_arr: Any,
+    unit_arr: Any,
+    actual_arr: Any,
+    factor: float,
+    fixed: float,
+    jit_buffer_percent: float,
+) -> float:
+    """Tightest estimate/actual over the fit set under the given constants."""
+    estimate = (1.0 + jit_buffer_percent) * (base_arr + fixed + factor * unit_arr)
+    return float((estimate / actual_arr).min())
 
 
 def refit_constants(
@@ -169,50 +249,58 @@ def refit_constants(
 ) -> PerMachineCalibration | None:
     """Least-squares refit of (FACTOR, FIXED) on this machine's measurements.
 
-    Returns None when there are too few usable points or no spread in the
-    collection term (a degenerate design can't identify two constants).
-    The result is inflated so every local point stays over-covered by
-    ``_MIN_LOCAL_ENVELOPE`` — never-under is part of the contract.
+    Returns None — meaning "keep the shipped constants" — whenever the result
+    cannot be shown to be safe: too few usable points, no spread in the
+    collection term (a degenerate design can't identify two constants),
+    non-finite fitted coefficients, or an envelope that the final constants
+    fail to satisfy. Never-under is the contract, so it is verified on the
+    numbers actually returned rather than assumed from the fitting procedure.
     """
     import numpy as np
 
-    bases, units, actuals = [], [], []
-    for record in records:
-        actual = record.get("actual_peak_gb")
-        terms = _linear_terms(record.get("estimate_inputs", {}))
-        if not actual or terms is None or actual <= 0:
-            continue
-        bases.append(terms[0])
-        units.append(terms[1])
-        actuals.append(float(actual))
+    if not _is_finite(jit_buffer_percent) or jit_buffer_percent < 0.0:
+        return None
+
+    bases, units, actuals = _usable_points(records)
     if len(units) < min_points:
         return None
-    base_arr = np.asarray(bases)
-    unit_arr = np.asarray(units)
-    actual_arr = np.asarray(actuals)
-    if float(unit_arr.std()) == 0.0:
+    base_arr = np.asarray(bases, dtype=float)
+    unit_arr = np.asarray(units, dtype=float)
+    actual_arr = np.asarray(actuals, dtype=float)
+    if not float(unit_arr.std()) > 0.0:
         return None
+
     y = actual_arr / (1.0 + jit_buffer_percent) - base_arr
-    slope, intercept = np.polyfit(unit_arr, y, 1)
+    try:
+        slope, intercept = np.polyfit(unit_arr, y, 1)
+    except (np.linalg.LinAlgError, ValueError):
+        return None
+    if not (_is_finite(float(slope)) and _is_finite(float(intercept))):
+        return None
     factor = max(float(slope), 0.1)
     fixed = max(float(intercept), 0.0)
 
-    def _min_ratio(f: float, c: float) -> float:
-        est = (1.0 + jit_buffer_percent) * (base_arr + c + f * unit_arr)
-        return float((est / actual_arr).min())
+    scale = _envelope_scale(
+        base_arr, unit_arr, actual_arr, factor, fixed, jit_buffer_percent
+    )
+    if scale is None:
+        return None
+    factor *= scale
+    fixed *= scale
+    if not (_is_finite(factor) and _is_finite(fixed)):
+        return None
 
-    # Inflate minimally until every local point is over-covered. The scale
-    # only touches the two constants (not the raw model term), so one pass
-    # can land a hair short — iterate.
-    min_ratio = _min_ratio(factor, fixed)
-    for _ in range(5):
-        if min_ratio >= _MIN_LOCAL_ENVELOPE:
-            break
-        # The 1e-6 overshoot breaks the asymptotic approach from below.
-        scale = _MIN_LOCAL_ENVELOPE / min_ratio * (1.0 + 1e-6)
-        factor *= scale
-        fixed *= scale
-        min_ratio = _min_ratio(factor, fixed)
+    min_ratio = _min_envelope_ratio(
+        base_arr, unit_arr, actual_arr, factor, fixed, jit_buffer_percent
+    )
+    if not _is_finite(min_ratio) or min_ratio < _MIN_LOCAL_ENVELOPE * (1.0 - _ENVELOPE_TOLERANCE):
+        logger.warning(
+            "local GPU calibration failed its over-coverage check "
+            "(min ratio %.4f < %.4f); keeping the shipped constants",
+            min_ratio,
+            _MIN_LOCAL_ENVELOPE,
+        )
+        return None
     return PerMachineCalibration(
         collection_overhead_factor=factor,
         fixed_overhead_gb=fixed,
