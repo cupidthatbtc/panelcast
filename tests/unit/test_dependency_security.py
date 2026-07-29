@@ -901,9 +901,24 @@ def test_tag_publication_reruns_advisory_scans_and_metadata_guards() -> None:
 def test_pr_ci_proves_release_metadata_without_project_dependencies() -> None:
     ci = _workflow("ci.yml")
     release = _workflow("release.yml")
-    assert ci["env"]["PYTEST_VERSION"] == release["env"]["PYTEST_VERSION"]
+    for variable in ("PYTHON_VERSION", "PYTEST_VERSION", "PACKAGING_VERSION"):
+        assert ci["env"][variable] == release["env"][variable]
 
     steps = _steps(ci["jobs"]["release-metadata"])
+    release_steps = _steps(release["jobs"]["build"])
+    ci_setup = next(
+        step
+        for step in steps
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    )
+    release_setup = next(
+        step
+        for step in release_steps
+        if str(step.get("uses", "")).startswith("actions/setup-python@")
+    )
+    assert ci_setup["with"]["python-version"] == "${{ env.PYTHON_VERSION }}"
+    assert release_setup["with"]["python-version"] == "${{ env.PYTHON_VERSION }}"
+
     metadata_step = next(
         (
             step
@@ -921,8 +936,19 @@ def test_pr_ci_proves_release_metadata_without_project_dependencies() -> None:
         in metadata_run
     )
 
-    install_runs = [_run(step) for step in steps if "pip install" in _run(step)]
-    assert install_runs == ['python -m pip install "pytest==${PYTEST_VERSION}"']
+    runs = [_run(step).strip() for step in steps]
+    install_pattern = re.compile(r"\b(?:pip3?|uv\s+pip|poetry)\s+(?:install|sync)\b")
+    install_runs = [run for run in runs if install_pattern.search(run)]
+    assert install_runs == [
+        'python -m pip install "pytest==${PYTEST_VERSION}" '
+        '"packaging==${PACKAGING_VERSION}"'
+    ]
+
+    action_uses = {str(step.get("uses")) for step in steps if step.get("uses")}
+    assert action_uses == {
+        "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5",
+        "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065",
+    }
 
 
 def test_every_standalone_security_gate_installs_its_imports_first() -> None:
