@@ -21,7 +21,7 @@ import math
 
 import numpy as np
 
-from panelcast.evaluation.calibration import PIT_METHOD, compute_pit_per_row
+from panelcast.evaluation.calibration import PIT_DEFAULT_SEED, PIT_METHOD, compute_pit_per_row
 
 
 def _interval_bounds(samples: np.ndarray, prob: float) -> tuple[np.ndarray, np.ndarray]:
@@ -80,7 +80,7 @@ def conformalize(
     test_samples: np.ndarray,
     probs: tuple[float, ...],
     *,
-    seed: int,
+    seed: int = PIT_DEFAULT_SEED,
 ) -> dict:
     """Both conformal layers evaluated on the test split, JSON-ready.
 

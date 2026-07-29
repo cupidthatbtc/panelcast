@@ -14,6 +14,7 @@ import pytest
 from scipy import stats
 
 from panelcast.evaluation.calibration import (
+    PIT_DEFAULT_SEED,
     PIT_METHOD,
     compute_pit_per_row,
     compute_pit_values,
@@ -240,9 +241,15 @@ class TestValidation:
         with pytest.raises(ValueError, match="at least one predictive draw"):
             compute_pit_per_row(np.zeros(3), np.zeros((0, 3)), seed=0)
 
-    def test_seed_is_required(self):
-        with pytest.raises(TypeError):
-            compute_pit_per_row(np.zeros(3), np.zeros((5, 3)))  # type: ignore[call-arg]
+    def test_omitted_seed_uses_a_recorded_compatibility_default(self):
+        y_true = np.zeros(3)
+        y_samples = np.zeros((5, 3))
+        np.testing.assert_array_equal(
+            compute_pit_per_row(y_true, y_samples),
+            compute_pit_per_row(y_true, y_samples, seed=PIT_DEFAULT_SEED),
+        )
+        summary = compute_pit_values(y_true, y_samples)
+        assert summary["randomization_seed"] == PIT_DEFAULT_SEED == 0
 
     def test_empty_summary_reports_nulls_not_nan(self):
         summary = summarize_pit(np.array([]), seed=3)

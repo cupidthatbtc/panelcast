@@ -22,7 +22,11 @@ from dataclasses import dataclass, field
 import numpy as np
 import pandas as pd
 
-from panelcast.evaluation.calibration import compute_pit_per_row, summarize_pit
+from panelcast.evaluation.calibration import (
+    PIT_DEFAULT_SEED,
+    compute_pit_per_row,
+    summarize_pit,
+)
 
 # Below this many rows a coverage estimate is noise, not evidence.
 MIN_SLICE_N = 20
@@ -75,7 +79,7 @@ def coverage_by_slice(
     dimension: str,
     min_n: int = MIN_SLICE_N,
     *,
-    seed: int,
+    seed: int = PIT_DEFAULT_SEED,
 ) -> list[SliceCoverage]:
     """Per-slice empirical coverage with Wilson CIs for one label vector.
 
@@ -129,7 +133,7 @@ def calibration_by_slice(
     probs: tuple[float, ...],
     min_n: int = MIN_SLICE_N,
     *,
-    seed: int,
+    seed: int = PIT_DEFAULT_SEED,
 ) -> dict:
     """The full audit across every slice dimension the row identities support.
 

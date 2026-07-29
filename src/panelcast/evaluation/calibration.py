@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import numpy as np
 
 __all__ = [
+    "PIT_DEFAULT_SEED",
     "PIT_METHOD",
     "CoverageResult",
     "IntervalScoreResult",
@@ -42,6 +43,7 @@ __all__ = [
 # Recorded next to every PIT payload so a stored histogram states which
 # convention produced it.
 PIT_METHOD = "randomized_rank"
+PIT_DEFAULT_SEED = 0
 
 
 def _validate_probability(prob: float) -> None:
@@ -571,7 +573,7 @@ def compute_pit_per_row(
     y_true: np.ndarray,
     y_samples: np.ndarray,
     *,
-    seed: int,
+    seed: int = PIT_DEFAULT_SEED,
 ) -> np.ndarray:
     """Per-observation randomized-rank PIT values, shape (n_obs,).
 
@@ -605,8 +607,8 @@ def compute_pit_per_row(
     Args:
         y_true: Observed values, shape (n_obs,).
         y_samples: Posterior predictive draws, shape (n_draws, n_obs).
-        seed: Seed for the randomization stream. Required, and consumed
-            through a local ``default_rng`` — the module never touches
+        seed: Seed for the randomization stream (default 0 for API compatibility),
+            consumed through a local ``default_rng`` — the module never touches
             global NumPy randomness, and a stored PIT is only reproducible
             if its seed travels with it.
 
@@ -671,7 +673,7 @@ def compute_pit_values(
     y_samples: np.ndarray,
     n_bins: int = 10,
     *,
-    seed: int,
+    seed: int = PIT_DEFAULT_SEED,
 ) -> dict:
     """Probability integral transform values and histogram.
 
