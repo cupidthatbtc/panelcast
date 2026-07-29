@@ -349,6 +349,19 @@ class TestRecordedPathContainment:
         fx = _Fixture(tmp_path, {"table": link})
         assert not fx.decision(roots=[workspace]).skip
 
+    def test_default_roots_do_not_trust_the_working_tree(self, tmp_path):
+        declared = _write_parquet(tmp_path / "processed" / "declared.parquet")
+        substitute = _write_parquet(tmp_path / "other" / "substitute.parquet")
+        fx = _Fixture(tmp_path, {"table": declared})
+        key = next(iter(fx.manifest.outputs))
+        fx.manifest.outputs[key] = str(substitute)
+        fx.manifest.output_hashes[key] = sha256_path(substitute)
+
+        decision = fx.stage.skip_decision(fx.manifest)
+
+        assert not decision.skip
+        assert decision.outputs_untrusted
+
     def test_path_inside_roots_is_accepted(self, tmp_path):
         fx = _Fixture(tmp_path, {"table": _write_parquet(tmp_path / "processed" / "d.parquet")})
         assert fx.decision(roots=[tmp_path / "processed"]).skip

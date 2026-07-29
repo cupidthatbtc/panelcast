@@ -445,7 +445,7 @@ class PipelineStage:
 
     def _default_roots(self) -> tuple[Path, ...]:
         """Where recorded outputs may live when the caller names no roots."""
-        return (Path.cwd(), *(p.parent for p in self.output_paths))
+        return tuple(p.parent for p in self.output_paths)
 
 
 def _topological_sort(
