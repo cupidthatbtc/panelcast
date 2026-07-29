@@ -44,7 +44,10 @@ def _newest_changelog_release(*, repo: Path | None = None) -> tuple[str, str]:
     assert re.fullmatch(r"\d+\.\d+\.\d+[^\]]*", version), (
         f"CHANGELOG.md's newest release heading {version!r} is not a version"
     )
-    date_match = re.fullmatch(r"\s*[-–—]\s*(\d{4}-\d{2}-\d{2})\s*", suffix)
+    date_match = re.fullmatch(
+        r"\s*(?:-|\N{EN DASH}|\N{EM DASH})\s*(\d{4}-\d{2}-\d{2})\s*",
+        suffix,
+    )
     assert date_match, (
         f"CHANGELOG.md's newest release heading suffix {suffix!r} has no ISO release date"
     )
@@ -88,7 +91,8 @@ def _iso_date(raw: str, field: str) -> date:
     try:
         return date.fromisoformat(value)
     except ValueError as exc:
-        raise AssertionError(f"{field} value {raw!r} is not a valid date") from exc
+        message = f"{field} value {raw!r} is not a valid date"
+        raise AssertionError(message) from exc
 
 
 def _release_dates(*, repo: Path | None = None) -> tuple[date, date, date]:
@@ -144,7 +148,7 @@ def test_changelog_rejects_malformed_newest_release_date(tmp_path):
         "## [0.23.0] : 2026-07-29\n\n## [0.22.1] — 2026-07-27\n",
         encoding="utf-8",
     )
-    with pytest.raises(AssertionError, match="suffix .* has no ISO release date"):
+    with pytest.raises(AssertionError, match=r"suffix .* has no ISO release date"):
         _newest_changelog_release(repo=tmp_path)
 
 
@@ -166,6 +170,20 @@ def test_release_date_guard_accepts_newer_model_card_and_unquoted_cff(tmp_path):
         "- **Last updated:** 2026-07-30\n", encoding="utf-8"
     )
     _assert_release_dates_match(repo=tmp_path)
+
+
+def test_release_date_guard_rejects_stale_model_card(tmp_path):
+    (tmp_path / "CHANGELOG.md").write_text(
+        "## [0.23.0] — 2026-07-29\n", encoding="utf-8"
+    )
+    (tmp_path / "CITATION.cff").write_text(
+        "date-released: 2026-07-29\n", encoding="utf-8"
+    )
+    (tmp_path / "MODEL_CARD.md").write_text(
+        "- **Last updated:** 2026-07-28\n", encoding="utf-8"
+    )
+    with pytest.raises(AssertionError, match="predates the release"):
+        _assert_release_dates_match(repo=tmp_path)
 
 
 def test_release_date_guard_rejects_disagreement(tmp_path):
