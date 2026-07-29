@@ -259,6 +259,9 @@ class CheckpointStore:
         for record in records:
             self._verify_artifact(self.directory / record.block_file, record.block_sha256, record)
             self._verify_artifact(self.directory / record.state_file, record.state_sha256, record)
+            # A matching archive hash proves identity, not structure. Validate the
+            # committed keys and shapes before trusting the state that follows it.
+            self._read_block(record)
         self._records = records
         if not records:
             return 0, None

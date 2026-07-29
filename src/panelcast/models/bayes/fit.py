@@ -10,9 +10,11 @@ with GPU acceleration via JAX. Key features:
 
 import gc
 import hashlib
+import inspect
 import json
 import logging
 import pickle
+import platform
 import subprocess
 import sys
 import time
@@ -343,11 +345,49 @@ def _warm_start_fingerprint(warm_start: dict | None) -> str | None:
     return digest.hexdigest()[:16]
 
 
+def _source_fingerprint(model: Callable) -> str:
+    """Hash the model source and the local Bayesian implementation it calls."""
+    digest = hashlib.sha256()
+    target: object = model
+    source_file: str | None = None
+    for _ in range(8):
+        try:
+            source_file = inspect.getsourcefile(target)
+        except TypeError:
+            source_file = None
+        if source_file:
+            break
+        wrapped = getattr(target, "fn", None) or getattr(target, "__wrapped__", None)
+        if wrapped is None or wrapped is target:
+            break
+        target = wrapped
+    roots = [Path(source_file)] if source_file else []
+    roots.extend(sorted(Path(__file__).parent.glob("*.py")))
+    seen: set[Path] = set()
+    for path in roots:
+        try:
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            digest.update(str(resolved.name).encode())
+            digest.update(resolved.read_bytes())
+        except OSError:
+            continue
+    if not seen:
+        try:
+            digest.update(inspect.getsource(target).encode())
+        except (OSError, TypeError):
+            digest.update(repr(getattr(target, "__code__", target)).encode())
+    return digest.hexdigest()
+
+
 def _model_fingerprint(model: Callable, run_args: dict) -> dict:
-    """Name plus latent-site signature: two posteriors must not share a checkpoint."""
+    """Implementation plus latent signature: checkpoints never cross model code."""
     return {
         "module": getattr(model, "__module__", None),
         "qualname": getattr(model, "__qualname__", None),
+        "source_sha256": _source_fingerprint(model),
         "latents": [
             [name, list(shape)] for name, shape in _model_latent_signature(model, run_args)
         ],
@@ -377,6 +417,7 @@ def _checkpoint_identity(
     JSON-stable by construction — the cursor compares identities after a round
     trip, so nothing here may serialize to a different type than it holds.
     """
+    import jaxlib
     import numpyro
 
     digest = hashlib.sha256()
@@ -400,8 +441,15 @@ def _checkpoint_identity(
         "exclude_from_idata": sorted(exclude_from_idata or ()),
         "warm_start": _warm_start_fingerprint(warm_start),
         "numpyro_version": numpyro.__version__,
+        "numpy_version": np.__version__,
         "jax_version": jax.__version__,
+        "jaxlib_version": jaxlib.__version__,
         "jax_backend": jax.default_backend(),
+        "jax_devices": sorted(
+            f"{device.platform}:{getattr(device, 'device_kind', '')}" for device in jax.devices()
+        ),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
         "jax_x64": bool(getattr(jax.config, "jax_enable_x64", False)),
     }
 

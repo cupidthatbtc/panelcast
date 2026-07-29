@@ -296,7 +296,13 @@ class TestCheckpointIdentityFitArguments:
 
     def test_environment_axes_are_recorded(self):
         identity = self._identity()
+        assert identity["model"]["source_sha256"]
         assert identity["jax_backend"]
+        assert identity["jax_devices"]
         assert isinstance(identity["jax_x64"], bool)
         assert identity["numpyro_version"]
+        assert identity["numpy_version"]
         assert identity["jax_version"]
+        assert identity["jaxlib_version"]
+        assert identity["platform"]
+        assert identity["machine"]

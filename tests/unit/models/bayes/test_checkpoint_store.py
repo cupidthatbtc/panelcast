@@ -452,18 +452,14 @@ class TestLoadValidation:
 
     def test_site_shape_disagreeing_with_the_stored_array_refuses(self, tmp_path):
         self._completed(tmp_path)
-        # Consistent across blocks, so it survives resume and must be caught
-        # when the arrays themselves are read.
         self._rewrite_cursor(
             tmp_path,
             lambda c: [
                 b["sample_sites"].update(beta=[NUM_CHAINS, b["draws"], 4]) for b in c["blocks"]
             ],
         )
-        store = _store(tmp_path)
-        store.resume()
         with pytest.raises(CheckpointError, match="site 'beta' has shape"):
-            store.load_blocks()
+            _store(tmp_path).resume()
 
     def test_block_holding_unexpected_keys_refuses(self, tmp_path):
         self._completed(tmp_path)
@@ -482,10 +478,8 @@ class TestLoadValidation:
             tmp_path,
             lambda c: c["blocks"][0].update(block_sha256=ckpt._sha256_file(path)),
         )
-        store = _store(tmp_path)
-        store.resume()
         with pytest.raises(CheckpointError, match="holds keys"):
-            store.load_blocks()
+            _store(tmp_path).resume()
 
     def test_load_before_every_block_is_committed_refuses(self, tmp_path):
         store = _store(tmp_path)
