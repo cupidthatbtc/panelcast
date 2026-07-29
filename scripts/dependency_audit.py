@@ -198,6 +198,7 @@ class Report:
             self.minimums
             or self.ledger_errors
             or self.expired
+            or self.stale
             or self.new_pypi
             or (strict_conda and self.new_named)
         )

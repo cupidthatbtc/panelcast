@@ -114,9 +114,10 @@ date-released), and the `MODEL_CARD.md` header. The CHANGELOG entry stays
 manual, as does `requirements.lock` when `pixi.lock` changed;
 `tests/unit/test_release_metadata.py` fails the build if anything drifts.
 
-Pushing the tag starts the release run, which builds the environment and
-wheel-runtime SBOMs and attaches both to a draft GitHub Release. PyPI
-publication is blocked until those assets are read back and verified; only a
+Pushing the tag starts the release run, which re-runs OSV and pip-audit on the
+tagged lock and built wheel, then builds the environment and wheel-runtime SBOMs
+and attaches both to a draft GitHub Release. PyPI publication is blocked until
+those scans pass and the assets are read back and verified; only a
 successful PyPI publication lets the final job publish the GitHub Release. Do
 not race the workflow with `gh release create` or publish the draft manually.
 Amend the generated release notes afterward if the changelog needs more detail.

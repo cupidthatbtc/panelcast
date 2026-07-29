@@ -133,13 +133,14 @@ not interchangeable:
 Each document declares its scope in `metadata.properties` under
 `panelcast:scope`, and `scripts/security_gate.py` refuses one that does not.
 
-The release workflow builds both from the tagged lock and the smoke-tested
-wheel, attaches them to a draft GitHub Release for the tag, and then downloads
-them back and compares them byte for byte before PyPI publication is allowed to
-start. The GitHub Release remains a draft through that publication and is made
-public only after PyPI succeeds. If any earlier step fails, the permanent assets
-remain on the draft and no public release is announced. The run artifact is a
-90-day convenience copy, not the record.
+The release workflow re-runs OSV and pip-audit against the tagged lock and the
+built wheel closure rather than relying on the most recent branch or scheduled
+scan. It builds both SBOMs from that same tag, attaches them to a draft GitHub
+Release, and downloads them back for byte comparison before PyPI publication is
+allowed to start. The GitHub Release remains a draft through that publication
+and is made public only after PyPI succeeds. If any earlier step fails, the
+permanent assets remain on the draft and no public release is announced. The run
+artifact is a 90-day convenience copy, not the record.
 
 ## When a scanner fails
 

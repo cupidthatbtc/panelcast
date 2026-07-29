@@ -15,6 +15,7 @@ across every entry sharing a conda name.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 
@@ -85,7 +86,7 @@ def _conda_fields(url: str) -> tuple[str, str, str, str | None, str | None]:
 
 
 def _normalise(name: str) -> str:
-    return name.lower().replace("_", "-")
+    return re.sub(r"[-_.]+", "-", name).lower()
 
 
 def _mapped_pypi_name(entry: dict) -> str | None:

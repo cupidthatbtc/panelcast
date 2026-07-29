@@ -67,7 +67,13 @@ def check_audit(path: Path, problems: list[str]) -> None:
         return
     if not document.get("osv_queried"):
         problems.append(f"{path}: the audit did not query OSV, so it is not a vulnerability scan")
-    for key in ("minimum_violations", "ledger_errors", "expired_acceptances", "unaccepted_gated"):
+    for key in (
+        "minimum_violations",
+        "ledger_errors",
+        "expired_acceptances",
+        "stale_acceptances",
+        "unaccepted_gated",
+    ):
         entries = document.get(key) or []
         if entries:
             problems.append(f"{path}: {len(entries)} {key.replace('_', ' ')}")
@@ -77,8 +83,9 @@ def check_audit(path: Path, problems: list[str]) -> None:
 
 def _scoped_path(spec: str, problems: list[str]) -> tuple[Path, str] | None:
     raw_path, separator, scope = spec.rpartition(":")
-    if not separator or not raw_path or not scope:
-        problems.append(f"{spec}: expected PATH:SCOPE")
+    valid_scopes = {*dependency_audit.ACCEPTANCE_SCOPES, "pixi-environment"}
+    if not separator or not raw_path or scope not in valid_scopes:
+        problems.append(f"{spec}: expected PATH:SCOPE with scope in {sorted(valid_scopes)}")
         return None
     return Path(raw_path), scope
 

@@ -140,6 +140,11 @@ def _ledger(tmp_path: Path, *entries: dict[str, Any]) -> Path:
 # --- version floors ---------------------------------------------------------
 
 
+def test_package_names_use_pep_503_normalization() -> None:
+    assert pixi_lock._normalise("Zope.Interface") == "zope-interface"
+    assert pixi_lock._normalise("a__b..c--d") == "a-b-c-d"
+
+
 def test_every_floor_names_the_advisories_and_the_path_that_reaches_it() -> None:
     for name, floor in dependency_audit.MINIMUM_VERSIONS.items():
         assert floor.advisories, f"{name} has no advisory behind its floor"
@@ -292,6 +297,10 @@ def test_wheel_acceptance_cannot_suppress_a_lock_finding(tmp_path: Path) -> None
     )
 
     assert report.new_pypi == [finding]
+
+
+def test_stale_acceptance_fails_the_gate() -> None:
+    assert dependency_audit.Report(stale=["pillow 12.3.0 GHSA-x"]).failed()
 
 
 def test_an_acceptance_does_not_carry_over_to_a_new_version(tmp_path: Path) -> None:
@@ -677,7 +686,13 @@ def test_gate_rejects_an_sbom_spec_without_a_scope_separator(tmp_path: Path) -> 
 
     security_gate.check_sbom(str(tmp_path / "sbom.json"), problems)
 
-    assert problems == [f"{tmp_path / 'sbom.json'}: expected PATH:SCOPE"]
+    assert len(problems) == 1
+    assert "expected PATH:SCOPE" in problems[0]
+
+    windows_problems: list[str] = []
+    security_gate.check_sbom(r"C:\evidence\sbom.json", windows_problems)
+    assert len(windows_problems) == 1
+    assert "expected PATH:SCOPE" in windows_problems[0]
 
 
 def test_gate_fails_when_an_sbom_is_the_wrong_scope_or_empty(tmp_path: Path) -> None:
@@ -791,7 +806,15 @@ def test_scanner_versions_are_pinned() -> None:
     assert re.fullmatch(r"v\d+\.\d+\.\d+", str(setup_pixi["with"]["pixi-version"]))
     # The release SBOM is evidence too, so its toolchain is pinned the same way.
     release_env = _workflow("release.yml")["env"]
-    for name in ("PYYAML_VERSION", "PACKAGING_VERSION"):
+    for name in (
+        "PYYAML_VERSION",
+        "PACKAGING_VERSION",
+        "PIP_VERSION",
+        "PIP_AUDIT_VERSION",
+        "BUILD_VERSION",
+        "TWINE_VERSION",
+        "PYTEST_VERSION",
+    ):
         assert re.fullmatch(r"\d+\.\d+(\.\d+)?", str(release_env[name])), name
 
 
@@ -846,6 +869,20 @@ def test_publication_waits_on_the_sboms_being_verifiably_attached() -> None:
     assert "gh release edit" in finalizer_run
     assert "--draft=false" in finalizer_run
     assert "--draft=false" not in text, "the release must stay draft until PyPI succeeds"
+
+
+def test_tag_publication_reruns_advisory_scans_and_metadata_guards() -> None:
+    build = _workflow("release.yml")["jobs"]["build"]
+    text = "\n".join(_run(step) for step in _steps(build))
+
+    assert "pytest tests/unit/test_release_metadata.py" in text
+    assert "dependency_audit.py" in text
+    assert "pip-audit-lock.json:lock" in text
+    assert "pip-audit-wheel.json:wheel-runtime" in text
+    assert "--audit security/osv-findings.json" in text
+    assert "steps.release_osv.outcome" in text
+    assert "steps.release_pip_lock.outcome" in text
+    assert "steps.release_pip_wheel.outcome" in text
 
 
 def test_every_standalone_security_gate_installs_its_imports_first() -> None:

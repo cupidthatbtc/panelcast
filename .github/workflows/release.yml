@@ -13,6 +13,11 @@ env:
   # toolchain that writes it does not drift between releases.
   PYYAML_VERSION: "6.0.3"
   PACKAGING_VERSION: "25.0"
+  PIP_VERSION: "26.1.2"
+  PIP_AUDIT_VERSION: "2.10.1"
+  BUILD_VERSION: "1.5.0"
+  TWINE_VERSION: "6.2.0"
+  PYTEST_VERSION: "9.1.1"
 
 jobs:
   build:
@@ -31,10 +36,22 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install the pinned release and scanner toolchain
+        run: |
+          python -m pip install \
+            "pip==${PIP_VERSION}" \
+            "build==${BUILD_VERSION}" \
+            "twine==${TWINE_VERSION}" \
+            "pip-audit==${PIP_AUDIT_VERSION}" \
+            "pytest==${PYTEST_VERSION}" \
+            "pyyaml==${PYYAML_VERSION}" \
+            "packaging==${PACKAGING_VERSION}"
+
+      - name: Verify release metadata at the tagged commit
+        run: python -m pytest tests/unit/test_release_metadata.py -q
+
       - name: Build and validate distributions
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install build twine
           python -m build
           python -m twine check dist/*
 
@@ -53,6 +70,39 @@ jobs:
           JAX_PLATFORMS=cpu "$RUNNER_TEMP/wheel-env/bin/panelcast" demo \
             --num-chains 1 --num-samples 50 --num-warmup 50
 
+      - name: Export the tagged lock's PyPI pins
+        id: release_pins
+        continue-on-error: true
+        run: |
+          mkdir -p security
+          python scripts/dependency_audit.py --offline \
+            --requirements security/pypi-pins.txt
+
+      - name: Audit the tagged lock against OSV
+        id: release_osv
+        continue-on-error: true
+        run: >-
+          python scripts/dependency_audit.py
+          --json security/osv-findings.json
+
+      - name: Cross-check the tagged lock with pip-audit
+        id: release_pip_lock
+        continue-on-error: true
+        run: >-
+          python -m pip_audit -r security/pypi-pins.txt
+          --no-deps --strict --progress-spinner off
+          --format json --output security/pip-audit-lock.json
+
+      - name: Audit the built wheel runtime closure
+        id: release_pip_wheel
+        continue-on-error: true
+        run: |
+          "$RUNNER_TEMP/wheel-env/bin/python" -m pip list --format=freeze \
+            | { grep -viE '^panelcast==' || true; } > security/wheel-pins.txt
+          python -m pip_audit -r security/wheel-pins.txt \
+            --no-deps --strict --progress-spinner off \
+            --format json --output security/pip-audit-wheel.json
+
       - name: Upload distributions
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
@@ -66,10 +116,11 @@ jobs:
       # `pip install panelcast` actually gets. Kept out of dist/, since
       # everything there goes to PyPI, which rejects non-distributions.
       - name: Build the environment and wheel-runtime SBOMs
+        id: release_sbom
+        continue-on-error: true
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          python -m pip install "pyyaml==${PYYAML_VERSION}" "packaging==${PACKAGING_VERSION}"
           mkdir -p sbom
           python scripts/generate_sbom.py --scope environment \
             --expect-version "$version" \
@@ -78,9 +129,24 @@ jobs:
             --expect-version "$version" \
             --python "$RUNNER_TEMP/wheel-env/bin/python" \
             --output "sbom/panelcast-$version-wheel-runtime.cdx.json"
+
+      - name: Fail closed on release-time advisories and evidence
+        if: always()
+        run: |
+          version="${GITHUB_REF_NAME#v}"
           python scripts/security_gate.py \
+            --step "lock pins=${{ steps.release_pins.outcome }}" \
+            --step "OSV audit=${{ steps.release_osv.outcome }}" \
+            --step "pip-audit (lock)=${{ steps.release_pip_lock.outcome }}" \
+            --step "pip-audit (wheel)=${{ steps.release_pip_wheel.outcome }}" \
+            --step "SBOM generation=${{ steps.release_sbom.outcome }}" \
+            --audit security/osv-findings.json \
+            --pip-audit security/pip-audit-lock.json:lock \
+            --pip-audit security/pip-audit-wheel.json:wheel-runtime \
             --sbom "sbom/panelcast-$version-environment.cdx.json:pixi-environment" \
-            --sbom "sbom/panelcast-$version-wheel-runtime.cdx.json:wheel-runtime"
+            --sbom "sbom/panelcast-$version-wheel-runtime.cdx.json:wheel-runtime" \
+            --present security/pypi-pins.txt \
+            --present security/wheel-pins.txt
 
       - name: Upload the SBOMs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
