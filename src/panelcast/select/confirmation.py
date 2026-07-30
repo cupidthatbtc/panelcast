@@ -274,19 +274,25 @@ def run_confirmation(
     prior = _reusable_prior_seeds(out_path, identity)
     timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
+    def _resolve(run_id: str, seed: int, label: str) -> Path:
+        """This fit's run dir, contained — raised in ``_one_fit``'s failure shape.
+
+        Re-raising as ``RuntimeError`` keeps the fail-closed path from depending
+        on how wide the seed loop's handler happens to be.
+        """
+        try:
+            return sweep_run_dir(cfg.pipeline_output_base, run_id, field="confirmation run_id")
+        except RunPathError as exc:
+            raise RuntimeError(f"{label} fit refused on seed {seed}: {exc}") from exc
+
     def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:
         config_path = cfg.sweep_dir / f"confirm_{label}_seed{seed}.yaml"
         # Named up front (#167 handshake) — no dependence on the mutable
         # `latest` pointer; unique per attempt so retries never collide.
         run_id = f"sel_{cfg.sweep_id}_confirm_{label}_seed{seed}_{datetime.now():%Y%m%dT%H%M%S%f}"
-        # Resolve before launching: the id is decidable up front, so an id the
-        # containment gate refuses costs nothing instead of a whole fit. The
-        # RunPathError is re-raised in this function's own failure shape so the
-        # fail-closed path does not depend on how wide the seed loop's handler is.
-        try:
-            run_dir = sweep_run_dir(cfg.pipeline_output_base, run_id, field="confirmation run_id")
-        except RunPathError as exc:
-            raise RuntimeError(f"{label} fit refused on seed {seed}: {exc}") from exc
+        # The id's shape is decidable before the fit, so refuse a bad one for
+        # free rather than after a publication-scale run.
+        _resolve(run_id, seed, label)
         _write_config(cfg, merged, seed, config_path, sampler_overrides, run_id=run_id)
         log.info("confirmation_fit_start", label=label, seed=seed, timeout=timeout)
         started = time.monotonic()
@@ -300,6 +306,10 @@ def run_confirmation(
         )
         if code != 0:
             raise RuntimeError(f"{label} fit failed on seed {seed}: {tail[-500:]}")
+        # Again now that the directory exists: the symlink half of containment
+        # has nothing to resolve through until then, and this is the path whose
+        # contents get read and recorded.
+        run_dir = _resolve(run_id, seed, label)
         return run_dir if run_dir.exists() else None
 
     for seed in seeds:

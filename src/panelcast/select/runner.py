@@ -664,7 +664,10 @@ def sweep_run_dir(output_base: Path, run_id: str, *, field: str = "run_id") -> P
     routing every lookup through ``safe_run_dir`` means a separator-bearing id
     or a run name symlinked out of ``output_base`` fails closed here rather
     than relying on some earlier caller having validated first. Callers resolve
-    once per fit, never inside a per-arm loop.
+    once per decision about a run dir — never inside a polling or scoring loop.
+    The symlink half of the check only bites once the directory exists, so a
+    caller that resolves an id before its run is created resolves again before
+    reading it.
 
     ``safe_run_dir`` returns the caller's spelling of the join by contract, so
     the absolute form is taken here: select records run directories in its

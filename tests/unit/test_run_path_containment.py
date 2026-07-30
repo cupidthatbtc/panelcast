@@ -585,6 +585,12 @@ class TestSelectRunLookupContainment:
         resolved = sweep_run_dir(base, "sel_s1_abc123@r1_20260709T120000123456")
         assert resolved.is_absolute()
         assert resolved == (tmp_path / "outputs" / "sel_s1_abc123@r1_20260709T120000123456")
+        # The documented headline property: the run dir need not exist, and
+        # neither need the output base a confirmation-only entry point names.
+        assert sweep_run_dir(base, "sel_s1_never_created_20260709T120000123456").is_absolute()
+        assert sweep_run_dir(Path("fresh") / "outputs", "sel_s1_x_20260709T120000123456") == (
+            tmp_path / "fresh" / "outputs" / "sel_s1_x_20260709T120000123456"
+        )
 
     def test_claim_named_run_accepts_a_minted_id(self, tmp_path):
         from panelcast.select.runner import _claim_named_run
@@ -603,9 +609,10 @@ class TestSelectRunLookupContainment:
 
     @pytest.mark.parametrize("run_id", ESCAPING_IDS + MALFORMED_IDS + RESERVED_IDS)
     def test_claim_named_run_refuses_bad_ids(self, tmp_path, run_id):
-        # Both plausible targets are fully valid, claimable runs, so nothing
-        # but the id gate stands between the lookup and attributing one of
-        # them to this arm.
+        # Where an id names a target at all — `outside` for the escapes,
+        # `latest` for the reserved names — that target is a fully valid,
+        # claimable run, so nothing but the id gate stands between the lookup
+        # and attributing it to this arm.
         from panelcast.select.runner import _claim_named_run
 
         base = tmp_path / "outputs"
@@ -686,3 +693,65 @@ class TestSelectRunLookupContainment:
         assert result.seeds[0].reference_run is None
         # The id is decidable up front, so no fit is paid for before refusing.
         assert launches == []
+
+    def _confirmation_cfg(self, tmp_path, base):
+        from panelcast.select.runner import SweepConfig
+
+        return SweepConfig(
+            sweep_id="s1",
+            output_root=tmp_path / "select",
+            panelcast_bin="pc",
+            pipeline_output_base=base,
+        )
+
+    def test_confirmation_lookup_refuses_a_symlinked_escape(self, tmp_path):
+        # The up-front resolve is lexical (nothing exists yet), so the symlink
+        # half of containment has to bite on the post-fit lookup instead.
+        import yaml
+
+        from panelcast.select.confirmation import run_confirmation
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("keep", encoding="utf-8")
+
+        def launch(config_path, panelcast_bin, timeout_seconds=None):
+            payload = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+            _symlink_dir(base / payload["run_id"], outside)
+            return 0, "ok"
+
+        result = run_confirmation(
+            {"latent_process": "ar1"}, self._confirmation_cfg(tmp_path, base), seeds=(42,),
+            launch=launch,
+        )
+
+        assert not result.confirmed
+        assert result.seeds[0].error is not None
+        assert "confirmation run_id" in result.seeds[0].error
+        assert result.seeds[0].reference_run is None
+        assert (outside / "keep.txt").exists()
+
+    def test_confirmation_lookup_tolerates_an_unwritten_output_base(self, tmp_path):
+        # A confirmation-only entry point can be the first thing to touch its
+        # output base, so resolving before the first fit must not require it.
+        import yaml
+
+        from panelcast.select.confirmation import run_confirmation
+
+        base = tmp_path / "fresh_outputs"
+
+        def launch(config_path, panelcast_bin, timeout_seconds=None):
+            payload = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+            (base / payload["run_id"]).mkdir(parents=True)
+            return 0, "ok"
+
+        result = run_confirmation(
+            {"latent_process": "ar1"}, self._confirmation_cfg(tmp_path, base), seeds=(42,),
+            launch=launch,
+        )
+
+        assert result.seeds[0].reference_run is not None
+        assert result.seeds[0].winner_run is not None
+        assert "confirmation run_id" not in (result.seeds[0].error or "")

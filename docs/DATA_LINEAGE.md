@@ -1471,7 +1471,7 @@ fully reads each candidate artifact (including directory trees), so
 - Deterministic hashing of pandas DataFrame contents
 - Used for training data hash in model manifest
 
-## 9.3 Resume Logic
+## 9.3 Run Identifier Containment
 
 Every run identifier resolves through `paths.py:safe_run_dir`, the single
 containment gate every run lookup, move, and delete goes through: `--resume`,
@@ -1479,10 +1479,17 @@ the `runs` CLI, sweep and backtest ids, and the ids `panelcast select` mints
 for its own arm and confirmation fits (the #167 handshake, via
 `select/runner.py:sweep_run_dir`). The id must be a bare directory name — no
 separators, traversal, absolute or drive-relative paths, reserved names — and
-the resolved candidate must still sit beneath the output base, so a symlinked
-run name pointing elsewhere is refused before anything is read or moved.
-Containment therefore holds on each lookup itself rather than on the caller
-having been validated first.
+the resolved candidate must still sit beneath the output base, so a run name
+symlinked elsewhere is refused rather than followed. Containment therefore
+holds on each lookup itself rather than on the caller having been validated
+first.
+
+The symlink half of that check only has something to resolve through once the
+directory exists, so a lookup that runs before its run dir is created (select
+resolves a confirmation fit's id up front, to refuse a bad id without paying
+for the fit) resolves again after the fit, before reading anything.
+
+## 9.4 Resume Logic
 
 The `--resume {run_id}` flag allows resuming a failed run:
 
@@ -1503,7 +1510,7 @@ The `--resume {run_id}` flag allows resuming a failed run:
 7. Skip already-completed stages (from `manifest.stages_completed`)
 8. Continue from first incomplete stage
 
-## 9.4 Environment Verification
+## 9.5 Environment Verification
 
 Before running, the orchestrator verifies the environment:
 
@@ -1514,7 +1521,7 @@ Before running, the orchestrator verifies the environment:
 
 This ensures the exact package versions can be reproduced via `pixi install`.
 
-## 9.5 Random Seed Management
+## 9.6 Random Seed Management
 
 `utils/random.py:set_seeds(seed)` sets random seeds for:
 - Python's `random` module
@@ -1532,7 +1539,7 @@ CLI --seed 42
       → MCMCConfig.seed (for MCMC sampling)
 ```
 
-## 9.6 Split Manifests
+## 9.7 Split Manifests
 
 Each split strategy saves its own manifest (`data/manifests.py:SplitManifest`):
 
