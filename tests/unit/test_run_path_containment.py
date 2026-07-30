@@ -639,17 +639,44 @@ class TestSelectRunLookupContainment:
             assert validate_run_id(run_id) == run_id
             assert sweep_run_dir(base, run_id).name == run_id
 
-    def test_the_confirmation_mint_can_overshoot_a_legal_sweep_id(self):
-        # `SweepConfig` bounds `sweep_id` at 255 bytes, but the confirmation
-        # mint wraps ~50 more around it, so a legal sweep_id can produce an
-        # illegal run_id — the boundary #435 is about. Kept to strings: a
-        # 250-character directory component under tmp_path would exceed
-        # Windows' MAX_PATH before it proved anything about ids.
-        sweep_id = "s" * 250
-        assert validate_run_id(sweep_id) == sweep_id
-        minted = f"sel_{sweep_id}_confirm_reference_seed42_20260730T120000123456"
-        with pytest.raises(RunPathError, match="255"):
-            validate_run_id(minted)
+    def test_the_confirmation_mint_can_overshoot_a_legal_sweep_id(self, tmp_path):
+        # `SweepConfig` accepts a `sweep_id` up to the run-id limit, but the
+        # confirmation mint wraps ~50 more around it, so a legal sweep_id can
+        # produce an illegal run_id — the boundary #435 is about. The wrapper
+        # is measured from a real mint rather than re-templated, and the long
+        # id never becomes a directory component: a 250-character one under
+        # tmp_path would blow Windows' MAX_PATH before proving anything.
+        from panelcast.select.confirmation import run_confirmation
+        from panelcast.select.runner import _claim_named_run
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        minted: list[str] = []
+
+        def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
+            minted.append(_minted_run_id(config_path))
+            (base / minted[-1]).mkdir(parents=True)
+            return 0, "ok"
+
+        run_confirmation(
+            {"latent_process": "ar1"}, _confirmation_cfg(tmp_path, base), seeds=(42,),
+            launch=launch,
+        )
+        head, sep, tail = minted[0].partition("_s1_")
+        assert sep, minted[0]
+
+        long_id = "s" * 250
+        assert _confirmation_cfg(tmp_path, base, sweep_id=long_id).sweep_id == long_id
+        assert validate_run_id(long_id) == long_id
+        with pytest.raises(RunPathError):
+            validate_run_id(f"{head}_{long_id}_{tail}")
+
+        # And an arm that somehow reached the handshake with such an id is
+        # refused without being told to go looking for artifacts.
+        _, problem = _claim_named_run(
+            f"{head}_{long_id}_{tail}", base, {}, datetime.now(), set()
+        )
+        assert problem is not None and "never wrote under that name" in problem
 
     def test_undecidable_containment_is_not_reported_as_an_escape(self, tmp_path, monkeypatch):
         # `path_is_within` fails closed on OSError, so an output base that

@@ -679,20 +679,8 @@ def sweep_run_dir(output_base: Path, run_id: str, *, field: str = "run_id") -> P
     return safe_run_dir(output_base, run_id, field=field).resolve()
 
 
-def _refused_run_name(output_base: Path, run_id: str) -> str | None:
+def _refused_run_name(output_base: Path, run_id: str) -> str:
     """Where a refused run name sits and — one hop on — what it points at.
-
-    None when *this run* cannot have written under that name. Only a
-    well-formed id refused for containment can have: a shape rejection
-    (separator, traversal, absolute or drive-relative path, reserved layout
-    name) is refused by the orchestrator the same way before it creates any
-    directory, so pointing an operator at the lexical join would send them
-    somewhere arbitrary — ``outputs/../outside``, or with an absolute id the
-    base drops out of the join entirely. Note that the shape half is decided
-    by re-running ``validate_run_id``, which is exact only while that stays
-    the whole of ``safe_run_dir``'s shape check: a shape rule added to
-    ``safe_run_dir`` alone would pass here and be described as a place
-    artifacts may be.
 
     Absolute, because the default output base is relative and a breadcrumb is
     only useful if it can be followed from anywhere; the target is joined to
@@ -702,10 +690,6 @@ def _refused_run_name(output_base: Path, run_id: str) -> str | None:
     symlink), and nothing here follows or touches the target. A failure
     degrades to naming the name alone rather than replacing the refusal.
     """
-    try:
-        validate_run_id(run_id)
-    except RunPathError:
-        return None
     joined = output_base / run_id
     refused = joined
     try:
@@ -725,9 +709,12 @@ def _containment_undecided(output_base: Path) -> bool:
     """Whether the refusal means "could not tell" rather than "escaped".
 
     ``path_is_within`` fails closed on ``OSError``, so a base that cannot be
-    resolved at all — a removed cwd under the relative default, a mount that
-    went away — produces the same ``RunPathError`` as a genuine escape. The two
-    deserve opposite advice: nothing left the output root in the second case.
+    resolved produces the same ``RunPathError`` as a genuine escape, and the
+    two deserve opposite advice: nothing left the output root in the second
+    case. Exactly one state reaches here — a *relative* ``output_base`` whose
+    cwd has been removed. Non-strict ``resolve()`` swallows per-component
+    ``lstat`` failures and returns the lexical path, so its only raise is the
+    ``getcwd()`` inside ``abspath``, which an absolute base skips entirely.
     """
     try:
         Path(output_base).resolve()
@@ -739,16 +726,23 @@ def _containment_undecided(output_base: Path) -> bool:
 def refusal_detail(output_base: Path, run_id: str) -> str:
     """The parenthetical both post-fit containment refusals carry.
 
-    The shape branch is reachable only from the arm handshake: confirmation
-    screens the id before launching, so by its post-fit call the id is
-    well-formed by construction. It also asserts something about a different
-    process — that the orchestrator refuses the same shapes before creating a
-    run dir — which holds because ``orchestrator._validate_run_id`` runs the
-    same ``paths.validate_run_id``. If those two ever diverge, this branch
-    claims nothing was written when something may have been.
+    Three outcomes, decided cheapest-first. A *shape* rejection means this run
+    never wrote under that name, so no path is named: the orchestrator refuses
+    the same shapes before creating a run dir, which holds because
+    ``orchestrator._validate_run_id`` runs the same ``paths.validate_run_id``
+    — if those two ever diverge, this branch claims nothing was written when
+    something may have been. The shape half is likewise decided by re-running
+    ``validate_run_id``, exact only while that stays the whole of
+    ``safe_run_dir``'s shape check. This branch is reachable only from the arm
+    handshake; confirmation screens the id before launching.
+
+    An *undecidable* base comes next, before anything is named, because the
+    state it detects is the one in which a name cannot be made absolute either.
+    Only a well-formed id against a resolvable base gets a breadcrumb.
     """
-    where = _refused_run_name(output_base, run_id)
-    if where is None:
+    try:
+        validate_run_id(run_id)
+    except RunPathError:
         return (
             "this run never wrote under that name — the id's shape is refused "
             "before any run dir is created"
@@ -756,8 +750,9 @@ def refusal_detail(output_base: Path, run_id: str) -> str:
     if _containment_undecided(output_base):
         return (
             "containment could not be decided — the output base did not resolve, "
-            f"so nothing is known to have left it; {where} is untouched"
+            "so nothing is known to have left it, and the refused name cannot be located"
         )
+    where = _refused_run_name(output_base, run_id)
     return (
         f"artifacts may exist outside the output base; anything at {where} "
         "is left in place, unread"
