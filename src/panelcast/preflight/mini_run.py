@@ -59,21 +59,25 @@ __all__ = ["run_and_measure", "rw_collection_excludes"]
 logger = logging.getLogger(__name__)
 
 
-def rw_collection_excludes(prefix: str, max_seq: int) -> tuple[str, ...]:
+def rw_collection_excludes(
+    prefix: str, max_seq: int, *, innovation_type: str | None = None
+) -> tuple[str, ...]:
     """Random-walk sites the mini-run model actually samples, hence excludable.
 
     Callers must build ``exclude_collection`` from this rather than assuming
     ``{prefix}_rw_raw`` exists: NumPyro's ``~z.<site>`` pops the site with no
     default, so naming a site the model never sampled is a KeyError. Single-
-    event panels skip the walk entirely (#400), and the mini-run always builds
-    its priors from the defaults, so the skew innovation's ``rw_raw_abs`` is
-    never present here even when the production fit has it.
+    event panels skip the walk entirely (#400).
+
+    ``innovation_type`` defaults to the prior default, which is what the model
+    falls back to when no ``PriorConfig`` reaches it — the skew innovation's
+    ``rw_raw_abs`` exists only under an explicitly skew configuration.
     """
     from panelcast.models.bayes.priors import get_default_priors, rw_latent_sites
 
-    return rw_latent_sites(
-        prefix, get_default_priors().rw_innovation_type, max_seq=max_seq
-    ).present()
+    if innovation_type is None:
+        innovation_type = get_default_priors().rw_innovation_type
+    return rw_latent_sites(prefix, innovation_type, max_seq=max_seq).present()
 
 
 def run_and_measure(
@@ -125,7 +129,7 @@ def run_and_measure(
 
     from panelcast.gpu_memory.measure import get_jax_memory_stats
     from panelcast.models.bayes.model import make_score_model
-    from panelcast.models.bayes.priors import priors_for_transform
+    from panelcast.models.bayes.priors import get_default_priors, priors_for_transform
     from panelcast.models.bayes.transforms import get_transform
 
     # Load model args from JSON
@@ -208,16 +212,26 @@ def run_and_measure(
     # Callers size their exclusion against the production model, so reconcile it
     # with the args actually loaded here: dropping the walk from a panel that
     # never samples one is what production does too, whereas naming the absent
-    # site would be the #410 KeyError.
-    sampled_rw = rw_collection_excludes(prefix, int(model_args["max_seq"]))
-    absent_rw = tuple(
-        site
-        for site in exclude_collection
-        if site.startswith(f"{prefix}_rw_raw") and site not in sampled_rw
-    )
-    if absent_rw:
-        logger.info(f"Dropping collection exclusions this model never samples: {absent_rw}")
-        exclude_collection = tuple(s for s in exclude_collection if s not in absent_rw)
+    # site would be the #410 KeyError. Both sets come from the site helper —
+    # pattern-matching the names would let a future walk latent slip through —
+    # and the skew innovation yields the maximal candidate set.
+    if exclude_collection:
+        effective_priors = model_args.get("priors") or get_default_priors()
+        run_max_seq = int(model_args["max_seq"])
+        sampled_rw = rw_collection_excludes(
+            prefix, run_max_seq, innovation_type=effective_priors.rw_innovation_type
+        )
+        candidate_rw = set(rw_collection_excludes(prefix, 2, innovation_type="skew_normal"))
+        absent_rw = tuple(
+            site for site in exclude_collection if site in candidate_rw and site not in sampled_rw
+        )
+        if absent_rw:
+            logger.warning(
+                f"Dropping collection exclusions this model never samples at "
+                f"max_seq={run_max_seq}: {absent_rw}; the requested memory saving "
+                "does not apply here"
+            )
+            exclude_collection = tuple(s for s in exclude_collection if s not in absent_rw)
 
     # Create NUTS kernel for the requested score-model prefix ("user" default
     # is consistent with CLI default behavior, most common use case)

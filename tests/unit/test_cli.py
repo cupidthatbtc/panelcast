@@ -1247,7 +1247,10 @@ class TestPreflightFull:
         # note belongs only to runs that asked for the exclusion. Rich wraps to
         # the console width, so compare on collapsed whitespace.
         output = " ".join(strip_ansi(result.output).split())
-        assert ("nothing to exclude" in output) is (exclude_flag and expected == ())
+        expect_note = exclude_flag and expected == ()
+        assert ("nothing to exclude" in output) is expect_note
+        if expect_note:
+            assert f"max_seq={max_events}" in output
 
     def test_preflight_full_fail_aborts_without_force(self, monkeypatch, tmp_path):
         """--preflight-full fail aborts without --force-run."""
