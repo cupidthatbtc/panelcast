@@ -545,12 +545,12 @@ class TestWindowsPathShapes:
             safe_run_dir(tmp_path, bad)
 
 
-def _confirmation_cfg(tmp_path: Path, base: Path) -> Any:
+def _confirmation_cfg(tmp_path: Path, base: Path, sweep_id: str = "s1") -> Any:
     """A sweep whose confirmation fits write under ``base``."""
     from panelcast.select.runner import SweepConfig
 
     return SweepConfig(
-        sweep_id="s1",
+        sweep_id=sweep_id,
         output_root=tmp_path / "select",
         panelcast_bin="pc",
         pipeline_output_base=base,
@@ -620,16 +620,11 @@ class TestSelectRunLookupContainment:
         # gate accepts, so a refusal is never select refusing its own naming.
         # Read out of the config the production mint wrote, not re-templated.
         from panelcast.select.confirmation import run_confirmation
-        from panelcast.select.runner import SweepConfig, sweep_run_dir
+        from panelcast.select.runner import sweep_run_dir
 
         base = tmp_path / "outputs"
         base.mkdir()
-        cfg = SweepConfig(
-            sweep_id=sweep_id,
-            output_root=tmp_path / "select",
-            panelcast_bin="pc",
-            pipeline_output_base=base,
-        )
+        cfg = _confirmation_cfg(tmp_path, base, sweep_id=sweep_id)
         minted: list[str] = []
 
         def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
@@ -644,37 +639,40 @@ class TestSelectRunLookupContainment:
             assert validate_run_id(run_id) == run_id
             assert sweep_run_dir(base, run_id).name == run_id
 
-    def test_an_oversized_sweep_id_is_refused_before_the_fit(self, tmp_path):
+    def test_the_confirmation_mint_can_overshoot_a_legal_sweep_id(self):
         # `SweepConfig` bounds `sweep_id` at 255 bytes, but the confirmation
-        # mint wraps ~50 more around it, so a legal sweep_id can still produce
-        # an illegal run_id. The orchestrator would refuse that id too, so the
-        # fit was always doomed — the up-front resolve makes it free. Refusing
-        # early is not the same as not accepting such a sweep_id: bounding it
-        # at construction is #435.
-        from panelcast.select.confirmation import run_confirmation
-        from panelcast.select.runner import SweepConfig
+        # mint wraps ~50 more around it, so a legal sweep_id can produce an
+        # illegal run_id — the boundary #435 is about. Kept to strings: a
+        # 250-character directory component under tmp_path would exceed
+        # Windows' MAX_PATH before it proved anything about ids.
+        sweep_id = "s" * 250
+        assert validate_run_id(sweep_id) == sweep_id
+        minted = f"sel_{sweep_id}_confirm_reference_seed42_20260730T120000123456"
+        with pytest.raises(RunPathError, match="255"):
+            validate_run_id(minted)
+
+    def test_undecidable_containment_is_not_reported_as_an_escape(self, tmp_path, monkeypatch):
+        # `path_is_within` fails closed on OSError, so an output base that
+        # cannot be resolved at all raises the same RunPathError a genuine
+        # escape does. Nothing left the root, and the message must not say it
+        # did.
+        from panelcast.select.runner import _claim_named_run
 
         base = tmp_path / "outputs"
         base.mkdir()
-        sweep_id = "s" * 250
-        cfg = SweepConfig(
-            sweep_id=sweep_id,
-            output_root=tmp_path / "select",
-            panelcast_bin="pc",
-            pipeline_output_base=base,
+
+        def fail(_self):
+            raise OSError("cwd is gone")
+
+        monkeypatch.setattr(Path, "resolve", fail)
+        run_dir, problem = _claim_named_run(
+            "sel_s1_x_20260730T120000123456", base, {}, datetime.now(), set()
         )
-        assert validate_run_id(sweep_id) == sweep_id
-        launches: list[Path] = []
 
-        def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
-            launches.append(config_path)
-            return 0, "ok"
-
-        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
-
-        assert launches == []
-        assert result.seeds[0].error is not None
-        assert "before launching" in result.seeds[0].error
+        assert run_dir is None
+        assert problem is not None
+        assert "could not be decided" in problem
+        assert "artifacts may exist" not in problem
 
     def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
         # The arm mint has no cheap production seam (it happens inside

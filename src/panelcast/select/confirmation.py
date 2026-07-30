@@ -295,6 +295,11 @@ def run_confirmation(
                 detail = refusal_detail(cfg.pipeline_output_base, run_id)
                 phase = f"refused after its fit ({detail})"
             else:
+                # "nothing ran" is per-fit: the reference fit precedes the
+                # winner's, so a refusal that only trips on the longer of the
+                # two labels would still read as if nothing had run at all.
+                # Today the reference label is the longer one (#435), so the
+                # seed aborts before the winner is ever minted.
                 phase = "refused before launching (nothing ran)"
             raise RuntimeError(f"{label} fit on seed {seed} {phase}: {exc}") from exc
 

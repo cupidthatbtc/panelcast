@@ -706,16 +706,34 @@ def _refused_run_name(output_base: Path, run_id: str) -> str | None:
         validate_run_id(run_id)
     except RunPathError:
         return None
-    joined = Path(output_base) / run_id
+    joined = output_base / run_id
+    refused = joined
     try:
         # absolute() reads the cwd, so it belongs under the same guard as the
         # link calls: on a relative output base it fails if the cwd is gone.
+        # Assigned before the hop so a readlink failure keeps the absolute
+        # spelling it already earned.
         refused = joined.absolute()
         if refused.is_symlink():
             return f"{refused} -> {refused.parent / refused.readlink()}"
-        return str(refused)
     except OSError:
-        return str(joined)
+        pass
+    return str(refused)
+
+
+def _containment_undecided(output_base: Path) -> bool:
+    """Whether the refusal means "could not tell" rather than "escaped".
+
+    ``path_is_within`` fails closed on ``OSError``, so a base that cannot be
+    resolved at all — a removed cwd under the relative default, a mount that
+    went away — produces the same ``RunPathError`` as a genuine escape. The two
+    deserve opposite advice: nothing left the output root in the second case.
+    """
+    try:
+        Path(output_base).resolve()
+    except OSError:
+        return True
+    return False
 
 
 def refusal_detail(output_base: Path, run_id: str) -> str:
@@ -734,6 +752,11 @@ def refusal_detail(output_base: Path, run_id: str) -> str:
         return (
             "this run never wrote under that name — the id's shape is refused "
             "before any run dir is created"
+        )
+    if _containment_undecided(output_base):
+        return (
+            "containment could not be decided — the output base did not resolve, "
+            f"so nothing is known to have left it; {where} is untouched"
         )
     return (
         f"artifacts may exist outside the output base; anything at {where} "

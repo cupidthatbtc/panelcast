@@ -1498,9 +1498,13 @@ it, so a pre-planted symlink is written through — and select's gate refuses th
 read, and on the arm path the attribution, not the write. Every refusal says
 whether the fit had already run and leaves the refused name alone. What it
 says next depends on which half refused: a post-fit refusal of a *well-formed*
-id means artifacts may exist outside the output base, so the message names that
-path and — when it is a symlink — follows one hop, because the link is the only
-surviving record of where they went; a refusal of a *malformed* id means the
+id usually means artifacts may exist outside the output base, so the message
+names that path and — when it is a symlink — follows one hop, because the link
+is the only surviving record of where they went. (Usually, because containment
+fails closed: an output base that cannot be resolved at all is refused the same
+way, and there the message says containment could not be decided rather than
+sending anyone looking outside a root nothing left.) A refusal of a *malformed*
+id means the
 orchestrator refused the same shape before creating a run directory, so *this
 run* never wrote under that name and the refusal names no path. That is
 deliberately narrower than "nothing is there" — a reserved id like `latest`
