@@ -819,9 +819,14 @@ def refusal_detail(
             f"{field} {run_id!r} could not be decided"
         )
     if _resolves_to_the_root(output_base, run_id):
+        # Own tail again: `exc` says "resolves outside the output root", and
+        # this is the one refusal where the fit wrote *into* it.
         return (
             f"(the refused name resolves to the output root {output_base} itself, which is "
-            f"not a run directory, so nothing left it): {exc}"
+            "not a run directory: nothing left the root, but a fit writing through that "
+            "name scattered its run-scoped artifacts across the root, where the walkers "
+            f"that enumerate it will see them as siblings of real runs): containment for "
+            f"{field} {run_id!r} could not be satisfied"
         )
     where = _refused_run_name(output_base, run_id)
     if not after_fit:

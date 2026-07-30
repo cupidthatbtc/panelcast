@@ -834,6 +834,10 @@ class TestSelectRunLookupContainment:
         assert "resolves to the output root" in problem
         assert "artifacts may exist" not in problem
         assert " -> " not in problem
+        # Including the exception tail, whose fail-closed default says the id
+        # left the root — this is the one refusal where it wrote into it.
+        assert "resolves outside" not in problem
+        assert "scattered its run-scoped artifacts across the root" in problem
 
     def test_an_unresolvable_run_name_is_undecidable_too(self, tmp_path, monkeypatch):
         # `path_is_within` resolves both operands, so a run name that will not
