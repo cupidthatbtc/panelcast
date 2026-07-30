@@ -792,11 +792,9 @@ class TestSelectRunLookupContainment:
         assert str(base / "sel_s1_x_20260730T120000123456") in before
 
     def test_an_undecidable_refusal_builds_no_breadcrumb(self, tmp_path, monkeypatch):
-        # The ordering matters: `_unresolvable` is consulted before the
-        # breadcrumb is built, because the state it detects is the one in which
-        # a name cannot be made absolute. The path that failed is named; the
-        # run dir is not, since locating it is exactly what just became
-        # impossible.
+        # Pins the ordering `refusal_detail`'s docstring argues for: the
+        # unresolvable check runs before the breadcrumb is built. The path that
+        # failed is named; the run dir is not.
         from panelcast.select.runner import refusal_detail
 
         monkeypatch.chdir(tmp_path)

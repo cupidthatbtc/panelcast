@@ -1511,11 +1511,13 @@ the orchestrator refuses the same shape before creating an arm's — so the
 refusal names no path. That is deliberately narrower than "nothing is there":
 a reserved id like `latest` names a directory the layout itself maintains,
 which this run still never wrote. A *path that will not resolve* is refused
-identically, because containment fails closed. Either operand can be the one —
-the output root or the refused name — and either a removed working directory
-or a symlink loop can be why. The message says containment could not be
-decided, names the path that failed and reports the errno, rather than
-inferring a cause or sending anyone looking outside a root that nothing left.
+identically, because containment fails closed. A removed working directory
+takes out a relative output root first, so that is the path the message names;
+a symlink loop — on the Pythons that raise for one — takes out whichever path
+it sits on, and a message naming the run name means a loop there rather than a
+shell problem. Either way it says containment could not be decided, names the
+path that failed and reports the errno, rather than inferring a cause or
+sending anyone looking outside a root that nothing left.
 
 Containment is also a property of an id *lookup*, not of enumeration: `runs
 list`, the dashboard, and the orchestrator's newest-run scan walk the output

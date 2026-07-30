@@ -722,7 +722,8 @@ def _unresolvable(output_base: Path, run_id: str) -> tuple[Path, Exception] | No
     swallows per-component ``lstat`` failures, so its other raise is the
     ``getcwd()`` inside ``abspath``, which an absolute base skips), and — on
     the Pythons that convert ``ELOOP`` — a symlink loop anywhere along either
-    path, including at the run name itself.
+    path, including at the run name itself. ``refusal_detail`` explains what
+    the caller does with the answer and why it is consulted where it is.
     """
     for path in (output_base, output_base / run_id):
         try:
