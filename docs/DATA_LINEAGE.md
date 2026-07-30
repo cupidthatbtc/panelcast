@@ -1510,11 +1510,12 @@ under that name — select refuses it before launching a confirmation fit, and
 the orchestrator refuses the same shape before creating an arm's — so the
 refusal names no path. That is deliberately narrower than "nothing is there":
 a reserved id like `latest` names a directory the layout itself maintains,
-which this run still never wrote. An
-*unresolvable output root* is
-refused identically, because containment fails closed — there the message says
-containment could not be decided, rather than sending anyone looking outside a
-root that nothing left.
+which this run still never wrote. A *path that will not resolve* is refused
+identically, because containment fails closed — either the output root, when
+it is relative and the working directory is gone, or the refused name itself,
+when a symlink loop sits on it. There the message says containment could not
+be decided, and names whichever path failed, rather than sending anyone looking
+outside a root that nothing left.
 
 Containment is also a property of an id *lookup*, not of enumeration: `runs
 list`, the dashboard, and the orchestrator's newest-run scan walk the output

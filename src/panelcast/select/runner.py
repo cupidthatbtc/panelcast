@@ -754,8 +754,11 @@ def refusal_detail(
     ran. The shape half is likewise decided by re-running ``validate_run_id``,
     exact only while that stays the whole of ``safe_run_dir``'s shape check.
 
-    An *unresolvable* operand comes next, before anything is named, because the
-    state it detects is the one in which a name cannot be made absolute either.
+    An *unresolvable* operand comes next, before the breadcrumb is built. For
+    the cwd trigger that is because a name cannot be made absolute either; for
+    a loop at the run name it is because following the link is exactly what
+    just failed. Either way the breadcrumb would be misleading, so the branch
+    names what it can and stops.
     It owns its own tail, because ``exc`` here says "resolves outside the
     output root" — ``path_is_within``'s fail-closed default, and the very
     claim this branch exists to deny. Its trigger is process-wide and
@@ -779,16 +782,23 @@ def refusal_detail(
     undecided = _unresolvable(output_base, run_id)
     if undecided is not None:
         unresolved, why = undecided
-        cause = (
-            f"the output root {output_base} is relative and the working directory could "
-            "not be read"
-            if unresolved == output_base and not output_base.is_absolute()
-            else f"{unresolved} could not be resolved"
-        )
+        if unresolved != output_base:
+            # The refused name itself is what would not resolve, so it can be
+            # named — what it cannot do is be followed to whatever it points at.
+            cause = f"the refused name {unresolved} could not be resolved"
+            located = "it cannot be followed further"
+        else:
+            cause = (
+                f"the output root {output_base} is relative and the working directory "
+                "could not be read"
+                if not output_base.is_absolute()
+                else f"the output root {output_base} could not be resolved"
+            )
+            located = "the refused name cannot be located"
         return (
             f"(containment could not be decided — {cause}: {why}; nothing is known to have "
-            f"left the output root, and the refused name cannot be located): containment "
-            f"for {field} {run_id!r} could not be decided"
+            f"left the output root, and {located}): containment for {field} {run_id!r} "
+            "could not be decided"
         )
     where = _refused_run_name(output_base, run_id)
     if not after_fit:

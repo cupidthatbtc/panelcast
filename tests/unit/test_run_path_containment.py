@@ -845,6 +845,10 @@ class TestSelectRunLookupContainment:
         assert "artifacts may exist" not in detail
         assert " -> " not in detail
         assert "Symlink loop" in detail
+        # It is the name that failed, so name it — and say what is unknown is
+        # where it points, not where it is.
+        assert f"the refused name {base / run_id} could not be resolved" in detail
+        assert "cannot be located" not in detail
 
     def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
         # The arm mint has no cheap production seam (it happens inside
