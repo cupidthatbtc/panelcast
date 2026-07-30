@@ -705,7 +705,7 @@ def _refused_run_name(output_base: Path, run_id: str) -> str:
     return str(refused)
 
 
-def _containment_undecided(output_base: Path) -> OSError | None:
+def _containment_undecided(output_base: Path) -> OSError | RuntimeError | None:
     """The error that made containment undecidable, or None if it was decided.
 
     Returned rather than reduced to a bool so the refusal can name the errno:
@@ -728,7 +728,9 @@ def _containment_undecided(output_base: Path) -> OSError | None:
     """
     try:
         output_base.resolve()
-    except OSError as exc:
+    except (OSError, RuntimeError) as exc:
+        # Same pair as `path_is_within`: this probe re-derives the state that
+        # made it fail closed, so it has to fail on everything it does.
         return exc
     return None
 

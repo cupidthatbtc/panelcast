@@ -127,7 +127,9 @@ def path_is_within(candidate: Path, root: Path) -> bool:
     ``RuntimeError`` is caught alongside ``OSError`` because on Python 3.11 and
     3.12 non-strict ``resolve()`` converts ``ELOOP`` into one; a planted
     symlink loop must fail closed here rather than raise through every caller
-    that documents a refusal instead.
+    that documents a refusal instead. On 3.13+ that conversion is gone and a
+    loop resolves to itself, so it stays contained and is not refused — the
+    catch is about never raising, not about a uniform verdict on loops.
     """
     try:
         return Path(root).resolve() in Path(candidate).resolve().parents

@@ -224,6 +224,18 @@ class TestPathIsWithin:
         monkeypatch.setattr(Path, "resolve", fail)
         assert not path_is_within(tmp_path / "a", tmp_path)
 
+    def test_a_real_symlink_loop_never_raises(self, tmp_path):
+        # Version-dependent verdict, single invariant: 3.11/3.12 raise
+        # RuntimeError and refuse, 3.13+ resolve the loop to itself and contain
+        # it. Either way nothing escapes to the caller.
+        loop = tmp_path / "loop"
+        try:
+            loop.symlink_to(loop, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"directory symlinks unavailable: {exc}")
+
+        assert path_is_within(loop, tmp_path) in (True, False)
+
 
 class TestMaliciousLatestPointer:
     def _base(self, tmp_path):
@@ -899,8 +911,10 @@ class TestSelectRunLookupContainment:
         # There is no pre-launch arm resolve, so every containment refusal here
         # is the post-fit case, and the message has to say so — and follow the
         # link, since its target is where the arm's artifacts actually landed.
-        # (A link that loops instead of escaping fails closed the same way:
-        # `path_is_within` catches the RuntimeError older Pythons raise.)
+        # (A link that *loops* rather than escaping is a different case, and a
+        # version-dependent one: 3.11/3.12 raise RuntimeError, which
+        # `path_is_within` now catches and refuses, while 3.13+ resolve it to
+        # itself — still inside the root, so contained and not refused.)
         assert "after the arm ran" in problem
         assert "artifacts may exist outside the output base" in problem
         assert " -> " in problem
