@@ -1248,11 +1248,8 @@ class TestPreflightFull:
         # naming too few sites is the direction reconciliation cannot fix.
         # Resolved independently here, or a wrong-but-valid forwarded value
         # would just move both sides of the comparison together.
-        from panelcast.config.descriptor import load_descriptor
-
-        descriptor = load_descriptor(None)
-        assert captured["model_prefix"] == descriptor.model_prefix
-        assert captured["target_transform"] == (descriptor.target_transform or "offset_logit")
+        assert captured["model_prefix"] == "user"
+        assert captured["target_transform"] == "offset_logit"
         assert captured["entity_group_pooling"] is False
         # A flag that silently buys nothing is worse than a noisy one, but the
         # note belongs only to runs that asked for the exclusion. Rich wraps to

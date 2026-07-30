@@ -99,6 +99,11 @@ def test_every_named_random_walk_site_is_one_the_model_samples(innovation, max_s
     named = set(rw_latent_sites("user", innovation, max_seq=max_seq).present())
     assert named <= sampled
     assert bool(named) is (max_seq > 1)
+    if max_seq <= 1:
+        # Otherwise the subset above is vacuous here: the helper returning ()
+        # while the model does sample a walk latent means the exclusion
+        # silently stops saving memory.
+        assert not sampled & {"user_rw_raw", "user_rw_raw_abs"}
 
 
 def test_entity_skew_site_names_follow_the_resolved_prior_type():

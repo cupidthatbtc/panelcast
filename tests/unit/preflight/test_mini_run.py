@@ -1447,6 +1447,9 @@ class TestExcludeCollectionPrefixGuard:
         try:
             with pytest.raises(ValueError, match="do not match model prefix 'perf'"):
                 run_and_measure(temp_path, prefix="perf", exclude_collection=("user_rw_raw",))
+            # A prefix that already carries the separator names the same sites.
+            with pytest.raises(ValueError, match="do not match model prefix 'perf_'"):
+                run_and_measure(temp_path, prefix="perf_", exclude_collection=("user_rw_raw",))
         finally:
             temp_path.unlink()
 
@@ -1511,6 +1514,12 @@ class TestRwCollectionExcludes:
         # innovation would leave its own latents out of every exclusion.
         with pytest.raises(ValueError, match="Unknown rw_innovation_type"):
             rw_collection_excludes("user", 10, innovation_type="student_t")
+
+    @pytest.mark.parametrize("prefix", ["user", "user_"])
+    def test_prefix_conventions_agree_with_the_site_names(self, prefix):
+        # A descriptor prefix may already carry the separator; the guard that
+        # rejects foreign sites has to read names the same way they are built.
+        assert rw_collection_excludes(prefix, 4) == ("user_rw_raw",)
 
     def test_mini_run_priors_are_what_the_mini_run_builds(self):
         from panelcast.models.bayes.priors import get_default_priors

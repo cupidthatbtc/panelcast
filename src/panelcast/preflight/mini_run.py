@@ -235,7 +235,10 @@ def run_and_measure(
     # All model sites are "{prefix}_..."; an exclusion naming another prefix
     # would silently match nothing in NumPyro, so the calibration would
     # measure WITH the dominant collection term while production excludes it.
-    foreign_sites = [s for s in exclude_collection if not s.startswith(f"{prefix}_")]
+    # A descriptor prefix may already carry the separator, so normalize the
+    # same way the site names themselves are built.
+    site_prefix = prefix if prefix.endswith("_") else f"{prefix}_"
+    foreign_sites = [s for s in exclude_collection if not s.startswith(site_prefix)]
     if foreign_sites:
         raise ValueError(
             f"exclude_collection sites {foreign_sites} do not match model "
