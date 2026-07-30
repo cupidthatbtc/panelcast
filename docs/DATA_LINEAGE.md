@@ -1473,11 +1473,10 @@ fully reads each candidate artifact (including directory trees), so
 
 ## 9.3 Run Identifier Containment
 
-Every run identifier resolves through `paths.py:safe_run_dir`, the single
-containment gate every run lookup keyed by an identifier — and every move and
-delete keyed by one — goes through: `--resume`,
-the `runs` CLI, sweep and backtest ids, and the ids `panelcast select` mints
-for its own arm and confirmation fits (the #167 handshake, via
+Every run identifier resolves through `paths.py:safe_run_dir`. It is the single
+containment gate for every lookup, move, and delete keyed by an identifier:
+`--resume`, the `runs` CLI, sweep and backtest ids, and the ids `panelcast
+select` mints for its own arm and confirmation fits (the #167 handshake, via
 `select/runner.py:sweep_run_dir`). The id must be a bare directory name — no
 separators, traversal, absolute or drive-relative paths, reserved names — and
 the resolved candidate must still sit beneath the output base, so a run name
@@ -1495,24 +1494,24 @@ runs before anything happens, so a symlinked run name is never followed. On
 select's mint-then-fit paths the run directory is created by the subprocess
 select launched — the orchestrator validates the id's *shape* before creating
 it, so a pre-planted symlink is written through — and select's gate refuses the
-read, and on the arm path the attribution, not the write. Every refusal says
-whether the fit had already run and leaves the refused name alone. What it
-says next depends on which half refused: a post-fit refusal of a *well-formed*
-id usually means artifacts may exist outside the output base, so the message
-names that path and — when it is a symlink — follows one hop, because the link
-is the only surviving record of where they went. (Usually, because containment
-fails closed: an output base that cannot be resolved at all is refused the same
-way, and there the message says containment could not be decided rather than
-sending anyone looking outside a root nothing left.) A refusal of a *malformed*
-id means the
-orchestrator refused the same shape before creating a run directory, so *this
-run* never wrote under that name and the refusal names no path. That is
-deliberately narrower than "nothing is there" — a reserved id like `latest`
-names a directory the layout itself maintains, which this run still never
-wrote. (The confirmation
-path has no attribution step of its own: an id
-that resolves to another run's directory *inside* the output base is contained,
-and only the arm handshake re-checks the manifest behind it.)
+read, and on the arm path the attribution, not the write. The confirmation path
+has no attribution step of its own: an id that resolves to another run's
+directory *inside* the output base is contained, and only the arm handshake
+re-checks the manifest behind it.
+
+Every refusal says whether the fit had already run, and leaves the refused name
+alone. What it says next depends on why the id was refused, and there are three
+answers. A *well-formed* id refused for containment means artifacts may exist
+outside the output base, so the message names that path and — when it is a
+symlink — follows one hop, because the link is the only surviving record of
+where they went. A *malformed* id means the orchestrator refused the same shape
+before creating a run directory, so *this run* never wrote under that name and
+the refusal names no path; that is deliberately narrower than "nothing is
+there", since a reserved id like `latest` names a directory the layout itself
+maintains which this run still never wrote. An *unresolvable output base* is
+refused identically, because containment fails closed — there the message says
+containment could not be decided, rather than sending anyone looking outside a
+root that nothing left.
 
 Containment is also a property of an id *lookup*, not of enumeration: `runs
 list`, the dashboard, and the orchestrator's newest-run scan walk the output

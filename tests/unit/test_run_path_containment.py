@@ -608,7 +608,7 @@ class TestSelectRunLookupContainment:
         # whole of safe_run_dir's shape check. This pins the agreement over the
         # shapes we know about; a rule added to safe_run_dir alone introduces a
         # shape that is by definition not in these lists, which is why the
-        # coupling is also written down in `_refused_run_name`'s docstring.
+        # coupling is also written down in `refusal_detail`'s docstring.
         with pytest.raises(RunPathError):
             validate_run_id(run_id)
         with pytest.raises(RunPathError):
@@ -647,7 +647,7 @@ class TestSelectRunLookupContainment:
         # id never becomes a directory component: a 250-character one under
         # tmp_path would blow Windows' MAX_PATH before proving anything.
         from panelcast.select.confirmation import run_confirmation
-        from panelcast.select.runner import _claim_named_run
+        from panelcast.select.runner import _claim_named_run, record_key
 
         base = tmp_path / "outputs"
         base.mkdir()
@@ -662,6 +662,7 @@ class TestSelectRunLookupContainment:
             {"latent_process": "ar1"}, _confirmation_cfg(tmp_path, base), seeds=(42,),
             launch=launch,
         )
+        assert minted[0].startswith("sel_s1_confirm_reference_"), minted[0]
         head, sep, tail = minted[0].partition("_s1_")
         assert sep, minted[0]
 
@@ -671,11 +672,13 @@ class TestSelectRunLookupContainment:
         with pytest.raises(RunPathError):
             validate_run_id(f"{head}_{long_id}_{tail}")
 
-        # And an arm that somehow reached the handshake with such an id is
+        # The arm mint wraps less, but not enough less: the same sweep_id
+        # overshoots there too, and an arm reaching the handshake with it is
         # refused without being told to go looking for artifacts.
-        _, problem = _claim_named_run(
-            f"{head}_{long_id}_{tail}", base, {}, datetime.now(), set()
-        )
+        arm_id = f"sel_{long_id}_{record_key('abc123', 0)}_{minted[0].rsplit('_', 1)[1]}"
+        with pytest.raises(RunPathError):
+            validate_run_id(arm_id)
+        _, problem = _claim_named_run(arm_id, base, {}, datetime.now(), set())
         assert problem is not None and "never wrote under that name" in problem
 
     def test_undecidable_containment_is_not_reported_as_an_escape(self, tmp_path, monkeypatch):
@@ -699,7 +702,11 @@ class TestSelectRunLookupContainment:
         assert run_dir is None
         assert problem is not None
         assert "could not be decided" in problem
+        # Including the exception tail, which carries `path_is_within`'s
+        # fail-closed default wording — the claim this branch exists to deny.
+        assert "resolves outside" not in problem
         assert "artifacts may exist" not in problem
+        assert "arm run_id" in problem
 
     def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
         # The arm mint has no cheap production seam (it happens inside
@@ -797,6 +804,7 @@ class TestSelectRunLookupContainment:
         # is the post-fit case, and the message has to say so — and follow the
         # link, since its target is where the arm's artifacts actually landed.
         assert "after the arm ran" in problem
+        assert "artifacts may exist outside the output base" in problem
         assert " -> " in problem
         named = problem.split(" -> ", 1)[1].split(" is left in place")[0]
         assert Path(named).is_absolute()

@@ -717,14 +717,14 @@ def _containment_undecided(output_base: Path) -> bool:
     ``getcwd()`` inside ``abspath``, which an absolute base skips entirely.
     """
     try:
-        Path(output_base).resolve()
+        output_base.resolve()
     except OSError:
         return True
     return False
 
 
-def refusal_detail(output_base: Path, run_id: str) -> str:
-    """The parenthetical both post-fit containment refusals carry.
+def refusal_detail(output_base: Path, run_id: str, exc: RunPathError, *, field: str) -> str:
+    """The tail both post-fit containment refusals carry, parenthetical and all.
 
     Three outcomes, decided cheapest-first. A *shape* rejection means this run
     never wrote under that name, so no path is named: the orchestrator refuses
@@ -733,29 +733,37 @@ def refusal_detail(output_base: Path, run_id: str) -> str:
     — if those two ever diverge, this branch claims nothing was written when
     something may have been. The shape half is likewise decided by re-running
     ``validate_run_id``, exact only while that stays the whole of
-    ``safe_run_dir``'s shape check. This branch is reachable only from the arm
-    handshake; confirmation screens the id before launching.
+    ``safe_run_dir``'s shape check. Reachable only from the arm handshake;
+    confirmation screens the id before launching.
 
     An *undecidable* base comes next, before anything is named, because the
     state it detects is the one in which a name cannot be made absolute either.
+    It owns its own tail, because ``exc`` here says "resolves outside the
+    output root" — ``path_is_within``'s fail-closed default, and the very
+    claim this branch exists to deny. It has the mirror-image asymmetry: on
+    the confirmation path it can only fire if the cwd disappears *between* the
+    pre-launch and post-fit resolves, while on the arm path the first lookup
+    sees it.
+
     Only a well-formed id against a resolvable base gets a breadcrumb.
     """
     try:
         validate_run_id(run_id)
     except RunPathError:
         return (
-            "this run never wrote under that name — the id's shape is refused "
-            "before any run dir is created"
+            "(this run never wrote under that name — the id's shape is refused "
+            f"before any run dir is created): {exc}"
         )
     if _containment_undecided(output_base):
         return (
-            "containment could not be decided — the output base did not resolve, "
-            "so nothing is known to have left it, and the refused name cannot be located"
+            "(containment could not be decided — the output base did not resolve, so "
+            "nothing is known to have left it, and the refused name cannot be located): "
+            f"Invalid {field}: {run_id!r} could not be resolved against the output root"
         )
     where = _refused_run_name(output_base, run_id)
     return (
-        f"artifacts may exist outside the output base; anything at {where} "
-        "is left in place, unread"
+        f"(artifacts may exist outside the output base; anything at {where} "
+        f"is left in place, unread): {exc}"
     )
 
 
@@ -781,9 +789,8 @@ def _claim_named_run(
     try:
         run_dir = sweep_run_dir(output_base, run_id, field="arm run_id")
     except RunPathError as exc:
-        return None, (
-            f"handshake failed after the arm ran ({refusal_detail(output_base, run_id)}): {exc}"
-        )
+        detail = refusal_detail(output_base, run_id, exc, field="arm run_id")
+        return None, f"handshake failed after the arm ran {detail}"
     if not run_dir.exists():
         return None, f"handshake failed: expected run dir {run_dir} was never created"
     problem = _attribution_error(run_dir, merged, launched_at, claimed_runs)
