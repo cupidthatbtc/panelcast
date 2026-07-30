@@ -706,13 +706,16 @@ def _refused_run_name(output_base: Path, run_id: str) -> str | None:
         validate_run_id(run_id)
     except RunPathError:
         return None
-    refused = (Path(output_base) / run_id).absolute()
+    joined = Path(output_base) / run_id
     try:
+        # absolute() reads the cwd, so it belongs under the same guard as the
+        # link calls: on a relative output base it fails if the cwd is gone.
+        refused = joined.absolute()
         if refused.is_symlink():
             return f"{refused} -> {refused.parent / refused.readlink()}"
+        return str(refused)
     except OSError:
-        pass
-    return str(refused)
+        return str(joined)
 
 
 def refusal_detail(output_base: Path, run_id: str) -> str:

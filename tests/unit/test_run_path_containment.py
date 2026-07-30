@@ -644,6 +644,36 @@ class TestSelectRunLookupContainment:
             assert validate_run_id(run_id) == run_id
             assert sweep_run_dir(base, run_id).name == run_id
 
+    def test_an_oversized_sweep_id_is_refused_before_the_fit(self, tmp_path):
+        # `SweepConfig` bounds `sweep_id` at 255 bytes, but the confirmation
+        # mint wraps ~50 more around it, so a legal sweep_id can still produce
+        # an illegal run_id. The orchestrator would refuse that id too, so the
+        # fit was always doomed — the up-front resolve makes it free.
+        from panelcast.select.confirmation import run_confirmation
+        from panelcast.select.runner import SweepConfig
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        sweep_id = "s" * 250
+        cfg = SweepConfig(
+            sweep_id=sweep_id,
+            output_root=tmp_path / "select",
+            panelcast_bin="pc",
+            pipeline_output_base=base,
+        )
+        assert validate_run_id(sweep_id) == sweep_id
+        launches: list[Path] = []
+
+        def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
+            launches.append(config_path)
+            return 0, "ok"
+
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+
+        assert launches == []
+        assert result.seeds[0].error is not None
+        assert "before launching" in result.seeds[0].error
+
     def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
         # The arm mint has no cheap production seam (it happens inside
         # `run_sweep`), so this pins its shape with the real `record_key` —
@@ -867,6 +897,23 @@ class TestSelectRunLookupContainment:
         assert Path(pointer).is_absolute()
         assert Path(named).is_absolute()
         assert Path(named).resolve() == outside.resolve()
+
+    def test_a_lost_cwd_does_not_eat_the_refusal(self, tmp_path, monkeypatch):
+        # absolute() reads the cwd on a relative output base, so it is inside
+        # the same guard: losing it costs the absolute spelling, not the
+        # refusal.
+        def refuse_absolute(self: Path) -> Path:
+            raise OSError("cwd is gone")
+
+        monkeypatch.setattr(Path, "absolute", refuse_absolute)
+        result, links, _ = self._escaping_confirmation(tmp_path)
+
+        error = result.seeds[0].error
+        assert error is not None
+        assert "confirmation run_id" in error
+        assert "after its fit" in error
+        assert str(links[0]) in error
+        assert " -> " not in error
 
     def test_an_unreadable_link_does_not_eat_the_refusal(self, tmp_path, monkeypatch):
         # Formatting the breadcrumb must never replace the containment error.
