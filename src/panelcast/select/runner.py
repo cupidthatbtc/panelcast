@@ -733,6 +733,20 @@ def _unresolvable(output_base: Path, run_id: str) -> tuple[Path, Exception] | No
     return None
 
 
+def _resolves_to_the_root(output_base: Path, run_id: str) -> bool:
+    """Whether the refused name is the output root itself rather than an escape.
+
+    ``path_is_within`` demands a *strict* descendant, so a run name symlinked
+    at the root resolves equal to it and is refused — correctly, since it is
+    not a run directory, but nothing left the root and the escape wording would
+    say it had. Both operands resolved by the time this is asked.
+    """
+    try:
+        return (output_base / run_id).resolve() == output_base.resolve()
+    except (OSError, RuntimeError):  # unreachable: `_unresolvable` ran first
+        return False
+
+
 def refusal_detail(
     output_base: Path,
     run_id: str,
@@ -743,7 +757,13 @@ def refusal_detail(
 ) -> str:
     """The tail every select containment refusal carries, parenthetical and all.
 
-    Three outcomes, decided cheapest-first. A *shape* rejection means this run
+    Four outcomes. The order is not about cost: each check has to run before
+    the one after it can be trusted. The shape check gates everything, since an
+    unvalidated id must not be joined onto anything; the unresolvable check
+    gates the two below it, which both resolve; and the resolves-to-the-root
+    check gates the breadcrumb, which would otherwise call a non-escape one.
+
+    A *shape* rejection means this run
     never wrote under that name, so no path is named. Both paths reach it, for
     different reasons: confirmation screens the id before launching, so select
     itself refused and the orchestrator was never invoked, while the arm
@@ -797,6 +817,11 @@ def refusal_detail(
             f"(containment could not be decided — {unresolved} could not be resolved: "
             f"{why}; nothing is known to have left the output root): containment for "
             f"{field} {run_id!r} could not be decided"
+        )
+    if _resolves_to_the_root(output_base, run_id):
+        return (
+            f"(the refused name resolves to the output root {output_base} itself, which is "
+            f"not a run directory, so nothing left it): {exc}"
         )
     where = _refused_run_name(output_base, run_id)
     if not after_fit:

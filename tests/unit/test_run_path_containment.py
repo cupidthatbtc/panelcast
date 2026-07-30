@@ -817,6 +817,24 @@ class TestSelectRunLookupContainment:
         assert run_id not in detail.split("containment for arm run_id")[0]
         assert str(Path("outputs") / run_id) not in detail
 
+    def test_a_run_name_pointing_at_the_root_is_not_an_escape(self, tmp_path):
+        # `path_is_within` wants a strict descendant, so a name symlinked at
+        # the root is refused — correctly, it is not a run directory — but
+        # nothing left the root and the message must not say it did.
+        from panelcast.select.runner import _claim_named_run
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        run_id = "sel_s1_root_20260730T120000123456"
+        _symlink_dir(base / run_id, base)
+
+        _, problem = _claim_named_run(run_id, base, {}, datetime.now(), set())
+
+        assert problem is not None
+        assert "resolves to the output root" in problem
+        assert "artifacts may exist" not in problem
+        assert " -> " not in problem
+
     def test_an_unresolvable_run_name_is_undecidable_too(self, tmp_path, monkeypatch):
         # `path_is_within` resolves both operands, so a run name that will not
         # resolve — a symlink loop on the Pythons that raise for one — must not
