@@ -1249,10 +1249,11 @@ class TestSelectRunLookupContainment:
         assert "refused" not in (result.seeds[0].error or "")
 
     def test_a_refused_run_dir_is_never_deleted(self, tmp_path, monkeypatch):
-        # A run name can stop being contained without being a symlink itself
-        # (a containment change in a parent produces the same refusal), so
-        # drive the post-fit refusal directly: whatever is at that name — real
-        # directory or link — the read-only lookup leaves it alone.
+        # In production a bare name is refused only via a symlink at the final
+        # component — `path_is_within` resolves both operands, so a shared
+        # parent moves them together — but the read-only property is about the
+        # refusal, not its cause. Force one and assert that whatever is at that
+        # name, real directory included, the lookup leaves it alone.
         from panelcast.select import confirmation as confirmation_module
         from panelcast.select.confirmation import run_confirmation
 
