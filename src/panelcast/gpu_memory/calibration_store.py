@@ -246,7 +246,7 @@ def _is_finite(value: Any) -> TypeGuard[int | float]:
         return False
 
 
-def _snapshot_is_valid(snapshot: Any) -> bool:
+def _snapshot_is_valid(snapshot: Any) -> TypeGuard[dict[str, Any]]:
     if not isinstance(snapshot, dict):
         return False
     integer_fields = (
@@ -296,7 +296,9 @@ def _provenance_quarantine_reason(record: dict[str, Any], actual: float) -> str 
 
     before = provenance.get("before")
     after = provenance.get("after")
-    if not (_snapshot_is_valid(before) and _snapshot_is_valid(after)):
+    if not _snapshot_is_valid(before):
+        return "malformed provenance"
+    if not _snapshot_is_valid(after):
         return "malformed provenance"
     identity_fields = ("process_id", "device_id", "process_index", "platform", "device_kind")
     if any(before[name] != after[name] for name in identity_fields):
