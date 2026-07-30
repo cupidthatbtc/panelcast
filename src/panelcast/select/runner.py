@@ -679,6 +679,28 @@ def sweep_run_dir(output_base: Path, run_id: str, *, field: str = "run_id") -> P
     return safe_run_dir(output_base, run_id, field=field).resolve()
 
 
+def refused_run_name(output_base: Path, run_id: str, *, arrow: str = " -> ") -> str:
+    """Where a refused run name sits, and — one hop — what it points at.
+
+    A containment refusal after a fit has run leaves artifacts somewhere, and
+    when the refused name is a symlink that link is the only record of where.
+    Absolute, because the default output base is relative and a breadcrumb is
+    only useful if it can be followed from anywhere; the target is joined to
+    the link's own directory, since ``readlink`` returns the link's contents
+    verbatim and a relative one means nothing elsewhere. That join stays
+    lexical (normalizing it would lie whenever ``output_base`` is itself a
+    symlink), and nothing here follows or touches the target. A failure
+    degrades to naming the name alone rather than replacing the refusal.
+    """
+    refused = (Path(output_base) / run_id).absolute()
+    try:
+        if refused.is_symlink():
+            return f"{refused}{arrow}{refused.parent / refused.readlink()}"
+    except OSError:
+        pass
+    return str(refused)
+
+
 def _claim_named_run(
     run_id: str,
     output_base: Path,
@@ -703,7 +725,8 @@ def _claim_named_run(
     except RunPathError as exc:
         return None, (
             "handshake failed after the arm ran (artifacts may exist outside the output "
-            f"base; anything at the refused name is left in place, unread): {exc}"
+            f"base; anything at {refused_run_name(output_base, run_id)} is left in "
+            f"place, unread): {exc}"
         )
     if not run_dir.exists():
         return None, f"handshake failed: expected run dir {run_dir} was never created"

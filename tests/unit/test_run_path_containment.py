@@ -676,8 +676,13 @@ class TestSelectRunLookupContainment:
         assert run_dir is None
         assert problem is not None and "arm run_id" in problem
         # There is no pre-launch arm resolve, so every containment refusal here
-        # is the post-fit case, and the message has to say so.
+        # is the post-fit case, and the message has to say so — and follow the
+        # link, since its target is where the arm's artifacts actually landed.
         assert "after the arm ran" in problem
+        assert " -> " in problem
+        named = problem.split(" -> ", 1)[1].split(" is left in place")[0]
+        assert Path(named).is_absolute()
+        assert Path(named).resolve() == outside.resolve()
         assert claimed == set()
 
     def test_claim_named_run_never_creates_the_run_dir(self, tmp_path):
@@ -772,24 +777,31 @@ class TestSelectRunLookupContainment:
 
     def test_the_breadcrumb_names_a_relative_link_absolutely(self, tmp_path):
         # readlink() returns the link's contents verbatim, which for a relative
-        # link means nothing without knowing where the link itself sits.
+        # link means nothing without knowing where the link itself sits. The
+        # join stays un-normalized on purpose: a lexical normpath would lie
+        # whenever the output base is itself a symlink.
         result, _, outside = self._escaping_confirmation(tmp_path, relative=True)
 
-        named = result.seeds[0].error.split(" -> ", 1)[1].split(" is left in place")[0]
+        error = result.seeds[0].error
+        assert error is not None and " -> " in error
+        named = error.split(" -> ", 1)[1].split(" is left in place")[0]
         assert Path(named).is_absolute()
         assert Path(named).resolve() == outside.resolve()
 
     def test_an_unreadable_link_does_not_eat_the_refusal(self, tmp_path, monkeypatch):
         # Formatting the breadcrumb must never replace the containment error.
-        def refuse_readlink(self):
+        def refuse_readlink(self: Path) -> Path:
             raise OSError("gone")
 
         monkeypatch.setattr(Path, "readlink", refuse_readlink)
-        result, _, _ = self._escaping_confirmation(tmp_path)
+        result, links, _ = self._escaping_confirmation(tmp_path)
 
-        assert "confirmation run_id" in result.seeds[0].error
-        assert "after its fit" in result.seeds[0].error
-        assert " -> " not in result.seeds[0].error
+        error = result.seeds[0].error
+        assert error is not None
+        assert "confirmation run_id" in error
+        assert "after its fit" in error
+        assert str(links[0]) in error  # the name survives; only the hop is lost
+        assert " -> " not in error
 
     def test_confirmation_lookup_tolerates_an_unwritten_output_base(self, tmp_path):
         # A confirmation-only entry point can be the first thing to touch its
