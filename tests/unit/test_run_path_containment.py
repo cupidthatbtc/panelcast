@@ -601,6 +601,28 @@ class TestSelectRunLookupContainment:
         with pytest.raises(RunPathError):
             sweep_run_dir(tmp_path, run_id)
 
+    @pytest.mark.parametrize("run_id", ESCAPING_IDS + MALFORMED_IDS + RESERVED_IDS)
+    def test_the_shape_and_containment_gates_agree(self, tmp_path, run_id):
+        # `refusal_detail` decides "nothing was written under that name" by
+        # re-running validate_run_id, which is exact only while that stays the
+        # whole of safe_run_dir's shape check.
+        with pytest.raises(RunPathError):
+            validate_run_id(run_id)
+        with pytest.raises(RunPathError):
+            safe_run_dir(tmp_path, run_id)
+
+    def test_selects_own_minted_ids_are_well_formed(self):
+        # The premise the whole handshake rests on: an id select mints is one
+        # both gates accept, so a refusal is never select refusing itself.
+        from panelcast.select.runner import record_key
+
+        stamp = f"{datetime.now():%Y%m%dT%H%M%S%f}"
+        minted = [f"sel_hs_{record_key('abc123', rung)}_{stamp}" for rung in (0, 3)]
+        minted += [f"sel_hs_confirm_{label}_seed42_{stamp}" for label in ("reference", "winner")]
+        for run_id in minted:
+            assert validate_run_id(run_id) == run_id
+            assert safe_run_dir(Path("outputs"), run_id).name == run_id
+
     def test_sweep_run_dir_returns_an_absolute_path(self, tmp_path, monkeypatch):
         from panelcast.select.runner import sweep_run_dir
 

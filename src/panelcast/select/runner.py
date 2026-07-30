@@ -720,7 +720,11 @@ def refusal_detail(output_base: Path, run_id: str) -> str:
 
     The shape branch is reachable only from the arm handshake: confirmation
     screens the id before launching, so by its post-fit call the id is
-    well-formed by construction.
+    well-formed by construction. It also asserts something about a different
+    process — that the orchestrator refuses the same shapes before creating a
+    run dir — which holds because ``orchestrator._validate_run_id`` runs the
+    same ``paths.validate_run_id``. If those two ever diverge, this branch
+    claims nothing was written when something may have been.
     """
     where = _refused_run_name(output_base, run_id)
     if where is None:
