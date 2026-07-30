@@ -214,6 +214,7 @@ def _run_full_preflight(
         run_extrapolated_preflight_check,
     )
     from panelcast.preflight.full_check import _derive_dimensions_from_model_args
+    from panelcast.preflight.mini_run import mini_run_priors, rw_collection_excludes
 
     console = Console()
 
@@ -309,14 +310,35 @@ def _run_full_preflight(
         "entity_group_pooling": effective_group_pooling,
     }
     model_signature.update(_period_signature(config))
-    # Mirror the production fit's memory gate in the calibration runs:
-    # with the rw_raw exclusion on, the dominant memory term disappears
-    # and the projection must reflect that.
+    # Mirror the memory gate in the calibration runs: with the exclusion on,
+    # the dominant memory term disappears and the projection must reflect
+    # that. What the MINI-RUN samples decides this, not the production fit —
+    # no transform selects the skew walk today, so a skew production fit
+    # excludes two sites there and one here, overstating the projection (the
+    # safe direction). Gate on site presence like train_bayes
+    # does (#400): a single-event panel never samples the walk. The mini-run
+    # reconciles the value against its own args, so a wrong one no longer
+    # crashes it, but it still keys the calibration cache signature.
+    preflight_max_seq = int(model_args.get("max_seq") or 0)
     preflight_exclude_collection = (
-        (f"{preflight_descriptor.model_prefix}_rw_raw",)
+        rw_collection_excludes(
+            preflight_descriptor.model_prefix,
+            preflight_max_seq,
+            # The mini-run's own priors decide which walk latents exist, and
+            # reconciliation there can only drop sites, never add them.
+            innovation_type=mini_run_priors(
+                config.target_transform, entity_group_pooling=effective_group_pooling
+            ).rw_innovation_type,
+        )
         if config.exclude_rw_raw_from_collection
         else ()
     )
+    if config.exclude_rw_raw_from_collection and not preflight_exclude_collection:
+        console.print(
+            "[bold yellow]Note:[/bold yellow] --exclude-rw-raw-from-collection "
+            f"has nothing to exclude: at max_seq={preflight_max_seq} the model "
+            "samples no random walk, so the flag saves no memory here."
+        )
     # The mini-run model cannot express these gates, so the calibration
     # measures a smaller model and the projection understates the gated
     # memory terms (EIV adds an n_obs-sized latent per collected draw).

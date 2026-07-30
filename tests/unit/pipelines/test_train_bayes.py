@@ -3089,6 +3089,25 @@ class TestIdataExclusions:
         )
         assert captured["exclude_from_collection"] == ()
 
+    @pytest.mark.parametrize(
+        "attribute", ["rw_innovation_type", "entity_effect_prior_type"]
+    )
+    def test_a_null_prior_type_means_unset_not_the_string_none(self, attribute):
+        # str(None) is "None", which the model rejects as an unknown type.
+        from panelcast.pipelines.train_bayes import build_training_priors
+
+        priors = build_training_priors(
+            _make_ctx(**{attribute: None}),
+            target_transform="identity",
+            logit_offset=0.0,
+            ar_center="none",
+            entity_group_pooling=False,
+            effective_ceiling=None,
+            ar_center_value=0.0,
+            target_bounds=(0.0, 100.0),
+        )
+        assert getattr(priors, attribute) == "normal"
+
     def test_null_rw_innovation_type_uses_normal_sites(self, tmp_path):
         captured = self._captured_excludes(
             tmp_path,

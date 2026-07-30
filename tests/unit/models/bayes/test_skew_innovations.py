@@ -16,6 +16,7 @@ from numpyro import handlers
 
 from panelcast.models.bayes.model import make_score_model, standardized_skew_innovation
 from panelcast.models.bayes.priors import (
+    RW_INNOVATION_TYPES,
     PriorConfig,
     entity_skew_sites,
     is_skew_rw_innovation,
@@ -67,6 +68,42 @@ def test_random_walk_site_names_cover_both_prefix_conventions():
     )
     assert rw_latent_sites("user", "normal", max_seq=1).present() == ()
     assert rw_latent_sites("user_", "skew_normal", max_seq=1).present() == ()
+
+
+def test_the_model_accepts_exactly_the_innovation_types_the_helper_knows():
+    """RW_INNOVATION_TYPES decides which walk latents a memory exclusion can
+    name, so it must not drift from the set the model itself implements."""
+    for innovation in RW_INNOVATION_TYPES:
+        _seeded_trace(_model_args(PriorConfig(rw_innovation_type=innovation)))
+
+    # Built outside the raises block so the rejection can only come from the
+    # model, which is the layer whose accepted set is under test.
+    unknown = _model_args(PriorConfig(rw_innovation_type="student_t"))
+    with pytest.raises(ValueError, match="Unknown rw_innovation_type"):
+        _seeded_trace(unknown)
+
+
+@pytest.mark.parametrize("innovation", RW_INNOVATION_TYPES)
+@pytest.mark.parametrize("max_seq", [1, 3])
+def test_every_named_random_walk_site_is_one_the_model_samples(innovation, max_seq):
+    """Memory exclusions name these sites to NumPyro, which pops them off the
+    trace with no default, so a name the model does not sample is a KeyError
+    (#410). Bind the helper to the model rather than to a second reading of it.
+
+    One-sided on purpose: a walk latent the model samples but the helper omits
+    only means the exclusion saves less memory than it could."""
+    priors = PriorConfig(rw_innovation_type=innovation)
+    trace = _seeded_trace(_model_args(priors, max_seq=max_seq))
+    sampled = {name for name, site in trace.items() if site["type"] == "sample"}
+
+    named = set(rw_latent_sites("user", innovation, max_seq=max_seq).present())
+    assert named <= sampled
+    assert bool(named) is (max_seq > 1)
+    if max_seq <= 1:
+        # Otherwise the subset above is vacuous here: the helper returning ()
+        # while the model does sample a walk latent means the exclusion
+        # silently stops saving memory.
+        assert not sampled & {"user_rw_raw", "user_rw_raw_abs"}
 
 
 def test_entity_skew_site_names_follow_the_resolved_prior_type():

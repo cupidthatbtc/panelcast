@@ -34,6 +34,12 @@ from dataclasses import dataclass
 DEFAULT_BETA_BOUNDARY_EPS = 1e-3
 
 
+# Every random-walk innovation the model implements. Callers that need the
+# complete set of walk latents (memory exclusions) union rw_latent_sites over
+# this rather than assuming one configuration is maximal.
+RW_INNOVATION_TYPES = ("normal", "skew_normal")
+
+
 def is_skew_rw_innovation(value: object) -> bool:
     """The rw_raw_abs site exists exactly when this predicate is true."""
     return (value or "normal") == "skew_normal"
@@ -56,7 +62,17 @@ class RandomWalkLatentSites:
 def rw_latent_sites(
     prefix: str, innovation_type: object, *, max_seq: int
 ) -> RandomWalkLatentSites:
-    """Return the random-walk latent sites eligible for memory exclusion."""
+    """Return the random-walk latent sites eligible for memory exclusion.
+
+    Unknown innovation types are rejected rather than treated as gaussian: an
+    innovation with its own latent that silently reported the gaussian sites
+    would leave that latent out of every memory exclusion built from here.
+    """
+    if innovation_type and innovation_type not in RW_INNOVATION_TYPES:
+        raise ValueError(
+            f"Unknown rw_innovation_type: '{innovation_type}'. "
+            f"Must be one of {RW_INNOVATION_TYPES}."
+        )
     if max_seq <= 1:
         return RandomWalkLatentSites(None, None)
     raw_abs = (

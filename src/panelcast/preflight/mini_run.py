@@ -52,11 +52,65 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-__all__ = ["run_and_measure"]
+if TYPE_CHECKING:
+    from panelcast.models.bayes.priors import PriorConfig
+
+__all__ = [
+    "mini_run_priors",
+    "run_and_measure",
+    "rw_collection_excludes",
+    "uses_transform_priors",
+]
 
 logger = logging.getLogger(__name__)
+
+
+def uses_transform_priors(target_transform: str, entity_group_pooling: bool) -> bool:
+    """Whether the mini-run builds a PriorConfig instead of taking the model's.
+
+    The forwarding gate and the priors themselves must never disagree: a run
+    whose priors say skew while the model runs on defaults would exclude a
+    site nothing sampled.
+    """
+    return target_transform != "identity" or entity_group_pooling
+
+
+def mini_run_priors(
+    target_transform: str = "identity", *, entity_group_pooling: bool = False
+) -> PriorConfig:
+    """The prior configuration the mini-run's model runs under.
+
+    Callers sizing a collection exclusion need the same answer the mini-run
+    will get, so both read it here rather than each deciding for themselves.
+    """
+    from panelcast.models.bayes.priors import get_default_priors, priors_for_transform
+
+    if not uses_transform_priors(target_transform, entity_group_pooling):
+        return get_default_priors()
+    return priors_for_transform(target_transform, entity_group_pooling=entity_group_pooling)
+
+
+def rw_collection_excludes(
+    prefix: str, max_seq: int, *, innovation_type: str | None = None
+) -> tuple[str, ...]:
+    """Random-walk sites the mini-run model actually samples, hence excludable.
+
+    Callers must build ``exclude_collection`` from this rather than assuming
+    ``{prefix}_rw_raw`` exists: NumPyro's ``~z.<site>`` pops the site with no
+    default, so naming a site the model never sampled is a KeyError. Single-
+    event panels skip the walk entirely (#400).
+
+    ``innovation_type`` defaults to the prior default, which is what the model
+    falls back to when no ``PriorConfig`` reaches it — the skew innovation's
+    ``rw_raw_abs`` exists only under an explicitly skew configuration.
+    """
+    from panelcast.models.bayes.priors import get_default_priors, rw_latent_sites
+
+    if innovation_type is None:
+        innovation_type = get_default_priors().rw_innovation_type
+    return rw_latent_sites(prefix, innovation_type, max_seq=max_seq).present()
 
 
 def run_and_measure(
@@ -108,7 +162,7 @@ def run_and_measure(
 
     from panelcast.gpu_memory.measure import get_jax_memory_stats
     from panelcast.models.bayes.model import make_score_model
-    from panelcast.models.bayes.priors import priors_for_transform
+    from panelcast.models.bayes.priors import RW_INNOVATION_TYPES
     from panelcast.models.bayes.transforms import get_transform
 
     # Load model args from JSON
@@ -171,22 +225,53 @@ def run_and_measure(
         )
 
     # Gated extras only ever ADD keys, keeping the default invocation
-    # byte-identical to the legacy mini-run.
-    if target_transform != "identity" or entity_group_pooling:
-        model_args["priors"] = priors_for_transform(
-            target_transform, entity_group_pooling=entity_group_pooling
-        )
+    # byte-identical to the legacy mini-run; the model applies this same
+    # fallback when the kwarg is absent.
+    run_priors = mini_run_priors(target_transform, entity_group_pooling=entity_group_pooling)
+    if uses_transform_priors(target_transform, entity_group_pooling):
+        model_args["priors"] = run_priors
         model_args["target_bounds"] = target_bounds
 
     # All model sites are "{prefix}_..."; an exclusion naming another prefix
     # would silently match nothing in NumPyro, so the calibration would
     # measure WITH the dominant collection term while production excludes it.
-    foreign_sites = [s for s in exclude_collection if not s.startswith(f"{prefix}_")]
+    # A descriptor prefix may already carry the separator, so normalize the
+    # same way the site names themselves are built.
+    site_prefix = prefix if prefix.endswith("_") else f"{prefix}_"
+    foreign_sites = [s for s in exclude_collection if not s.startswith(site_prefix)]
     if foreign_sites:
         raise ValueError(
             f"exclude_collection sites {foreign_sites} do not match model "
             f"prefix '{prefix}'; the exclusion would be a silent no-op"
         )
+
+    # Callers size their exclusion against the production model, so reconcile it
+    # with the args actually loaded here: dropping the walk from a panel that
+    # never samples one is what production does too, whereas naming the absent
+    # site would be the #410 KeyError. Both sets come from the site helper —
+    # pattern-matching the names would let a future walk latent slip through —
+    # and an absent max_seq means no walk, not a crash. Two events is the whole
+    # walk as far as site presence goes: the gate is binary, not a length.
+    if exclude_collection:
+        run_max_seq = int(model_args.get("max_seq") or 0)
+        sampled_rw = rw_collection_excludes(
+            prefix, run_max_seq, innovation_type=run_priors.rw_innovation_type
+        )
+        candidate_rw = {
+            site
+            for innovation in RW_INNOVATION_TYPES
+            for site in rw_collection_excludes(prefix, 2, innovation_type=innovation)
+        }
+        absent_rw = tuple(
+            site for site in exclude_collection if site in candidate_rw and site not in sampled_rw
+        )
+        if absent_rw:
+            logger.warning(
+                f"Dropping collection exclusions this model never samples at "
+                f"max_seq={run_max_seq}: {absent_rw}; the requested memory saving "
+                "does not apply here"
+            )
+            exclude_collection = tuple(s for s in exclude_collection if s not in absent_rw)
 
     # Create NUTS kernel for the requested score-model prefix ("user" default
     # is consistent with CLI default behavior, most common use case)
