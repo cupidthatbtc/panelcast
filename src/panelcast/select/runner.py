@@ -660,10 +660,12 @@ def _attribution_error(
 def sweep_run_dir(output_base: Path, run_id: str, *, field: str = "run_id") -> Path:
     """Absolute path of a run this sweep minted, containment-checked (#375).
 
-    Read-only: the directory need not exist. Select mints its own run ids, but
-    routing every lookup through ``safe_run_dir`` means a separator-bearing id
-    or a run name symlinked out of ``output_base`` fails closed here rather
-    than relying on some earlier caller having validated first. Callers resolve
+    Read-only: nothing here creates, moves, or deletes anything. Neither the
+    run dir nor ``output_base`` has to exist — containment is a property of the
+    path, not of what is on disk. Select mints its own run ids, but routing
+    every lookup through ``safe_run_dir`` means a separator-bearing id or a run
+    name symlinked out of ``output_base`` fails closed here rather than relying
+    on some earlier caller having validated first. Callers resolve
     once per decision about a run dir — never inside a polling or scoring loop.
     The symlink half of the check only bites once the directory exists, so a
     caller that resolves an id before its run is created resolves again before

@@ -274,16 +274,24 @@ def run_confirmation(
     prior = _reusable_prior_seeds(out_path, identity)
     timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
-    def _resolve(run_id: str, seed: int, label: str) -> Path:
+    def _resolve(run_id: str, seed: int, label: str, *, after_fit: bool) -> Path:
         """This fit's run dir, contained — raised in ``_one_fit``'s failure shape.
 
         Re-raising as ``RuntimeError`` keeps the fail-closed path from depending
-        on how wide the seed loop's handler happens to be.
+        on how wide the seed loop's handler happens to be. The two phases mean
+        very different things to whoever reads the log, so they say so: a
+        pre-launch refusal costs nothing, while a post-fit one means a full fit
+        already wrote somewhere select now refuses to read.
         """
         try:
             return sweep_run_dir(cfg.pipeline_output_base, run_id, field="confirmation run_id")
         except RunPathError as exc:
-            raise RuntimeError(f"{label} fit refused on seed {seed}: {exc}") from exc
+            when = (
+                "after its fit — artifacts may exist outside the output base"
+                if after_fit
+                else "before launching — nothing ran"
+            )
+            raise RuntimeError(f"{label} fit on seed {seed} refused {when}: {exc}") from exc
 
     def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:
         config_path = cfg.sweep_dir / f"confirm_{label}_seed{seed}.yaml"
@@ -291,8 +299,11 @@ def run_confirmation(
         # `latest` pointer; unique per attempt so retries never collide.
         run_id = f"sel_{cfg.sweep_id}_confirm_{label}_seed{seed}_{datetime.now():%Y%m%dT%H%M%S%f}"
         # The id's shape is decidable before the fit, so refuse a bad one for
-        # free rather than after a publication-scale run.
-        _resolve(run_id, seed, label)
+        # free rather than after a publication-scale run. The return value is
+        # deliberately discarded — nothing exists at that name yet, so only the
+        # post-fit call below can see a symlink escape
+        # (test_confirmation_lookup_refuses_a_symlinked_escape covers both).
+        _resolve(run_id, seed, label, after_fit=False)
         _write_config(cfg, merged, seed, config_path, sampler_overrides, run_id=run_id)
         log.info("confirmation_fit_start", label=label, seed=seed, timeout=timeout)
         started = time.monotonic()
@@ -309,7 +320,7 @@ def run_confirmation(
         # Again now that the directory exists: the symlink half of containment
         # has nothing to resolve through until then, and this is the path whose
         # contents get read and recorded.
-        run_dir = _resolve(run_id, seed, label)
+        run_dir = _resolve(run_id, seed, label, after_fit=True)
         return run_dir if run_dir.exists() else None
 
     for seed in seeds:

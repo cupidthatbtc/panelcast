@@ -1489,6 +1489,16 @@ directory exists, so a lookup that runs before its run dir is created (select
 resolves a confirmation fit's id up front, to refuse a bad id without paying
 for the fit) resolves again after the fit, before reading anything.
 
+What the gate refuses differs by caller. For `--resume` and the `runs` CLI it
+runs before anything happens, so a symlinked run name is never followed. On
+select's mint-then-fit paths the run directory is created by the subprocess
+select launched — the orchestrator validates the id's *shape* before creating
+it, so a pre-planted symlink is written through — and select's gate refuses the
+read and the attribution, not the write. The refusal says which phase it is in,
+because a post-fit refusal means artifacts exist outside the output base.
+Closing the write side means routing the orchestrator's own run-dir creation
+through `safe_run_dir`, which is a separate change.
+
 ## 9.4 Resume Logic
 
 The `--resume {run_id}` flag allows resuming a failed run:

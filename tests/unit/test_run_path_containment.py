@@ -625,7 +625,9 @@ class TestSelectRunLookupContainment:
         run_dir, problem = _claim_named_run(run_id, base, {}, launched_at, claimed)
 
         assert run_dir is None
-        assert problem is not None and "handshake failed" in problem
+        # Only the RunPathError branch names the field, so an ordinary
+        # "was never created" miss cannot make this assertion pass.
+        assert problem is not None and "arm run_id" in problem
         assert claimed == set()
 
     def test_claim_named_run_refuses_a_symlinked_escape(self, tmp_path):
@@ -644,7 +646,7 @@ class TestSelectRunLookupContainment:
         )
 
         assert run_dir is None
-        assert problem is not None and "handshake failed" in problem
+        assert problem is not None and "arm run_id" in problem
         assert claimed == set()
 
     def test_claim_named_run_never_creates_the_run_dir(self, tmp_path):
