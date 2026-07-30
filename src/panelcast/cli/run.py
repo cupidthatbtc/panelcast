@@ -314,7 +314,9 @@ def _run_full_preflight(
     # with the rw_raw exclusion on, the dominant memory term disappears
     # and the projection must reflect that. Gate on site presence exactly
     # like train_bayes does (#400) — a single-event panel never samples the
-    # walk, and excluding an unsampled site crashes the mini-run.
+    # walk, and excluding an unsampled site crashes the mini-run. One value
+    # covers every calibration point: they vary only the sample count and
+    # share this model_args, so max_seq is the same in all of them.
     preflight_exclude_collection = (
         rw_collection_excludes(
             preflight_descriptor.model_prefix, int(model_args["max_seq"])
@@ -324,9 +326,9 @@ def _run_full_preflight(
     )
     if config.exclude_rw_raw_from_collection and not preflight_exclude_collection:
         console.print(
-            "[bold yellow]Note:[/bold yellow] --exclude-rw-raw-from-collection has "
-            "nothing to exclude at max_events=1 (no random walk is sampled), so it "
-            "saves no memory here."
+            "[bold yellow]Note:[/bold yellow] --exclude-rw-raw-from-collection "
+            f"has nothing to exclude: at max_events={config.max_events} the model "
+            "samples no random walk, so the flag saves no memory here."
         )
     # The mini-run model cannot express these gates, so the calibration
     # measures a smaller model and the projection understates the gated

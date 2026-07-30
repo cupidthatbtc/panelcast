@@ -1244,8 +1244,10 @@ class TestPreflightFull:
         )
         assert result.exit_code == 0
         assert captured["exclude_collection"] == expected
-        # A flag that silently buys nothing is worse than a noisy one.
-        assert ("nothing to exclude" in strip_ansi(result.output)) is (expected == ())
+        # A flag that silently buys nothing is worse than a noisy one. Rich
+        # wraps to the console width, so compare on collapsed whitespace.
+        output = " ".join(strip_ansi(result.output).split())
+        assert ("nothing to exclude" in output) is (expected == ())
 
     def test_preflight_full_fail_aborts_without_force(self, monkeypatch, tmp_path):
         """--preflight-full fail aborts without --force-run."""

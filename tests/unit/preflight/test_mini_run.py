@@ -1491,7 +1491,9 @@ class TestRwCollectionExcludes:
         # there even when the production fit runs the skew innovation.
         assert "user_rw_raw_abs" not in rw_collection_excludes("user", 10)
 
-    @pytest.mark.parametrize("target_transform", ["identity", "offset_logit"])
+    @pytest.mark.parametrize(
+        ("target_transform", "forwards_priors"), [("identity", False), ("offset_logit", True)]
+    )
     @mock.patch("panelcast.gpu_memory.measure.get_jax_memory_stats")
     @mock.patch("numpyro.infer.MCMC")
     @mock.patch("numpyro.infer.NUTS")
@@ -1502,8 +1504,8 @@ class TestRwCollectionExcludes:
         mock_nuts,
         mock_mcmc_class,
         mock_get_stats,
-        minimal_model_args,
         target_transform,
+        forwards_priors,
     ):
         """The helper hardcodes the default innovation type because the mini-run
         never forwards one. Fail loudly the day that stops being true."""
@@ -1518,27 +1520,40 @@ class TestRwCollectionExcludes:
         mock_stats.peak_gb = 0.0
         mock_get_stats.return_value = mock_stats
 
+        panel = {
+            "artist_idx": [0, 0, 0, 0],
+            "album_seq": [1, 2, 3, 4],
+            "prev_score": [0.0, 70.0, 72.0, 68.0],
+            "X": [[1.0], [1.0], [1.0], [1.0]],
+            "y": [70.0, 72.0, 68.0, 74.0],
+            "n_artists": 1,
+            "max_seq": 4,
+        }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump({**minimal_model_args, "max_seq": 4}, f)
+            json.dump(panel, f)
             temp_path = Path(f.name)
         try:
             run_and_measure(temp_path, target_transform=target_transform)
         finally:
             temp_path.unlink()
 
-        # The model falls back to get_default_priors() when the mini-run omits
-        # the kwarg, so that is the effective configuration either way.
-        effective = mock_mcmc.run.call_args[1].get("priors") or get_default_priors()
+        kwargs = mock_mcmc.run.call_args[1]
+        # Pin the kwarg surface itself: the assertion below would otherwise
+        # absorb a prior arriving under a different name, which is exactly the
+        # drift that reintroduces #410.
+        assert ("priors" in kwargs) is forwards_priors
+        assert not [key for key in kwargs if "innovation" in key or key.endswith("_prior_type")]
+        effective = kwargs["priors"] if forwards_priors else get_default_priors()
         assert rw_collection_excludes("user", 4) == rw_latent_sites(
             "user", effective.rw_innovation_type, max_seq=4
         ).present()
 
     @mock.patch("panelcast.gpu_memory.measure.get_jax_memory_stats")
-    def test_single_event_mini_run_survives_the_exclusion(
+    def test_single_event_panel_really_has_no_rw_site_to_exclude(
         self, mock_get_stats, minimal_model_args
     ):
         """The #410 crash, end to end: NumPyro pops the named sites off a real
-        trace, so only an unmocked sampler can prove the exclusion is sound.
+        trace, so only an unmocked sampler can show the site is genuinely absent.
         Peak memory is the one GPU-only step, so it stays stubbed."""
         assert minimal_model_args["max_seq"] == 1
         mock_stats = mock.Mock()
@@ -1550,6 +1565,12 @@ class TestRwCollectionExcludes:
             json.dump(minimal_model_args, f)
             temp_path = Path(f.name)
         try:
+            # What the CLI used to send, and why the preflight died.
+            with pytest.raises(KeyError, match="user_rw_raw"):
+                run_and_measure(
+                    temp_path, num_warmup=1, exclude_collection=("user_rw_raw",)
+                )
+
             excludes = rw_collection_excludes("user", minimal_model_args["max_seq"])
             assert excludes == ()
             result = run_and_measure(temp_path, num_warmup=1, exclude_collection=excludes)
