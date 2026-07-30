@@ -44,7 +44,7 @@ from typing import Any
 import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
-from panelcast.paths import safe_run_dir
+from panelcast.paths import RunPathError, safe_run_dir
 from panelcast.select.space import (
     KNOBS,
     arm_conflicts,
@@ -657,6 +657,18 @@ def _attribution_error(
     return None
 
 
+def sweep_run_dir(output_base: Path, run_id: str, *, field: str = "run_id") -> Path:
+    """Absolute path of a run this sweep minted, containment-checked (#375).
+
+    Read-only: the directory need not exist. Select mints its own run ids, but
+    routing every lookup through ``safe_run_dir`` means a separator-bearing id
+    or a run name symlinked out of ``output_base`` fails closed here rather
+    than relying on some earlier caller having validated first. Callers resolve
+    once per fit, never inside a per-arm loop.
+    """
+    return safe_run_dir(output_base, run_id, field=field).resolve()
+
+
 def _claim_named_run(
     run_id: str,
     output_base: Path,
@@ -671,7 +683,10 @@ def _claim_named_run(
     pointer that races under concurrency. The manifest sanity checks
     (creation time, knob agreement, prior claim) still apply.
     """
-    run_dir = (output_base / run_id).resolve()
+    try:
+        run_dir = sweep_run_dir(output_base, run_id, field="arm run_id")
+    except RunPathError as exc:
+        return None, f"handshake failed: {exc}"
     if not run_dir.exists():
         return None, f"handshake failed: expected run dir {run_dir} was never created"
     problem = _attribution_error(run_dir, merged, launched_at, claimed_runs)

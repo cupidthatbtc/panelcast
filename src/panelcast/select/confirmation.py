@@ -26,6 +26,7 @@ from panelcast.select.runner import (
     _default_panelcast_bin,
     launch_arm,
     resolve_arm_timeout,
+    sweep_run_dir,
 )
 from panelcast.select.scoring import PairedElpd, paired_elpd
 from panelcast.select.space import default_arm
@@ -290,7 +291,7 @@ def run_confirmation(
         )
         if code != 0:
             raise RuntimeError(f"{label} fit failed on seed {seed}: {tail[-500:]}")
-        run_dir = (cfg.pipeline_output_base / run_id).resolve()
+        run_dir = sweep_run_dir(cfg.pipeline_output_base, run_id, field="confirmation run_id")
         return run_dir if run_dir.exists() else None
 
     for seed in seeds:

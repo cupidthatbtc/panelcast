@@ -7,6 +7,7 @@ Every lookup, move, and delete keyed by a run identifier goes through
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -541,3 +542,131 @@ class TestWindowsPathShapes:
         (tmp_path / "runA").mkdir()
         with pytest.raises(RunPathError):
             safe_run_dir(tmp_path, bad)
+
+
+def _write_arm_manifest(run_dir: Path, created_at: datetime, flags: dict | None = None) -> None:
+    """A manifest `_attribution_error` would accept for an arm launched at ``created_at``."""
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "manifest.json").write_text(
+        json.dumps({"created_at": created_at.isoformat(), "flags": flags or {}}),
+        encoding="utf-8",
+    )
+
+
+class TestSelectRunLookupContainment:
+    """Select's own run lookups fail closed, whatever the caller validated first (#375).
+
+    The ids here are internally minted, so these are not live escapes — the
+    point is that containment holds on the lookup itself rather than on the
+    sweep having been set up in the usual order.
+    """
+
+    @pytest.mark.parametrize("run_id", ESCAPING_IDS + MALFORMED_IDS + RESERVED_IDS)
+    def test_sweep_run_dir_rejects_bad_ids(self, tmp_path, run_id):
+        from panelcast.select.runner import sweep_run_dir
+
+        with pytest.raises(RunPathError):
+            sweep_run_dir(tmp_path, run_id)
+
+    def test_sweep_run_dir_returns_an_absolute_path(self, tmp_path, monkeypatch):
+        from panelcast.select.runner import sweep_run_dir
+
+        monkeypatch.chdir(tmp_path)
+        base = Path("outputs")
+        (base / "sel_s1_abc123@r1_20260709T120000123456").mkdir(parents=True)
+        resolved = sweep_run_dir(base, "sel_s1_abc123@r1_20260709T120000123456")
+        assert resolved.is_absolute()
+        assert resolved == (tmp_path / "outputs" / "sel_s1_abc123@r1_20260709T120000123456")
+
+    def test_claim_named_run_accepts_a_minted_id(self, tmp_path):
+        from panelcast.select.runner import _claim_named_run
+
+        base = tmp_path / "outputs"
+        launched_at = datetime.now()
+        run_id = "sel_s1_abc123_20260709T120000123456"
+        _write_arm_manifest(base / run_id, launched_at)
+        claimed: set[str] = set()
+
+        run_dir, problem = _claim_named_run(run_id, base, {}, launched_at, claimed)
+
+        assert problem is None
+        assert run_dir == (base / run_id).resolve()
+        assert claimed == {str((base / run_id).resolve())}
+
+    @pytest.mark.parametrize("run_id", ["../outside", "..\\outside", "a/b", "latest", ".."])
+    def test_claim_named_run_refuses_escaping_ids(self, tmp_path, run_id):
+        # The escape target is a fully valid, claimable run: only containment
+        # stands between the lookup and attributing it to this arm.
+        base = tmp_path / "outputs"
+        base.mkdir()
+        launched_at = datetime.now()
+        _write_arm_manifest(tmp_path / "outside", launched_at)
+        _write_arm_manifest(base / "latest", launched_at)
+        claimed: set[str] = set()
+
+        from panelcast.select.runner import _claim_named_run
+
+        run_dir, problem = _claim_named_run(run_id, base, {}, launched_at, claimed)
+
+        assert run_dir is None
+        assert problem is not None and "handshake failed" in problem
+        assert claimed == set()
+
+    def test_claim_named_run_refuses_a_symlinked_escape(self, tmp_path):
+        from panelcast.select.runner import _claim_named_run
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        outside = tmp_path / "outside"
+        launched_at = datetime.now()
+        _write_arm_manifest(outside, launched_at)
+        _symlink_dir(base / "sel_s1_escape_20260709T120000123456", outside)
+        claimed: set[str] = set()
+
+        run_dir, problem = _claim_named_run(
+            "sel_s1_escape_20260709T120000123456", base, {}, launched_at, claimed
+        )
+
+        assert run_dir is None
+        assert problem is not None and "handshake failed" in problem
+        assert claimed == set()
+
+    def test_claim_named_run_never_creates_the_run_dir(self, tmp_path):
+        from panelcast.select.runner import _claim_named_run
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        run_dir, problem = _claim_named_run(
+            "sel_s1_missing_20260709T120000123456", base, {}, datetime.now(), set()
+        )
+        assert run_dir is None
+        assert problem is not None and "never created" in problem
+        assert list(base.iterdir()) == []
+
+    def test_confirmation_lookup_fails_closed_on_a_mutated_sweep_id(self, tmp_path):
+        # `SweepConfig` validates `sweep_id` at construction, so reach the
+        # unvalidated state the way a caller that skipped setup order would:
+        # mutate it after the sweep dir is already cached.
+        from panelcast.select.confirmation import run_confirmation
+        from panelcast.select.runner import SweepConfig
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        (tmp_path / "outside").mkdir()
+        cfg = SweepConfig(
+            sweep_id="s1",
+            output_root=tmp_path / "select",
+            panelcast_bin="pc",
+            pipeline_output_base=base,
+        )
+        assert cfg.sweep_dir == tmp_path / "select" / "s1"
+        cfg.sweep_id = "../outside"
+
+        result = run_confirmation(
+            {"latent_process": "ar1"}, cfg, seeds=(42,), launch=lambda *a, **k: (0, "ok")
+        )
+
+        assert not result.confirmed
+        assert result.seeds[0].error is not None
+        assert "confirmation run_id" in result.seeds[0].error
+        assert result.seeds[0].reference_run is None

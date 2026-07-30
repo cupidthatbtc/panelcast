@@ -1480,7 +1480,10 @@ The `--resume {run_id}` flag allows resuming a failed run:
    directory name — no separators, traversal, absolute or drive-relative
    paths, reserved names — and the resolved candidate must still sit beneath
    the output base, so a symlinked run name pointing elsewhere is refused
-   before anything is read or moved.
+   before anything is read or moved. `panelcast select` mints its own arm and
+   confirmation run ids (the #167 handshake) and resolves them through the same
+   gate (`select/runner.py:sweep_run_dir`), so containment holds on the lookup
+   itself rather than on the sweep having been validated first.
 1. Locate run directory: `outputs/{run_id}/` or `outputs/failed/{run_id}/`
 2. If in `failed/`, move back to `outputs/`
 3. Load existing `manifest.json`
