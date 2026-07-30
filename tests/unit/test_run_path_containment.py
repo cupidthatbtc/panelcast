@@ -668,6 +668,8 @@ class TestSelectRunLookupContainment:
             panelcast_bin="pc",
             pipeline_output_base=base,
         )
+        # Load-bearing: reading sweep_dir warms the cached property, so the
+        # mutation below cannot retroactively move the sweep's own directory.
         assert cfg.sweep_dir == tmp_path / "select" / "s1"
         cfg.sweep_id = "../outside"
         launches: list[Path] = []
