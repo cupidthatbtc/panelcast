@@ -738,14 +738,16 @@ def refusal_detail(
     """The tail every select containment refusal carries, parenthetical and all.
 
     Three outcomes, decided cheapest-first. A *shape* rejection means this run
-    never wrote under that name, so no path is named: the orchestrator refuses
-    the same shapes before creating a run dir, which holds because
-    ``orchestrator._validate_run_id`` runs the same ``paths.validate_run_id``
-    — if those two ever diverge, this branch claims nothing was written when
-    something may have been. The shape half is likewise decided by re-running
-    ``validate_run_id``, exact only while that stays the whole of
-    ``safe_run_dir``'s shape check. Reachable only from the arm handshake;
-    confirmation screens the id before launching.
+    never wrote under that name, so no path is named. Both paths reach it, for
+    different reasons: confirmation screens the id before launching, so select
+    itself refused and the orchestrator was never invoked, while the arm
+    handshake only looks afterwards and relies on the orchestrator refusing the
+    same shapes before creating a run dir — which holds because
+    ``orchestrator._validate_run_id`` runs the same ``paths.validate_run_id``.
+    If those two ever diverge, the *arm* branch claims nothing was written when
+    something may have been; the confirmation one is unaffected, since nothing
+    ran. The shape half is likewise decided by re-running ``validate_run_id``,
+    exact only while that stays the whole of ``safe_run_dir``'s shape check.
 
     An *undecidable* base comes next, before anything is named, because the
     state it detects is the one in which a name cannot be made absolute either.
@@ -757,19 +759,22 @@ def refusal_detail(
 
     Only a well-formed id against a resolvable base gets a breadcrumb, and only
     ``after_fit`` lets it claim artifacts may be out there: a refusal before
-    launching means the name was never written to.
+    launching means the name was never written to. That pre-launch breadcrumb
+    is defensive — reaching it needs something to already exist at a name
+    minted microseconds earlier, which nothing can plant — but it is the one
+    combination that would otherwise fall through to the escape wording.
     """
     try:
         validate_run_id(run_id)
     except RunPathError:
         return (
-            "(this run never wrote under that name — the id's shape is refused "
+            "(this run never wrote under that name — an id of this shape is refused "
             f"before any run dir is created): {exc}"
         )
     undecided = _containment_undecided(output_base)
     if undecided is not None:
         return (
-            f"(containment could not be decided — the output base {output_base} did not "
+            f"(containment could not be decided — the output root {output_base} did not "
             f"resolve: {undecided}; nothing is known to have left it, and the refused name "
             f"cannot be located): Invalid {field}: {run_id!r} could not be resolved against "
             "the output root"
@@ -805,7 +810,8 @@ def _claim_named_run(
     try:
         run_dir = sweep_run_dir(output_base, run_id, field="arm run_id")
     except RunPathError as exc:
-        detail = refusal_detail(output_base, run_id, exc, field="arm run_id")
+        # after_fit is always true here: there is no pre-launch arm resolve.
+        detail = refusal_detail(output_base, run_id, exc, field="arm run_id", after_fit=True)
         return None, f"handshake failed after the arm ran {detail}"
     if not run_dir.exists():
         return None, f"handshake failed: expected run dir {run_dir} was never created"

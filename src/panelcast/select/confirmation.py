@@ -303,7 +303,7 @@ def run_confirmation(
             # would still read as if nothing had run at all. Today the reference
             # label is the longer one (#435), so the seed aborts before the
             # winner is ever minted.
-            phase = "after its fit" if after_fit else "before launching (nothing ran)"
+            phase = "after its fit" if after_fit else "before launching"
             raise RuntimeError(f"{label} fit on seed {seed} refused {phase} {detail}") from exc
 
     def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:

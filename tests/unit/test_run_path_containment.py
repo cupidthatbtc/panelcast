@@ -720,7 +720,10 @@ class TestSelectRunLookupContainment:
         monkeypatch.chdir(tmp_path)
         base = Path("outputs")
         (tmp_path / "outputs").mkdir()
-        cfg = _confirmation_cfg(tmp_path, base)  # built before resolve() breaks
+        cfg = _confirmation_cfg(tmp_path, base)
+        # Load-bearing: warms the cached sweep_dir, which resolves, so the
+        # patch below cannot make the sweep's own directory unreachable.
+        assert cfg.sweep_dir == tmp_path / "select" / "s1"
         launches: list[Path] = []
 
         def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
@@ -740,6 +743,34 @@ class TestSelectRunLookupContainment:
         assert "could not be decided" in error
         assert "resolves outside" not in error
         assert "artifacts may exist" not in error
+        # The relative spelling is the one that says "your cwd is gone", not
+        # "your config is wrong", and the errno is the only other evidence.
+        assert "the output root outputs did not resolve" in error
+        assert "cwd is gone" in error
+
+    def test_a_pre_launch_breadcrumb_never_claims_artifacts_exist(self, tmp_path):
+        # Defensive branch: reaching it needs something already at a name minted
+        # microseconds earlier, so drive `refusal_detail` directly rather than
+        # pretend a sweep can get there.
+        from panelcast.select.runner import refusal_detail
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        exc = RunPathError("Invalid confirmation run_id: 'x' resolves outside the output root")
+
+        before = refusal_detail(
+            base, "sel_s1_x_20260730T120000123456", exc,
+            field="confirmation run_id", after_fit=False,
+        )
+        after = refusal_detail(
+            base, "sel_s1_x_20260730T120000123456", exc,
+            field="confirmation run_id", after_fit=True,
+        )
+
+        assert "nothing had been written yet" in before
+        assert "artifacts may exist" not in before
+        assert "artifacts may exist outside the output base" in after
+        assert str(base / "sel_s1_x_20260730T120000123456") in before
 
     def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
         # The arm mint has no cheap production seam (it happens inside

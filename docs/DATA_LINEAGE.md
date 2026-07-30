@@ -1504,11 +1504,14 @@ alone. What it says next depends on why the id was refused, and there are three
 answers. A *well-formed* id refused for containment means artifacts may exist
 outside the output base, so the message names that path and — when it is a
 symlink — follows one hop, because the link is the only surviving record of
-where they went. A *malformed* id means the orchestrator refused the same shape
-before creating a run directory, so *this run* never wrote under that name and
-the refusal names no path; that is deliberately narrower than "nothing is
-there", since a reserved id like `latest` names a directory the layout itself
-maintains which this run still never wrote. An *unresolvable output base* is
+where they went (a refusal *before* launching says so instead: the name was
+never written to). A *malformed* id means no run directory was ever created
+under it — select refuses it before launching a confirmation fit, and the
+orchestrator refuses the same shape before creating an arm's — so *this run*
+never wrote under that name and the refusal names no path; that is deliberately
+narrower than "nothing is there", since a reserved id like `latest` names a
+directory the layout itself maintains which this run still never wrote. An
+*unresolvable output root* is
 refused identically, because containment fails closed — there the message says
 containment could not be decided, rather than sending anyone looking outside a
 root that nothing left.
