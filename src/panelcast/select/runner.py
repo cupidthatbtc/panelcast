@@ -759,12 +759,15 @@ def refusal_detail(
     dead working directory leaves nothing that can be made absolute, and a
     symlink loop at the run name means following the link is the thing that
     just failed. So the branch names the path that would not resolve, reports
-    the errno, and stops.
-    It owns its own tail, because ``exc`` here says "resolves outside the
-    output root" — ``path_is_within``'s fail-closed default, and the very
-    claim this branch exists to deny. Its trigger is process-wide and
-    persistent, so it fires on whichever lookup comes first, which on the
-    confirmation path is the one before the fit.
+    the errno, and stops — no inference about which trigger fired, because
+    every proxy for that (an absolute base, a path unequal to the root) is
+    right for one and wrong for the other. It owns its own tail, because
+    ``exc`` here says "resolves outside the output root" —
+    ``path_is_within``'s fail-closed default, and the very claim this branch
+    exists to deny. Which lookup meets it depends on the trigger: a dead
+    working directory is process-wide and persistent, so on the confirmation
+    path the pre-launch resolve sees it, while a loop planted at a run name
+    can only be met after that name exists.
 
     Only a well-formed id against a resolvable base gets a breadcrumb, and only
     ``after_fit`` lets it claim artifacts may be out there: a refusal before

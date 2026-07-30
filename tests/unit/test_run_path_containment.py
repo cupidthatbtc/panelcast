@@ -791,11 +791,12 @@ class TestSelectRunLookupContainment:
         assert "artifacts may exist outside the output base" in after
         assert str(base / "sel_s1_x_20260730T120000123456") in before
 
-    def test_an_undecidable_refusal_names_no_path_at_all(self, tmp_path, monkeypatch):
-        # The ordering matters: `_containment_undecided` is consulted before
-        # anything is named, because the state it detects is the one in which
-        # a name cannot be made absolute. Naming one here would emit a path
-        # relative to a cwd that no longer exists.
+    def test_an_undecidable_refusal_builds_no_breadcrumb(self, tmp_path, monkeypatch):
+        # The ordering matters: `_unresolvable` is consulted before the
+        # breadcrumb is built, because the state it detects is the one in which
+        # a name cannot be made absolute. The path that failed is named; the
+        # run dir is not, since locating it is exactly what just became
+        # impossible.
         from panelcast.select.runner import refusal_detail
 
         monkeypatch.chdir(tmp_path)
