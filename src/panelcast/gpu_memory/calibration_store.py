@@ -17,7 +17,6 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from statistics import median
 from typing import Any, TypeGuard
 
 from panelcast.gpu_memory.estimate import (
@@ -37,13 +36,21 @@ _MIN_LOCAL_ENVELOPE = 1.05
 # Slack allowed when re-checking the envelope on the returned constants: the
 # scale is solved in closed form, so only float rounding should ever show up.
 _ENVELOPE_TOLERANCE = 1e-9
-# Shape-driven ratios vary, so history may tighten the 2x shipped cap only to 1.75x.
-_MAX_SHIPPED_PEAK_RATIO = 2.0
-_RECENT_CLEAN_WINDOW = 20
-_MIN_RECENT_CLEAN_POINTS = 5
-_MAX_RECENT_RATIO_MULTIPLIER = 3.0
-_MIN_RECENT_RATIO_CEILING = 1.75
 _PEAK_PROVENANCE_VERSION = 1
+_TRUSTED_ATTRIBUTION = "fit_interval_new_process_peak"
+# Quarantine reasons double as log text and counter keys, so a producer
+# attribution only survives into them if it is one this vocabulary knows —
+# the store is a plain on-disk file and anything else is untrusted text.
+_UNTRUSTED_ATTRIBUTIONS = frozenset(
+    {
+        "overlapping_fit_interval",
+        "missing_start_snapshot",
+        "allocator_identity_changed",
+        "stale_process_peak",
+    }
+)
+# Record ids are free-form on disk; the diagnostics line names a few of them.
+_MAX_LABEL_CHARS = 64
 
 
 def default_store_path() -> Path:
@@ -277,37 +284,37 @@ def _snapshot_is_valid(snapshot: Any) -> TypeGuard[dict[str, Any]]:
 def _provenance_quarantine_reason(record: dict[str, Any], actual: float) -> str | None:
     provenance = record.get("peak_provenance")
     if provenance is None:
-        return "missing provenance"
+        return "missing_provenance"
     if not isinstance(provenance, dict):
-        return "malformed provenance"
+        return "malformed_provenance"
     if (
         provenance.get("version") != _PEAK_PROVENANCE_VERSION
         or provenance.get("source") != "jax_allocator"
         or provenance.get("scope") != "process"
     ):
-        return "unsupported provenance"
+        return "unsupported_provenance"
     if provenance.get("trusted_for_calibration") is not True:
         attribution = provenance.get("attribution")
-        return (
-            attribution if isinstance(attribution, str) and attribution else "untrusted provenance"
-        )
-    if provenance.get("attribution") != "fit_interval_new_process_peak":
-        return "invalid attribution"
+        if isinstance(attribution, str) and attribution in _UNTRUSTED_ATTRIBUTIONS:
+            return attribution
+        return "untrusted_provenance"
+    if provenance.get("attribution") != _TRUSTED_ATTRIBUTION:
+        return "invalid_attribution"
 
     before = provenance.get("before")
     after = provenance.get("after")
     if not _snapshot_is_valid(before):
-        return "malformed provenance"
+        return "malformed_provenance"
     if not _snapshot_is_valid(after):
-        return "malformed provenance"
+        return "malformed_provenance"
     identity_fields = ("process_id", "device_id", "process_index", "platform", "device_kind")
     if any(before[name] != after[name] for name in identity_fields):
-        return "allocator identity changed"
+        return "allocator_identity_changed"
     if after["peak_bytes_in_use"] <= before["peak_bytes_in_use"]:
-        return "stale process peak"
+        return "stale_process_peak"
     measured_gb = after["peak_bytes_in_use"] / (1024**3)
     if abs(measured_gb - actual) > 0.001:
-        return "peak/provenance mismatch"
+        return "peak_provenance_mismatch"
     return None
 
 
@@ -315,19 +322,24 @@ def _record_label(record: dict[str, Any], index: int) -> str:
     for name in ("record_id", "timestamp"):
         value = record.get(name)
         if isinstance(value, str) and value:
-            return value
+            return value[:_MAX_LABEL_CHARS]
     return f"record[{index}]"
 
 
 def _partition_points(
     records: list[dict[str, Any]],
-    jit_buffer_percent: float,
 ) -> tuple[list[_CalibrationPoint], CalibrationDiagnostics]:
+    """Trusted fit-owned points, and why the rest were left out.
+
+    Provenance is the only admission test: a peak this fit provably owns is a
+    real measurement of this machine, however large. Dropping the large ones
+    would leave an envelope verified against a sample censored of exactly the
+    workloads that need the most memory.
+    """
     points: list[_CalibrationPoint] = []
     quarantine_reasons: Counter[str] = Counter()
     quarantined_records: list[tuple[str, str]] = []
     invalid_points = 0
-    recent_ratios: list[float] = []
 
     for index, record in enumerate(records):
         if not isinstance(record, dict):
@@ -347,27 +359,7 @@ def _partition_points(
             continue
 
         base, unit = terms
-        shipped_estimate = (1.0 + jit_buffer_percent) * (
-            base + FIXED_OVERHEAD_GB + COLLECTION_OVERHEAD_FACTOR * unit
-        )
-        if not _is_finite(shipped_estimate) or shipped_estimate <= 0.0:
-            invalid_points += 1
-            continue
-        shipped_ratio = actual_value / shipped_estimate
-        ratio_ceiling = _MAX_SHIPPED_PEAK_RATIO
-        if len(recent_ratios) >= _MIN_RECENT_CLEAN_POINTS:
-            recent_ceiling = max(
-                _MIN_RECENT_RATIO_CEILING,
-                median(recent_ratios[-_RECENT_CLEAN_WINDOW:]) * _MAX_RECENT_RATIO_MULTIPLIER,
-            )
-            ratio_ceiling = min(ratio_ceiling, recent_ceiling)
-        if shipped_ratio > ratio_ceiling:
-            quarantine_reasons["peak influence"] += 1
-            quarantined_records.append((_record_label(record, index), "peak influence"))
-            continue
-
         points.append(_CalibrationPoint(base, unit, actual_value))
-        recent_ratios.append(shipped_ratio)
 
     reasons = tuple(sorted(quarantine_reasons.items()))
     return points, CalibrationDiagnostics(
@@ -438,7 +430,7 @@ def _refit_with_diagnostics(
     if not _is_finite(jit_buffer_percent) or jit_buffer_percent < 0.0:
         return None, CalibrationDiagnostics(len(records), 0, 0, len(records), (), ())
 
-    points, diagnostics = _partition_points(records, float(jit_buffer_percent))
+    points, diagnostics = _partition_points(records)
     if diagnostics.quarantined_points:
         logger.warning(
             "quarantined %d GPU calibration record(s): %s",

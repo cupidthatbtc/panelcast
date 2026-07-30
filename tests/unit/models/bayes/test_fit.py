@@ -23,7 +23,9 @@ from panelcast.models.bayes.fit import (
     MCMCConfig,
     fit_model,
     get_gpu_info,
+    measure_peak_gpu_bytes,
 )
+from tests.helpers.gpu_provenance import allocator_snapshot
 
 
 class TestMCMCConfigValidation:
@@ -591,6 +593,53 @@ class TestFitModelBasic:
         )
 
         assert result.divergences == 3
+
+
+class TestFitOwnedPeak:
+    """The peak a fit reports is the one its own interval established."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_interval_state(self, monkeypatch):
+        from panelcast.gpu_memory import measure
+
+        monkeypatch.setattr(measure, "_ACTIVE_FIT_INTERVALS", 0)
+        monkeypatch.setattr(measure, "_FIT_OVERLAP_EPOCH", 0)
+
+    @patch("panelcast.models.bayes.fit.MCMC")
+    @patch("panelcast.models.bayes.fit.NUTS")
+    @patch("panelcast.models.bayes.fit.get_gpu_info")
+    @patch("panelcast.models.bayes.fit.jax.default_backend")
+    @patch("panelcast.gpu_memory.measure.capture_jax_allocator_snapshot")
+    def test_result_carries_the_peak_and_its_provenance(
+        self, capture, mock_backend, mock_gpu, mock_nuts, mock_mcmc_cls
+    ):
+        capture.side_effect = [allocator_snapshot(1 * 1024**3), allocator_snapshot(6 * 1024**3)]
+        mock_backend.return_value = "gpu"
+        mock_gpu.return_value = "NVIDIA Test"
+        mock_nuts.return_value = MagicMock()
+        mock_mcmc_cls.return_value = _make_mock_mcmc()
+
+        result = fit_model(
+            model=lambda **kw: None,
+            model_args=_make_model_args(),
+            config=MCMCConfig(num_warmup=5, num_samples=10, num_chains=2, seed=42),
+            progress_bar=False,
+        )
+
+        assert result.peak_gpu_memory_bytes == 6 * 1024**3
+        provenance = result.peak_gpu_memory_provenance
+        assert provenance is not None
+        assert provenance["attribution"] == "fit_interval_new_process_peak"
+
+    @patch("panelcast.gpu_memory.measure.capture_jax_allocator_snapshot")
+    def test_process_peak_helper_reads_the_allocator(self, capture):
+        capture.return_value = allocator_snapshot(3 * 1024**3)
+        assert measure_peak_gpu_bytes() == 3 * 1024**3
+
+    @patch("panelcast.gpu_memory.measure.capture_jax_allocator_snapshot")
+    def test_process_peak_helper_is_none_without_a_gpu(self, capture):
+        capture.return_value = None
+        assert measure_peak_gpu_bytes() is None
 
 
 class TestFitModelExcludeFromIdata:

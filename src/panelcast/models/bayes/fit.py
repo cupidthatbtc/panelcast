@@ -830,11 +830,12 @@ def fit_model(
         warm_start=warm_start_kwargs,
     )
 
-    from panelcast.gpu_memory.measure import begin_fit_peak_tracking, end_fit_peak_tracking
+    from panelcast.gpu_memory.measure import track_fit_peak
 
-    peak_tracking = begin_fit_peak_tracking()
-    start_time = time.perf_counter()
-    try:
+    # The interval closes before post-sampling exports and InferenceData
+    # allocations, so the peak it reports is the sampler's alone.
+    with track_fit_peak() as fit_peak:
+        start_time = time.perf_counter()
         mcmc, samples, extra_fields, resumed_from_checkpoint = _run_sampling(
             kernel,
             config,
@@ -845,11 +846,10 @@ def fit_model(
             checkpoint_dir,
             checkpoint_identity,
         )
-    finally:
-        # Snapshot before post-sampling exports and InferenceData allocations.
-        peak_gpu_memory_bytes, peak_gpu_memory_provenance = end_fit_peak_tracking(peak_tracking)
 
     runtime_seconds = time.perf_counter() - start_time
+    peak_gpu_memory_bytes = fit_peak.peak_bytes
+    peak_gpu_memory_provenance = fit_peak.provenance
 
     _maybe_export_warmup(mcmc, model, run_args, config, warmup_export_path)
 

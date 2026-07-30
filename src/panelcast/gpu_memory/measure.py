@@ -14,6 +14,8 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -206,6 +208,29 @@ def end_fit_peak_tracking(
         after,
         interval_exclusive=interval_exclusive,
     )
+
+
+@dataclass
+class FitPeakResult:
+    """Slot filled in when the tracked interval closes."""
+
+    peak_bytes: int | None = None
+    provenance: dict[str, Any] | None = None
+
+
+@contextmanager
+def track_fit_peak() -> Iterator[FitPeakResult]:
+    """Bracket a fit interval so a missed close can't strand the interval count.
+
+    A leaked count never falls back to zero, so every later fit in the process
+    would be attributed ``overlapping_fit_interval`` and quarantined.
+    """
+    token = begin_fit_peak_tracking()
+    result = FitPeakResult()
+    try:
+        yield result
+    finally:
+        result.peak_bytes, result.provenance = end_fit_peak_tracking(token)
 
 
 def get_jax_memory_stats(device_index: int = 0) -> JaxMemoryStats:

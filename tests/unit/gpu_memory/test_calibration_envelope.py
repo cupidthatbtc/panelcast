@@ -18,6 +18,7 @@ from panelcast.gpu_memory.calibration_store import (
     _MIN_LOCAL_ENVELOPE,
     PerMachineCalibration,
     _envelope_scale,
+    _is_finite,
     _partition_points,
     refit_constants,
     resolve_calibration,
@@ -27,6 +28,7 @@ from panelcast.gpu_memory.estimate import (
     FIXED_OVERHEAD_GB,
     estimate_memory_gb,
 )
+from tests.helpers.gpu_provenance import peak_provenance as _provenance
 
 ENVELOPE_SLACK = 1 - 1e-9
 
@@ -46,46 +48,15 @@ def _inputs(**overrides) -> dict:
     return base
 
 
-def _provenance(actual: float, *, attribution: str = "fit_interval_new_process_peak") -> dict:
-    peak = round(actual * 1024**3)
-
-    def snapshot(value: int) -> dict:
-        return {
-            "recorded_at": "2026-07-30T00:00:00+00:00",
-            "process_id": 1234,
-            "thread_id": 5678,
-            "device_id": 0,
-            "process_index": 0,
-            "platform": "gpu",
-            "device_kind": "test GPU",
-            "bytes_in_use": value,
-            "peak_bytes_in_use": value,
-            "bytes_limit": max(peak * 2, 1),
-            "bytes_reserved": value,
-            "num_allocs": 1,
-        }
-
-    trusted = attribution == "fit_interval_new_process_peak"
-    before_peak = max(peak - 1, 0) if trusted else peak
-    return {
-        "version": 1,
-        "source": "jax_allocator",
-        "scope": "process",
-        "trusted_for_calibration": trusted,
-        "attribution": attribution,
-        "before": snapshot(before_peak),
-        "after": snapshot(peak),
-    }
-
-
 def _record(inputs: dict, actual: float | None) -> dict:
+    # Gate on the production predicate: an int peak is a real measurement and
+    # must keep its provenance, or the record reads as "missing provenance".
+    usable = _is_finite(actual) and actual > 0
     return {
         "estimate_inputs": inputs,
         "expected_gb": 1.0,
         "actual_peak_gb": actual,
-        "peak_provenance": _provenance(actual)
-        if isinstance(actual, float) and actual > 0
-        else None,
+        "peak_provenance": _provenance(actual) if usable else None,
         "wall_clock_seconds": 600.0,
         "context": {},
     }
@@ -212,9 +183,12 @@ class TestPeakOwnershipAndInfluence:
         assert factor == COLLECTION_OVERHEAD_FACTOR
         assert fixed == FIXED_OVERHEAD_GB
         assert "8 quarantined" in source
-        assert "missing provenance=8" in source
+        assert "missing_provenance=8" in source
 
-    def test_recent_clean_history_quarantines_a_relative_jump(self):
+    def test_a_fit_owned_jump_against_clean_history_still_binds(self):
+        """A fit that really did take 1.9x the shipped estimate is evidence
+        about this machine. Dropping it as an outlier would hand back constants
+        that under-cover the one workload that needed the memory."""
         records = []
         for i in range(9):
             inputs = _inputs(num_samples=100 + 150 * i)
@@ -225,8 +199,9 @@ class TestPeakOwnershipAndInfluence:
         cal = refit_constants(records)
 
         assert cal is not None
-        assert cal.n_points == 8
-        assert cal.quarantine_reasons == (("peak influence", 1),)
+        assert cal.n_points == 9
+        assert cal.quarantine_reasons == ()
+        _assert_envelope_holds(cal, records)
 
     def test_legitimate_large_workloads_remain_eligible(self):
         records = _exact_records(
@@ -323,6 +298,44 @@ class TestEnvelopeIsVerifiedNotAssumed:
         assert cal.n_points == 8
         _assert_envelope_holds(cal, records[:-1])
 
+    def test_an_uncoverable_design_is_refused(self, monkeypatch):
+        """No scale covers every point, so the refit ships nothing rather than
+        constants that under-cover the point it could not lift."""
+        import panelcast.gpu_memory.calibration_store as store
+
+        monkeypatch.setattr(store, "_envelope_scale", lambda *a, **k: None)
+        assert refit_constants(_exact_records(2.5, 0.2)) is None
+
+    def test_scaling_that_overflows_the_constants_is_refused(self, monkeypatch):
+        import panelcast.gpu_memory.calibration_store as store
+
+        monkeypatch.setattr(store, "_envelope_scale", lambda *a, **k: 1.7e308)
+        assert refit_constants(_exact_records(2.5, 0.2)) is None
+
+    def test_constants_failing_their_own_recheck_are_discarded(self, monkeypatch, caplog):
+        """The closed-form scale is verified, not trusted: if the re-check says
+        a point is under-covered the whole calibration is dropped."""
+        import panelcast.gpu_memory.calibration_store as store
+
+        monkeypatch.setattr(store, "_min_envelope_ratio", lambda *a, **k: 1.0)
+        with caplog.at_level("WARNING"):
+            assert refit_constants(_exact_records(2.5, 0.2)) is None
+        assert "over-coverage check" in caplog.text
+
+    def test_trusted_points_with_no_collection_spread_are_refused(self):
+        """Eight clean points sharing one design cannot identify two constants."""
+        inputs = _inputs(num_samples=500)
+        shipped = estimate_memory_gb(**inputs).total_gb
+        records = [
+            _record(_inputs(num_samples=500), shipped * (0.9 + 0.001 * i)) for i in range(8)
+        ]
+
+        points, diagnostics = _partition_points(records)
+
+        assert len(points) == 8
+        assert diagnostics.quarantine_reasons == ()
+        assert refit_constants(records) is None
+
     def test_reported_min_ratio_matches_the_returned_constants(self):
         records = _exact_records(2.2, 0.18, n=10)
         cal = refit_constants(records)
@@ -352,16 +365,19 @@ class TestEnvelopeIsVerifiedNotAssumed:
         assert cal is not None
         _assert_envelope_holds(cal, records)
 
-    def test_single_extreme_leverage_point_is_quarantined(self):
+    def test_single_extreme_leverage_point_binds_the_envelope(self):
+        """A 60x peak the fit provably owns dominates the binding constraint,
+        exactly as it should — provenance, not its size, is what admits it."""
         records = _exact_records(2.5, 0.2, n=9)
         records[0]["actual_peak_gb"] *= 60.0
         records[0]["peak_provenance"] = _provenance(records[0]["actual_peak_gb"])
+
         cal = refit_constants(records)
+
         assert cal is not None
-        assert cal.n_points == 8
-        assert cal.quarantined_points == 1
-        assert cal.quarantine_reasons == (("peak influence", 1),)
-        _assert_envelope_holds(cal, records[1:])
+        assert cal.n_points == 9
+        assert cal.quarantined_points == 0
+        _assert_envelope_holds(cal, records)
 
     def test_already_covered_constants_are_not_inflated_further(self):
         """The 0.1 factor floor already over-covers here, so no scale applies."""
@@ -407,7 +423,7 @@ class TestEnvelopeProperty:
         assert math.isfinite(cal.fixed_overhead_gb)
         assert cal.collection_overhead_factor > 0.0
         assert cal.fixed_overhead_gb >= 0.0
-        points, _ = _partition_points(records, 0.10)
+        points, _ = _partition_points(records)
         assert cal.n_points == len(points)
         for point in points:
             estimate = 1.10 * (
@@ -432,7 +448,7 @@ class TestEnvelopeProperty:
         cal = refit_constants(records)
         if cal is None:
             return
-        points, _ = _partition_points(records, 0.10)
+        points, _ = _partition_points(records)
         assert cal.n_points == len(points)
         for point in points:
             estimate = 1.10 * (
@@ -450,7 +466,7 @@ class TestEnvelopeProperty:
         cal = refit_constants(records)
         if cal is None:
             return
-        points, _ = _partition_points(records, 0.10)
+        points, _ = _partition_points(records)
         assert cal.n_points == len(points)
         for point in points:
             estimate = 1.10 * (

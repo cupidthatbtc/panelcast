@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from panelcast.gpu_memory.calibration_store import (
+    _MAX_LABEL_CHARS,
     _MIN_LOCAL_ENVELOPE,
     _linear_terms,
     _partition_points,
@@ -22,6 +23,7 @@ from panelcast.gpu_memory.estimate import (
     FIXED_OVERHEAD_GB,
     estimate_memory_gb,
 )
+from tests.helpers.gpu_provenance import peak_provenance as _provenance
 
 
 def _inputs(num_samples: int = 500, num_chains: int = 2, n_obs: int = 4000) -> dict:
@@ -34,38 +36,6 @@ def _inputs(num_samples: int = 500, num_chains: int = 2, n_obs: int = 4000) -> d
         "num_samples": num_samples,
         "num_warmup": num_samples,
         "exclude_rw_raw_from_collection": False,
-    }
-
-
-def _provenance(actual: float, *, attribution: str = "fit_interval_new_process_peak") -> dict:
-    peak = round(actual * 1024**3)
-
-    def snapshot(value: int) -> dict:
-        return {
-            "recorded_at": "2026-07-30T00:00:00+00:00",
-            "process_id": 1234,
-            "thread_id": 5678,
-            "device_id": 0,
-            "process_index": 0,
-            "platform": "gpu",
-            "device_kind": "test GPU",
-            "bytes_in_use": value,
-            "peak_bytes_in_use": value,
-            "bytes_limit": max(peak * 2, 1),
-            "bytes_reserved": value,
-            "num_allocs": 1,
-        }
-
-    trusted = attribution == "fit_interval_new_process_peak"
-    before_peak = max(peak - 1, 0) if trusted else peak
-    return {
-        "version": 1,
-        "source": "jax_allocator",
-        "scope": "process",
-        "trusted_for_calibration": trusted,
-        "attribution": attribution,
-        "before": snapshot(before_peak),
-        "after": snapshot(peak),
     }
 
 
@@ -157,7 +127,7 @@ class TestRefit:
             r["peak_provenance"] = _provenance(r["actual_peak_gb"])
         cal = refit_constants(records)
         assert cal is not None
-        points, _ = _partition_points(records, 0.10)
+        points, _ = _partition_points(records)
         assert cal.n_points == len(points)
         for point in points:
             estimate = 1.10 * (
@@ -298,6 +268,107 @@ class TestAppendRobustness:
         records = load_records(path)
         assert len(records) == 2
         assert records[-1]["estimate_inputs"]["num_samples"] == 999
+
+
+class TestProvenanceQuarantineReasons:
+    """One canonical snake_case key per rejection, whatever the store holds.
+
+    The reasons are counter keys and log text, so a doctored store must not be
+    able to split a counter in two or push its own text through them.
+    """
+
+    ACTUAL = 0.4
+
+    def _reason(self, provenance, actual: float | None = None, record_id: str = "pid-42") -> str:
+        actual = self.ACTUAL if actual is None else actual
+        record = {
+            "record_id": record_id,
+            "estimate_inputs": _inputs(),
+            "expected_gb": actual,
+            "actual_peak_gb": actual,
+            "peak_provenance": provenance,
+            "wall_clock_seconds": 600.0,
+            "context": {},
+        }
+        points, diagnostics = _partition_points([record])
+        assert points == []
+        assert diagnostics.quarantined_points == 1
+        (reason, count), *rest = diagnostics.quarantine_reasons
+        assert count == 1
+        assert rest == []
+        assert diagnostics.quarantined_records == ((record_id[:_MAX_LABEL_CHARS], reason),)
+        return reason
+
+    def test_clean_provenance_is_not_quarantined(self):
+        points, diagnostics = _partition_points(
+            [
+                {
+                    "record_id": "pid-1",
+                    "estimate_inputs": _inputs(),
+                    "actual_peak_gb": self.ACTUAL,
+                    "peak_provenance": _provenance(self.ACTUAL),
+                }
+            ]
+        )
+        assert len(points) == 1
+        assert diagnostics.quarantine_reasons == ()
+
+    def test_non_dict_provenance(self):
+        assert self._reason("jax_allocator") == "malformed_provenance"
+
+    def test_foreign_provenance_envelope(self):
+        provenance = {**_provenance(self.ACTUAL), "scope": "device"}
+        assert self._reason(provenance) == "unsupported_provenance"
+
+    def test_trusted_flag_with_a_foreign_attribution(self):
+        provenance = {**_provenance(self.ACTUAL), "attribution": "hand_edited"}
+        assert self._reason(provenance) == "invalid_attribution"
+
+    def test_absent_start_snapshot(self):
+        assert self._reason({**_provenance(self.ACTUAL), "before": None}) == "malformed_provenance"
+
+    def test_end_snapshot_with_a_negative_counter(self):
+        provenance = _provenance(self.ACTUAL)
+        provenance["after"] = {**provenance["after"], "num_allocs": -1}
+        assert self._reason(provenance) == "malformed_provenance"
+
+    def test_allocator_identity_change_across_the_interval(self):
+        provenance = _provenance(self.ACTUAL)
+        provenance["after"] = {**provenance["after"], "device_id": 1}
+        assert self._reason(provenance) == "allocator_identity_changed"
+
+    def test_peak_the_fit_did_not_raise(self):
+        provenance = _provenance(self.ACTUAL)
+        provenance["before"] = provenance["after"]
+        assert self._reason(provenance) == "stale_process_peak"
+
+    def test_peak_that_disagrees_with_the_recorded_measurement(self):
+        assert self._reason(_provenance(self.ACTUAL), actual=self.ACTUAL * 2) == (
+            "peak_provenance_mismatch"
+        )
+
+    @pytest.mark.parametrize(
+        "attribution",
+        ["overlapping_fit_interval", "missing_start_snapshot", "stale_process_peak"],
+    )
+    def test_known_producer_attributions_survive_verbatim(self, attribution):
+        provenance = _provenance(self.ACTUAL, attribution=attribution)
+        assert self._reason(provenance) == attribution
+
+    @pytest.mark.parametrize("attribution", ["x" * 4096, ["stale_process_peak"], 7, ""])
+    def test_unknown_attributions_never_reach_the_counters(self, attribution):
+        """Anything outside the vocabulary — including unhashable junk — is
+        reported as one bounded key rather than echoed out of the store."""
+        provenance = {
+            **_provenance(self.ACTUAL, attribution="stale_process_peak"),
+            "attribution": attribution,
+        }
+        assert self._reason(provenance) == "untrusted_provenance"
+
+    def test_long_record_ids_are_clamped_in_the_diagnostics(self):
+        """The store names offending records in a log line; a 500-char id from
+        disk must not be the thing that decides how long that line is."""
+        assert self._reason("not a mapping", record_id="r" * 500) == "malformed_provenance"
 
 
 class TestLinearTermsGateFlags:
