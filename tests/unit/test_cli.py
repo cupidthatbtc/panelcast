@@ -1121,6 +1121,7 @@ class TestPreflightFull:
             status=status,
             exit_code=exit_code,
         )
+
         def fake_extrapolated_check(**kwargs):
             if captured is not None:
                 captured.update(kwargs)
@@ -1211,13 +1212,13 @@ class TestPreflightFull:
 
     @pytest.mark.parametrize(
         ("max_events", "expected"),
-        [("1", ()), ("10", ("user_rw_raw",))],
+        [("1", ()), ("2", ("user_rw_raw",)), ("10", ("user_rw_raw",))],
     )
     def test_preflight_exclusion_follows_site_presence(
         self, monkeypatch, tmp_path, max_events, expected
     ):
         """Single-event panels never sample rw_raw, so the mini-run must not
-        be told to exclude it (#410)."""
+        be told to exclude it (#410); two events already do."""
         monkeypatch.chdir(tmp_path)
 
         features_path = tmp_path / "data" / "features"
@@ -1243,6 +1244,8 @@ class TestPreflightFull:
         )
         assert result.exit_code == 0
         assert captured["exclude_collection"] == expected
+        # A flag that silently buys nothing is worse than a noisy one.
+        assert ("nothing to exclude" in strip_ansi(result.output)) is (expected == ())
 
     def test_preflight_full_fail_aborts_without_force(self, monkeypatch, tmp_path):
         """--preflight-full fail aborts without --force-run."""

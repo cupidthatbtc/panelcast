@@ -1491,13 +1491,24 @@ class TestRwCollectionExcludes:
         # there even when the production fit runs the skew innovation.
         assert "user_rw_raw_abs" not in rw_collection_excludes("user", 10)
 
+    @pytest.mark.parametrize("target_transform", ["identity", "offset_logit"])
     @mock.patch("panelcast.gpu_memory.measure.get_jax_memory_stats")
     @mock.patch("numpyro.infer.MCMC")
     @mock.patch("numpyro.infer.NUTS")
     @mock.patch("panelcast.models.bayes.model.make_score_model")
-    def test_single_event_exclusion_runs_without_keyerror(
-        self, mock_make_model, mock_nuts, mock_mcmc_class, mock_get_stats, minimal_model_args
+    def test_pinned_innovation_type_matches_the_priors_the_model_receives(
+        self,
+        mock_make_model,
+        mock_nuts,
+        mock_mcmc_class,
+        mock_get_stats,
+        minimal_model_args,
+        target_transform,
     ):
+        """The helper hardcodes the default innovation type because the mini-run
+        never forwards one. Fail loudly the day that stops being true."""
+        from panelcast.models.bayes.priors import get_default_priors, rw_latent_sites
+
         mock_make_model.return_value = "model"
         mock_nuts.return_value = "nuts_kernel"
         mock_mcmc = mock.Mock()
@@ -1508,13 +1519,41 @@ class TestRwCollectionExcludes:
         mock_get_stats.return_value = mock_stats
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump({**minimal_model_args, "max_seq": 4}, f)
+            temp_path = Path(f.name)
+        try:
+            run_and_measure(temp_path, target_transform=target_transform)
+        finally:
+            temp_path.unlink()
+
+        # The model falls back to get_default_priors() when the mini-run omits
+        # the kwarg, so that is the effective configuration either way.
+        effective = mock_mcmc.run.call_args[1].get("priors") or get_default_priors()
+        assert rw_collection_excludes("user", 4) == rw_latent_sites(
+            "user", effective.rw_innovation_type, max_seq=4
+        ).present()
+
+    @mock.patch("panelcast.gpu_memory.measure.get_jax_memory_stats")
+    def test_single_event_mini_run_survives_the_exclusion(
+        self, mock_get_stats, minimal_model_args
+    ):
+        """The #410 crash, end to end: NumPyro pops the named sites off a real
+        trace, so only an unmocked sampler can prove the exclusion is sound.
+        Peak memory is the one GPU-only step, so it stays stubbed."""
+        assert minimal_model_args["max_seq"] == 1
+        mock_stats = mock.Mock()
+        mock_stats.peak_bytes_in_use = 1024
+        mock_stats.peak_gb = 0.0
+        mock_get_stats.return_value = mock_stats
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(minimal_model_args, f)
             temp_path = Path(f.name)
         try:
             excludes = rw_collection_excludes("user", minimal_model_args["max_seq"])
-            result = run_and_measure(temp_path, exclude_collection=excludes)
+            assert excludes == ()
+            result = run_and_measure(temp_path, num_warmup=1, exclude_collection=excludes)
             assert result["success"] is True
-            assert mock_mcmc.run.call_args[1]["extra_fields"] == ()
         finally:
             temp_path.unlink()
 

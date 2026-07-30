@@ -322,6 +322,12 @@ def _run_full_preflight(
         if config.exclude_rw_raw_from_collection
         else ()
     )
+    if config.exclude_rw_raw_from_collection and not preflight_exclude_collection:
+        console.print(
+            "[bold yellow]Note:[/bold yellow] --exclude-rw-raw-from-collection has "
+            "nothing to exclude at max_events=1 (no random walk is sampled), so it "
+            "saves no memory here."
+        )
     # The mini-run model cannot express these gates, so the calibration
     # measures a smaller model and the projection understates the gated
     # memory terms (EIV adds an n_obs-sized latent per collected draw).
