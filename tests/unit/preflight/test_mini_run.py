@@ -14,7 +14,11 @@ from unittest import mock
 import pytest
 
 import panelcast
-from panelcast.preflight.mini_run import _parse_args, run_and_measure
+from panelcast.preflight.mini_run import (
+    _parse_args,
+    run_and_measure,
+    rw_collection_excludes,
+)
 
 _PKG_PARENT = str(Path(panelcast.__file__).resolve().parent.parent)
 
@@ -1467,6 +1471,50 @@ class TestExcludeCollectionPrefixGuard:
             result = run_and_measure(temp_path, prefix="perf", exclude_collection=("perf_rw_raw",))
             assert result["success"] is True
             assert mock_mcmc.run.call_args[1]["extra_fields"] == ("~z.perf_rw_raw",)
+        finally:
+            temp_path.unlink()
+
+
+class TestRwCollectionExcludes:
+    """The exclusion list must name only sites the mini-run model samples."""
+
+    def test_single_event_panel_excludes_nothing(self):
+        assert rw_collection_excludes("user", 1) == ()
+        assert rw_collection_excludes("user", 0) == ()
+
+    def test_multi_event_panel_excludes_rw_raw(self):
+        assert rw_collection_excludes("user", 2) == ("user_rw_raw",)
+        assert rw_collection_excludes("perf", 50) == ("perf_rw_raw",)
+
+    def test_never_names_the_skew_site(self):
+        # The mini-run builds default priors, so rw_raw_abs is never sampled
+        # there even when the production fit runs the skew innovation.
+        assert "user_rw_raw_abs" not in rw_collection_excludes("user", 10)
+
+    @mock.patch("panelcast.gpu_memory.measure.get_jax_memory_stats")
+    @mock.patch("numpyro.infer.MCMC")
+    @mock.patch("numpyro.infer.NUTS")
+    @mock.patch("panelcast.models.bayes.model.make_score_model")
+    def test_single_event_exclusion_runs_without_keyerror(
+        self, mock_make_model, mock_nuts, mock_mcmc_class, mock_get_stats, minimal_model_args
+    ):
+        mock_make_model.return_value = "model"
+        mock_nuts.return_value = "nuts_kernel"
+        mock_mcmc = mock.Mock()
+        mock_mcmc_class.return_value = mock_mcmc
+        mock_stats = mock.Mock()
+        mock_stats.peak_bytes_in_use = 1024
+        mock_stats.peak_gb = 0.0
+        mock_get_stats.return_value = mock_stats
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(minimal_model_args, f)
+            temp_path = Path(f.name)
+        try:
+            excludes = rw_collection_excludes("user", minimal_model_args["max_seq"])
+            result = run_and_measure(temp_path, exclude_collection=excludes)
+            assert result["success"] is True
+            assert mock_mcmc.run.call_args[1]["extra_fields"] == ()
         finally:
             temp_path.unlink()
 

@@ -54,9 +54,26 @@ import time
 from pathlib import Path
 from typing import Any
 
-__all__ = ["run_and_measure"]
+__all__ = ["run_and_measure", "rw_collection_excludes"]
 
 logger = logging.getLogger(__name__)
+
+
+def rw_collection_excludes(prefix: str, max_seq: int) -> tuple[str, ...]:
+    """Random-walk sites the mini-run model actually samples, hence excludable.
+
+    Callers must build ``exclude_collection`` from this rather than assuming
+    ``{prefix}_rw_raw`` exists: NumPyro's ``~z.<site>`` pops the site with no
+    default, so naming a site the model never sampled is a KeyError. Single-
+    event panels skip the walk entirely (#400), and the mini-run always builds
+    its priors from the defaults, so the skew innovation's ``rw_raw_abs`` is
+    never present here even when the production fit has it.
+    """
+    from panelcast.models.bayes.priors import PriorConfig, rw_latent_sites
+
+    return rw_latent_sites(
+        prefix, PriorConfig.rw_innovation_type, max_seq=max_seq
+    ).present()
 
 
 def run_and_measure(

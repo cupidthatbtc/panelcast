@@ -214,6 +214,7 @@ def _run_full_preflight(
         run_extrapolated_preflight_check,
     )
     from panelcast.preflight.full_check import _derive_dimensions_from_model_args
+    from panelcast.preflight.mini_run import rw_collection_excludes
 
     console = Console()
 
@@ -311,9 +312,13 @@ def _run_full_preflight(
     model_signature.update(_period_signature(config))
     # Mirror the production fit's memory gate in the calibration runs:
     # with the rw_raw exclusion on, the dominant memory term disappears
-    # and the projection must reflect that.
+    # and the projection must reflect that. Gate on site presence exactly
+    # like train_bayes does (#400) — a single-event panel never samples the
+    # walk, and excluding an unsampled site crashes the mini-run.
     preflight_exclude_collection = (
-        (f"{preflight_descriptor.model_prefix}_rw_raw",)
+        rw_collection_excludes(
+            preflight_descriptor.model_prefix, int(model_args["max_seq"])
+        )
         if config.exclude_rw_raw_from_collection
         else ()
     )

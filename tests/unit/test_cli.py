@@ -1079,8 +1079,11 @@ def _make_pipeline_mocks_new(monkeypatch, exit_code: int = 0):
 class TestPreflightFull:
     """Tests for --preflight-full code path."""
 
-    def _setup_preflight_full_mocks(self, monkeypatch, status="pass", exit_code=0):
-        """Set up mocks for the full preflight path."""
+    def _setup_preflight_full_mocks(self, monkeypatch, status="pass", exit_code=0, captured=None):
+        """Set up mocks for the full preflight path.
+
+        ``captured`` receives the kwargs the calibration call was made with.
+        """
         import numpy as np
 
         # Mock load_training_data
@@ -1118,9 +1121,14 @@ class TestPreflightFull:
             status=status,
             exit_code=exit_code,
         )
+        def fake_extrapolated_check(**kwargs):
+            if captured is not None:
+                captured.update(kwargs)
+            return fake_result
+
         monkeypatch.setattr(
             "panelcast.preflight.run_extrapolated_preflight_check",
-            lambda **kwargs: fake_result,
+            fake_extrapolated_check,
         )
         monkeypatch.setattr(
             "panelcast.preflight.render_extrapolation_result",
@@ -1200,6 +1208,41 @@ class TestPreflightFull:
         output = strip_ansi(result.output)
         assert "Warning" in output
         assert "errors_in_variables" in output
+
+    @pytest.mark.parametrize(
+        ("max_events", "expected"),
+        [("1", ()), ("10", ("user_rw_raw",))],
+    )
+    def test_preflight_exclusion_follows_site_presence(
+        self, monkeypatch, tmp_path, max_events, expected
+    ):
+        """Single-event panels never sample rw_raw, so the mini-run must not
+        be told to exclude it (#410)."""
+        monkeypatch.chdir(tmp_path)
+
+        features_path = tmp_path / "data" / "features"
+        features_path.mkdir(parents=True)
+        (features_path / "train_features.parquet").write_text("dummy")
+        splits_path = tmp_path / "data" / "splits" / "within_entity_temporal"
+        splits_path.mkdir(parents=True)
+        (splits_path / "train.parquet").write_text("dummy")
+
+        captured: dict[str, object] = {}
+        self._setup_preflight_full_mocks(monkeypatch, captured=captured)
+
+        result = runner.invoke(
+            app,
+            [
+                "run",
+                "--preflight-full",
+                "--preflight-only",
+                "--exclude-rw-raw-from-collection",
+                "--max-events",
+                max_events,
+            ],
+        )
+        assert result.exit_code == 0
+        assert captured["exclude_collection"] == expected
 
     def test_preflight_full_fail_aborts_without_force(self, monkeypatch, tmp_path):
         """--preflight-full fail aborts without --force-run."""
