@@ -274,25 +274,6 @@ def run_confirmation(
     prior = _reusable_prior_seeds(out_path, identity)
     timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
-    def _drop_escaping_link(run_id: str) -> str:
-        """Remove a refused run name that is a symlink, never what it points at.
-
-        Containment is a property of an id lookup, but `runs list`, the
-        dashboard, and the orchestrator's newest-run scan all enumerate the
-        output base directly, and ``is_dir()`` follows a link. Leaving the
-        pointer behind would hand those walkers the escape the lookup just
-        refused. ``unlink`` never follows a symlink, and the lexical parent
-        check keeps a separator-bearing id from aiming it anywhere else.
-        """
-        candidate = cfg.pipeline_output_base / run_id
-        try:
-            if candidate.parent == Path(cfg.pipeline_output_base) and candidate.is_symlink():
-                candidate.unlink()
-                return f"; removed the escaping link at {candidate}"
-        except OSError as exc:  # a link we cannot remove is still refused
-            return f"; the escaping link at {candidate} could not be removed: {exc}"
-        return ""
-
     def _resolve(run_id: str, seed: int, label: str, *, after_fit: bool) -> Path:
         """This fit's run dir, contained — raised in ``_one_fit``'s failure shape.
 
@@ -300,15 +281,18 @@ def run_confirmation(
         on how wide the seed loop's handler happens to be. The two phases mean
         very different things to whoever reads the log, so they say so: a
         pre-launch refusal costs nothing, while a post-fit one means a full fit
-        has already run and may have written outside the output base.
+        has already run and may have written outside the output base. The
+        refused name is left exactly as it is — this lookup does not delete —
+        and named, because when it is a symlink it is the only surviving record
+        of where those artifacts went (#413).
         """
         try:
             return sweep_run_dir(cfg.pipeline_output_base, run_id, field="confirmation run_id")
         except RunPathError as exc:
             if after_fit:
                 phase = (
-                    "refused after its fit (artifacts may exist outside the output base"
-                    f"{_drop_escaping_link(run_id)})"
+                    "refused after its fit (artifacts may exist outside the output base; "
+                    f"{cfg.pipeline_output_base / run_id} is left in place, unread)"
                 )
             else:
                 phase = "refused before launching (nothing ran)"

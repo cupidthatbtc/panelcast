@@ -748,10 +748,12 @@ class TestSelectRunLookupContainment:
         assert result.seeds[0].error is not None
         assert "confirmation run_id" in result.seeds[0].error
         assert result.seeds[0].reference_run is None
-        # The fit ran, so this is the post-fit branch — and the pointer it left
-        # inside the output base is removed, while its target is untouched.
+        # The fit ran, so this is the post-fit branch. The lookup is read-only:
+        # the escaping name survives, named in the error as the breadcrumb to
+        # wherever the fit's artifacts actually landed (#413).
         assert "after its fit" in result.seeds[0].error
-        assert links and not links[0].exists() and not links[0].is_symlink()
+        assert str(links[0]) in result.seeds[0].error
+        assert links[0].is_symlink()
         assert (outside / "keep.txt").exists()
 
     def test_confirmation_lookup_tolerates_an_unwritten_output_base(self, tmp_path):
@@ -774,15 +776,16 @@ class TestSelectRunLookupContainment:
         assert result.seeds[0].winner_run is not None
         assert "confirmation run_id" not in (result.seeds[0].error or "")
 
-    def _refuse_after_fit(self, monkeypatch):
-        """Make only the post-fit resolve refuse, whatever is on disk.
-
-        A run name can stop being contained without being a symlink itself —
-        a containment change in a parent produces the same refusal — and that
-        case must not delete a real directory.
-        """
+    def test_a_refused_run_dir_is_never_deleted(self, tmp_path, monkeypatch):
+        # A run name can stop being contained without being a symlink itself
+        # (a containment change in a parent produces the same refusal), so
+        # drive the post-fit refusal directly: whatever is at that name — real
+        # directory or link — the read-only lookup leaves it alone.
         from panelcast.select import confirmation as confirmation_module
+        from panelcast.select.confirmation import run_confirmation
 
+        base = tmp_path / "outputs"
+        base.mkdir()
         real = confirmation_module.sweep_run_dir
         calls: list[str] = []
 
@@ -793,17 +796,9 @@ class TestSelectRunLookupContainment:
             return real(output_base, run_id, field=field)
 
         monkeypatch.setattr(confirmation_module, "sweep_run_dir", only_after_fit)
-        return calls
-
-    def test_a_refused_run_that_is_not_a_link_is_left_alone(self, tmp_path, monkeypatch):
-        from panelcast.select.confirmation import run_confirmation
-
-        base = tmp_path / "outputs"
-        base.mkdir()
-        calls = self._refuse_after_fit(monkeypatch)
 
         def launch(config_path, panelcast_bin, timeout_seconds=None):
-            (base / _minted_run_id(config_path)).mkdir(parents=True)
+            (base / _minted_run_id(config_path) / "evaluation").mkdir(parents=True)
             return 0, "ok"
 
         result = run_confirmation(
@@ -813,33 +808,4 @@ class TestSelectRunLookupContainment:
 
         assert result.seeds[0].error is not None
         assert "after its fit" in result.seeds[0].error
-        assert "removed the escaping link" not in result.seeds[0].error
-        assert (base / calls[0]).is_dir()
-
-    def test_a_link_that_cannot_be_removed_is_reported(self, tmp_path, monkeypatch):
-        from panelcast.select.confirmation import run_confirmation
-
-        base = tmp_path / "outputs"
-        base.mkdir()
-        outside = tmp_path / "outside"
-        outside.mkdir()
-        calls = self._refuse_after_fit(monkeypatch)
-
-        def launch(config_path, panelcast_bin, timeout_seconds=None):
-            _symlink_dir(base / _minted_run_id(config_path), outside)
-            return 0, "ok"
-
-        def refuse_unlink(self, missing_ok=False):
-            raise OSError("locked")
-
-        monkeypatch.setattr(Path, "unlink", refuse_unlink)
-
-        result = run_confirmation(
-            {"latent_process": "ar1"}, _confirmation_cfg(tmp_path, base), seeds=(42,),
-            launch=launch,
-        )
-
-        assert result.seeds[0].error is not None
-        assert "could not be removed" in result.seeds[0].error
-        assert (base / calls[0]).is_symlink()
-        assert outside.exists()
+        assert (base / calls[0] / "evaluation").is_dir()
