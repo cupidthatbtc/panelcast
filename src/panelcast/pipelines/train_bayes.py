@@ -1184,9 +1184,11 @@ def _build_resource_usage(
     peak = fit_result.peak_gpu_memory_bytes
     expected = round(expected_gb, 3)
     actual = round(peak / (1024**3), 3) if peak is not None else None
+    peak_provenance = getattr(fit_result, "peak_gpu_memory_provenance", None)
     usage = {
         "expected_gb": expected,
         "actual_peak_gb": actual,
+        "peak_provenance": peak_provenance,
         "ratio": round(actual / expected, 3) if actual is not None and expected > 0 else None,
         "wall_clock_seconds": fit_result.runtime_seconds,
     }
@@ -1203,6 +1205,7 @@ def _build_resource_usage(
                 actual_peak_gb=actual,
                 wall_clock_seconds=fit_result.runtime_seconds,
                 context=context,
+                peak_provenance=peak_provenance,
             )
         except Exception:  # telemetry must never break a fit
             log.warning("calibration_store_append_failed", exc_info=True)
@@ -1961,6 +1964,7 @@ def train_models(  # noqa: C901  # tracked complexity debt
         # Preflight-validation telemetry: same counter the calibration
         # mini-runs measure, so projections are directly comparable.
         "peak_gpu_memory_bytes": fit_result.peak_gpu_memory_bytes,
+        "peak_gpu_memory_provenance": fit_result.peak_gpu_memory_provenance,
         "gpu_info": fit_result.gpu_info,
         "exclude_rw_raw_from_collection": exclude_rw_raw_from_collection,
         "sigma_obs_prior_type": getattr(ctx, "sigma_obs_prior_type", "halfnormal"),

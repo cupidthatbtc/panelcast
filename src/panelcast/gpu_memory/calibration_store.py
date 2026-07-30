@@ -14,8 +14,10 @@ import logging
 import math
 import os
 import time
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import median
 from typing import Any, TypeGuard
 
 from panelcast.gpu_memory.estimate import (
@@ -27,7 +29,7 @@ from panelcast.gpu_memory.estimate import (
 
 logger = logging.getLogger(__name__)
 
-_STORE_VERSION = 1
+_STORE_VERSION = 2
 _MAX_RECORDS = 200
 # Local refits stay conservative: every stored point must be over-covered by
 # at least this ratio (mirrors the never-under ladder discipline of #104).
@@ -35,6 +37,13 @@ _MIN_LOCAL_ENVELOPE = 1.05
 # Slack allowed when re-checking the envelope on the returned constants: the
 # scale is solved in closed form, so only float rounding should ever show up.
 _ENVELOPE_TOLERANCE = 1e-9
+# Shape-driven ratios vary, so history may tighten the 2x shipped cap only to 1.75x.
+_MAX_SHIPPED_PEAK_RATIO = 2.0
+_RECENT_CLEAN_WINDOW = 20
+_MIN_RECENT_CLEAN_POINTS = 5
+_MAX_RECENT_RATIO_MULTIPLIER = 3.0
+_MIN_RECENT_RATIO_CEILING = 1.75
+_PEAK_PROVENANCE_VERSION = 1
 
 
 def default_store_path() -> Path:
@@ -48,7 +57,30 @@ class PerMachineCalibration:
     collection_overhead_factor: float
     fixed_overhead_gb: float
     n_points: int
-    min_ratio: float  # tightest estimate/actual over the fit set, post-envelope
+    min_ratio: float
+    envelope_inflation: float = 1.0
+    quarantined_points: int = 0
+    invalid_points: int = 0
+    quarantine_reasons: tuple[tuple[str, int], ...] = ()
+    quarantined_records: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class CalibrationDiagnostics:
+    total_records: int
+    trusted_points: int
+    quarantined_points: int
+    invalid_points: int
+    quarantine_reasons: tuple[tuple[str, int], ...]
+    quarantined_records: tuple[tuple[str, str], ...]
+    envelope_inflation: float | None = None
+
+
+@dataclass(frozen=True)
+class _CalibrationPoint:
+    base: float
+    unit: float
+    actual: float
 
 
 def append_record(
@@ -58,16 +90,19 @@ def append_record(
     wall_clock_seconds: float | None,
     context: dict[str, Any] | None = None,
     path: Path | None = None,
+    peak_provenance: dict[str, Any] | None = None,
 ) -> None:
     """Best-effort append; telemetry must never break a fit."""
     path = path or default_store_path()
     record = {
+        "record_id": f"{os.getpid()}-{time.time_ns()}",
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "estimate_inputs": estimate_inputs,
         "expected_gb": expected_gb,
         "actual_peak_gb": actual_peak_gb,
         "wall_clock_seconds": wall_clock_seconds,
         "context": context or {},
+        "peak_provenance": peak_provenance,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     records = _read_records_for_append(path)
@@ -211,25 +246,136 @@ def _is_finite(value: Any) -> TypeGuard[int | float]:
         return False
 
 
-def _usable_points(records: list[dict[str, Any]]) -> tuple[list[float], list[float], list[float]]:
-    """(bases, units, actuals) for records that are real, positive measurements."""
-    bases: list[float] = []
-    units: list[float] = []
-    actuals: list[float] = []
-    for record in records:
+def _snapshot_is_valid(snapshot: Any) -> bool:
+    if not isinstance(snapshot, dict):
+        return False
+    integer_fields = (
+        "process_id",
+        "thread_id",
+        "device_id",
+        "process_index",
+        "bytes_in_use",
+        "peak_bytes_in_use",
+        "bytes_limit",
+        "bytes_reserved",
+        "num_allocs",
+    )
+    for name in integer_fields:
+        value = snapshot.get(name)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return False
+    return (
+        snapshot["process_id"] > 0
+        and snapshot.get("platform") == "gpu"
+        and isinstance(snapshot.get("device_kind"), str)
+        and bool(snapshot["device_kind"])
+        and isinstance(snapshot.get("recorded_at"), str)
+        and bool(snapshot["recorded_at"])
+    )
+
+
+def _provenance_quarantine_reason(record: dict[str, Any], actual: float) -> str | None:
+    provenance = record.get("peak_provenance")
+    if provenance is None:
+        return "missing provenance"
+    if not isinstance(provenance, dict):
+        return "malformed provenance"
+    if (
+        provenance.get("version") != _PEAK_PROVENANCE_VERSION
+        or provenance.get("source") != "jax_allocator"
+        or provenance.get("scope") != "process"
+    ):
+        return "unsupported provenance"
+    if provenance.get("trusted_for_calibration") is not True:
+        attribution = provenance.get("attribution")
+        return (
+            attribution if isinstance(attribution, str) and attribution else "untrusted provenance"
+        )
+    if provenance.get("attribution") != "fit_interval_new_process_peak":
+        return "invalid attribution"
+
+    before = provenance.get("before")
+    after = provenance.get("after")
+    if not (_snapshot_is_valid(before) and _snapshot_is_valid(after)):
+        return "malformed provenance"
+    identity_fields = ("process_id", "device_id", "process_index", "platform", "device_kind")
+    if any(before[name] != after[name] for name in identity_fields):
+        return "allocator identity changed"
+    if after["peak_bytes_in_use"] <= before["peak_bytes_in_use"]:
+        return "stale process peak"
+    measured_gb = after["peak_bytes_in_use"] / (1024**3)
+    if abs(measured_gb - actual) > 0.001:
+        return "peak/provenance mismatch"
+    return None
+
+
+def _record_label(record: dict[str, Any], index: int) -> str:
+    for name in ("record_id", "timestamp"):
+        value = record.get(name)
+        if isinstance(value, str) and value:
+            return value
+    return f"record[{index}]"
+
+
+def _partition_points(
+    records: list[dict[str, Any]],
+    jit_buffer_percent: float,
+) -> tuple[list[_CalibrationPoint], CalibrationDiagnostics]:
+    points: list[_CalibrationPoint] = []
+    quarantine_reasons: Counter[str] = Counter()
+    quarantined_records: list[tuple[str, str]] = []
+    invalid_points = 0
+    recent_ratios: list[float] = []
+
+    for index, record in enumerate(records):
         if not isinstance(record, dict):
+            invalid_points += 1
             continue
         actual = record.get("actual_peak_gb")
-        if not _is_finite(actual) or float(actual) <= 0.0:
-            continue
         inputs = record.get("estimate_inputs", {})
         terms = _linear_terms(inputs) if isinstance(inputs, dict) else None
-        if terms is None:
+        if not _is_finite(actual) or float(actual) <= 0.0 or terms is None:
+            invalid_points += 1
             continue
-        bases.append(terms[0])
-        units.append(terms[1])
-        actuals.append(float(actual))
-    return bases, units, actuals
+        actual_value = float(actual)
+        provenance_reason = _provenance_quarantine_reason(record, actual_value)
+        if provenance_reason is not None:
+            quarantine_reasons[provenance_reason] += 1
+            quarantined_records.append((_record_label(record, index), provenance_reason))
+            continue
+
+        base, unit = terms
+        shipped_estimate = (1.0 + jit_buffer_percent) * (
+            base + FIXED_OVERHEAD_GB + COLLECTION_OVERHEAD_FACTOR * unit
+        )
+        if not _is_finite(shipped_estimate) or shipped_estimate <= 0.0:
+            invalid_points += 1
+            continue
+        shipped_ratio = actual_value / shipped_estimate
+        ratio_ceiling = _MAX_SHIPPED_PEAK_RATIO
+        if len(recent_ratios) >= _MIN_RECENT_CLEAN_POINTS:
+            recent_ceiling = max(
+                _MIN_RECENT_RATIO_CEILING,
+                median(recent_ratios[-_RECENT_CLEAN_WINDOW:]) * _MAX_RECENT_RATIO_MULTIPLIER,
+            )
+            ratio_ceiling = min(ratio_ceiling, recent_ceiling)
+        if shipped_ratio > ratio_ceiling:
+            quarantine_reasons["peak influence"] += 1
+            quarantined_records.append((_record_label(record, index), "peak influence"))
+            continue
+
+        points.append(_CalibrationPoint(base, unit, actual_value))
+        recent_ratios.append(shipped_ratio)
+
+    reasons = tuple(sorted(quarantine_reasons.items()))
+    return points, CalibrationDiagnostics(
+        total_records=len(records),
+        trusted_points=len(points),
+        quarantined_points=sum(quarantine_reasons.values()),
+        invalid_points=invalid_points,
+        quarantine_reasons=reasons,
+        quarantined_records=tuple(quarantined_records),
+    )
 
 
 def _envelope_scale(
@@ -280,61 +426,53 @@ def _min_envelope_ratio(
     return float((estimate / actual_arr).min())
 
 
-def refit_constants(
+def _refit_with_diagnostics(
     records: list[dict[str, Any]],
-    min_points: int = 5,
-    jit_buffer_percent: float = 0.10,
-) -> PerMachineCalibration | None:
-    """Least-squares refit of (FACTOR, FIXED) on this machine's measurements.
-
-    Returns None — meaning "keep the shipped constants" — whenever the result
-    cannot be shown to be safe: too few usable points, no spread in the
-    collection term (a degenerate design can't identify two constants),
-    non-finite fitted coefficients, or an envelope that the final constants
-    fail to satisfy. Never-under is the contract, so it is verified on the
-    numbers actually returned rather than assumed from the fitting procedure.
-    """
+    min_points: int,
+    jit_buffer_percent: float,
+) -> tuple[PerMachineCalibration | None, CalibrationDiagnostics]:
     import numpy as np
 
     if not _is_finite(jit_buffer_percent) or jit_buffer_percent < 0.0:
-        return None
+        return None, CalibrationDiagnostics(len(records), 0, 0, len(records), (), ())
 
-    bases, units, actuals = _usable_points(records)
-    if len(units) < min_points:
-        return None
-    base_arr = np.asarray(bases, dtype=float)
-    unit_arr = np.asarray(units, dtype=float)
-    actual_arr = np.asarray(actuals, dtype=float)
+    points, diagnostics = _partition_points(records, float(jit_buffer_percent))
+    if diagnostics.quarantined_points:
+        logger.warning(
+            "quarantined %d GPU calibration record(s): %s",
+            diagnostics.quarantined_points,
+            ", ".join(f"{reason}={count}" for reason, count in diagnostics.quarantine_reasons),
+        )
+    if len(points) < min_points:
+        return None, diagnostics
+
+    base_arr = np.asarray([point.base for point in points], dtype=float)
+    unit_arr = np.asarray([point.unit for point in points], dtype=float)
+    actual_arr = np.asarray([point.actual for point in points], dtype=float)
     if not float(unit_arr.std()) > 0.0:
-        return None
+        return None, diagnostics
 
     y = actual_arr / (1.0 + jit_buffer_percent) - base_arr
     try:
         slope, intercept = np.polyfit(unit_arr, y, 1)
     except (np.linalg.LinAlgError, ValueError):
-        return None
+        return None, diagnostics
     if not (_is_finite(float(slope)) and _is_finite(float(intercept))):
-        return None
+        return None, diagnostics
     factor = max(float(slope), 0.1)
     fixed = max(float(intercept), 0.0)
 
-    scale = _envelope_scale(
-        base_arr, unit_arr, actual_arr, factor, fixed, jit_buffer_percent
-    )
+    scale = _envelope_scale(base_arr, unit_arr, actual_arr, factor, fixed, jit_buffer_percent)
     if scale is None:
-        return None
+        return None, diagnostics
     if scale > 2.0:
-        logger.warning(
-            "local GPU calibration envelope requires %.2fx inflation; "
-            "inspect the telemetry store for co-resident allocation peaks",
-            scale,
-        )
+        logger.warning("local GPU calibration envelope inflation: %.3fx", scale)
     else:
         logger.info("local GPU calibration envelope inflation: %.3fx", scale)
     factor *= scale
     fixed *= scale
     if not (_is_finite(factor) and _is_finite(fixed)):
-        return None
+        return None, diagnostics
 
     min_ratio = _min_envelope_ratio(
         base_arr, unit_arr, actual_arr, factor, fixed, jit_buffer_percent
@@ -346,13 +484,58 @@ def refit_constants(
             min_ratio,
             _MIN_LOCAL_ENVELOPE,
         )
-        return None
+        return None, diagnostics
+
+    final_diagnostics = CalibrationDiagnostics(
+        total_records=diagnostics.total_records,
+        trusted_points=diagnostics.trusted_points,
+        quarantined_points=diagnostics.quarantined_points,
+        invalid_points=diagnostics.invalid_points,
+        quarantine_reasons=diagnostics.quarantine_reasons,
+        quarantined_records=diagnostics.quarantined_records,
+        envelope_inflation=scale,
+    )
     return PerMachineCalibration(
         collection_overhead_factor=factor,
         fixed_overhead_gb=fixed,
-        n_points=len(units),
+        n_points=len(points),
         min_ratio=min_ratio,
-    )
+        envelope_inflation=scale,
+        quarantined_points=diagnostics.quarantined_points,
+        invalid_points=diagnostics.invalid_points,
+        quarantine_reasons=diagnostics.quarantine_reasons,
+        quarantined_records=diagnostics.quarantined_records,
+    ), final_diagnostics
+
+
+def refit_constants(
+    records: list[dict[str, Any]],
+    min_points: int = 5,
+    jit_buffer_percent: float = 0.10,
+) -> PerMachineCalibration | None:
+    """Refit constants only from attributable, bounded-influence measurements."""
+    calibration, _ = _refit_with_diagnostics(records, min_points, jit_buffer_percent)
+    return calibration
+
+
+def _diagnostic_summary(diagnostics: CalibrationDiagnostics) -> str:
+    details = [
+        f"{diagnostics.trusted_points} trusted",
+        f"{diagnostics.quarantined_points} quarantined",
+        f"{diagnostics.invalid_points} invalid",
+    ]
+    if diagnostics.quarantine_reasons:
+        details.append(
+            "reasons "
+            + ", ".join(f"{reason}={count}" for reason, count in diagnostics.quarantine_reasons)
+        )
+    if diagnostics.quarantined_records:
+        shown = ", ".join(
+            f"{label}:{reason}" for label, reason in diagnostics.quarantined_records[:3]
+        )
+        remaining = len(diagnostics.quarantined_records) - 3
+        details.append(f"excluded {shown}" + (f", +{remaining} more" if remaining > 0 else ""))
+    return ", ".join(details)
 
 
 def resolve_calibration(
@@ -360,17 +543,20 @@ def resolve_calibration(
     min_points: int = 5,
 ) -> tuple[float, float, str]:
     """(factor, fixed, source) — per-machine when history suffices, else shipped."""
-    calibration = refit_constants(load_records(path), min_points=min_points)
+    records = load_records(path)
+    calibration, diagnostics = _refit_with_diagnostics(records, min_points, 0.10)
+    summary = _diagnostic_summary(diagnostics)
     if calibration is None:
         return (
             COLLECTION_OVERHEAD_FACTOR,
             FIXED_OVERHEAD_GB,
-            "shipped constants (no local calibration history)",
+            f"shipped constants (local calibration rejected; {summary})",
         )
     return (
         calibration.collection_overhead_factor,
         calibration.fixed_overhead_gb,
-        f"per-machine calibration ({calibration.n_points} local fits, "
+        f"per-machine calibration ({calibration.n_points} local fits, {summary}, "
+        f"envelope inflation {calibration.envelope_inflation:.3f}x, "
         f"min over-coverage {calibration.min_ratio:.2f}x)",
     )
 
@@ -387,6 +573,7 @@ def estimate_with_calibration(path: Path | None = None, **estimate_kwargs: Any):
 
 
 __all__ = [
+    "CalibrationDiagnostics",
     "PerMachineCalibration",
     "append_record",
     "estimate_with_calibration",

@@ -6,7 +6,15 @@ from unittest import mock
 
 import pytest
 
-from panelcast.gpu_memory.measure import JaxMemoryStats, get_jax_memory_stats
+from panelcast.gpu_memory.measure import (
+    JaxAllocatorSnapshot,
+    JaxMemoryStats,
+    attribute_fit_peak,
+    begin_fit_peak_tracking,
+    capture_jax_allocator_snapshot,
+    end_fit_peak_tracking,
+    get_jax_memory_stats,
+)
 
 
 class TestJaxMemoryStatsDataclass:
@@ -208,3 +216,108 @@ class TestGetJaxMemoryStats:
 
         assert result.peak_bytes_in_use == 6 * 1024**3
         mock_device_1.memory_stats.assert_called_once()
+
+
+class TestFitPeakAttribution:
+    @staticmethod
+    def _snapshot(peak: int, *, device_id: int = 0) -> JaxAllocatorSnapshot:
+        return JaxAllocatorSnapshot(
+            recorded_at="2026-07-30T00:00:00+00:00",
+            process_id=1234,
+            thread_id=5678,
+            device_id=device_id,
+            process_index=0,
+            platform="gpu",
+            device_kind="test GPU",
+            bytes_in_use=peak,
+            peak_bytes_in_use=peak,
+            bytes_limit=32 * 1024**3,
+            bytes_reserved=peak,
+            num_allocs=10,
+        )
+
+    @mock.patch("panelcast.gpu_memory.measure.jax.devices")
+    def test_capture_records_allocator_process_and_device(self, mock_devices):
+        device = mock.Mock()
+        device.platform = "gpu"
+        device.id = 2
+        device.process_index = 1
+        device.device_kind = "NVIDIA Test"
+        device.memory_stats.return_value = {
+            "bytes_in_use": 2 * 1024**3,
+            "peak_bytes_in_use": 4 * 1024**3,
+            "bytes_limit": 32 * 1024**3,
+            "bytes_reserved": 8 * 1024**3,
+            "num_allocs": 42,
+        }
+        mock_devices.return_value = [device]
+
+        snapshot = capture_jax_allocator_snapshot()
+
+        assert snapshot is not None
+        assert snapshot.platform == "gpu"
+        assert snapshot.device_id == 2
+        assert snapshot.process_index == 1
+        assert snapshot.device_kind == "NVIDIA Test"
+        assert snapshot.process_id > 0
+        assert snapshot.thread_id > 0
+        assert snapshot.peak_bytes_in_use == 4 * 1024**3
+        assert snapshot.num_allocs == 42
+
+    def test_new_process_peak_is_attributed_to_fit_interval(self):
+        before = self._snapshot(2 * 1024**3)
+        after = self._snapshot(5 * 1024**3)
+
+        peak, provenance = attribute_fit_peak(before, after)
+
+        assert peak == 5 * 1024**3
+        assert provenance is not None
+        assert provenance["trusted_for_calibration"] is True
+        assert provenance["attribution"] == "fit_interval_new_process_peak"
+        assert provenance["scope"] == "process"
+
+    def test_unchanged_process_peak_is_marked_stale(self):
+        snapshot = self._snapshot(5 * 1024**3)
+
+        peak, provenance = attribute_fit_peak(snapshot, snapshot)
+
+        assert peak == 5 * 1024**3
+        assert provenance is not None
+        assert provenance["trusted_for_calibration"] is False
+        assert provenance["attribution"] == "stale_process_peak"
+
+    @mock.patch("panelcast.gpu_memory.measure.capture_jax_allocator_snapshot")
+    def test_overlapping_fit_intervals_are_untrusted_and_recover(self, capture):
+        capture.side_effect = [
+            self._snapshot(1 * 1024**3),
+            self._snapshot(2 * 1024**3),
+            self._snapshot(4 * 1024**3),
+            self._snapshot(5 * 1024**3),
+            self._snapshot(5 * 1024**3),
+            self._snapshot(6 * 1024**3),
+        ]
+
+        first = begin_fit_peak_tracking()
+        second = begin_fit_peak_tracking()
+        _, second_provenance = end_fit_peak_tracking(second)
+        _, first_provenance = end_fit_peak_tracking(first)
+        recovered = begin_fit_peak_tracking()
+        _, recovered_provenance = end_fit_peak_tracking(recovered)
+
+        assert second_provenance is not None
+        assert first_provenance is not None
+        assert recovered_provenance is not None
+        assert second_provenance["attribution"] == "overlapping_fit_interval"
+        assert first_provenance["attribution"] == "overlapping_fit_interval"
+        assert recovered_provenance["attribution"] == "fit_interval_new_process_peak"
+        assert recovered_provenance["trusted_for_calibration"] is True
+
+    def test_identity_change_is_not_attributed(self):
+        before = self._snapshot(2 * 1024**3, device_id=0)
+        after = self._snapshot(5 * 1024**3, device_id=1)
+
+        _, provenance = attribute_fit_peak(before, after)
+
+        assert provenance is not None
+        assert provenance["trusted_for_calibration"] is False
+        assert provenance["attribution"] == "allocator_identity_changed"

@@ -25,8 +25,12 @@ def _model_args(n_obs=100, n_features=5, n_artists=20, max_seq=8):
     }
 
 
-def _fit_result(peak_bytes, runtime=12.5):
-    return SimpleNamespace(peak_gpu_memory_bytes=peak_bytes, runtime_seconds=runtime)
+def _fit_result(peak_bytes, runtime=12.5, provenance=None):
+    return SimpleNamespace(
+        peak_gpu_memory_bytes=peak_bytes,
+        peak_gpu_memory_provenance=provenance,
+        runtime_seconds=runtime,
+    )
 
 
 class TestBuildResourceUsage:
@@ -39,6 +43,24 @@ class TestBuildResourceUsage:
         assert usage["actual_peak_gb"] == 2.0
         assert usage["ratio"] == round(2.0 / usage["expected_gb"], 3)
         assert usage["wall_clock_seconds"] == 12.5
+
+    def test_calibration_record_carries_peak_provenance(self, monkeypatch):
+        import panelcast.gpu_memory.calibration_store as store
+
+        captured = {}
+        monkeypatch.setattr(store, "append_record", lambda **kw: captured.update(kw))
+        provenance = {"attribution": "fit_interval_new_process_peak"}
+        config = MCMCConfig(num_warmup=10, num_samples=10, num_chains=2, seed=0)
+
+        usage = _build_resource_usage(
+            _model_args(),
+            config,
+            _fit_result(2 * 1024**3, provenance=provenance),
+            False,
+        )
+
+        assert usage["peak_provenance"] == provenance
+        assert captured["peak_provenance"] == provenance
 
     def test_cpu_run_records_none_peak(self):
         config = MCMCConfig(num_warmup=10, num_samples=10, num_chains=2, seed=0)
@@ -85,9 +107,7 @@ class TestBuildResourceUsage:
         monkeypatch.setattr(store, "append_record", lambda **kw: captured.update(kw))
 
         config = MCMCConfig(num_warmup=10, num_samples=10, num_chains=2, seed=0)
-        _build_resource_usage(
-            _model_args(), config, _fit_result(peak_bytes=2 * 1024**3), False
-        )
+        _build_resource_usage(_model_args(), config, _fit_result(peak_bytes=2 * 1024**3), False)
 
         inputs = captured["estimate_inputs"]
         assert inputs["errors_in_variables"] is False
