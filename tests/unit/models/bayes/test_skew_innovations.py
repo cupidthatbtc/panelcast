@@ -16,6 +16,7 @@ from numpyro import handlers
 
 from panelcast.models.bayes.model import make_score_model, standardized_skew_innovation
 from panelcast.models.bayes.priors import (
+    RW_INNOVATION_TYPES,
     PriorConfig,
     entity_skew_sites,
     is_skew_rw_innovation,
@@ -67,6 +68,21 @@ def test_random_walk_site_names_cover_both_prefix_conventions():
     )
     assert rw_latent_sites("user", "normal", max_seq=1).present() == ()
     assert rw_latent_sites("user_", "skew_normal", max_seq=1).present() == ()
+
+
+@pytest.mark.parametrize("innovation", RW_INNOVATION_TYPES)
+@pytest.mark.parametrize("max_seq", [1, 3])
+def test_every_named_random_walk_site_is_one_the_model_samples(innovation, max_seq):
+    """Memory exclusions name these sites to NumPyro, which pops them off the
+    trace with no default, so a name the model does not sample is a KeyError
+    (#410). Bind the helper to the model rather than to a second reading of it."""
+    priors = PriorConfig(rw_innovation_type=innovation)
+    trace = _seeded_trace(_model_args(priors, max_seq=max_seq))
+    sampled = {name for name, site in trace.items() if site["type"] == "sample"}
+
+    named = set(rw_latent_sites("user", innovation, max_seq=max_seq).present())
+    assert named <= sampled
+    assert bool(named) is (max_seq > 1)
 
 
 def test_entity_skew_site_names_follow_the_resolved_prior_type():

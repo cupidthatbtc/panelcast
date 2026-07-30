@@ -1539,6 +1539,9 @@ class TestRwCollectionExcludes:
             "y": [70.0, 72.0, 68.0, 74.0],
             "n_artists": 1,
             "max_seq": 4,
+            # The args JSON is a whitelist; an innovation key smuggled through
+            # it must not reach the model behind the helper's back.
+            "rw_innovation_type": "skew_normal",
         }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(panel, f)
@@ -1671,26 +1674,23 @@ class TestRwCollectionExcludes:
             "n_artists": 1,
             "max_seq": 2,
         }
-        with (
-            mock.patch(
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(panel, f)
+            temp_path = Path(f.name)
+        try:
+            with mock.patch(
                 "panelcast.models.bayes.priors.priors_for_transform",
                 lambda transform, **kw: priors_for_transform(
                     transform, rw_innovation_type="skew_normal", **kw
                 ),
-            ),
-            tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f,
-        ):
-            json.dump(panel, f)
-            f.flush()
-            temp_path = Path(f.name)
-            try:
+            ):
                 run_and_measure(
                     temp_path,
                     target_transform="offset_logit",
                     exclude_collection=("user_rw_raw", "user_rw_raw_abs"),
                 )
-            finally:
-                temp_path.unlink()
+        finally:
+            temp_path.unlink()
 
         assert mock_mcmc.run.call_args[1]["extra_fields"] == (
             "~z.user_rw_raw",
@@ -1719,8 +1719,10 @@ class TestRwCollectionExcludes:
             json.dump({**minimal_model_args, "max_seq": None}, f)
             temp_path = Path(f.name)
         try:
-            result = run_and_measure(temp_path)
-            assert result["success"] is True
+            assert run_and_measure(temp_path)["success"] is True
+            # ... and an unusable max_seq means no walk, not a crash.
+            run_and_measure(temp_path, exclude_collection=("user_rw_raw",))
+            assert mock_mcmc.run.call_args[1]["extra_fields"] == ()
         finally:
             temp_path.unlink()
 

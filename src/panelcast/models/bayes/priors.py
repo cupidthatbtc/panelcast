@@ -34,6 +34,12 @@ from dataclasses import dataclass
 DEFAULT_BETA_BOUNDARY_EPS = 1e-3
 
 
+# Every random-walk innovation the model implements. Callers that need the
+# complete set of walk latents (memory exclusions) union rw_latent_sites over
+# this rather than assuming one configuration is maximal.
+RW_INNOVATION_TYPES = ("normal", "skew_normal")
+
+
 def is_skew_rw_innovation(value: object) -> bool:
     """The rw_raw_abs site exists exactly when this predicate is true."""
     return (value or "normal") == "skew_normal"

@@ -129,7 +129,11 @@ def run_and_measure(
 
     from panelcast.gpu_memory.measure import get_jax_memory_stats
     from panelcast.models.bayes.model import make_score_model
-    from panelcast.models.bayes.priors import get_default_priors, priors_for_transform
+    from panelcast.models.bayes.priors import (
+        RW_INNOVATION_TYPES,
+        get_default_priors,
+        priors_for_transform,
+    )
     from panelcast.models.bayes.transforms import get_transform
 
     # Load model args from JSON
@@ -192,11 +196,14 @@ def run_and_measure(
         )
 
     # Gated extras only ever ADD keys, keeping the default invocation
-    # byte-identical to the legacy mini-run.
+    # byte-identical to the legacy mini-run. The model applies this same
+    # fallback when the kwarg is absent.
+    run_priors = get_default_priors()
     if target_transform != "identity" or entity_group_pooling:
-        model_args["priors"] = priors_for_transform(
+        run_priors = priors_for_transform(
             target_transform, entity_group_pooling=entity_group_pooling
         )
+        model_args["priors"] = run_priors
         model_args["target_bounds"] = target_bounds
 
     # All model sites are "{prefix}_..."; an exclusion naming another prefix
@@ -214,14 +221,17 @@ def run_and_measure(
     # never samples one is what production does too, whereas naming the absent
     # site would be the #410 KeyError. Both sets come from the site helper —
     # pattern-matching the names would let a future walk latent slip through —
-    # and the skew innovation yields the maximal candidate set.
+    # and an absent max_seq means no walk, not a crash.
     if exclude_collection:
-        effective_priors = model_args.get("priors") or get_default_priors()
-        run_max_seq = int(model_args["max_seq"])
+        run_max_seq = int(model_args.get("max_seq") or 0)
         sampled_rw = rw_collection_excludes(
-            prefix, run_max_seq, innovation_type=effective_priors.rw_innovation_type
+            prefix, run_max_seq, innovation_type=run_priors.rw_innovation_type
         )
-        candidate_rw = set(rw_collection_excludes(prefix, 2, innovation_type="skew_normal"))
+        candidate_rw = {
+            site
+            for innovation in RW_INNOVATION_TYPES
+            for site in rw_collection_excludes(prefix, 2, innovation_type=innovation)
+        }
         absent_rw = tuple(
             site for site in exclude_collection if site in candidate_rw and site not in sampled_rw
         )
