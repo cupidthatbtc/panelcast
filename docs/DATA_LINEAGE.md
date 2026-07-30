@@ -1495,9 +1495,12 @@ select's mint-then-fit paths the run directory is created by the subprocess
 select launched — the orchestrator validates the id's *shape* before creating
 it, so a pre-planted symlink is written through — and select's gate refuses the
 read and the attribution, not the write. The refusal says which phase it is in,
-because a post-fit refusal means artifacts exist outside the output base.
-Closing the write side means routing the orchestrator's own run-dir creation
-through `safe_run_dir`, which is a separate change.
+because a post-fit refusal means artifacts may exist outside the output base;
+select also removes the refused pointer (never its target), since `runs list`,
+the dashboard, and the orchestrator's newest-run scan enumerate the output base
+directly and would otherwise follow it. Containment is a property of an id
+lookup, not of enumeration. Closing the write side means routing the
+orchestrator's own run-dir creation through `safe_run_dir`, tracked in #413.
 
 ## 9.4 Resume Logic
 

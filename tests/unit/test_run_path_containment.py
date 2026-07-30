@@ -544,6 +544,28 @@ class TestWindowsPathShapes:
             safe_run_dir(tmp_path, bad)
 
 
+def _confirmation_cfg(tmp_path: Path, base: Path):
+    """A sweep whose confirmation fits write under ``base``."""
+    from panelcast.select.runner import SweepConfig
+
+    return SweepConfig(
+        sweep_id="s1",
+        output_root=tmp_path / "select",
+        panelcast_bin="pc",
+        pipeline_output_base=base,
+    )
+
+
+def _minted_run_id(config_path) -> str:
+    """The run id a select-written arm config carries."""
+    import yaml
+
+    payload = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
+    run_id = payload.get("run_id")
+    assert isinstance(run_id, str) and run_id, f"no top-level run_id in {config_path}"
+    return run_id
+
+
 def _write_arm_manifest(
     run_dir: Path, launched_at: datetime, flags: dict[str, object] | None = None
 ) -> None:
@@ -671,6 +693,8 @@ class TestSelectRunLookupContainment:
         base = tmp_path / "outputs"
         base.mkdir()
         (tmp_path / "outside").mkdir()
+        # Built inline rather than through `_confirmation_cfg` because the
+        # sweep_dir read below has to happen before the mutation.
         cfg = SweepConfig(
             sweep_id="s1",
             output_root=tmp_path / "select",
@@ -695,22 +719,11 @@ class TestSelectRunLookupContainment:
         assert result.seeds[0].reference_run is None
         # The id is decidable up front, so no fit is paid for before refusing.
         assert launches == []
-
-    def _confirmation_cfg(self, tmp_path, base):
-        from panelcast.select.runner import SweepConfig
-
-        return SweepConfig(
-            sweep_id="s1",
-            output_root=tmp_path / "select",
-            panelcast_bin="pc",
-            pipeline_output_base=base,
-        )
+        assert "before launching" in result.seeds[0].error
 
     def test_confirmation_lookup_refuses_a_symlinked_escape(self, tmp_path):
         # The up-front resolve is lexical (nothing exists yet), so the symlink
         # half of containment has to bite on the post-fit lookup instead.
-        import yaml
-
         from panelcast.select.confirmation import run_confirmation
 
         base = tmp_path / "outputs"
@@ -718,14 +731,16 @@ class TestSelectRunLookupContainment:
         outside = tmp_path / "outside"
         outside.mkdir()
         (outside / "keep.txt").write_text("keep", encoding="utf-8")
+        links: list[Path] = []
 
         def launch(config_path, panelcast_bin, timeout_seconds=None):
-            payload = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
-            _symlink_dir(base / payload["run_id"], outside)
+            link = base / _minted_run_id(config_path)
+            _symlink_dir(link, outside)
+            links.append(link)
             return 0, "ok"
 
         result = run_confirmation(
-            {"latent_process": "ar1"}, self._confirmation_cfg(tmp_path, base), seeds=(42,),
+            {"latent_process": "ar1"}, _confirmation_cfg(tmp_path, base), seeds=(42,),
             launch=launch,
         )
 
@@ -733,24 +748,25 @@ class TestSelectRunLookupContainment:
         assert result.seeds[0].error is not None
         assert "confirmation run_id" in result.seeds[0].error
         assert result.seeds[0].reference_run is None
+        # The fit ran, so this is the post-fit branch — and the pointer it left
+        # inside the output base is removed, while its target is untouched.
+        assert "after its fit" in result.seeds[0].error
+        assert links and not links[0].exists() and not links[0].is_symlink()
         assert (outside / "keep.txt").exists()
 
     def test_confirmation_lookup_tolerates_an_unwritten_output_base(self, tmp_path):
         # A confirmation-only entry point can be the first thing to touch its
         # output base, so resolving before the first fit must not require it.
-        import yaml
-
         from panelcast.select.confirmation import run_confirmation
 
         base = tmp_path / "fresh_outputs"
 
         def launch(config_path, panelcast_bin, timeout_seconds=None):
-            payload = yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
-            (base / payload["run_id"]).mkdir(parents=True)
+            (base / _minted_run_id(config_path)).mkdir(parents=True)
             return 0, "ok"
 
         result = run_confirmation(
-            {"latent_process": "ar1"}, self._confirmation_cfg(tmp_path, base), seeds=(42,),
+            {"latent_process": "ar1"}, _confirmation_cfg(tmp_path, base), seeds=(42,),
             launch=launch,
         )
 
