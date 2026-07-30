@@ -1243,6 +1243,20 @@ class TestPreflightFull:
         result = runner.invoke(app, argv)
         assert result.exit_code == 0
         assert captured["exclude_collection"] == expected
+        # The exclusion is sized from the priors the transform and pooling gate
+        # produce, so it must agree with the ones actually forwarded — the CLI
+        # naming too few sites is the direction reconciliation cannot fix.
+        from panelcast.preflight.mini_run import mini_run_priors, rw_collection_excludes
+
+        forwarded = rw_collection_excludes(
+            captured["model_prefix"],
+            int(max_events),
+            innovation_type=mini_run_priors(
+                captured["target_transform"],
+                entity_group_pooling=captured["entity_group_pooling"],
+            ).rw_innovation_type,
+        )
+        assert captured["exclude_collection"] == (forwarded if exclude_flag else ())
         # A flag that silently buys nothing is worse than a noisy one, but the
         # note belongs only to runs that asked for the exclusion. Rich wraps to
         # the console width, so compare on collapsed whitespace.

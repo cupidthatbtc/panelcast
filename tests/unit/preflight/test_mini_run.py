@@ -1575,7 +1575,9 @@ class TestRwCollectionExcludes:
         assert ("priors" in kwargs) is forwards_priors
         assert not [key for key in kwargs if key.endswith("innovation_type")]
         # Not tautological: this fails if priors_for_transform ever selects a
-        # different walk innovation for a transform.
+        # different walk innovation for a transform. That is a supported
+        # configuration (the CLI sizes its exclusion from these priors), so a
+        # failure here means "review the new configuration", not "the fix broke".
         if forwards_priors:
             assert (
                 kwargs["priors"].rw_innovation_type == get_default_priors().rw_innovation_type
