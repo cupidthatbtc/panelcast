@@ -1464,8 +1464,18 @@ class TestExcludeCollectionPrefixGuard:
         mock_stats.peak_gb = 0.0
         mock_get_stats.return_value = mock_stats
 
+        # Two events per entity, so the walk this exclusion names really exists.
+        panel = {
+            "artist_idx": [0, 0],
+            "album_seq": [1, 2],
+            "prev_score": [0.0, 70.0],
+            "X": [[1.0], [1.0]],
+            "y": [70.0, 72.0],
+            "n_artists": 1,
+            "max_seq": 2,
+        }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(minimal_model_args, f)
+            json.dump(panel, f)
             temp_path = Path(f.name)
         try:
             result = run_and_measure(temp_path, prefix="perf", exclude_collection=("perf_rw_raw",))
@@ -1537,24 +1547,52 @@ class TestRwCollectionExcludes:
         finally:
             temp_path.unlink()
 
+        assert mock_mcmc.run.call_count == 1
         kwargs = mock_mcmc.run.call_args[1]
         # Pin the kwarg surface itself: the assertion below would otherwise
         # absorb a prior arriving under a different name, which is exactly the
         # drift that reintroduces #410.
         assert ("priors" in kwargs) is forwards_priors
-        assert not [key for key in kwargs if "innovation" in key or key.endswith("_prior_type")]
+        assert not [key for key in kwargs if key.endswith("innovation_type")]
         effective = kwargs["priors"] if forwards_priors else get_default_priors()
         assert rw_collection_excludes("user", 4) == rw_latent_sites(
             "user", effective.rw_innovation_type, max_seq=4
         ).present()
 
+    def test_single_event_model_never_samples_the_rw_site(self):
+        """#410's root fact, straight from the sampler: with one event per entity
+        there is no rw_raw site to exclude. The KeyError is NumPyro's, not
+        panelcast's — ``~z.`` pops each named site off the trace with no
+        default — so a change of exception type here is a dependency change."""
+        import jax.numpy as jnp
+        from jax import random
+        from numpyro.infer import MCMC, NUTS
+
+        from panelcast.models.bayes.model import make_score_model
+
+        mcmc = MCMC(
+            NUTS(make_score_model("user")), num_warmup=1, num_samples=1, progress_bar=False
+        )
+        with pytest.raises(KeyError, match="user_rw_raw"):
+            mcmc.run(
+                random.key(0),
+                extra_fields=("~z.user_rw_raw",),
+                artist_idx=jnp.array([0], dtype=jnp.int32),
+                album_seq=jnp.array([1], dtype=jnp.int32),
+                prev_score=jnp.array([0.0]),
+                X=jnp.array([[1.0]]),
+                y=jnp.array([70.0]),
+                n_artists=1,
+                max_seq=1,
+            )
+
     @mock.patch("panelcast.gpu_memory.measure.get_jax_memory_stats")
-    def test_single_event_panel_really_has_no_rw_site_to_exclude(
+    def test_stale_rw_exclusion_is_reconciled_with_the_loaded_args(
         self, mock_get_stats, minimal_model_args
     ):
-        """The #410 crash, end to end: NumPyro pops the named sites off a real
-        trace, so only an unmocked sampler can show the site is genuinely absent.
-        Peak memory is the one GPU-only step, so it stays stubbed."""
+        """A caller that sized its exclusion against a longer panel must not be
+        able to crash the mini-run. Peak memory is the one GPU-only step, so it
+        stays stubbed while the sampler runs for real."""
         assert minimal_model_args["max_seq"] == 1
         mock_stats = mock.Mock()
         mock_stats.peak_bytes_in_use = 1024
@@ -1565,18 +1603,39 @@ class TestRwCollectionExcludes:
             json.dump(minimal_model_args, f)
             temp_path = Path(f.name)
         try:
-            # What the CLI used to send, and why the preflight died.
-            with pytest.raises(KeyError, match="user_rw_raw"):
-                run_and_measure(
-                    temp_path, num_warmup=1, exclude_collection=("user_rw_raw",)
-                )
-
-            excludes = rw_collection_excludes("user", minimal_model_args["max_seq"])
-            assert excludes == ()
-            result = run_and_measure(temp_path, num_warmup=1, exclude_collection=excludes)
+            # Exactly what the CLI used to send, and why the preflight died.
+            result = run_and_measure(
+                temp_path, num_warmup=1, exclude_collection=("user_rw_raw",)
+            )
             assert result["success"] is True
         finally:
             temp_path.unlink()
+
+    @mock.patch("panelcast.gpu_memory.measure.get_jax_memory_stats")
+    @mock.patch("numpyro.infer.MCMC")
+    @mock.patch("numpyro.infer.NUTS")
+    @mock.patch("panelcast.models.bayes.model.make_score_model")
+    def test_reconciliation_drops_the_site_rather_than_renaming_it(
+        self, mock_make_model, mock_nuts, mock_mcmc_class, mock_get_stats, minimal_model_args
+    ):
+        mock_make_model.return_value = "model"
+        mock_nuts.return_value = "nuts_kernel"
+        mock_mcmc = mock.Mock()
+        mock_mcmc_class.return_value = mock_mcmc
+        mock_stats = mock.Mock()
+        mock_stats.peak_bytes_in_use = 1024
+        mock_stats.peak_gb = 0.0
+        mock_get_stats.return_value = mock_stats
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(minimal_model_args, f)
+            temp_path = Path(f.name)
+        try:
+            run_and_measure(temp_path, exclude_collection=("user_rw_raw",))
+        finally:
+            temp_path.unlink()
+
+        assert mock_mcmc.run.call_args[1]["extra_fields"] == ()
 
 
 class TestLikelihoodDfConsumed:

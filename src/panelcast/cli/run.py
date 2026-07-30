@@ -327,8 +327,8 @@ def _run_full_preflight(
     if config.exclude_rw_raw_from_collection and not preflight_exclude_collection:
         console.print(
             "[bold yellow]Note:[/bold yellow] --exclude-rw-raw-from-collection "
-            f"has nothing to exclude: at max_events={config.max_events} the model "
-            "samples no random walk, so the flag saves no memory here."
+            f"has nothing to exclude: at max_seq={int(model_args['max_seq'])} the "
+            "model samples no random walk, so the flag saves no memory here."
         )
     # The mini-run model cannot express these gates, so the calibration
     # measures a smaller model and the projection understates the gated

@@ -1211,11 +1211,16 @@ class TestPreflightFull:
         assert "errors_in_variables" in output
 
     @pytest.mark.parametrize(
-        ("max_events", "expected"),
-        [("1", ()), ("2", ("user_rw_raw",)), ("10", ("user_rw_raw",))],
+        ("max_events", "exclude_flag", "expected"),
+        [
+            ("1", True, ()),
+            ("2", True, ("user_rw_raw",)),
+            ("10", True, ("user_rw_raw",)),
+            ("10", False, ()),
+        ],
     )
     def test_preflight_exclusion_follows_site_presence(
-        self, monkeypatch, tmp_path, max_events, expected
+        self, monkeypatch, tmp_path, max_events, exclude_flag, expected
     ):
         """Single-event panels never sample rw_raw, so the mini-run must not
         be told to exclude it (#410); two events already do."""
@@ -1231,23 +1236,18 @@ class TestPreflightFull:
         captured: dict[str, object] = {}
         self._setup_preflight_full_mocks(monkeypatch, captured=captured)
 
-        result = runner.invoke(
-            app,
-            [
-                "run",
-                "--preflight-full",
-                "--preflight-only",
-                "--exclude-rw-raw-from-collection",
-                "--max-events",
-                max_events,
-            ],
-        )
+        argv = ["run", "--preflight-full", "--preflight-only", "--max-events", max_events]
+        if exclude_flag:
+            argv.insert(3, "--exclude-rw-raw-from-collection")
+
+        result = runner.invoke(app, argv)
         assert result.exit_code == 0
         assert captured["exclude_collection"] == expected
-        # A flag that silently buys nothing is worse than a noisy one. Rich
-        # wraps to the console width, so compare on collapsed whitespace.
+        # A flag that silently buys nothing is worse than a noisy one, but the
+        # note belongs only to runs that asked for the exclusion. Rich wraps to
+        # the console width, so compare on collapsed whitespace.
         output = " ".join(strip_ansi(result.output).split())
-        assert ("nothing to exclude" in output) is (expected == ())
+        assert ("nothing to exclude" in output) is (exclude_flag and expected == ())
 
     def test_preflight_full_fail_aborts_without_force(self, monkeypatch, tmp_path):
         """--preflight-full fail aborts without --force-run."""

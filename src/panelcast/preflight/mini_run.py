@@ -69,10 +69,10 @@ def rw_collection_excludes(prefix: str, max_seq: int) -> tuple[str, ...]:
     its priors from the defaults, so the skew innovation's ``rw_raw_abs`` is
     never present here even when the production fit has it.
     """
-    from panelcast.models.bayes.priors import PriorConfig, rw_latent_sites
+    from panelcast.models.bayes.priors import get_default_priors, rw_latent_sites
 
     return rw_latent_sites(
-        prefix, PriorConfig.rw_innovation_type, max_seq=max_seq
+        prefix, get_default_priors().rw_innovation_type, max_seq=max_seq
     ).present()
 
 
@@ -204,6 +204,20 @@ def run_and_measure(
             f"exclude_collection sites {foreign_sites} do not match model "
             f"prefix '{prefix}'; the exclusion would be a silent no-op"
         )
+
+    # Callers size their exclusion against the production model, so reconcile it
+    # with the args actually loaded here: dropping the walk from a panel that
+    # never samples one is what production does too, whereas naming the absent
+    # site would be the #410 KeyError.
+    sampled_rw = rw_collection_excludes(prefix, int(model_args["max_seq"]))
+    absent_rw = tuple(
+        site
+        for site in exclude_collection
+        if site.startswith(f"{prefix}_rw_raw") and site not in sampled_rw
+    )
+    if absent_rw:
+        logger.info(f"Dropping collection exclusions this model never samples: {absent_rw}")
+        exclude_collection = tuple(s for s in exclude_collection if s not in absent_rw)
 
     # Create NUTS kernel for the requested score-model prefix ("user" default
     # is consistent with CLI default behavior, most common use case)
