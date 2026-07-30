@@ -745,7 +745,8 @@ class TestSelectRunLookupContainment:
         assert "artifacts may exist" not in error
         # The relative spelling is the one that says "your cwd is gone", not
         # "your config is wrong", and the errno is the only other evidence.
-        assert "the output root outputs did not resolve" in error
+        assert "the output root outputs is relative" in error
+        assert "working directory could not be read" in error
         assert "cwd is gone" in error
 
     def test_a_pre_launch_breadcrumb_never_claims_artifacts_exist(self, tmp_path):
@@ -787,10 +788,13 @@ class TestSelectRunLookupContainment:
             raise OSError("cwd is gone")
 
         monkeypatch.setattr(Path, "resolve", fail)
-        detail = refusal_detail(Path("outputs"), run_id, exc, field="arm run_id")
+        detail = refusal_detail(Path("outputs"), run_id, exc, field="arm run_id", after_fit=True)
 
         assert "cannot be located" in detail
-        assert run_id not in detail.split("Invalid arm run_id")[0]
+        assert "arm run_id" in detail
+        # The id is valid — it passed the shape gate — so nothing convicts it.
+        assert "Invalid" not in detail
+        assert run_id not in detail.split("containment for arm run_id")[0]
         assert str(Path("outputs") / run_id) not in detail
 
     def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
@@ -945,6 +949,8 @@ class TestSelectRunLookupContainment:
         # The id is decidable up front, so no fit is paid for before refusing.
         assert launches == []
         assert "before launching" in result.seeds[0].error
+        # The shape branch is reachable from confirmation too, not just arms.
+        assert "never wrote under that name" in result.seeds[0].error
 
     def _escaping_confirmation(self, tmp_path, relative: bool = False, base: Path | None = None):
         """Run a confirmation whose fit plants an escaping link at its run name."""
@@ -1035,6 +1041,22 @@ class TestSelectRunLookupContainment:
         assert "after its fit" in error
         assert str(links[0]) in error
         assert " -> " not in error
+
+    def test_an_unreadable_link_keeps_the_absolute_spelling(self, tmp_path, monkeypatch):
+        # The cross the other two tests never make: relative base × failing hop.
+        # `refused` is assigned before the hop precisely so the absolute form
+        # already earned survives a readlink that fails after it.
+        def refuse_readlink(self: Path) -> Path:
+            raise OSError("gone")
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(Path, "readlink", refuse_readlink)
+        result, _, _ = self._escaping_confirmation(tmp_path, base=Path("outputs"))
+
+        error = result.seeds[0].error
+        assert error is not None and " -> " not in error
+        pointer = error.split("anything at ", 1)[1].split(" is left in place")[0]
+        assert Path(pointer).is_absolute()
 
     def test_an_unreadable_link_does_not_eat_the_refusal(self, tmp_path, monkeypatch):
         # Formatting the breadcrumb must never replace the containment error.

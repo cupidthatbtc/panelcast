@@ -733,7 +733,7 @@ def refusal_detail(
     exc: RunPathError,
     *,
     field: str,
-    after_fit: bool = True,
+    after_fit: bool,
 ) -> str:
     """The tail every select containment refusal carries, parenthetical and all.
 
@@ -774,10 +774,10 @@ def refusal_detail(
     undecided = _containment_undecided(output_base)
     if undecided is not None:
         return (
-            f"(containment could not be decided — the output root {output_base} did not "
-            f"resolve: {undecided}; nothing is known to have left it, and the refused name "
-            f"cannot be located): Invalid {field}: {run_id!r} could not be resolved against "
-            "the output root"
+            f"(containment could not be decided — the output root {output_base} is relative "
+            f"and the working directory could not be read: {undecided}; nothing is known to "
+            "have left it, and the refused name cannot be located): containment for "
+            f"{field} {run_id!r} could not be decided"
         )
     where = _refused_run_name(output_base, run_id)
     if not after_fit:
