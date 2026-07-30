@@ -123,10 +123,15 @@ def path_is_within(candidate: Path, root: Path) -> bool:
 
     Both sides are resolved, so a symlinked component that leaves the root is
     caught even when the literal join looks contained.
+
+    ``RuntimeError`` is caught alongside ``OSError`` because on Python 3.11 and
+    3.12 non-strict ``resolve()`` converts ``ELOOP`` into one; a planted
+    symlink loop must fail closed here rather than raise through every caller
+    that documents a refusal instead.
     """
     try:
         return Path(root).resolve() in Path(candidate).resolve().parents
-    except OSError:
+    except (OSError, RuntimeError):
         return False
 
 

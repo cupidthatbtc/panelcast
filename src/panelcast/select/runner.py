@@ -719,6 +719,12 @@ def _containment_undecided(output_base: Path) -> OSError | None:
     cwd has been removed. Non-strict ``resolve()`` swallows per-component
     ``lstat`` failures and returns the lexical path, so its only raise is the
     ``getcwd()`` inside ``abspath``, which an absolute base skips entirely.
+
+    Only the root is probed, while ``path_is_within`` resolves the candidate
+    too: sufficient because the candidate is the root joined to a validated
+    bare name, which adds no component that can fail to resolve on its own. A
+    shape rule that let a candidate carry its own resolvable failure would
+    make this branch miss it and fall through to the escape wording.
     """
     try:
         output_base.resolve()
@@ -773,11 +779,15 @@ def refusal_detail(
         )
     undecided = _containment_undecided(output_base)
     if undecided is not None:
+        why = (
+            "could not be resolved"
+            if output_base.is_absolute()
+            else "is relative and the working directory could not be read"
+        )
         return (
-            f"(containment could not be decided — the output root {output_base} is relative "
-            f"and the working directory could not be read: {undecided}; nothing is known to "
-            "have left it, and the refused name cannot be located): containment for "
-            f"{field} {run_id!r} could not be decided"
+            f"(containment could not be decided — the output root {output_base} {why}: "
+            f"{undecided}; nothing is known to have left it, and the refused name cannot "
+            f"be located): containment for {field} {run_id!r} could not be decided"
         )
     where = _refused_run_name(output_base, run_id)
     if not after_fit:

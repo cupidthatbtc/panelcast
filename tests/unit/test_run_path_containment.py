@@ -213,9 +213,13 @@ class TestPathIsWithin:
         assert not path_is_within(tmp_path, tmp_path)
         assert not path_is_within(tmp_path.parent, tmp_path)
 
-    def test_resolution_error_fails_closed(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("error", [OSError, RuntimeError])
+    def test_resolution_error_fails_closed(self, tmp_path, monkeypatch, error):
+        # RuntimeError too: Python 3.11 and 3.12 convert a resolve() ELOOP into
+        # one, and a planted symlink loop must not raise through every caller
+        # that documents a refusal instead.
         def fail(_path):
-            raise OSError("symlink loop")
+            raise error("symlink loop")
 
         monkeypatch.setattr(Path, "resolve", fail)
         assert not path_is_within(tmp_path / "a", tmp_path)
@@ -708,6 +712,9 @@ class TestSelectRunLookupContainment:
         assert "artifacts may exist" not in problem
         assert "arm run_id" in problem
         assert "cwd is gone" in problem  # the errno the arm has no traceback for
+        # This base is absolute, so the message must not blame a relative one.
+        assert "is relative" not in problem
+        assert "could not be resolved" in problem
 
     def test_a_confirmation_refused_before_launching_reports_the_real_cause(
         self, tmp_path, monkeypatch
@@ -892,6 +899,8 @@ class TestSelectRunLookupContainment:
         # There is no pre-launch arm resolve, so every containment refusal here
         # is the post-fit case, and the message has to say so — and follow the
         # link, since its target is where the arm's artifacts actually landed.
+        # (A link that loops instead of escaping fails closed the same way:
+        # `path_is_within` catches the RuntimeError older Pythons raise.)
         assert "after the arm ran" in problem
         assert "artifacts may exist outside the output base" in problem
         assert " -> " in problem
