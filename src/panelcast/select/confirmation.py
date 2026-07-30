@@ -26,7 +26,7 @@ from panelcast.select.runner import (
     SweepConfig,
     _default_panelcast_bin,
     launch_arm,
-    refused_run_name,
+    refusal_detail,
     resolve_arm_timeout,
     sweep_run_dir,
 )
@@ -276,7 +276,7 @@ def run_confirmation(
     timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
     def _resolve(run_id: str, seed: int, label: str, *, after_fit: bool) -> Path:
-        """This fit's run dir, contained — raised in ``_one_fit``'s failure shape.
+        """This fit's run dir, contained — raised in the shape ``_one_fit`` uses.
 
         Re-raising as ``RuntimeError`` keeps the fail-closed path from depending
         on how wide the seed loop's handler happens to be. The two phases mean
@@ -284,19 +284,16 @@ def run_confirmation(
         pre-launch refusal costs nothing, while a post-fit one means a full fit
         has already run and may have written outside the output base. The
         refused name is left exactly as it is — this lookup does not delete —
-        and named by ``refused_run_name``, the same breadcrumb the arm handshake
-        emits, because when it is a symlink that link is the only surviving
-        record of where those artifacts went (#413).
+        and described by ``refusal_detail``, the same wording the arm handshake
+        emits, because when the name is a symlink that link is the only
+        surviving record of where those artifacts went (#413).
         """
         try:
             return sweep_run_dir(cfg.pipeline_output_base, run_id, field="confirmation run_id")
         except RunPathError as exc:
             if after_fit:
-                phase = (
-                    "refused after its fit (artifacts may exist outside the output base; "
-                    f"anything at {refused_run_name(cfg.pipeline_output_base, run_id)} "
-                    "is left in place, unread)"
-                )
+                detail = refusal_detail(cfg.pipeline_output_base, run_id)
+                phase = f"refused after its fit ({detail}, unread)"
             else:
                 phase = "refused before launching (nothing ran)"
             raise RuntimeError(f"{label} fit on seed {seed} {phase}: {exc}") from exc

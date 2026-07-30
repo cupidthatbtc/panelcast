@@ -1474,7 +1474,8 @@ fully reads each candidate artifact (including directory trees), so
 ## 9.3 Run Identifier Containment
 
 Every run identifier resolves through `paths.py:safe_run_dir`, the single
-containment gate every run lookup, move, and delete goes through: `--resume`,
+containment gate every run lookup keyed by an identifier — and every move and
+delete keyed by one — goes through: `--resume`,
 the `runs` CLI, sweep and backtest ids, and the ids `panelcast select` mints
 for its own arm and confirmation fits (the #167 handshake, via
 `select/runner.py:sweep_run_dir`). The id must be a bare directory name — no

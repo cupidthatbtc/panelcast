@@ -654,8 +654,12 @@ class TestSelectRunLookupContainment:
         # "was never created" miss cannot make this assertion pass.
         assert problem is not None and "arm run_id" in problem
         # There is no pre-launch arm resolve, so every containment refusal here
-        # is the post-fit case, and the message has to say so.
+        # is the post-fit case, and the message has to say so. None of these
+        # ids is well formed, so the orchestrator would have refused it before
+        # creating anything: the message must not send anyone looking.
         assert "after the arm ran" in problem
+        assert "never named a run directory" in problem
+        assert "artifacts may exist" not in problem
         assert claimed == set()
 
     def test_claim_named_run_refuses_a_symlinked_escape(self, tmp_path):
@@ -735,12 +739,12 @@ class TestSelectRunLookupContainment:
         assert launches == []
         assert "before launching" in result.seeds[0].error
 
-    def _escaping_confirmation(self, tmp_path, relative: bool = False):
+    def _escaping_confirmation(self, tmp_path, relative: bool = False, base: Path | None = None):
         """Run a confirmation whose fit plants an escaping link at its run name."""
         from panelcast.select.confirmation import run_confirmation
 
-        base = tmp_path / "outputs"
-        base.mkdir()
+        base = tmp_path / "outputs" if base is None else base
+        base.mkdir(exist_ok=True)
         outside = tmp_path / "outside"
         outside.mkdir()
         (outside / "keep.txt").write_text("keep", encoding="utf-8")
@@ -785,6 +789,25 @@ class TestSelectRunLookupContainment:
         error = result.seeds[0].error
         assert error is not None and " -> " in error
         named = error.split(" -> ", 1)[1].split(" is left in place")[0]
+        assert Path(named).is_absolute()
+        assert Path(named).resolve() == outside.resolve()
+
+    def test_the_breadcrumb_is_absolute_from_a_relative_output_base(
+        self, tmp_path, monkeypatch
+    ):
+        # `pipeline_output_base` defaults to the relative `outputs`, so without
+        # the absolute() the whole breadcrumb — link and target — would only
+        # mean anything to a reader standing where the process stood.
+        monkeypatch.chdir(tmp_path)
+        result, _, outside = self._escaping_confirmation(
+            tmp_path, relative=True, base=Path("outputs")
+        )
+
+        error = result.seeds[0].error
+        assert error is not None and " -> " in error
+        pointer = error.split("anything at ", 1)[1].split(" -> ", 1)[0]
+        named = error.split(" -> ", 1)[1].split(" is left in place")[0]
+        assert Path(pointer).is_absolute()
         assert Path(named).is_absolute()
         assert Path(named).resolve() == outside.resolve()
 
@@ -859,4 +882,7 @@ class TestSelectRunLookupContainment:
 
         assert result.seeds[0].error is not None
         assert "after its fit" in result.seeds[0].error
+        # Not a link, so the breadcrumb is the name itself, with no hop.
+        assert str((base / calls[0]).absolute()) in result.seeds[0].error
+        assert " -> " not in result.seeds[0].error
         assert (base / calls[0] / "evaluation").is_dir()

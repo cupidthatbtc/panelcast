@@ -44,7 +44,7 @@ from typing import Any
 import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
-from panelcast.paths import RunPathError, safe_run_dir
+from panelcast.paths import RunPathError, safe_run_dir, validate_run_id
 from panelcast.select.space import (
     KNOBS,
     arm_conflicts,
@@ -679,11 +679,17 @@ def sweep_run_dir(output_base: Path, run_id: str, *, field: str = "run_id") -> P
     return safe_run_dir(output_base, run_id, field=field).resolve()
 
 
-def refused_run_name(output_base: Path, run_id: str, *, arrow: str = " -> ") -> str:
-    """Where a refused run name sits, and — one hop — what it points at.
+def refused_run_name(output_base: Path, run_id: str) -> str | None:
+    """Where a refused run name sits and — one hop on — what it points at.
 
-    A containment refusal after a fit has run leaves artifacts somewhere, and
-    when the refused name is a symlink that link is the only record of where.
+    None when the id never named a place this run could have written. Only a
+    well-formed id refused for containment did: a shape rejection (separator,
+    traversal, absolute or drive-relative path, reserved layout name) is
+    refused by the orchestrator the same way before it creates any directory,
+    so there is nothing at that name and pointing an operator at the lexical
+    join would send them somewhere arbitrary — ``outputs/../outside``, or with
+    an absolute id the base drops out of the join entirely.
+
     Absolute, because the default output base is relative and a breadcrumb is
     only useful if it can be followed from anywhere; the target is joined to
     the link's own directory, since ``readlink`` returns the link's contents
@@ -692,13 +698,25 @@ def refused_run_name(output_base: Path, run_id: str, *, arrow: str = " -> ") -> 
     symlink), and nothing here follows or touches the target. A failure
     degrades to naming the name alone rather than replacing the refusal.
     """
+    try:
+        validate_run_id(run_id)
+    except RunPathError:
+        return None
     refused = (Path(output_base) / run_id).absolute()
     try:
         if refused.is_symlink():
-            return f"{refused}{arrow}{refused.parent / refused.readlink()}"
+            return f"{refused} -> {refused.parent / refused.readlink()}"
     except OSError:
         pass
     return str(refused)
+
+
+def refusal_detail(output_base: Path, run_id: str) -> str:
+    """The parenthetical both post-fit containment refusals carry."""
+    where = refused_run_name(output_base, run_id)
+    if where is None:
+        return "the id never named a run directory"
+    return f"artifacts may exist outside the output base; anything at {where} is left in place"
 
 
 def _claim_named_run(
@@ -724,9 +742,8 @@ def _claim_named_run(
         run_dir = sweep_run_dir(output_base, run_id, field="arm run_id")
     except RunPathError as exc:
         return None, (
-            "handshake failed after the arm ran (artifacts may exist outside the output "
-            f"base; anything at {refused_run_name(output_base, run_id)} is left in "
-            f"place, unread): {exc}"
+            "handshake failed after the arm ran "
+            f"({refusal_detail(output_base, run_id)}, unread): {exc}"
         )
     if not run_dir.exists():
         return None, f"handshake failed: expected run dir {run_dir} was never created"
