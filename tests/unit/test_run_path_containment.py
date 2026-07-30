@@ -762,9 +762,10 @@ class TestSelectRunLookupContainment:
         assert "could not be decided" in error
         assert "resolves outside" not in error
         assert "artifacts may exist" not in error
-        # The lexical spelling is the only one available once the cwd read
-        # that would absolutize it is what failed; the errno is the evidence.
+        # The failing path is named — absolutely here, since only resolve() is
+        # broken — and the errno is the evidence for which trigger fired.
         assert "outputs could not be resolved" in error
+        assert str((tmp_path / "outputs").absolute()) in error
         assert "cwd is gone" in error
 
     def test_a_pre_launch_breadcrumb_never_claims_artifacts_exist(self, tmp_path):
@@ -816,6 +817,30 @@ class TestSelectRunLookupContainment:
         assert "Invalid" not in detail
         assert run_id not in detail.split("containment for arm run_id")[0]
         assert str(Path("outputs") / run_id) not in detail
+
+    def test_a_dead_cwd_falls_back_to_the_lexical_spelling(self, tmp_path, monkeypatch):
+        # The real trigger breaks both calls, since resolving a relative path
+        # and absolutizing it read the same cwd. Then lexical is all there is.
+        from panelcast.select.runner import refusal_detail
+
+        monkeypatch.chdir(tmp_path)
+        run_id = "sel_s1_x_20260730T120000123456"
+
+        def fail(_self, *args, **kwargs):
+            raise OSError("cwd is gone")
+
+        monkeypatch.setattr(Path, "resolve", fail)
+        monkeypatch.setattr(Path, "absolute", fail)
+        detail = refusal_detail(
+            Path("outputs"),
+            run_id,
+            RunPathError("Invalid arm run_id: resolves outside the output root"),
+            field="arm run_id",
+            after_fit=True,
+        )
+
+        assert detail.startswith("(containment could not be decided — outputs could not")
+        assert "cwd is gone" in detail
 
     def test_a_run_name_pointing_at_the_root_is_not_an_escape(self, tmp_path):
         # `path_is_within` wants a strict descendant, so a name symlinked at

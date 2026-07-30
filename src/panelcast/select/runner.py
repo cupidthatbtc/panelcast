@@ -811,8 +811,13 @@ def refusal_detail(
         # which: the errno distinguishes a dead working directory from a
         # symlink loop, and any proxy for it (an absolute base, a name that
         # differs from the root) is a guess that goes wrong on the other one.
-        # The lexical spelling is used because it is the only one available
-        # when what failed is the cwd read that would absolutize it.
+        # The spelling is likewise taken rather than reasoned about — absolute
+        # where that is obtainable, lexical where the cwd read it needs is
+        # itself what failed.
+        try:
+            unresolved = unresolved.absolute()
+        except OSError:
+            pass
         return (
             f"(containment could not be decided — {unresolved} could not be resolved: "
             f"{why}; nothing is known to have left the output root): containment for "
