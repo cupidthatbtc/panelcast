@@ -194,7 +194,12 @@ src/panelcast/
 │       ├── io.py                   # save_model (NetCDF + manifest)
 │       └── predict.py              # Posterior predictive sampling
 ├── pipelines/
-│   ├── orchestrator.py             # PipelineOrchestrator, PipelineConfig
+│   ├── orchestrator.py             # PipelineOrchestrator run lifecycle
+│   ├── pipeline_config.py          # PipelineConfig, descriptor model-fact resolution
+│   ├── run_command.py              # Manifest command-string provenance
+│   ├── stage_context.py            # PipelineConfig -> StageContext
+│   ├── artifact_routing.py         # Run-scoped product roots
+│   ├── failure_report.py           # failure.json, console epilogue
 │   ├── stages.py                   # PipelineStage definitions, topological sort
 │   ├── prepare_dataset.py          # Stage 1: data preparation
 │   ├── create_splits.py            # Stage 2: split creation
@@ -1130,7 +1135,7 @@ panelcast export-figures     # Static figure export
 
 ## 7.2 PipelineConfig
 
-`PipelineConfig` dataclass in `pipelines/orchestrator.py`:
+`PipelineConfig` dataclass in `pipelines/pipeline_config.py`:
 
 ### Execution Control
 
@@ -1932,6 +1937,11 @@ Every file path referenced in this document should exist in the codebase:
 - [ ] `src/panelcast/models/bayes/io.py`
 - [ ] `src/panelcast/models/bayes/predict.py`
 - [ ] `src/panelcast/pipelines/orchestrator.py`
+- [ ] `src/panelcast/pipelines/pipeline_config.py`
+- [ ] `src/panelcast/pipelines/run_command.py`
+- [ ] `src/panelcast/pipelines/stage_context.py`
+- [ ] `src/panelcast/pipelines/artifact_routing.py`
+- [ ] `src/panelcast/pipelines/failure_report.py`
 - [ ] `src/panelcast/pipelines/stages.py`
 - [ ] `src/panelcast/pipelines/prepare_dataset.py`
 - [ ] `src/panelcast/pipelines/create_splits.py`
@@ -1962,7 +1972,7 @@ Every file path referenced in this document should exist in the codebase:
 Key entities referenced in this document:
 
 - [ ] `PipelineOrchestrator` class in `orchestrator.py`
-- [ ] `PipelineConfig` dataclass in `orchestrator.py`
+- [ ] `PipelineConfig` dataclass in `pipeline_config.py`
 - [ ] `PipelineStage` dataclass in `stages.py`
 - [ ] `StageContext` dataclass in `stages.py`
 - [ ] `get_execution_order()` in `stages.py`
