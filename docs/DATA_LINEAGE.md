@@ -1501,8 +1501,11 @@ says next depends on which half refused: a post-fit refusal of a *well-formed*
 id means artifacts may exist outside the output base, so the message names that
 path and — when it is a symlink — follows one hop, because the link is the only
 surviving record of where they went; a refusal of a *malformed* id means the
-orchestrator refused the same shape before creating anything, so nothing was
-written under that name and the refusal names no path at all. (The confirmation
+orchestrator refused the same shape before creating a run directory, so *this
+run* never wrote under that name and the refusal names no path. That is
+deliberately narrower than "nothing is there" — a reserved id like `latest`
+names a directory the layout itself maintains, which this run still never
+wrote. (The confirmation
 path has no attribution step of its own: an id
 that resolves to another run's directory *inside* the output base is contained,
 and only the arm handshake re-checks the manifest behind it.)

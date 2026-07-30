@@ -602,26 +602,59 @@ class TestSelectRunLookupContainment:
             sweep_run_dir(tmp_path, run_id)
 
     @pytest.mark.parametrize("run_id", ESCAPING_IDS + MALFORMED_IDS + RESERVED_IDS)
-    def test_the_shape_and_containment_gates_agree(self, tmp_path, run_id):
-        # `refusal_detail` decides "nothing was written under that name" by
+    def test_both_gates_refuse_the_same_known_ids(self, tmp_path, run_id):
+        # `refusal_detail` decides "this run never wrote under that name" by
         # re-running validate_run_id, which is exact only while that stays the
-        # whole of safe_run_dir's shape check.
+        # whole of safe_run_dir's shape check. This pins the agreement over the
+        # shapes we know about; a rule added to safe_run_dir alone introduces a
+        # shape that is by definition not in these lists, which is why the
+        # coupling is also written down in `_refused_run_name`'s docstring.
         with pytest.raises(RunPathError):
             validate_run_id(run_id)
         with pytest.raises(RunPathError):
             safe_run_dir(tmp_path, run_id)
 
-    def test_selects_own_minted_ids_are_well_formed(self):
-        # The premise the whole handshake rests on: an id select mints is one
-        # both gates accept, so a refusal is never select refusing itself.
-        from panelcast.select.runner import record_key
+    @pytest.mark.parametrize("sweep_id", ["hs", "nightly-2026-07-30_offset-logit-rescreen"])
+    def test_the_real_confirmation_mint_passes_the_gate(self, tmp_path, sweep_id):
+        # The premise the handshake rests on: an id select mints is one the
+        # gate accepts, so a refusal is never select refusing its own naming.
+        # Read out of the config the production mint wrote, not re-templated.
+        from panelcast.select.confirmation import run_confirmation
+        from panelcast.select.runner import SweepConfig, sweep_run_dir
 
-        stamp = f"{datetime.now():%Y%m%dT%H%M%S%f}"
-        minted = [f"sel_hs_{record_key('abc123', rung)}_{stamp}" for rung in (0, 3)]
-        minted += [f"sel_hs_confirm_{label}_seed42_{stamp}" for label in ("reference", "winner")]
+        base = tmp_path / "outputs"
+        base.mkdir()
+        cfg = SweepConfig(
+            sweep_id=sweep_id,
+            output_root=tmp_path / "select",
+            panelcast_bin="pc",
+            pipeline_output_base=base,
+        )
+        minted: list[str] = []
+
+        def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
+            minted.append(_minted_run_id(config_path))
+            (base / minted[-1]).mkdir(parents=True)
+            return 0, "ok"
+
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+
+        assert len(minted) == 2  # reference and winner
         for run_id in minted:
             assert validate_run_id(run_id) == run_id
-            assert safe_run_dir(Path("outputs"), run_id).name == run_id
+            assert sweep_run_dir(base, run_id).name == run_id
+
+    def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
+        # The arm mint has no cheap production seam (it happens inside
+        # `run_sweep`), so this pins its shape with the real `record_key` —
+        # the rung suffix is the segment most likely to grow a bad character.
+        from panelcast.select.runner import record_key, sweep_run_dir
+
+        stamp = f"{datetime.now():%Y%m%dT%H%M%S%f}"
+        for rung in (0, 3):
+            run_id = f"sel_hs_{record_key('abc123', rung)}_{stamp}"
+            assert validate_run_id(run_id) == run_id
+            assert sweep_run_dir(tmp_path, run_id).name == run_id
 
     def test_sweep_run_dir_returns_an_absolute_path(self, tmp_path, monkeypatch):
         from panelcast.select.runner import sweep_run_dir
