@@ -7,7 +7,7 @@ Every lookup, move, and delete keyed by a run identifier goes through
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -544,9 +544,17 @@ class TestWindowsPathShapes:
             safe_run_dir(tmp_path, bad)
 
 
-def _write_arm_manifest(run_dir: Path, created_at: datetime, flags: dict | None = None) -> None:
-    """A manifest `_attribution_error` would accept for an arm launched at ``created_at``."""
+def _write_arm_manifest(
+    run_dir: Path, launched_at: datetime, flags: dict[str, object] | None = None
+) -> None:
+    """A manifest `_attribution_error` accepts for an arm launched at ``launched_at``.
+
+    ``created_at`` sits a couple of seconds after the launch — the shape
+    production writes (a naive local timestamp from the subprocess, which
+    starts after the arm does), not the equality boundary.
+    """
     run_dir.mkdir(parents=True, exist_ok=True)
+    created_at = launched_at + timedelta(seconds=2)
     (run_dir / "manifest.json").write_text(
         json.dumps({"created_at": created_at.isoformat(), "flags": flags or {}}),
         encoding="utf-8",
@@ -593,18 +601,19 @@ class TestSelectRunLookupContainment:
         assert run_dir == (base / run_id).resolve()
         assert claimed == {str((base / run_id).resolve())}
 
-    @pytest.mark.parametrize("run_id", ["../outside", "..\\outside", "a/b", "latest", ".."])
-    def test_claim_named_run_refuses_escaping_ids(self, tmp_path, run_id):
-        # The escape target is a fully valid, claimable run: only containment
-        # stands between the lookup and attributing it to this arm.
+    @pytest.mark.parametrize("run_id", ESCAPING_IDS + MALFORMED_IDS + RESERVED_IDS)
+    def test_claim_named_run_refuses_bad_ids(self, tmp_path, run_id):
+        # Both plausible targets are fully valid, claimable runs, so nothing
+        # but the id gate stands between the lookup and attributing one of
+        # them to this arm.
+        from panelcast.select.runner import _claim_named_run
+
         base = tmp_path / "outputs"
         base.mkdir()
         launched_at = datetime.now()
         _write_arm_manifest(tmp_path / "outside", launched_at)
         _write_arm_manifest(base / "latest", launched_at)
         claimed: set[str] = set()
-
-        from panelcast.select.runner import _claim_named_run
 
         run_dir, problem = _claim_named_run(run_id, base, {}, launched_at, claimed)
 
@@ -661,12 +670,17 @@ class TestSelectRunLookupContainment:
         )
         assert cfg.sweep_dir == tmp_path / "select" / "s1"
         cfg.sweep_id = "../outside"
+        launches: list[Path] = []
 
-        result = run_confirmation(
-            {"latent_process": "ar1"}, cfg, seeds=(42,), launch=lambda *a, **k: (0, "ok")
-        )
+        def launch(config_path, panelcast_bin, timeout_seconds=None):
+            launches.append(config_path)
+            return 0, "ok"
+
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
 
         assert not result.confirmed
         assert result.seeds[0].error is not None
         assert "confirmation run_id" in result.seeds[0].error
         assert result.seeds[0].reference_run is None
+        # The id is decidable up front, so no fit is paid for before refusing.
+        assert launches == []

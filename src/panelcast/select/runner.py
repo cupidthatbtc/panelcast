@@ -665,6 +665,11 @@ def sweep_run_dir(output_base: Path, run_id: str, *, field: str = "run_id") -> P
     or a run name symlinked out of ``output_base`` fails closed here rather
     than relying on some earlier caller having validated first. Callers resolve
     once per fit, never inside a per-arm loop.
+
+    ``safe_run_dir`` returns the caller's spelling of the join by contract, so
+    the absolute form is taken here: select records run directories in its
+    ledger and in ``confirmation.json``, where a relative path would stop
+    meaning the same run once the resume runs from a different directory.
     """
     return safe_run_dir(output_base, run_id, field=field).resolve()
 
