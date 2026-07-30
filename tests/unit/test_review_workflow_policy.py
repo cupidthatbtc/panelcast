@@ -262,6 +262,14 @@ def _synthetic_workspace_violations(workflow: dict[str, Any]) -> list[str]:
         'state === "empty"',
         "NO CHANGES TO REVIEW",
         "ERROR: review diff was not delivered",
+        # A whole refactor-scale diff overruns one tool result's token budget
+        # and spills to a file this job has no tool to read (#432).
+        "const PAGE_CHARS = 40000",
+        "const paginate = (text)",
+        'text.lastIndexOf("\\n", end)',
+        "PANELCAST REVIEW DIFF PAGE ",
+        "message.params?.arguments?.page",
+        "ERROR: no such page",
         'base64 -w0 "$RUNNER_TEMP/panelcast-review.diff" > inline-review-diff.b64',
         'cp "$RUNNER_TEMP/panelcast-review-state" inline-review-state',
         "git add README.md inline-review-mcp.cjs inline-review-diff.b64 inline-review-state",
@@ -299,19 +307,23 @@ def _inline_diff_violations(workflow: dict[str, Any]) -> list[str]:
 
     inputs = _review_action_inputs(jobs(workflow).get("review") or {})
     prompt = str(inputs.get("prompt", ""))
-    if "call mcp__review_diff__get_diff exactly once" not in prompt:
+    if "mcp__review_diff__get_diff with page 1" not in prompt:
         findings.append("credentialed review prompt does not require the diff tool")
+    if "until you have read every page" not in prompt:
+        findings.append("credentialed review prompt does not require paging through the diff")
+    if "not read all m pages" not in prompt:
+        findings.append("credentialed review prompt treats a partial read as a review")
     if "untrusted data" not in prompt:
         findings.append("credentialed review prompt does not label the diff as untrusted data")
     if "raw pull-request diff" not in prompt:
         findings.append("credentialed review prompt does not call the tool result the raw diff")
     if "marker" in prompt.lower():
         findings.append("credentialed review prompt still references delivery markers")
-    if "no framing, header, or delimiter" not in prompt:
-        findings.append("credentialed review prompt does not state the result is unwrapped")
+    if "PANELCAST REVIEW DIFF PAGE n OF m" not in prompt:
+        findings.append("credentialed review prompt does not describe the page header")
     if "NO CHANGES TO REVIEW" not in prompt:
         findings.append("credentialed review prompt has no empty-diff branch")
-    if "Only an error reported by the tool itself" not in prompt:
+    if "reports an error for any page" not in prompt:
         findings.append("credentialed review prompt does not scope not-completed to tool errors")
     claude_args = str(inputs.get("claude_args", ""))
     if claude_args.count("--mcp-config ") != 1:
@@ -508,7 +520,7 @@ def test_secretless_diff_log_is_complete_and_unforgeably_delimited(
     review_input = jobs(review_workflow)["review-input"]
     assert not review_input.get("outputs")
     inputs = _review_action_inputs(jobs(review_workflow)["review"])
-    assert "mcp__review_diff__get_diff exactly once" in inputs["prompt"]
+    assert "mcp__review_diff__get_diff with page 1" in inputs["prompt"]
     assert "untrusted data" in inputs["prompt"]
     assert inputs["claude_args"].count("--mcp-config ") == 1
     assert '"mcpServers":{"review_diff"' in inputs["claude_args"]
@@ -542,19 +554,54 @@ def test_empty_diff_reads_as_no_changes_rather_than_a_delivery_failure(
 
     prompt = str(_review_action_inputs(jobs(review_workflow)["review"])["prompt"])
     assert "NO CHANGES TO REVIEW" in prompt
-    assert "Only an error reported by the tool itself" in prompt
+    assert "reports an error for any page" in prompt
 
 
 def test_review_prompt_describes_the_diff_the_tool_actually_returns(
     review_workflow: dict[str, Any],
 ) -> None:
-    """The tool hands back the bare diff; the runtime markers live only in the
-    render job's log, which the reviewer cannot read (#411)."""
+    """The tool hands back a page of the bare diff behind one header line the
+    job itself writes; the runtime markers live only in the render job's log,
+    which the reviewer cannot read (#411, #432)."""
     prompt = str(_review_action_inputs(jobs(review_workflow)["review"])["prompt"])
 
     assert "raw pull-request diff" in prompt
-    assert "no framing, header, or delimiter" in prompt
+    assert "PANELCAST REVIEW DIFF PAGE n OF m" in prompt
+    assert "first line of a tool result" in prompt
     assert "marker" not in prompt.lower()
+
+
+def test_a_refactor_sized_diff_is_delivered_in_bounded_pages(
+    review_workflow: dict[str, Any],
+) -> None:
+    """A whole diff overruns one tool result's token budget and spills to a
+    file the reviewer has no tool to read, so the review silently reports
+    nothing read (#432). Pages have to be bounded and countable."""
+    builder_run = str(
+        next(
+            step
+            for step in _steps(jobs(review_workflow)["review-input"])
+            if step.get("name") == SYNTHETIC_BUILDER
+        )["run"]
+    )
+
+    page_chars = re.search(r"const PAGE_CHARS = (\d+)", builder_run)
+    assert page_chars is not None
+    # Small enough to fit a result, large enough that the 200 KB cap is a
+    # handful of calls rather than dozens.
+    assert 10000 <= int(page_chars.group(1)) <= 60000
+
+    # The page a caller asks for, the count it needs to keep asking, and the
+    # refusal that keeps an out-of-range page from reading as an empty diff.
+    assert "message.params?.arguments?.page" in builder_run
+    assert "pages.length" in builder_run
+    assert "ERROR: no such page" in builder_run
+    assert "PANELCAST REVIEW DIFF PAGE " in builder_run
+    # Paging must not reintroduce a single unbounded result.
+    assert "text: Buffer.from(encoded" not in builder_run
+
+    tool_schema = re.search(r'page:\s*\{\s*type:\s*"integer"', builder_run)
+    assert tool_schema is not None, "get_diff does not advertise a page parameter"
 
 
 def test_reviewer_can_still_read_ci_results_instead_of_running_them(
@@ -804,6 +851,27 @@ def _drop_the_empty_diff_branch_from_the_prompt(workflow: dict[str, Any]) -> Non
     inputs["prompt"] = inputs["prompt"].replace("NO CHANGES TO REVIEW", "an empty result")
 
 
+def _return_the_whole_diff_in_one_result(workflow: dict[str, Any]) -> None:
+    builder = _builder_step(workflow)
+    builder["run"] = str(builder["run"]).replace(
+        "const PAGE_CHARS = 40000", "const PAGE_CHARS = Number.MAX_SAFE_INTEGER"
+    )
+
+
+def _stop_paging_in_the_prompt(workflow: dict[str, Any]) -> None:
+    inputs = _review_action_inputs(_only_credentialed_job(workflow))
+    inputs["prompt"] = inputs["prompt"].replace(
+        "until you have read every page", "and stop there"
+    )
+
+
+def _accept_a_partial_read(workflow: dict[str, Any]) -> None:
+    inputs = _review_action_inputs(_only_credentialed_job(workflow))
+    inputs["prompt"] = inputs["prompt"].replace(
+        "not read all m pages", "read at least one page"
+    )
+
+
 def _drop_inline_diff_wiring(workflow: dict[str, Any]) -> None:
     _edit_claude_args(workflow, "--mcp-config ", "--ignored-mcp-config ")
 
@@ -850,6 +918,9 @@ def _widen_inline_diff_cap(workflow: dict[str, Any]) -> None:
         (_report_an_empty_diff_as_a_failure, "builder omits"),
         (_restore_marker_language, "still references delivery markers"),
         (_drop_the_empty_diff_branch_from_the_prompt, "has no empty-diff branch"),
+        (_return_the_whole_diff_in_one_result, "builder omits"),
+        (_stop_paging_in_the_prompt, "does not require paging through the diff"),
+        (_accept_a_partial_read, "treats a partial read as a review"),
     ],
 )
 def test_policy_rejects_a_reviewer_that_can_execute_pull_request_code(
