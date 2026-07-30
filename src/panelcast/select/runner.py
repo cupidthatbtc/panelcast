@@ -705,8 +705,12 @@ def _refused_run_name(output_base: Path, run_id: str) -> str:
     return str(refused)
 
 
-def _containment_undecided(output_base: Path) -> bool:
-    """Whether the refusal means "could not tell" rather than "escaped".
+def _containment_undecided(output_base: Path) -> OSError | None:
+    """The error that made containment undecidable, or None if it was decided.
+
+    Returned rather than reduced to a bool so the refusal can name the errno:
+    from the arm handshake the problem string is the entire record, with no
+    exception behind it to carry a traceback.
 
     ``path_is_within`` fails closed on ``OSError``, so a base that cannot be
     resolved produces the same ``RunPathError`` as a genuine escape, and the
@@ -718,13 +722,20 @@ def _containment_undecided(output_base: Path) -> bool:
     """
     try:
         output_base.resolve()
-    except OSError:
-        return True
-    return False
+    except OSError as exc:
+        return exc
+    return None
 
 
-def refusal_detail(output_base: Path, run_id: str, exc: RunPathError, *, field: str) -> str:
-    """The tail both post-fit containment refusals carry, parenthetical and all.
+def refusal_detail(
+    output_base: Path,
+    run_id: str,
+    exc: RunPathError,
+    *,
+    field: str,
+    after_fit: bool = True,
+) -> str:
+    """The tail every select containment refusal carries, parenthetical and all.
 
     Three outcomes, decided cheapest-first. A *shape* rejection means this run
     never wrote under that name, so no path is named: the orchestrator refuses
@@ -740,12 +751,13 @@ def refusal_detail(output_base: Path, run_id: str, exc: RunPathError, *, field: 
     state it detects is the one in which a name cannot be made absolute either.
     It owns its own tail, because ``exc`` here says "resolves outside the
     output root" — ``path_is_within``'s fail-closed default, and the very
-    claim this branch exists to deny. It has the mirror-image asymmetry: on
-    the confirmation path it can only fire if the cwd disappears *between* the
-    pre-launch and post-fit resolves, while on the arm path the first lookup
-    sees it.
+    claim this branch exists to deny. Its trigger is process-wide and
+    persistent, so it fires on whichever lookup comes first, which on the
+    confirmation path is the one before the fit.
 
-    Only a well-formed id against a resolvable base gets a breadcrumb.
+    Only a well-formed id against a resolvable base gets a breadcrumb, and only
+    ``after_fit`` lets it claim artifacts may be out there: a refusal before
+    launching means the name was never written to.
     """
     try:
         validate_run_id(run_id)
@@ -754,13 +766,17 @@ def refusal_detail(output_base: Path, run_id: str, exc: RunPathError, *, field: 
             "(this run never wrote under that name — the id's shape is refused "
             f"before any run dir is created): {exc}"
         )
-    if _containment_undecided(output_base):
+    undecided = _containment_undecided(output_base)
+    if undecided is not None:
         return (
-            "(containment could not be decided — the output base did not resolve, so "
-            "nothing is known to have left it, and the refused name cannot be located): "
-            f"Invalid {field}: {run_id!r} could not be resolved against the output root"
+            f"(containment could not be decided — the output base {output_base} did not "
+            f"resolve: {undecided}; nothing is known to have left it, and the refused name "
+            f"cannot be located): Invalid {field}: {run_id!r} could not be resolved against "
+            "the output root"
         )
     where = _refused_run_name(output_base, run_id)
+    if not after_fit:
+        return f"(nothing had been written yet; {where} is refused, not read): {exc}"
     return (
         f"(artifacts may exist outside the output base; anything at {where} "
         f"is left in place, unread): {exc}"

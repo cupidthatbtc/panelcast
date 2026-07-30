@@ -291,21 +291,20 @@ def run_confirmation(
         try:
             return sweep_run_dir(cfg.pipeline_output_base, run_id, field="confirmation run_id")
         except RunPathError as exc:
-            if after_fit:
-                detail = refusal_detail(
-                    cfg.pipeline_output_base, run_id, exc, field="confirmation run_id"
-                )
-                raise RuntimeError(
-                    f"{label} fit on seed {seed} refused after its fit {detail}"
-                ) from exc
+            detail = refusal_detail(
+                cfg.pipeline_output_base,
+                run_id,
+                exc,
+                field="confirmation run_id",
+                after_fit=after_fit,
+            )
             # "nothing ran" is per-fit: the reference fit precedes the winner's,
             # so a refusal that only tripped on the longer of the two labels
             # would still read as if nothing had run at all. Today the reference
             # label is the longer one (#435), so the seed aborts before the
             # winner is ever minted.
-            raise RuntimeError(
-                f"{label} fit on seed {seed} refused before launching (nothing ran): {exc}"
-            ) from exc
+            phase = "after its fit" if after_fit else "before launching (nothing ran)"
+            raise RuntimeError(f"{label} fit on seed {seed} refused {phase} {detail}") from exc
 
     def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:
         config_path = cfg.sweep_dir / f"confirm_{label}_seed{seed}.yaml"

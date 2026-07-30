@@ -691,7 +691,7 @@ class TestSelectRunLookupContainment:
         base = tmp_path / "outputs"
         base.mkdir()
 
-        def fail(_self):
+        def fail(_self, strict=False):
             raise OSError("cwd is gone")
 
         monkeypatch.setattr(Path, "resolve", fail)
@@ -707,6 +707,39 @@ class TestSelectRunLookupContainment:
         assert "resolves outside" not in problem
         assert "artifacts may exist" not in problem
         assert "arm run_id" in problem
+        assert "cwd is gone" in problem  # the errno the arm has no traceback for
+
+    def test_a_confirmation_refused_before_launching_reports_the_real_cause(
+        self, tmp_path, monkeypatch
+    ):
+        # The undecidable state is process-wide, so on the confirmation path it
+        # is the *pre-launch* resolve that meets it first — with the relative
+        # output base that is the only configuration which can reach it.
+        from panelcast.select.confirmation import run_confirmation
+
+        monkeypatch.chdir(tmp_path)
+        base = Path("outputs")
+        (tmp_path / "outputs").mkdir()
+        cfg = _confirmation_cfg(tmp_path, base)  # built before resolve() breaks
+        launches: list[Path] = []
+
+        def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
+            launches.append(config_path)
+            return 0, "ok"
+
+        def fail(_self, strict=False):
+            raise OSError("cwd is gone")
+
+        monkeypatch.setattr(Path, "resolve", fail)
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+
+        error = result.seeds[0].error
+        assert error is not None
+        assert launches == []
+        assert "before launching" in error
+        assert "could not be decided" in error
+        assert "resolves outside" not in error
+        assert "artifacts may exist" not in error
 
     def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
         # The arm mint has no cheap production seam (it happens inside
