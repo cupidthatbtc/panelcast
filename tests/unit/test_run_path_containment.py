@@ -773,3 +773,73 @@ class TestSelectRunLookupContainment:
         assert result.seeds[0].reference_run is not None
         assert result.seeds[0].winner_run is not None
         assert "confirmation run_id" not in (result.seeds[0].error or "")
+
+    def _refuse_after_fit(self, monkeypatch):
+        """Make only the post-fit resolve refuse, whatever is on disk.
+
+        A run name can stop being contained without being a symlink itself —
+        a containment change in a parent produces the same refusal — and that
+        case must not delete a real directory.
+        """
+        from panelcast.select import confirmation as confirmation_module
+
+        real = confirmation_module.sweep_run_dir
+        calls: list[str] = []
+
+        def only_after_fit(output_base, run_id, *, field="run_id"):
+            calls.append(run_id)
+            if len(calls) % 2 == 0:  # pre-launch, then post-fit
+                raise RunPathError(f"Invalid {field}: simulated post-fit rejection")
+            return real(output_base, run_id, field=field)
+
+        monkeypatch.setattr(confirmation_module, "sweep_run_dir", only_after_fit)
+        return calls
+
+    def test_a_refused_run_that_is_not_a_link_is_left_alone(self, tmp_path, monkeypatch):
+        from panelcast.select.confirmation import run_confirmation
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        calls = self._refuse_after_fit(monkeypatch)
+
+        def launch(config_path, panelcast_bin, timeout_seconds=None):
+            (base / _minted_run_id(config_path)).mkdir(parents=True)
+            return 0, "ok"
+
+        result = run_confirmation(
+            {"latent_process": "ar1"}, _confirmation_cfg(tmp_path, base), seeds=(42,),
+            launch=launch,
+        )
+
+        assert result.seeds[0].error is not None
+        assert "after its fit" in result.seeds[0].error
+        assert "removed the escaping link" not in result.seeds[0].error
+        assert (base / calls[0]).is_dir()
+
+    def test_a_link_that_cannot_be_removed_is_reported(self, tmp_path, monkeypatch):
+        from panelcast.select.confirmation import run_confirmation
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        calls = self._refuse_after_fit(monkeypatch)
+
+        def launch(config_path, panelcast_bin, timeout_seconds=None):
+            _symlink_dir(base / _minted_run_id(config_path), outside)
+            return 0, "ok"
+
+        def refuse_unlink(self, missing_ok=False):
+            raise OSError("locked")
+
+        monkeypatch.setattr(Path, "unlink", refuse_unlink)
+
+        result = run_confirmation(
+            {"latent_process": "ar1"}, _confirmation_cfg(tmp_path, base), seeds=(42,),
+            launch=launch,
+        )
+
+        assert result.seeds[0].error is not None
+        assert "could not be removed" in result.seeds[0].error
+        assert (base / calls[0]).is_symlink()
+        assert outside.exists()
