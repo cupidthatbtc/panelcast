@@ -1494,19 +1494,24 @@ runs before anything happens, so a symlinked run name is never followed. On
 select's mint-then-fit paths the run directory is created by the subprocess
 select launched — the orchestrator validates the id's *shape* before creating
 it, so a pre-planted symlink is written through — and select's gate refuses the
-read and the attribution, not the write. The refusal says which phase it is in
-and names the refused path, because a post-fit refusal means artifacts may
-exist outside the output base and — when the refused name is a symlink — that
-name is the only surviving record of where they went.
+read, and on the arm path the attribution, not the write. Every refusal says
+whether the fit had already run and leaves the refused name alone, because a
+post-fit refusal means artifacts may exist outside the output base and — when
+the refused name is a symlink — that name is the only surviving record of where
+they went. (The confirmation path has no attribution step of its own: an id
+that resolves to another run's directory *inside* the output base is contained,
+and only the arm handshake re-checks the manifest behind it.)
 
 Containment is also a property of an id *lookup*, not of enumeration: `runs
 list`, the dashboard, and the orchestrator's newest-run scan walk the output
 base with `iterdir()`, and `is_dir()` follows a link, so none of them passes
 through the gate. Select's lookups deliberately leave a refused name in place
 rather than deleting it — they are read-only, and the pointer is the breadcrumb
-— which means an escaping link written by a subprocess survives the refusal.
-Both halves close the same way, by containing the run directory's *creation*
-rather than only its lookup: tracked in #413.
+— which means an escaping link survives the refusal. The two halves need
+different fixes: containing the run directory's *creation* stops panelcast
+writing through such a link, while closing the walk means the enumerating
+callers contain each entry themselves, since a link planted by anything else
+still sits there. Both are tracked in #413.
 
 ## 9.4 Resume Logic
 

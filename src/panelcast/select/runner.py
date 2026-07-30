@@ -692,11 +692,19 @@ def _claim_named_run(
     subprocess starts — no dependence on the mutable ``outputs/latest.json``
     pointer that races under concurrency. The manifest sanity checks
     (creation time, knob agreement, prior claim) still apply.
+
+    There is no pre-launch resolve here, so a containment refusal is always the
+    post-fit case: the arm subprocess has already run and may have written
+    outside the output base. The refusal says so, and leaves whatever is at
+    that name alone — this lookup does not delete.
     """
     try:
         run_dir = sweep_run_dir(output_base, run_id, field="arm run_id")
     except RunPathError as exc:
-        return None, f"handshake failed: {exc}"
+        return None, (
+            "handshake failed after the arm ran (artifacts may exist outside the output "
+            f"base; anything at the refused name is left in place, unread): {exc}"
+        )
     if not run_dir.exists():
         return None, f"handshake failed: expected run dir {run_dir} was never created"
     problem = _attribution_error(run_dir, merged, launched_at, claimed_runs)

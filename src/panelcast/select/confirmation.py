@@ -283,16 +283,20 @@ def run_confirmation(
         pre-launch refusal costs nothing, while a post-fit one means a full fit
         has already run and may have written outside the output base. The
         refused name is left exactly as it is — this lookup does not delete —
-        and named, because when it is a symlink it is the only surviving record
-        of where those artifacts went (#413).
+        and named absolutely, following one hop when it is a symlink, because
+        that link is the only surviving record of where those artifacts went
+        (#413). ``absolute()`` and ``readlink()`` are reads; neither follows the
+        link's target nor touches it.
         """
         try:
             return sweep_run_dir(cfg.pipeline_output_base, run_id, field="confirmation run_id")
         except RunPathError as exc:
             if after_fit:
+                refused = (cfg.pipeline_output_base / run_id).absolute()
+                target = f" -> {refused.readlink()}" if refused.is_symlink() else ""
                 phase = (
                     "refused after its fit (artifacts may exist outside the output base; "
-                    f"{cfg.pipeline_output_base / run_id} is left in place, unread)"
+                    f"anything at {refused}{target} is left in place, unread)"
                 )
             else:
                 phase = "refused before launching (nothing ran)"

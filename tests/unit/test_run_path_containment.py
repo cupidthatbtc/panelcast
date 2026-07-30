@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 import typer
@@ -544,7 +545,7 @@ class TestWindowsPathShapes:
             safe_run_dir(tmp_path, bad)
 
 
-def _confirmation_cfg(tmp_path: Path, base: Path):
+def _confirmation_cfg(tmp_path: Path, base: Path) -> Any:
     """A sweep whose confirmation fits write under ``base``."""
     from panelcast.select.runner import SweepConfig
 
@@ -556,7 +557,7 @@ def _confirmation_cfg(tmp_path: Path, base: Path):
     )
 
 
-def _minted_run_id(config_path) -> str:
+def _minted_run_id(config_path: Path | str) -> str:
     """The run id a select-written arm config carries."""
     import yaml
 
@@ -573,7 +574,9 @@ def _write_arm_manifest(
 
     ``created_at`` sits a couple of seconds after the launch — the shape
     production writes (a naive local timestamp from the subprocess, which
-    starts after the arm does), not the equality boundary.
+    starts after the arm does), not the equality boundary. Callers pass
+    ``datetime.now()``, so the stamp lands slightly ahead of wall clock;
+    `_attribution_error` has no not-in-the-future clause to trip on.
     """
     run_dir.mkdir(parents=True, exist_ok=True)
     created_at = launched_at + timedelta(seconds=2)
@@ -707,7 +710,7 @@ class TestSelectRunLookupContainment:
         cfg.sweep_id = "../outside"
         launches: list[Path] = []
 
-        def launch(config_path, panelcast_bin, timeout_seconds=None):
+        def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
             launches.append(config_path)
             return 0, "ok"
 
@@ -733,7 +736,7 @@ class TestSelectRunLookupContainment:
         (outside / "keep.txt").write_text("keep", encoding="utf-8")
         links: list[Path] = []
 
-        def launch(config_path, panelcast_bin, timeout_seconds=None):
+        def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
             link = base / _minted_run_id(config_path)
             _symlink_dir(link, outside)
             links.append(link)
@@ -763,7 +766,7 @@ class TestSelectRunLookupContainment:
 
         base = tmp_path / "fresh_outputs"
 
-        def launch(config_path, panelcast_bin, timeout_seconds=None):
+        def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
             (base / _minted_run_id(config_path)).mkdir(parents=True)
             return 0, "ok"
 
@@ -772,9 +775,13 @@ class TestSelectRunLookupContainment:
             launch=launch,
         )
 
+        # Both fits resolve and are recorded, which is the property under test.
+        # The seed still errors afterwards, because these stub run dirs carry
+        # no log-likelihood to pair — that failure must not be a containment one.
         assert result.seeds[0].reference_run is not None
         assert result.seeds[0].winner_run is not None
         assert "confirmation run_id" not in (result.seeds[0].error or "")
+        assert "refused" not in (result.seeds[0].error or "")
 
     def test_a_refused_run_dir_is_never_deleted(self, tmp_path, monkeypatch):
         # A run name can stop being contained without being a symlink itself
@@ -789,15 +796,15 @@ class TestSelectRunLookupContainment:
         real = confirmation_module.sweep_run_dir
         calls: list[str] = []
 
-        def only_after_fit(output_base, run_id, *, field="run_id"):
+        def only_after_fit(output_base: Path, run_id: str, *, field: str = "run_id") -> Path:
             calls.append(run_id)
-            if len(calls) % 2 == 0:  # pre-launch, then post-fit
+            if len(calls) == 2:  # the reference fit's post-fit resolve
                 raise RunPathError(f"Invalid {field}: simulated post-fit rejection")
             return real(output_base, run_id, field=field)
 
         monkeypatch.setattr(confirmation_module, "sweep_run_dir", only_after_fit)
 
-        def launch(config_path, panelcast_bin, timeout_seconds=None):
+        def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
             (base / _minted_run_id(config_path) / "evaluation").mkdir(parents=True)
             return 0, "ok"
 
