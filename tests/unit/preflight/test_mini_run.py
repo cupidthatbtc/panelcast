@@ -1555,9 +1555,11 @@ class TestRwCollectionExcludes:
             "y": [70.0, 72.0, 68.0, 74.0],
             "n_artists": 1,
             "max_seq": 4,
-            # The args JSON is a whitelist; an innovation key smuggled through
-            # it must not reach the model behind the helper's back.
+            # The args JSON is a whitelist; neither a bare innovation key nor a
+            # serialized prior config may reach the model behind the helper's
+            # back, and on the gated path the built priors must win.
             "rw_innovation_type": "skew_normal",
+            "priors": {"rw_innovation_type": "skew_normal"},
         }
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(panel, f)

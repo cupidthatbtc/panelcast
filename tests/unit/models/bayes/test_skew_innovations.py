@@ -75,8 +75,12 @@ def test_the_model_accepts_exactly_the_innovation_types_the_helper_knows():
     name, so it must not drift from the set the model itself implements."""
     for innovation in RW_INNOVATION_TYPES:
         _seeded_trace(_model_args(PriorConfig(rw_innovation_type=innovation)))
+
+    # Built outside the raises block so the rejection can only come from the
+    # model, which is the layer whose accepted set is under test.
+    unknown = _model_args(PriorConfig(rw_innovation_type="student_t"))
     with pytest.raises(ValueError, match="Unknown rw_innovation_type"):
-        _seeded_trace(_model_args(PriorConfig(rw_innovation_type="student_t")))
+        _seeded_trace(unknown)
 
 
 @pytest.mark.parametrize("innovation", RW_INNOVATION_TYPES)
@@ -84,7 +88,10 @@ def test_the_model_accepts_exactly_the_innovation_types_the_helper_knows():
 def test_every_named_random_walk_site_is_one_the_model_samples(innovation, max_seq):
     """Memory exclusions name these sites to NumPyro, which pops them off the
     trace with no default, so a name the model does not sample is a KeyError
-    (#410). Bind the helper to the model rather than to a second reading of it."""
+    (#410). Bind the helper to the model rather than to a second reading of it.
+
+    One-sided on purpose: a walk latent the model samples but the helper omits
+    only means the exclusion saves less memory than it could."""
     priors = PriorConfig(rw_innovation_type=innovation)
     trace = _seeded_trace(_model_args(priors, max_seq=max_seq))
     sampled = {name for name, site in trace.items() if site["type"] == "sample"}
