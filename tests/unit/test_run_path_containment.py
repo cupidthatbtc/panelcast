@@ -772,6 +772,27 @@ class TestSelectRunLookupContainment:
         assert "artifacts may exist outside the output base" in after
         assert str(base / "sel_s1_x_20260730T120000123456") in before
 
+    def test_an_undecidable_refusal_names_no_path_at_all(self, tmp_path, monkeypatch):
+        # The ordering matters: `_containment_undecided` is consulted before
+        # anything is named, because the state it detects is the one in which
+        # a name cannot be made absolute. Naming one here would emit a path
+        # relative to a cwd that no longer exists.
+        from panelcast.select.runner import refusal_detail
+
+        monkeypatch.chdir(tmp_path)
+        run_id = "sel_s1_x_20260730T120000123456"
+        exc = RunPathError(f"Invalid arm run_id: {run_id!r} resolves outside the output root")
+
+        def fail(_self, strict=False):
+            raise OSError("cwd is gone")
+
+        monkeypatch.setattr(Path, "resolve", fail)
+        detail = refusal_detail(Path("outputs"), run_id, exc, field="arm run_id")
+
+        assert "cannot be located" in detail
+        assert run_id not in detail.split("Invalid arm run_id")[0]
+        assert str(Path("outputs") / run_id) not in detail
+
     def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
         # The arm mint has no cheap production seam (it happens inside
         # `run_sweep`), so this pins its shape with the real `record_key` —

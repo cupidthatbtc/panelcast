@@ -298,11 +298,6 @@ def run_confirmation(
                 field="confirmation run_id",
                 after_fit=after_fit,
             )
-            # "nothing ran" is per-fit: the reference fit precedes the winner's,
-            # so a refusal that only tripped on the longer of the two labels
-            # would still read as if nothing had run at all. Today the reference
-            # label is the longer one (#435), so the seed aborts before the
-            # winner is ever minted.
             phase = "after its fit" if after_fit else "before launching"
             raise RuntimeError(f"{label} fit on seed {seed} refused {phase} {detail}") from exc
 
