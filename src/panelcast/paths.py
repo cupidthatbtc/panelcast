@@ -129,7 +129,9 @@ def path_is_within(candidate: Path, root: Path) -> bool:
     symlink loop must fail closed here rather than raise through every caller
     that documents a refusal instead. On 3.13+ that conversion is gone and a
     loop resolves to itself, so it stays contained and is not refused — the
-    catch is about never raising, not about a uniform verdict on loops.
+    catch is about never raising, not about a uniform verdict on loops. Every
+    caller treats False as "not contained", so widening it can only make an
+    answer more conservative, never more permissive.
     """
     try:
         return Path(root).resolve() in Path(candidate).resolve().parents

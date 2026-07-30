@@ -816,6 +816,36 @@ class TestSelectRunLookupContainment:
         assert run_id not in detail.split("containment for arm run_id")[0]
         assert str(Path("outputs") / run_id) not in detail
 
+    def test_an_unresolvable_run_name_is_undecidable_too(self, tmp_path, monkeypatch):
+        # `path_is_within` resolves both operands, so a run name that will not
+        # resolve — a symlink loop on the Pythons that raise for one — must not
+        # fall through to the escape wording just because the base resolves.
+        from panelcast.select.runner import refusal_detail
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        run_id = "sel_s1_x_20260730T120000123456"
+        real = Path.resolve
+
+        def fail_for_the_run_name(self, strict=False):
+            if self.name == run_id:
+                raise RuntimeError(f"Symlink loop from {str(self)!r}")
+            return real(self)
+
+        monkeypatch.setattr(Path, "resolve", fail_for_the_run_name)
+        detail = refusal_detail(
+            base,
+            run_id,
+            RunPathError("Invalid arm run_id: resolves outside the output root"),
+            field="arm run_id",
+            after_fit=True,
+        )
+
+        assert "could not be decided" in detail
+        assert "artifacts may exist" not in detail
+        assert " -> " not in detail
+        assert "Symlink loop" in detail
+
     def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
         # The arm mint has no cheap production seam (it happens inside
         # `run_sweep`), so this pins its shape with the real `record_key` —

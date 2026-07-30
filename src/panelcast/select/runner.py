@@ -705,33 +705,30 @@ def _refused_run_name(output_base: Path, run_id: str) -> str:
     return str(refused)
 
 
-def _containment_undecided(output_base: Path) -> OSError | RuntimeError | None:
-    """The error that made containment undecidable, or None if it was decided.
+def _unresolvable(output_base: Path, run_id: str) -> tuple[Path, Exception] | None:
+    """The path that would not resolve and why, or None if both did.
 
-    Returned rather than reduced to a bool so the refusal can name the errno:
-    from the arm handshake the problem string is the entire record, with no
-    exception behind it to carry a traceback.
+    ``path_is_within`` fails closed on a resolution error, so a path it cannot
+    resolve produces the same ``RunPathError`` as a genuine escape, and the two
+    deserve opposite advice: nothing left the output root in the second case.
+    Returned rather than reduced to a bool because the refusal has to name
+    both — from the arm handshake the problem string is the entire record, with
+    no exception behind it to carry a traceback.
 
-    ``path_is_within`` fails closed on ``OSError``, so a base that cannot be
-    resolved produces the same ``RunPathError`` as a genuine escape, and the
-    two deserve opposite advice: nothing left the output root in the second
-    case. Exactly one state reaches here — a *relative* ``output_base`` whose
-    cwd has been removed. Non-strict ``resolve()`` swallows per-component
-    ``lstat`` failures and returns the lexical path, so its only raise is the
-    ``getcwd()`` inside ``abspath``, which an absolute base skips entirely.
-
-    Only the root is probed, while ``path_is_within`` resolves the candidate
-    too: sufficient because the candidate is the root joined to a validated
-    bare name, which adds no component that can fail to resolve on its own. A
-    shape rule that let a candidate carry its own resolvable failure would
-    make this branch miss it and fall through to the escape wording.
+    Probes the same two operands ``path_is_within`` resolves, in its order and
+    on the same exception pair, so the two agree by construction rather than by
+    an argument about which one can fail. Two states reach here: a *relative*
+    ``output_base`` whose cwd has been removed (non-strict ``resolve()``
+    swallows per-component ``lstat`` failures, so its other raise is the
+    ``getcwd()`` inside ``abspath``, which an absolute base skips), and — on
+    the Pythons that convert ``ELOOP`` — a symlink loop anywhere along either
+    path, including at the run name itself.
     """
-    try:
-        output_base.resolve()
-    except (OSError, RuntimeError) as exc:
-        # Same pair as `path_is_within`: this probe re-derives the state that
-        # made it fail closed, so it has to fail on everything it does.
-        return exc
+    for path in (output_base, output_base / run_id):
+        try:
+            path.resolve()
+        except (OSError, RuntimeError) as exc:
+            return path, exc
     return None
 
 
@@ -757,7 +754,7 @@ def refusal_detail(
     ran. The shape half is likewise decided by re-running ``validate_run_id``,
     exact only while that stays the whole of ``safe_run_dir``'s shape check.
 
-    An *undecidable* base comes next, before anything is named, because the
+    An *unresolvable* operand comes next, before anything is named, because the
     state it detects is the one in which a name cannot be made absolute either.
     It owns its own tail, because ``exc`` here says "resolves outside the
     output root" — ``path_is_within``'s fail-closed default, and the very
@@ -779,17 +776,19 @@ def refusal_detail(
             "(this run never wrote under that name — an id of this shape is refused "
             f"before any run dir is created): {exc}"
         )
-    undecided = _containment_undecided(output_base)
+    undecided = _unresolvable(output_base, run_id)
     if undecided is not None:
-        why = (
-            "could not be resolved"
-            if output_base.is_absolute()
-            else "is relative and the working directory could not be read"
+        unresolved, why = undecided
+        cause = (
+            f"the output root {output_base} is relative and the working directory could "
+            "not be read"
+            if unresolved == output_base and not output_base.is_absolute()
+            else f"{unresolved} could not be resolved"
         )
         return (
-            f"(containment could not be decided — the output root {output_base} {why}: "
-            f"{undecided}; nothing is known to have left it, and the refused name cannot "
-            f"be located): containment for {field} {run_id!r} could not be decided"
+            f"(containment could not be decided — {cause}: {why}; nothing is known to have "
+            f"left the output root, and the refused name cannot be located): containment "
+            f"for {field} {run_id!r} could not be decided"
         )
     where = _refused_run_name(output_base, run_id)
     if not after_fit:
