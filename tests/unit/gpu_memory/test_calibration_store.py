@@ -8,8 +8,10 @@ import numpy as np
 import pytest
 
 from panelcast.gpu_memory.calibration_store import (
+    _MAX_LABEL_CHARS,
     _MIN_LOCAL_ENVELOPE,
     _linear_terms,
+    _partition_points,
     append_record,
     estimate_with_calibration,
     load_records,
@@ -21,6 +23,7 @@ from panelcast.gpu_memory.estimate import (
     FIXED_OVERHEAD_GB,
     estimate_memory_gb,
 )
+from tests.helpers.gpu_provenance import peak_provenance as _provenance
 
 
 def _inputs(num_samples: int = 500, num_chains: int = 2, n_obs: int = 4000) -> dict:
@@ -49,6 +52,7 @@ def _synth_records(factor: float, fixed: float, n: int = 8) -> list[dict]:
                 "estimate_inputs": inputs,
                 "expected_gb": est.total_gb,
                 "actual_peak_gb": est.total_gb,
+                "peak_provenance": _provenance(est.total_gb),
                 "wall_clock_seconds": 600.0 + 60 * i,
                 "context": {"transform": "offset_logit"},
             }
@@ -59,10 +63,21 @@ def _synth_records(factor: float, fixed: float, n: int = 8) -> list[dict]:
 class TestStore:
     def test_append_and_load_roundtrip(self, tmp_path):
         path = tmp_path / "cal.json"
-        append_record(_inputs(), 8.3, 7.4, 3000.0, {"transform": "offset_logit"}, path=path)
+        provenance = _provenance(7.4)
+        append_record(
+            _inputs(),
+            8.3,
+            7.4,
+            3000.0,
+            {"transform": "offset_logit"},
+            path=path,
+            peak_provenance=provenance,
+        )
         records = load_records(path)
         assert len(records) == 1
+        assert records[0]["record_id"]
         assert records[0]["actual_peak_gb"] == 7.4
+        assert records[0]["peak_provenance"] == provenance
         assert records[0]["context"]["transform"] == "offset_logit"
 
     def test_corrupt_store_tolerated(self, tmp_path):
@@ -109,15 +124,16 @@ class TestRefit:
         records = _synth_records(2.5, 0.2, n=10)
         for r in records:
             r["actual_peak_gb"] *= float(rng.uniform(0.85, 1.15))
+            r["peak_provenance"] = _provenance(r["actual_peak_gb"])
         cal = refit_constants(records)
         assert cal is not None
-        for r in records:
-            est = estimate_memory_gb(
-                collection_overhead_factor=cal.collection_overhead_factor,
-                fixed_overhead_gb=cal.fixed_overhead_gb,
-                **r["estimate_inputs"],
+        points, _ = _partition_points(records)
+        assert cal.n_points == len(points)
+        for point in points:
+            estimate = 1.10 * (
+                point.base + cal.fixed_overhead_gb + cal.collection_overhead_factor * point.unit
             )
-            assert est.total_gb >= r["actual_peak_gb"] * _MIN_LOCAL_ENVELOPE * (1 - 1e-9)
+            assert estimate >= point.actual * _MIN_LOCAL_ENVELOPE * (1 - 1e-9)
 
     def test_too_few_points_returns_none(self):
         assert refit_constants(_synth_records(3.0, 0.25, n=3)) is None
@@ -147,6 +163,51 @@ class TestResolve:
         factor, fixed, source = resolve_calibration(path)
         assert "per-machine" in source
         assert factor < COLLECTION_OVERHEAD_FACTOR  # tighter than shipped on this synthetic machine
+
+    def test_source_reports_quarantine_and_inflation(self, tmp_path):
+        path = tmp_path / "cal.json"
+        records = _synth_records(2.0, 0.15, n=9)
+        records[0]["peak_provenance"] = _provenance(
+            records[0]["actual_peak_gb"], attribution="stale_process_peak"
+        )
+        path.write_text(json.dumps({"version": 2, "records": records}), encoding="utf-8")
+
+        _, _, source = resolve_calibration(path)
+
+        assert "1 quarantined" in source
+        assert "stale_process_peak=1" in source
+        assert "excluded record[0]:stale_process_peak" in source
+        assert "envelope inflation" in source
+
+    def test_contaminated_record_ages_out_of_bounded_store(self, tmp_path):
+        path = tmp_path / "cal.json"
+        records = _synth_records(2.0, 0.15, n=200)
+        records[0]["actual_peak_gb"] *= 60.0
+        contaminated_peak = records[0]["actual_peak_gb"]
+        records[0]["peak_provenance"] = _provenance(contaminated_peak)
+        path.write_text(json.dumps({"version": 2, "records": records}), encoding="utf-8")
+        inputs = _inputs(num_samples=50_000)
+        actual = estimate_memory_gb(
+            collection_overhead_factor=2.0,
+            fixed_overhead_gb=0.15,
+            **inputs,
+        ).total_gb
+
+        append_record(
+            inputs,
+            actual,
+            actual,
+            600.0,
+            path=path,
+            peak_provenance=_provenance(actual),
+        )
+
+        loaded = load_records(path)
+        assert len(loaded) == 200
+        assert all(record["actual_peak_gb"] != contaminated_peak for record in loaded)
+        calibration = refit_constants(loaded)
+        assert calibration is not None
+        assert calibration.quarantined_points == 0
 
     def test_estimate_with_calibration_reports_source(self, tmp_path):
         estimate, source = estimate_with_calibration(tmp_path / "missing.json", **_inputs())
@@ -209,6 +270,107 @@ class TestAppendRobustness:
         assert records[-1]["estimate_inputs"]["num_samples"] == 999
 
 
+class TestProvenanceQuarantineReasons:
+    """One canonical snake_case key per rejection, whatever the store holds.
+
+    The reasons are counter keys and log text, so a doctored store must not be
+    able to split a counter in two or push its own text through them.
+    """
+
+    ACTUAL = 0.4
+
+    def _reason(self, provenance, actual: float | None = None, record_id: str = "pid-42") -> str:
+        actual = self.ACTUAL if actual is None else actual
+        record = {
+            "record_id": record_id,
+            "estimate_inputs": _inputs(),
+            "expected_gb": actual,
+            "actual_peak_gb": actual,
+            "peak_provenance": provenance,
+            "wall_clock_seconds": 600.0,
+            "context": {},
+        }
+        points, diagnostics = _partition_points([record])
+        assert points == []
+        assert diagnostics.quarantined_points == 1
+        (reason, count), *rest = diagnostics.quarantine_reasons
+        assert count == 1
+        assert rest == []
+        assert diagnostics.quarantined_records == ((record_id[:_MAX_LABEL_CHARS], reason),)
+        return reason
+
+    def test_clean_provenance_is_not_quarantined(self):
+        points, diagnostics = _partition_points(
+            [
+                {
+                    "record_id": "pid-1",
+                    "estimate_inputs": _inputs(),
+                    "actual_peak_gb": self.ACTUAL,
+                    "peak_provenance": _provenance(self.ACTUAL),
+                }
+            ]
+        )
+        assert len(points) == 1
+        assert diagnostics.quarantine_reasons == ()
+
+    def test_non_dict_provenance(self):
+        assert self._reason("jax_allocator") == "malformed_provenance"
+
+    def test_foreign_provenance_envelope(self):
+        provenance = {**_provenance(self.ACTUAL), "scope": "device"}
+        assert self._reason(provenance) == "unsupported_provenance"
+
+    def test_trusted_flag_with_a_foreign_attribution(self):
+        provenance = {**_provenance(self.ACTUAL), "attribution": "hand_edited"}
+        assert self._reason(provenance) == "invalid_attribution"
+
+    def test_absent_start_snapshot(self):
+        assert self._reason({**_provenance(self.ACTUAL), "before": None}) == "malformed_provenance"
+
+    def test_end_snapshot_with_a_negative_counter(self):
+        provenance = _provenance(self.ACTUAL)
+        provenance["after"] = {**provenance["after"], "num_allocs": -1}
+        assert self._reason(provenance) == "malformed_provenance"
+
+    def test_allocator_identity_change_across_the_interval(self):
+        provenance = _provenance(self.ACTUAL)
+        provenance["after"] = {**provenance["after"], "device_id": 1}
+        assert self._reason(provenance) == "allocator_identity_changed"
+
+    def test_peak_the_fit_did_not_raise(self):
+        provenance = _provenance(self.ACTUAL)
+        provenance["before"] = provenance["after"]
+        assert self._reason(provenance) == "stale_process_peak"
+
+    def test_peak_that_disagrees_with_the_recorded_measurement(self):
+        assert self._reason(_provenance(self.ACTUAL), actual=self.ACTUAL * 2) == (
+            "peak_provenance_mismatch"
+        )
+
+    @pytest.mark.parametrize(
+        "attribution",
+        ["overlapping_fit_interval", "missing_start_snapshot", "stale_process_peak"],
+    )
+    def test_known_producer_attributions_survive_verbatim(self, attribution):
+        provenance = _provenance(self.ACTUAL, attribution=attribution)
+        assert self._reason(provenance) == attribution
+
+    @pytest.mark.parametrize("attribution", ["x" * 4096, ["stale_process_peak"], 7, ""])
+    def test_unknown_attributions_never_reach_the_counters(self, attribution):
+        """Anything outside the vocabulary — including unhashable junk — is
+        reported as one bounded key rather than echoed out of the store."""
+        provenance = {
+            **_provenance(self.ACTUAL, attribution="stale_process_peak"),
+            "attribution": attribution,
+        }
+        assert self._reason(provenance) == "untrusted_provenance"
+
+    def test_long_record_ids_are_clamped_in_the_diagnostics(self):
+        """The store names offending records in a log line; a 500-char id from
+        disk must not be the thing that decides how long that line is."""
+        assert self._reason("not a mapping", record_id="r" * 500) == "malformed_provenance"
+
+
 class TestLinearTermsGateFlags:
     """_linear_terms folds structural gate flags into the fit terms."""
 
@@ -244,6 +406,7 @@ class TestLinearTermsGateFlags:
                     "estimate_inputs": inputs,
                     "expected_gb": est.total_gb,
                     "actual_peak_gb": est.total_gb,
+                    "peak_provenance": _provenance(est.total_gb),
                     "wall_clock_seconds": 600.0,
                     "context": {},
                 }

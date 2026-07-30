@@ -6,7 +6,17 @@ from unittest import mock
 
 import pytest
 
-from panelcast.gpu_memory.measure import JaxMemoryStats, get_jax_memory_stats
+from panelcast.gpu_memory import measure
+from panelcast.gpu_memory.measure import (
+    JaxMemoryStats,
+    attribute_fit_peak,
+    begin_fit_peak_tracking,
+    capture_jax_allocator_snapshot,
+    end_fit_peak_tracking,
+    get_jax_memory_stats,
+    track_fit_peak,
+)
+from tests.helpers.gpu_provenance import allocator_snapshot
 
 
 class TestJaxMemoryStatsDataclass:
@@ -208,3 +218,181 @@ class TestGetJaxMemoryStats:
 
         assert result.peak_bytes_in_use == 6 * 1024**3
         mock_device_1.memory_stats.assert_called_once()
+
+
+class TestFitPeakAttribution:
+    _snapshot = staticmethod(allocator_snapshot)
+
+    @pytest.fixture(autouse=True)
+    def _isolated_interval_state(self, monkeypatch):
+        """These tests drive measure's interval counters; leaking either one
+        would attribute every later fit in the session to an overlap."""
+        monkeypatch.setattr(measure, "_ACTIVE_FIT_INTERVALS", 0)
+        monkeypatch.setattr(measure, "_FIT_OVERLAP_EPOCH", 0)
+
+    @mock.patch("panelcast.gpu_memory.measure.jax.devices")
+    def test_capture_records_allocator_process_and_device(self, mock_devices):
+        device = mock.Mock()
+        device.platform = "gpu"
+        device.id = 2
+        device.process_index = 1
+        device.device_kind = "NVIDIA Test"
+        device.memory_stats.return_value = {
+            "bytes_in_use": 2 * 1024**3,
+            "peak_bytes_in_use": 4 * 1024**3,
+            "bytes_limit": 32 * 1024**3,
+            "bytes_reserved": 8 * 1024**3,
+            "num_allocs": 42,
+        }
+        mock_devices.return_value = [device]
+
+        snapshot = capture_jax_allocator_snapshot()
+
+        assert snapshot is not None
+        assert snapshot.platform == "gpu"
+        assert snapshot.device_id == 2
+        assert snapshot.process_index == 1
+        assert snapshot.device_kind == "NVIDIA Test"
+        assert snapshot.process_id > 0
+        assert snapshot.thread_id > 0
+        assert snapshot.peak_bytes_in_use == 4 * 1024**3
+        assert snapshot.num_allocs == 42
+
+    def test_new_process_peak_is_attributed_to_fit_interval(self):
+        before = self._snapshot(2 * 1024**3)
+        after = self._snapshot(5 * 1024**3)
+
+        peak, provenance = attribute_fit_peak(before, after)
+
+        assert peak == 5 * 1024**3
+        assert provenance is not None
+        assert provenance["trusted_for_calibration"] is True
+        assert provenance["attribution"] == "fit_interval_new_process_peak"
+        assert provenance["scope"] == "process"
+
+    def test_unchanged_process_peak_is_marked_stale(self):
+        snapshot = self._snapshot(5 * 1024**3)
+
+        peak, provenance = attribute_fit_peak(snapshot, snapshot)
+
+        assert peak == 5 * 1024**3
+        assert provenance is not None
+        assert provenance["trusted_for_calibration"] is False
+        assert provenance["attribution"] == "stale_process_peak"
+
+    @mock.patch("panelcast.gpu_memory.measure.capture_jax_allocator_snapshot")
+    def test_overlapping_fit_intervals_are_untrusted_and_recover(self, capture):
+        capture.side_effect = [
+            self._snapshot(1 * 1024**3),
+            self._snapshot(2 * 1024**3),
+            self._snapshot(4 * 1024**3),
+            self._snapshot(5 * 1024**3),
+            self._snapshot(5 * 1024**3),
+            self._snapshot(6 * 1024**3),
+        ]
+
+        first = begin_fit_peak_tracking()
+        second = begin_fit_peak_tracking()
+        _, second_provenance = end_fit_peak_tracking(second)
+        _, first_provenance = end_fit_peak_tracking(first)
+        recovered = begin_fit_peak_tracking()
+        _, recovered_provenance = end_fit_peak_tracking(recovered)
+
+        assert second_provenance is not None
+        assert first_provenance is not None
+        assert recovered_provenance is not None
+        assert second_provenance["attribution"] == "overlapping_fit_interval"
+        assert first_provenance["attribution"] == "overlapping_fit_interval"
+        assert recovered_provenance["attribution"] == "fit_interval_new_process_peak"
+        assert recovered_provenance["trusted_for_calibration"] is True
+
+    def test_identity_change_is_not_attributed(self):
+        before = self._snapshot(2 * 1024**3, device_id=0)
+        after = self._snapshot(5 * 1024**3, device_id=1)
+
+        _, provenance = attribute_fit_peak(before, after)
+
+        assert provenance is not None
+        assert provenance["trusted_for_calibration"] is False
+        assert provenance["attribution"] == "allocator_identity_changed"
+
+    def test_a_fit_without_a_start_snapshot_is_untrusted(self):
+        peak, provenance = attribute_fit_peak(None, self._snapshot(5 * 1024**3))
+
+        assert peak == 5 * 1024**3
+        assert provenance is not None
+        assert provenance["before"] is None
+        assert provenance["trusted_for_calibration"] is False
+        assert provenance["attribution"] == "missing_start_snapshot"
+
+    def test_no_end_snapshot_yields_no_peak(self):
+        assert attribute_fit_peak(self._snapshot(5 * 1024**3), None) == (None, None)
+
+    @mock.patch("panelcast.gpu_memory.measure.jax.devices")
+    def test_capture_needs_a_peak_counter(self, mock_devices):
+        """A backend that reports stats without the peak counter is no basis
+        for attribution — the fit records nothing rather than a guess."""
+        device = mock.Mock()
+        device.platform = "gpu"
+        device.memory_stats.return_value = {"bytes_in_use": 1024}
+        mock_devices.return_value = [device]
+
+        assert capture_jax_allocator_snapshot() is None
+
+    @pytest.mark.parametrize("value", [True, -1])
+    @mock.patch("panelcast.gpu_memory.measure.jax.devices")
+    def test_capture_rejects_nonsensical_counters(self, mock_devices, value):
+        device = mock.Mock()
+        device.platform = "gpu"
+        device.id = 0
+        device.process_index = 0
+        device.device_kind = "NVIDIA Test"
+        device.memory_stats.return_value = {
+            "bytes_in_use": value,
+            "peak_bytes_in_use": 4 * 1024**3,
+            "bytes_limit": 32 * 1024**3,
+            "bytes_reserved": 0,
+            "num_allocs": 1,
+        }
+        mock_devices.return_value = [device]
+
+        assert capture_jax_allocator_snapshot() is None
+
+
+class TestTrackFitPeakContext:
+    @pytest.fixture(autouse=True)
+    def _isolated_interval_state(self, monkeypatch):
+        monkeypatch.setattr(measure, "_ACTIVE_FIT_INTERVALS", 0)
+        monkeypatch.setattr(measure, "_FIT_OVERLAP_EPOCH", 0)
+
+    @mock.patch("panelcast.gpu_memory.measure.capture_jax_allocator_snapshot")
+    def test_result_is_filled_in_when_the_interval_closes(self, capture):
+        capture.side_effect = [allocator_snapshot(1 * 1024**3), allocator_snapshot(3 * 1024**3)]
+
+        with track_fit_peak() as result:
+            assert result.peak_bytes is None
+
+        assert result.peak_bytes == 3 * 1024**3
+        assert result.provenance is not None
+        assert result.provenance["attribution"] == "fit_interval_new_process_peak"
+
+    @mock.patch("panelcast.gpu_memory.measure.capture_jax_allocator_snapshot")
+    def test_a_failed_fit_still_closes_its_interval(self, capture):
+        """A stranded interval would attribute every later fit in the process
+        to an overlap and quarantine it out of the calibration store."""
+        capture.side_effect = [
+            allocator_snapshot(1 * 1024**3),
+            allocator_snapshot(2 * 1024**3),
+            allocator_snapshot(2 * 1024**3),
+            allocator_snapshot(4 * 1024**3),
+        ]
+
+        with pytest.raises(RuntimeError):
+            with track_fit_peak():
+                raise RuntimeError("sampling died")
+
+        assert measure._ACTIVE_FIT_INTERVALS == 0
+        with track_fit_peak() as recovered:
+            assert measure._ACTIVE_FIT_INTERVALS == 1
+        assert recovered.provenance is not None
+        assert recovered.provenance["trusted_for_calibration"] is True

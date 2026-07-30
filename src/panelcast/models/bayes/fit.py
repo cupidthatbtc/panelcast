@@ -134,6 +134,8 @@ class FitResult:
         warm_started: True when the fit ran with an imported inverse mass
             matrix (warmup-transfer); such fits are screening-grade evidence,
             never confirmation evidence.
+        peak_gpu_memory_provenance: Fit-boundary allocator snapshots proving
+            whether this fit established the process peak.
     """
 
     mcmc: MCMC | None
@@ -145,27 +147,15 @@ class FitResult:
     tree_depth_saturation: float | None = None
     resumed_from_checkpoint: bool = False
     warm_started: bool = False
+    peak_gpu_memory_provenance: dict[str, Any] | None = None
 
 
 def measure_peak_gpu_bytes() -> int | None:
-    """Peak GPU bytes allocated by this process, if a GPU backend is active.
+    """Peak GPU bytes allocated by this process, if a GPU backend is active."""
+    from panelcast.gpu_memory.measure import capture_jax_allocator_snapshot
 
-    Reads the same counter the preflight mini-runs use
-    (``device.memory_stats()["peak_bytes_in_use"]``), so projections and
-    real-run telemetry are directly comparable. The counter is cumulative for
-    the process; with several fits per process it reports the largest so far.
-    """
-    try:
-        gpu_devices = [d for d in jax.devices() if d.platform == "gpu"]
-        if not gpu_devices:
-            return None
-        stats = gpu_devices[0].memory_stats()
-        if not stats or "peak_bytes_in_use" not in stats:
-            return None
-        return int(stats["peak_bytes_in_use"])
-    except Exception as e:  # pragma: no cover - defensive against backend quirks
-        logger.debug("peak GPU bytes unavailable: %s", type(e).__name__, exc_info=True)
-        return None
+    snapshot = capture_jax_allocator_snapshot()
+    return snapshot.peak_bytes_in_use if snapshot is not None else None
 
 
 def get_gpu_info() -> str:
@@ -822,8 +812,6 @@ def fit_model(
         f"Starting MCMC: {config.num_chains} chains, "
         f"{config.num_warmup} warmup, {config.num_samples} samples"
     )
-    start_time = time.perf_counter()
-
     extra_field_names: list[str] = ["diverging", "num_steps"]
     if exclude_from_collection:
         # NumPyro's "~z.<site>" syntax removes the site from the collected
@@ -842,26 +830,35 @@ def fit_model(
         warm_start=warm_start_kwargs,
     )
 
-    mcmc, samples, extra_fields, resumed_from_checkpoint = _run_sampling(
-        kernel,
-        config,
-        rng_key,
-        run_args,
-        tuple(extra_field_names),
-        progress_bar,
-        checkpoint_dir,
-        checkpoint_identity,
-    )
+    from panelcast.gpu_memory.measure import track_fit_peak
+
+    # The interval closes before post-sampling exports and InferenceData
+    # allocations, so the peak it reports is the sampler's alone.
+    with track_fit_peak() as fit_peak:
+        start_time = time.perf_counter()
+        mcmc, samples, extra_fields, resumed_from_checkpoint = _run_sampling(
+            kernel,
+            config,
+            rng_key,
+            run_args,
+            tuple(extra_field_names),
+            progress_bar,
+            checkpoint_dir,
+            checkpoint_identity,
+        )
 
     runtime_seconds = time.perf_counter() - start_time
+    peak_gpu_memory_bytes = fit_peak.peak_bytes
+    peak_gpu_memory_provenance = fit_peak.provenance
 
     _maybe_export_warmup(mcmc, model, run_args, config, warmup_export_path)
 
-    # Measure peak GPU allocation right after sampling, before any
-    # InferenceData construction allocates on top of it.
-    peak_gpu_memory_bytes = measure_peak_gpu_bytes()
-    if peak_gpu_memory_bytes is not None:
-        logger.info(f"Peak GPU memory: {peak_gpu_memory_bytes / (1024**3):.2f} GiB")
+    if peak_gpu_memory_bytes is not None and peak_gpu_memory_provenance is not None:
+        logger.info(
+            "Peak GPU memory: %.2f GiB (%s)",
+            peak_gpu_memory_bytes / (1024**3),
+            peak_gpu_memory_provenance["attribution"],
+        )
 
     # Count divergences
     divergences = int(np.asarray(extra_fields["diverging"]).sum())
@@ -1033,6 +1030,7 @@ def fit_model(
         runtime_seconds=runtime_seconds,
         gpu_info=gpu_info,
         peak_gpu_memory_bytes=peak_gpu_memory_bytes,
+        peak_gpu_memory_provenance=peak_gpu_memory_provenance,
         tree_depth_saturation=tree_depth_saturation,
         resumed_from_checkpoint=resumed_from_checkpoint,
         warm_started=warm_started,

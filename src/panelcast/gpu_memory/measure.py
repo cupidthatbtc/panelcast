@@ -12,11 +12,21 @@ Example:
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+import os
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 import jax
 
 logger = logging.getLogger(__name__)
+
+_FIT_INTERVAL_LOCK = threading.Lock()
+_ACTIVE_FIT_INTERVALS = 0
+_FIT_OVERLAP_EPOCH = 0
 
 
 @dataclass(frozen=True)
@@ -57,6 +67,170 @@ class JaxMemoryStats:
     def reserved_gb(self) -> float:
         """Reserved memory in GB (1024^3 bytes)."""
         return self.bytes_reserved / (1024**3)
+
+
+@dataclass(frozen=True)
+class JaxAllocatorSnapshot:
+    """Process-local JAX allocator state at one fit boundary."""
+
+    recorded_at: str
+    process_id: int
+    thread_id: int
+    device_id: int
+    process_index: int
+    platform: str
+    device_kind: str
+    bytes_in_use: int
+    peak_bytes_in_use: int
+    bytes_limit: int
+    bytes_reserved: int
+    num_allocs: int
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class FitPeakTrackingToken:
+    before: JaxAllocatorSnapshot | None
+    overlap_epoch: int
+    exclusive_at_start: bool
+
+
+def capture_jax_allocator_snapshot(device_index: int = 0) -> JaxAllocatorSnapshot | None:
+    """Capture provenance for the process-local GPU allocator, if available."""
+    try:
+        devices = [device for device in jax.devices() if device.platform == "gpu"]
+        if device_index < 0 or device_index >= len(devices):
+            return None
+        device = devices[device_index]
+        stats = device.memory_stats()
+        if not stats or "peak_bytes_in_use" not in stats:
+            return None
+
+        def _stat(name: str) -> int:
+            value = stats.get(name, 0)
+            if isinstance(value, bool):
+                raise ValueError(name)
+            parsed = int(value)
+            if parsed < 0:
+                raise ValueError(name)
+            return parsed
+
+        return JaxAllocatorSnapshot(
+            recorded_at=datetime.now(UTC).isoformat(),
+            process_id=os.getpid(),
+            thread_id=threading.get_ident(),
+            device_id=int(getattr(device, "id", device_index)),
+            process_index=int(getattr(device, "process_index", 0)),
+            platform=str(device.platform),
+            device_kind=str(getattr(device, "device_kind", "unknown")),
+            bytes_in_use=_stat("bytes_in_use"),
+            peak_bytes_in_use=_stat("peak_bytes_in_use"),
+            bytes_limit=_stat("bytes_limit"),
+            bytes_reserved=_stat("bytes_reserved"),
+            num_allocs=_stat("num_allocs"),
+        )
+    except Exception as exc:  # pragma: no cover - backend-specific telemetry failures
+        logger.debug("JAX allocator snapshot unavailable: %s", type(exc).__name__, exc_info=True)
+        return None
+
+
+def attribute_fit_peak(
+    before: JaxAllocatorSnapshot | None,
+    after: JaxAllocatorSnapshot | None,
+    *,
+    interval_exclusive: bool = True,
+) -> tuple[int | None, dict[str, Any] | None]:
+    """Return the observed peak and whether this fit established that process peak."""
+    if after is None:
+        return None, None
+
+    attribution = "fit_interval_new_process_peak"
+    trusted = True
+    if not interval_exclusive:
+        attribution = "overlapping_fit_interval"
+        trusted = False
+    elif before is None:
+        attribution = "missing_start_snapshot"
+        trusted = False
+    elif (
+        before.process_id != after.process_id
+        or before.device_id != after.device_id
+        or before.process_index != after.process_index
+        or before.platform != after.platform
+        or before.device_kind != after.device_kind
+    ):
+        attribution = "allocator_identity_changed"
+        trusted = False
+    elif after.peak_bytes_in_use <= before.peak_bytes_in_use:
+        attribution = "stale_process_peak"
+        trusted = False
+
+    return after.peak_bytes_in_use, {
+        "version": 1,
+        "source": "jax_allocator",
+        "scope": "process",
+        "trusted_for_calibration": trusted,
+        "attribution": attribution,
+        "before": before.to_dict() if before is not None else None,
+        "after": after.to_dict(),
+    }
+
+
+def begin_fit_peak_tracking() -> FitPeakTrackingToken:
+    global _ACTIVE_FIT_INTERVALS, _FIT_OVERLAP_EPOCH
+
+    with _FIT_INTERVAL_LOCK:
+        exclusive = _ACTIVE_FIT_INTERVALS == 0
+        if not exclusive:
+            _FIT_OVERLAP_EPOCH += 1
+        _ACTIVE_FIT_INTERVALS += 1
+        overlap_epoch = _FIT_OVERLAP_EPOCH
+    return FitPeakTrackingToken(
+        before=capture_jax_allocator_snapshot(),
+        overlap_epoch=overlap_epoch,
+        exclusive_at_start=exclusive,
+    )
+
+
+def end_fit_peak_tracking(
+    token: FitPeakTrackingToken,
+) -> tuple[int | None, dict[str, Any] | None]:
+    global _ACTIVE_FIT_INTERVALS
+
+    after = capture_jax_allocator_snapshot()
+    with _FIT_INTERVAL_LOCK:
+        interval_exclusive = token.exclusive_at_start and token.overlap_epoch == _FIT_OVERLAP_EPOCH
+        _ACTIVE_FIT_INTERVALS = max(0, _ACTIVE_FIT_INTERVALS - 1)
+    return attribute_fit_peak(
+        token.before,
+        after,
+        interval_exclusive=interval_exclusive,
+    )
+
+
+@dataclass
+class FitPeakResult:
+    """Slot filled in when the tracked interval closes."""
+
+    peak_bytes: int | None = None
+    provenance: dict[str, Any] | None = None
+
+
+@contextmanager
+def track_fit_peak() -> Iterator[FitPeakResult]:
+    """Bracket a fit interval so a missed close can't strand the interval count.
+
+    A leaked count never falls back to zero, so every later fit in the process
+    would be attributed ``overlapping_fit_interval`` and quarantined.
+    """
+    token = begin_fit_peak_tracking()
+    result = FitPeakResult()
+    try:
+        yield result
+    finally:
+        result.peak_bytes, result.provenance = end_fit_peak_tracking(token)
 
 
 def get_jax_memory_stats(device_index: int = 0) -> JaxMemoryStats:
