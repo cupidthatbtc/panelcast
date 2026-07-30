@@ -823,9 +823,9 @@ def refusal_detail(
         # paths resolved, and resolving a relative one already read the cwd.
         link, root = (output_base / run_id).absolute(), output_base.absolute()
         wrote = (
-            "the fit wrote through that name and scattered its run-scoped artifacts "
-            "across the root, where the walkers that enumerate it will see them as "
-            "siblings of real runs"
+            "anything the fit wrote through that name landed in the root itself, where "
+            "the walkers that enumerate it read run-scoped directories as siblings of "
+            "real runs"
             if after_fit
             else "nothing ran, so nothing was written through it"
         )

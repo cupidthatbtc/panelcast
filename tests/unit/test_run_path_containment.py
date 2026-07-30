@@ -837,10 +837,31 @@ class TestSelectRunLookupContainment:
         # Including the exception tail, whose fail-closed default says the id
         # left the root — this is the one refusal where it wrote into it.
         assert "resolves outside" not in problem
-        assert "scattered its run-scoped artifacts across the root" in problem
-        # Both paths named absolutely: the link to remove, the root to sweep.
+        assert "landed in the root itself" in problem
         assert str(base / run_id) in problem
         assert str(base) in problem
+
+    def test_a_root_pointing_name_is_named_absolutely(self, tmp_path, monkeypatch):
+        # This is the refusal that asks someone to remove a link and sweep a
+        # root, so both paths have to be followable from wherever they read it.
+        from panelcast.select.runner import _claim_named_run
+
+        monkeypatch.chdir(tmp_path)
+        base = Path("outputs")
+        base.mkdir()
+        run_id = "sel_s1_root_20260730T120000123456"
+        # Absolute target: a relative one would resolve against the link's own
+        # directory and name a child of the root, not the root.
+        _symlink_dir(base / run_id, base.absolute())
+
+        _, problem = _claim_named_run(run_id, base, {}, datetime.now(), set())
+
+        assert problem is not None and "resolves to the output root" in problem
+        named = problem.split("the refused name ", 1)[1].split(" resolves to", 1)[0]
+        root = problem.split("the output root ", 1)[1].split(" itself", 1)[0]
+        assert Path(named).is_absolute()
+        assert Path(root).is_absolute()
+        assert Path(named).parent == Path(root)
 
     def test_a_root_pointing_name_refused_before_launching_claims_no_write(self, tmp_path):
         # The root branch sits above the after_fit split, so it has to honour
@@ -862,7 +883,7 @@ class TestSelectRunLookupContainment:
 
         assert "resolves to the output root" in detail
         assert "nothing ran, so nothing was written through it" in detail
-        assert "scattered" not in detail
+        assert "landed in the root" not in detail
 
     def test_an_unresolvable_run_name_is_undecidable_too(self, tmp_path, monkeypatch):
         # `path_is_within` resolves both operands, so a run name that will not

@@ -1501,8 +1501,8 @@ re-checks the manifest behind it.
 
 Every refusal says whether the fit had already run, and leaves the refused name
 alone. What it says next depends on why the id was refused, and there are four
-answers. A *well-formed* id refused for containment means artifacts may exist
-outside the output base, so the message names that path and — when it is a
+answers. A *well-formed* id whose name resolves outside the output base means
+artifacts may exist there, so the message names that path and — when it is a
 symlink — follows one hop, because the link is the only surviving record of
 where they went (a refusal *before* launching says so instead: the name was
 never written to). A *malformed* id means *this run* created no run directory
@@ -1519,9 +1519,9 @@ shell problem. Either way it says containment could not be decided, names the
 path that failed and reports the errno, rather than inferring a cause or
 sending anyone looking outside a root that nothing left. Finally, a name that
 resolves *to the output root itself* is refused because containment demands a
-strict descendant: nothing left the root, but a fit that ran through such a
-name scattered its run-scoped directories across the root, where the walkers
-below read them as siblings of real runs — so that refusal says so rather than
+strict descendant: nothing left the root, but anything a fit wrote through such
+a name landed in the root itself, where the walkers below read run-scoped
+directories as siblings of real runs — so that refusal says so rather than
 reporting an escape.
 
 Containment is also a property of an id *lookup*, not of enumeration: `runs
