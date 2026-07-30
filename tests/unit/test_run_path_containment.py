@@ -648,7 +648,9 @@ class TestSelectRunLookupContainment:
         # `SweepConfig` bounds `sweep_id` at 255 bytes, but the confirmation
         # mint wraps ~50 more around it, so a legal sweep_id can still produce
         # an illegal run_id. The orchestrator would refuse that id too, so the
-        # fit was always doomed — the up-front resolve makes it free.
+        # fit was always doomed — the up-front resolve makes it free. Refusing
+        # early is not the same as not accepting such a sweep_id: bounding it
+        # at construction is #435.
         from panelcast.select.confirmation import run_confirmation
         from panelcast.select.runner import SweepConfig
 
@@ -898,10 +900,11 @@ class TestSelectRunLookupContainment:
         assert Path(named).is_absolute()
         assert Path(named).resolve() == outside.resolve()
 
-    def test_a_lost_cwd_does_not_eat_the_refusal(self, tmp_path, monkeypatch):
+    def test_a_failed_absolute_does_not_eat_the_refusal(self, tmp_path, monkeypatch):
         # absolute() reads the cwd on a relative output base, so it is inside
-        # the same guard: losing it costs the absolute spelling, not the
-        # refusal.
+        # the same guard: a failure there costs the absolute spelling, not the
+        # refusal. (A genuinely removed cwd never reaches here — `path_is_within`
+        # turns the OSError into the RunPathError this is formatting.)
         def refuse_absolute(self: Path) -> Path:
             raise OSError("cwd is gone")
 
