@@ -819,14 +819,22 @@ def refusal_detail(
             f"{field} {run_id!r} could not be decided"
         )
     if _resolves_to_the_root(output_base, run_id):
+        # Absolute without a guard: `_unresolvable` returned None, so both
+        # paths resolved, and resolving a relative one already read the cwd.
+        link, root = (output_base / run_id).absolute(), output_base.absolute()
+        wrote = (
+            "the fit wrote through that name and scattered its run-scoped artifacts "
+            "across the root, where the walkers that enumerate it will see them as "
+            "siblings of real runs"
+            if after_fit
+            else "nothing ran, so nothing was written through it"
+        )
         # Own tail again: `exc` says "resolves outside the output root", and
-        # this is the one refusal where the fit wrote *into* it.
+        # this is the one refusal where a fit writes *into* it.
         return (
-            f"(the refused name resolves to the output root {output_base} itself, which is "
-            "not a run directory: nothing left the root, but a fit writing through that "
-            "name scattered its run-scoped artifacts across the root, where the walkers "
-            f"that enumerate it will see them as siblings of real runs): containment for "
-            f"{field} {run_id!r} could not be satisfied"
+            f"(the refused name {link} resolves to the output root {root} itself, which "
+            f"is not a run directory: nothing left the root, but {wrote}): containment "
+            f"for {field} {run_id!r} could not be satisfied"
         )
     where = _refused_run_name(output_base, run_id)
     if not after_fit:

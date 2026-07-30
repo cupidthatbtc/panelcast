@@ -838,6 +838,31 @@ class TestSelectRunLookupContainment:
         # left the root — this is the one refusal where it wrote into it.
         assert "resolves outside" not in problem
         assert "scattered its run-scoped artifacts across the root" in problem
+        # Both paths named absolutely: the link to remove, the root to sweep.
+        assert str(base / run_id) in problem
+        assert str(base) in problem
+
+    def test_a_root_pointing_name_refused_before_launching_claims_no_write(self, tmp_path):
+        # The root branch sits above the after_fit split, so it has to honour
+        # it: a pre-launch refusal means nothing ran through that name.
+        from panelcast.select.runner import refusal_detail
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        run_id = "sel_s1_root_20260730T120000123456"
+        _symlink_dir(base / run_id, base)
+
+        detail = refusal_detail(
+            base,
+            run_id,
+            RunPathError("Invalid confirmation run_id: resolves outside the output root"),
+            field="confirmation run_id",
+            after_fit=False,
+        )
+
+        assert "resolves to the output root" in detail
+        assert "nothing ran, so nothing was written through it" in detail
+        assert "scattered" not in detail
 
     def test_an_unresolvable_run_name_is_undecidable_too(self, tmp_path, monkeypatch):
         # `path_is_within` resolves both operands, so a run name that will not

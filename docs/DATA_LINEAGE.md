@@ -1500,7 +1500,7 @@ directory *inside* the output base is contained, and only the arm handshake
 re-checks the manifest behind it.
 
 Every refusal says whether the fit had already run, and leaves the refused name
-alone. What it says next depends on why the id was refused, and there are three
+alone. What it says next depends on why the id was refused, and there are four
 answers. A *well-formed* id refused for containment means artifacts may exist
 outside the output base, so the message names that path and — when it is a
 symlink — follows one hop, because the link is the only surviving record of
@@ -1517,7 +1517,12 @@ a symlink loop — on the Pythons that raise for one — takes out whichever pat
 it sits on, and a message naming the run name means a loop there rather than a
 shell problem. Either way it says containment could not be decided, names the
 path that failed and reports the errno, rather than inferring a cause or
-sending anyone looking outside a root that nothing left.
+sending anyone looking outside a root that nothing left. Finally, a name that
+resolves *to the output root itself* is refused because containment demands a
+strict descendant: nothing left the root, but a fit that ran through such a
+name scattered its run-scoped directories across the root, where the walkers
+below read them as siblings of real runs — so that refusal says so rather than
+reporting an escape.
 
 Containment is also a property of an id *lookup*, not of enumeration: `runs
 list`, the dashboard, and the orchestrator's newest-run scan walk the output
