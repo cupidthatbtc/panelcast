@@ -776,10 +776,11 @@ def refusal_detail(
     exact only while that stays the whole of ``safe_run_dir``'s shape check.
 
     An *unresolvable* operand comes next, before the breadcrumb is built,
-    because both of its triggers are states in which building one misleads: a
-    dead working directory leaves nothing that can be made absolute, and a
-    symlink loop at the run name means following the link is the thing that
-    just failed. So the branch names the path that would not resolve, reports
+    because both of its triggers make one misleading rather than impossible: a
+    dead working directory leaves nothing that can be made absolute, and for a
+    symlink loop the breadcrumb builds fine — ``is_symlink`` and ``readlink``
+    do not traverse — but renders a hop pointing back at itself. So the branch
+    names the path that would not resolve, reports
     the errno, and stops — no inference about which trigger fired, because
     every proxy for that (an absolute base, a path unequal to the root) is
     right for one and wrong for the other. It owns its own tail, because
@@ -865,9 +866,9 @@ def _claim_named_run(
     (creation time, knob agreement, prior claim) still apply.
 
     There is no pre-launch resolve here, so a containment refusal is always the
-    post-fit case: the arm subprocess has already run and may have written
-    outside the output base. The refusal says so, and leaves whatever is at
-    that name alone — this lookup does not delete.
+    post-fit case: the arm subprocess has already run. Where it wrote — outside
+    the root, into it, or nowhere — is ``refusal_detail``'s to say, and the
+    refusal leaves whatever is at that name alone; this lookup does not delete.
     """
     try:
         run_dir = sweep_run_dir(output_base, run_id, field="arm run_id")

@@ -282,11 +282,10 @@ def run_confirmation(
         on how wide the seed loop's handler happens to be. The two phases mean
         very different things to whoever reads the log, so they say so: a
         pre-launch refusal costs nothing, while a post-fit one means a full fit
-        has already run and may have written outside the output base. The
-        refused name is left exactly as it is — this lookup does not delete —
-        and described by ``refusal_detail``, the same wording the arm handshake
-        emits, because when the name is a symlink that link is the only
-        surviving record of where those artifacts went (#413).
+        has already run. Where it wrote depends on why the name was refused,
+        which is ``refusal_detail``'s job — the same wording the arm handshake
+        emits — not this function's. The refused name is left exactly as it is;
+        this lookup does not delete (#413).
         """
         try:
             return sweep_run_dir(cfg.pipeline_output_base, run_id, field="confirmation run_id")
