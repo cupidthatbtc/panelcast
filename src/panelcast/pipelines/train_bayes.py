@@ -184,7 +184,9 @@ def build_training_priors(
         tau_group_sigma_scale=float(getattr(ctx, "tau_group_sigma_scale", 0.3)),
         entity_effect_prior_type=str(getattr(ctx, "entity_effect_prior_type", "normal")),
         entity_skew_alpha_scale=float(getattr(ctx, "entity_skew_alpha_scale", 2.0)),
-        rw_innovation_type=str(getattr(ctx, "rw_innovation_type", "normal")),
+        # A null in the config means "unset", not the literal string "None" —
+        # which the model would reject as an unknown innovation at fit time.
+        rw_innovation_type=str(getattr(ctx, "rw_innovation_type", None) or "normal"),
         rw_skew_alpha_scale=float(getattr(ctx, "rw_skew_alpha_scale", 2.0)),
         censor_at_bounds=bool(getattr(ctx, "censor_at_bounds", False)),
         period_effects=bool(getattr(ctx, "period_effects", False)),

@@ -54,9 +54,22 @@ import time
 from pathlib import Path
 from typing import Any
 
-__all__ = ["run_and_measure", "rw_collection_excludes"]
+__all__ = ["mini_run_priors", "run_and_measure", "rw_collection_excludes"]
 
 logger = logging.getLogger(__name__)
+
+
+def mini_run_priors(target_transform: str = "identity", *, entity_group_pooling: bool = False):
+    """The prior configuration the mini-run's model runs under.
+
+    Callers sizing a collection exclusion need the same answer the mini-run
+    will get, so both read it here rather than each deciding for themselves.
+    """
+    from panelcast.models.bayes.priors import get_default_priors, priors_for_transform
+
+    if target_transform == "identity" and not entity_group_pooling:
+        return get_default_priors()
+    return priors_for_transform(target_transform, entity_group_pooling=entity_group_pooling)
 
 
 def rw_collection_excludes(
@@ -129,11 +142,7 @@ def run_and_measure(
 
     from panelcast.gpu_memory.measure import get_jax_memory_stats
     from panelcast.models.bayes.model import make_score_model
-    from panelcast.models.bayes.priors import (
-        RW_INNOVATION_TYPES,
-        get_default_priors,
-        priors_for_transform,
-    )
+    from panelcast.models.bayes.priors import RW_INNOVATION_TYPES
     from panelcast.models.bayes.transforms import get_transform
 
     # Load model args from JSON
@@ -196,13 +205,10 @@ def run_and_measure(
         )
 
     # Gated extras only ever ADD keys, keeping the default invocation
-    # byte-identical to the legacy mini-run. The model applies this same
+    # byte-identical to the legacy mini-run; the model applies this same
     # fallback when the kwarg is absent.
-    run_priors = get_default_priors()
+    run_priors = mini_run_priors(target_transform, entity_group_pooling=entity_group_pooling)
     if target_transform != "identity" or entity_group_pooling:
-        run_priors = priors_for_transform(
-            target_transform, entity_group_pooling=entity_group_pooling
-        )
         model_args["priors"] = run_priors
         model_args["target_bounds"] = target_bounds
 
@@ -221,7 +227,8 @@ def run_and_measure(
     # never samples one is what production does too, whereas naming the absent
     # site would be the #410 KeyError. Both sets come from the site helper —
     # pattern-matching the names would let a future walk latent slip through —
-    # and an absent max_seq means no walk, not a crash.
+    # and an absent max_seq means no walk, not a crash. Two events is the whole
+    # walk as far as site presence goes: the gate is binary, not a length.
     if exclude_collection:
         run_max_seq = int(model_args.get("max_seq") or 0)
         sampled_rw = rw_collection_excludes(

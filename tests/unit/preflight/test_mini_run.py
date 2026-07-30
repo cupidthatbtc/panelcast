@@ -17,6 +17,7 @@ import pytest
 import panelcast
 from panelcast.preflight.mini_run import (
     _parse_args,
+    mini_run_priors,
     run_and_measure,
     rw_collection_excludes,
 )
@@ -1497,10 +1498,25 @@ class TestRwCollectionExcludes:
         assert rw_collection_excludes("user", 2) == ("user_rw_raw",)
         assert rw_collection_excludes("perf", 50) == ("perf_rw_raw",)
 
-    def test_never_names_the_skew_site(self):
-        # The mini-run builds default priors, so rw_raw_abs is never sampled
-        # there even when the production fit runs the skew innovation.
+    def test_never_names_the_skew_site_by_default(self):
+        # rw_raw_abs exists only under an explicitly skew configuration, which
+        # no mini-run transform selects today.
         assert "user_rw_raw_abs" not in rw_collection_excludes("user", 10)
+        assert "user_rw_raw_abs" in rw_collection_excludes(
+            "user", 10, innovation_type="skew_normal"
+        )
+
+    def test_unknown_innovation_type_is_rejected(self):
+        # Fail closed: reporting the gaussian sites for an unrecognized
+        # innovation would leave its own latents out of every exclusion.
+        with pytest.raises(ValueError, match="Unknown rw_innovation_type"):
+            rw_collection_excludes("user", 10, innovation_type="student_t")
+
+    def test_mini_run_priors_are_what_the_mini_run_builds(self):
+        from panelcast.models.bayes.priors import get_default_priors
+
+        assert mini_run_priors() == get_default_priors()
+        assert mini_run_priors("offset_logit").target_transform == "offset_logit"
 
     @pytest.mark.parametrize(
         ("target_transform", "forwards_priors"), [("identity", False), ("offset_logit", True)]
@@ -1509,7 +1525,7 @@ class TestRwCollectionExcludes:
     @mock.patch("numpyro.infer.MCMC")
     @mock.patch("numpyro.infer.NUTS")
     @mock.patch("panelcast.models.bayes.model.make_score_model")
-    def test_pinned_innovation_type_matches_the_priors_the_model_receives(
+    def test_no_innovation_configuration_reaches_the_model_behind_the_helper(
         self,
         mock_make_model,
         mock_nuts,
@@ -1518,9 +1534,9 @@ class TestRwCollectionExcludes:
         target_transform,
         forwards_priors,
     ):
-        """The helper hardcodes the default innovation type because the mini-run
-        never forwards one. Fail loudly the day that stops being true."""
-        from panelcast.models.bayes.priors import get_default_priors, rw_latent_sites
+        """Exclusions are sized from the priors the mini-run builds, so nothing
+        may configure the innovation by another route."""
+        from panelcast.models.bayes.priors import get_default_priors
 
         mock_make_model.return_value = "model"
         mock_nuts.return_value = "nuts_kernel"
@@ -1558,10 +1574,12 @@ class TestRwCollectionExcludes:
         # drift that reintroduces #410.
         assert ("priors" in kwargs) is forwards_priors
         assert not [key for key in kwargs if key.endswith("innovation_type")]
-        effective = kwargs["priors"] if forwards_priors else get_default_priors()
-        assert rw_collection_excludes("user", 4) == rw_latent_sites(
-            "user", effective.rw_innovation_type, max_seq=4
-        ).present()
+        # Not tautological: this fails if priors_for_transform ever selects a
+        # different walk innovation for a transform.
+        if forwards_priors:
+            assert (
+                kwargs["priors"].rw_innovation_type == get_default_priors().rw_innovation_type
+            )
 
     def test_single_event_model_never_samples_the_rw_site(self):
         """#410's root fact, straight from the sampler: with one event per entity
@@ -1701,11 +1719,11 @@ class TestRwCollectionExcludes:
     @mock.patch("numpyro.infer.MCMC")
     @mock.patch("numpyro.infer.NUTS")
     @mock.patch("panelcast.models.bayes.model.make_score_model")
-    def test_reconciliation_is_skipped_without_an_exclusion(
+    def test_absent_max_seq_is_tolerated_with_and_without_an_exclusion(
         self, mock_make_model, mock_nuts, mock_mcmc_class, mock_get_stats, minimal_model_args
     ):
-        """The common path must not acquire a new hard dependency on max_seq
-        being int-coercible."""
+        """Neither path may acquire a hard dependency on max_seq being
+        int-coercible; an unusable value means no walk."""
         mock_make_model.return_value = "model"
         mock_nuts.return_value = "nuts_kernel"
         mock_mcmc = mock.Mock()

@@ -62,7 +62,17 @@ class RandomWalkLatentSites:
 def rw_latent_sites(
     prefix: str, innovation_type: object, *, max_seq: int
 ) -> RandomWalkLatentSites:
-    """Return the random-walk latent sites eligible for memory exclusion."""
+    """Return the random-walk latent sites eligible for memory exclusion.
+
+    Unknown innovation types are rejected rather than treated as gaussian: an
+    innovation with its own latent that silently reported the gaussian sites
+    would leave that latent out of every memory exclusion built from here.
+    """
+    if innovation_type is not None and innovation_type not in RW_INNOVATION_TYPES:
+        raise ValueError(
+            f"Unknown rw_innovation_type: '{innovation_type}'. "
+            f"Must be one of {RW_INNOVATION_TYPES}."
+        )
     if max_seq <= 1:
         return RandomWalkLatentSites(None, None)
     raw_abs = (

@@ -214,7 +214,7 @@ def _run_full_preflight(
         run_extrapolated_preflight_check,
     )
     from panelcast.preflight.full_check import _derive_dimensions_from_model_args
-    from panelcast.preflight.mini_run import rw_collection_excludes
+    from panelcast.preflight.mini_run import mini_run_priors, rw_collection_excludes
 
     console = Console()
 
@@ -317,9 +317,17 @@ def _run_full_preflight(
     # walk. The mini-run reconciles this against its own args, so a wrong
     # value here no longer crashes it, but it still keys the calibration
     # cache signature and must describe what actually gets measured.
-    preflight_max_seq = int(model_args["max_seq"])
+    preflight_max_seq = int(model_args.get("max_seq") or 0)
     preflight_exclude_collection = (
-        rw_collection_excludes(preflight_descriptor.model_prefix, preflight_max_seq)
+        rw_collection_excludes(
+            preflight_descriptor.model_prefix,
+            preflight_max_seq,
+            # The mini-run's own priors decide which walk latents exist, and
+            # reconciliation there can only drop sites, never add them.
+            innovation_type=mini_run_priors(
+                config.target_transform, entity_group_pooling=effective_group_pooling
+            ).rw_innovation_type,
+        )
         if config.exclude_rw_raw_from_collection
         else ()
     )
