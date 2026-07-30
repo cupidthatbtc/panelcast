@@ -762,10 +762,9 @@ class TestSelectRunLookupContainment:
         assert "could not be decided" in error
         assert "resolves outside" not in error
         assert "artifacts may exist" not in error
-        # The relative spelling is the one that says "your cwd is gone", not
-        # "your config is wrong", and the errno is the only other evidence.
-        assert "the output root outputs is relative" in error
-        assert "working directory could not be read" in error
+        # The lexical spelling is the only one available once the cwd read
+        # that would absolutize it is what failed; the errno is the evidence.
+        assert "outputs could not be resolved" in error
         assert "cwd is gone" in error
 
     def test_a_pre_launch_breadcrumb_never_claims_artifacts_exist(self, tmp_path):
@@ -809,8 +808,11 @@ class TestSelectRunLookupContainment:
         monkeypatch.setattr(Path, "resolve", fail)
         detail = refusal_detail(Path("outputs"), run_id, exc, field="arm run_id", after_fit=True)
 
-        assert "cannot be located" in detail
+        assert "could not be decided" in detail
         assert "arm run_id" in detail
+        # The base is what failed here, so that is what gets named — no
+        # breadcrumb for the run dir, which is the point of the ordering.
+        assert "outputs could not be resolved" in detail
         # The id is valid — it passed the shape gate — so nothing convicts it.
         assert "Invalid" not in detail
         assert run_id not in detail.split("containment for arm run_id")[0]
@@ -845,10 +847,10 @@ class TestSelectRunLookupContainment:
         assert "artifacts may exist" not in detail
         assert " -> " not in detail
         assert "Symlink loop" in detail
-        # It is the name that failed, so name it — and say what is unknown is
-        # where it points, not where it is.
-        assert f"the refused name {base / run_id} could not be resolved" in detail
-        assert "cannot be located" not in detail
+        # It is the name that failed, so that is the path the message names —
+        # the base resolved fine and is not blamed for it.
+        assert f"{base / run_id} could not be resolved" in detail
+        assert f"{base} could not be resolved" not in detail
 
     def test_the_arm_mint_shape_passes_the_gate(self, tmp_path):
         # The arm mint has no cheap production seam (it happens inside

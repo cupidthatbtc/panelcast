@@ -754,11 +754,12 @@ def refusal_detail(
     ran. The shape half is likewise decided by re-running ``validate_run_id``,
     exact only while that stays the whole of ``safe_run_dir``'s shape check.
 
-    An *unresolvable* operand comes next, before the breadcrumb is built. For
-    the cwd trigger that is because a name cannot be made absolute either; for
-    a loop at the run name it is because following the link is exactly what
-    just failed. Either way the breadcrumb would be misleading, so the branch
-    names what it can and stops.
+    An *unresolvable* operand comes next, before the breadcrumb is built,
+    because both of its triggers are states in which building one misleads: a
+    dead working directory leaves nothing that can be made absolute, and a
+    symlink loop at the run name means following the link is the thing that
+    just failed. So the branch names the path that would not resolve, reports
+    the errno, and stops.
     It owns its own tail, because ``exc`` here says "resolves outside the
     output root" — ``path_is_within``'s fail-closed default, and the very
     claim this branch exists to deny. Its trigger is process-wide and
@@ -782,23 +783,16 @@ def refusal_detail(
     undecided = _unresolvable(output_base, run_id)
     if undecided is not None:
         unresolved, why = undecided
-        if unresolved != output_base:
-            # The refused name itself is what would not resolve, so it can be
-            # named — what it cannot do is be followed to whatever it points at.
-            cause = f"the refused name {unresolved} could not be resolved"
-            located = "it cannot be followed further"
-        else:
-            cause = (
-                f"the output root {output_base} is relative and the working directory "
-                "could not be read"
-                if not output_base.is_absolute()
-                else f"the output root {output_base} could not be resolved"
-            )
-            located = "the refused name cannot be located"
+        # Deliberately one sentence for both triggers, with no inference about
+        # which: the errno distinguishes a dead working directory from a
+        # symlink loop, and any proxy for it (an absolute base, a name that
+        # differs from the root) is a guess that goes wrong on the other one.
+        # The lexical spelling is used because it is the only one available
+        # when what failed is the cwd read that would absolutize it.
         return (
-            f"(containment could not be decided — {cause}: {why}; nothing is known to have "
-            f"left the output root, and {located}): containment for {field} {run_id!r} "
-            "could not be decided"
+            f"(containment could not be decided — {unresolved} could not be resolved: "
+            f"{why}; nothing is known to have left the output root): containment for "
+            f"{field} {run_id!r} could not be decided"
         )
     where = _refused_run_name(output_base, run_id)
     if not after_fit:
