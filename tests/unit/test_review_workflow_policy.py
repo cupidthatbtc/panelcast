@@ -254,10 +254,17 @@ def _synthetic_workspace_violations(workflow: dict[str, Any]) -> list[str]:
         'message.method === "tools/list"',
         'message.params?.name === "get_diff"',
         'path.join(__dirname, "inline-review-diff.b64")',
+        'path.join(__dirname, "inline-review-state")',
         "fs.readFileSync(",
         'Buffer.from(encoded, "base64")',
+        # An empty payload the render job vouched for is "no changes", not the
+        # delivery failure the same empty payload means without that vouching.
+        'state === "empty"',
+        "NO CHANGES TO REVIEW",
+        "ERROR: review diff was not delivered",
         'base64 -w0 "$RUNNER_TEMP/panelcast-review.diff" > inline-review-diff.b64',
-        "git add README.md inline-review-mcp.cjs inline-review-diff.b64",
+        'cp "$RUNNER_TEMP/panelcast-review-state" inline-review-state',
+        "git add README.md inline-review-mcp.cjs inline-review-diff.b64 inline-review-state",
     )
     findings.extend(
         f"synthetic workspace builder omits {required}"
@@ -287,6 +294,8 @@ def _inline_diff_violations(workflow: dict[str, Any]) -> list[str]:
         findings.append("inline diff renderer omits the 200 KB cap")
     if "GITHUB_OUTPUT" in run:
         findings.append("inline diff renderer writes PR text to GitHub job outputs")
+    if 'if [ "$size" -eq 0 ]' not in run or "panelcast-review-state" not in run:
+        findings.append("inline diff renderer does not record a legitimately empty diff")
 
     inputs = _review_action_inputs(jobs(workflow).get("review") or {})
     prompt = str(inputs.get("prompt", ""))
@@ -294,6 +303,16 @@ def _inline_diff_violations(workflow: dict[str, Any]) -> list[str]:
         findings.append("credentialed review prompt does not require the diff tool")
     if "untrusted data" not in prompt:
         findings.append("credentialed review prompt does not label the diff as untrusted data")
+    if "raw pull-request diff" not in prompt:
+        findings.append("credentialed review prompt does not call the tool result the raw diff")
+    if "marker" in prompt.lower():
+        findings.append("credentialed review prompt still references delivery markers")
+    if "no framing, header, or delimiter" not in prompt:
+        findings.append("credentialed review prompt does not state the result is unwrapped")
+    if "NO CHANGES TO REVIEW" not in prompt:
+        findings.append("credentialed review prompt has no empty-diff branch")
+    if "Only an error reported by the tool itself" not in prompt:
+        findings.append("credentialed review prompt does not scope not-completed to tool errors")
     claude_args = str(inputs.get("claude_args", ""))
     if claude_args.count("--mcp-config ") != 1:
         findings.append("Claude must receive exactly one merged MCP config")
@@ -499,6 +518,45 @@ def test_secretless_diff_log_is_complete_and_unforgeably_delimited(
     assert not inputs.get("settings")
 
 
+def test_empty_diff_reads_as_no_changes_rather_than_a_delivery_failure(
+    review_workflow: dict[str, Any],
+) -> None:
+    """A pull request with nothing in its diff must not be reported as a
+    review that could not be completed (#411)."""
+    input_steps = _steps(jobs(review_workflow)["review-input"])
+    render = next(
+        step for step in input_steps if step.get("name") == "Render the pull request diff for review"
+    )
+    builder = next(step for step in input_steps if step.get("name") == SYNTHETIC_BUILDER)
+    render_run = str(render["run"])
+    builder_run = str(builder["run"])
+
+    assert 'if [ "$size" -eq 0 ]' in render_run
+    assert "'empty' > \"$state_file\"" in render_run
+    assert "'diff' > \"$state_file\"" in render_run
+    assert 'cp "$RUNNER_TEMP/panelcast-review-state" inline-review-state' in builder_run
+    # Both branches of the tool result stay reachable and distinct.
+    assert '!encoded && state === "empty"' in builder_run
+    assert "NO CHANGES TO REVIEW" in builder_run
+    assert "ERROR: review diff was not delivered" in builder_run
+
+    prompt = str(_review_action_inputs(jobs(review_workflow)["review"])["prompt"])
+    assert "NO CHANGES TO REVIEW" in prompt
+    assert "Only an error reported by the tool itself" in prompt
+
+
+def test_review_prompt_describes_the_diff_the_tool_actually_returns(
+    review_workflow: dict[str, Any],
+) -> None:
+    """The tool hands back the bare diff; the runtime markers live only in the
+    render job's log, which the reviewer cannot read (#411)."""
+    prompt = str(_review_action_inputs(jobs(review_workflow)["review"])["prompt"])
+
+    assert "raw pull-request diff" in prompt
+    assert "no framing, header, or delimiter" in prompt
+    assert "marker" not in prompt.lower()
+
+
 def test_reviewer_can_still_read_ci_results_instead_of_running_them(
     credentialed_job: dict[str, Any],
 ) -> None:
@@ -691,9 +749,17 @@ def _add_decoy_artifact_transfer(workflow: dict[str, Any]) -> None:
     )
 
 
+def _builder_step(workflow: dict[str, Any]) -> dict[str, Any]:
+    return next(
+        step
+        for step in _steps(jobs(workflow)["review-input"])
+        if step.get("name") == SYNTHETIC_BUILDER
+    )
+
+
 def _move_builder_contract_to_a_decoy(workflow: dict[str, Any]) -> None:
     steps = jobs(workflow)["review-input"]["steps"]
-    builder = next(step for step in steps if step.get("name") == SYNTHETIC_BUILDER)
+    builder = _builder_step(workflow)
     original = str(builder["run"])
     builder["run"] = "printf '%s\\n' unsafe-builder"
     steps.insert(0, {"name": "Decoy safe text", "run": original})
@@ -708,15 +774,34 @@ def _render_step(workflow: dict[str, Any]) -> dict[str, Any]:
 
 
 def _drop_base64_encoding(workflow: dict[str, Any]) -> None:
-    builder = next(
-        step
-        for step in _steps(jobs(workflow)["review-input"])
-        if step.get("name") == SYNTHETIC_BUILDER
-    )
+    builder = _builder_step(workflow)
     builder["run"] = str(builder["run"]).replace(
         'base64 -w0 "$RUNNER_TEMP/panelcast-review.diff"',
         'cat "$RUNNER_TEMP/panelcast-review.diff"',
     )
+
+
+def _drop_empty_diff_state(workflow: dict[str, Any]) -> None:
+    render = _render_step(workflow)
+    render["run"] = str(render["run"]).replace("panelcast-review-state", "panelcast-review-unused")
+
+
+def _report_an_empty_diff_as_a_failure(workflow: dict[str, Any]) -> None:
+    builder = _builder_step(workflow)
+    builder["run"] = str(builder["run"]).replace('!encoded && state === "empty"', "false")
+
+
+def _restore_marker_language(workflow: dict[str, Any]) -> None:
+    inputs = _review_action_inputs(_only_credentialed_job(workflow))
+    inputs["prompt"] += (
+        "\nThe diff arrives between matching runtime-generated markers; if there "
+        "are no markers, report that the review was not completed.\n"
+    )
+
+
+def _drop_the_empty_diff_branch_from_the_prompt(workflow: dict[str, Any]) -> None:
+    inputs = _review_action_inputs(_only_credentialed_job(workflow))
+    inputs["prompt"] = inputs["prompt"].replace("NO CHANGES TO REVIEW", "an empty result")
 
 
 def _drop_inline_diff_wiring(workflow: dict[str, Any]) -> None:
@@ -761,6 +846,10 @@ def _widen_inline_diff_cap(workflow: dict[str, Any]) -> None:
         (_drop_base64_encoding, "builder omits"),
         (_drop_inline_diff_wiring, "does not merge the inline diff MCP config"),
         (_widen_inline_diff_cap, "omits the 200 KB cap"),
+        (_drop_empty_diff_state, "does not record a legitimately empty diff"),
+        (_report_an_empty_diff_as_a_failure, "builder omits"),
+        (_restore_marker_language, "still references delivery markers"),
+        (_drop_the_empty_diff_branch_from_the_prompt, "has no empty-diff branch"),
     ],
 )
 def test_policy_rejects_a_reviewer_that_can_execute_pull_request_code(
