@@ -1220,11 +1220,11 @@ class TestPipelineConfigValidation:
     def test_sigma_knob_at_its_default_does_not_block_a_beta_family(self, monkeypatch):
         """A promoted-on sigma knob must not make the Beta families
         unconstructible: inheriting a default is not a request to use it."""
-        from panelcast.pipelines import orchestrator as orch
+        from panelcast.pipelines import pipeline_config
 
-        flipped = dict(orch._field_defaults())
+        flipped = dict(pipeline_config._field_defaults())
         flipped["heteroscedastic_entity_obs"] = True
-        monkeypatch.setattr(orch, "_field_defaults", lambda: flipped)
+        monkeypatch.setattr(pipeline_config, "_field_defaults", lambda: flipped)
 
         config = PipelineConfig(
             likelihood_family="beta",
@@ -1236,11 +1236,11 @@ class TestPipelineConfigValidation:
     def test_sigma_knob_moved_off_a_flipped_default_still_raises(self, monkeypatch):
         import pytest
 
-        from panelcast.pipelines import orchestrator as orch
+        from panelcast.pipelines import pipeline_config
 
-        flipped = dict(orch._field_defaults())
+        flipped = dict(pipeline_config._field_defaults())
         flipped["heteroscedastic_entity_obs"] = True
-        monkeypatch.setattr(orch, "_field_defaults", lambda: flipped)
+        monkeypatch.setattr(pipeline_config, "_field_defaults", lambda: flipped)
 
         with pytest.raises(ValueError, match="learn_n_exponent"):
             PipelineConfig(

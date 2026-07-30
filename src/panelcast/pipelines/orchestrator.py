@@ -7,20 +7,21 @@ stages in dependency order, with features for:
 - Environment verification via pixi.lock
 - Error handling with fail-fast semantics
 - Manifest tracking for reproducibility
+
+The pieces it drives live next door: ``pipeline_config`` (the resolved
+experiment), ``run_command`` (manifest command provenance), ``stage_context``
+(config to StageContext), ``artifact_routing`` (run-scoped product roots), and
+``failure_report`` (what a failed run leaves behind).
 """
 
 from __future__ import annotations
 
 import json
-import logging
-import math
 import os
 import shutil
 import subprocess
 import sys
-from dataclasses import dataclass, field
 from dataclasses import fields as dataclass_fields
-from dataclasses import replace as dataclass_replace
 from datetime import datetime
 from pathlib import Path
 from time import time
@@ -38,31 +39,24 @@ from rich.progress import (
 
 from panelcast import __version__ as panelcast_version
 from panelcast.config.descriptor import load_descriptor, resolve_descriptor_path
-from panelcast.config.gates import (
-    ArCenter,
-    ArtistEffectParam,
-    BetaPriorType,
-    ChainMethod,
-    DebutPrevScoreSource,
-    InitStrategy,
-    LatentProcess,
-    NExponentPrior,
-    SigmaObsPriorType,
-)
 from panelcast.model_preflight import beta_binomial_trial_scale
 from panelcast.paths import (
     ArtifactPaths,
     RunPathError,
-    path_is_within,
     resolve_latest,
     safe_run_dir,
-    validate_run_id,
 )
+from panelcast.pipelines.artifact_routing import find_run_with_product, resolve_artifact_paths
 from panelcast.pipelines.errors import (
     ConvergenceError,
     EnvironmentError,
     PipelineError,
     StageSkipped,
+)
+from panelcast.pipelines.failure_report import (
+    close_log_handlers,
+    print_failure_epilogue,
+    write_failure_payload,
 )
 from panelcast.pipelines.manifest import (
     GitStateModel,
@@ -73,6 +67,20 @@ from panelcast.pipelines.manifest import (
     load_run_manifest,
     save_run_manifest,
 )
+
+# Re-exported: these have always been importable (and monkeypatchable) from
+# this module, and the CLI, select runner and tests still reach for them here.
+from panelcast.pipelines.pipeline_config import (  # noqa: F401
+    _RESUME_CONFIG_KEYS,
+    _RESUME_EXCLUDED_KEYS,
+    PipelineConfig,
+    _field_defaults,
+    _get_default_config,
+    _reset_default_config,
+    resolve_model_facts,
+)
+from panelcast.pipelines.run_command import build_command_string
+from panelcast.pipelines.stage_context import build_stage_context
 from panelcast.pipelines.stages import PipelineStage, StageContext, get_execution_order
 from panelcast.pipelines.stamps import (
     CONSUMER_STAGES,
@@ -89,647 +97,12 @@ from panelcast.utils.random import set_seeds
 
 log = structlog.get_logger()
 
-# Module-level reference for default config values (used to detect non-default flags)
-_DEFAULT_CONFIG: PipelineConfig | None = None
-
-
-def _get_default_config() -> PipelineConfig:
-    """Get a cached default PipelineConfig instance for comparison."""
-    global _DEFAULT_CONFIG
-    if _DEFAULT_CONFIG is None:
-        _DEFAULT_CONFIG = PipelineConfig()
-    return _DEFAULT_CONFIG
-
-
-def _reset_default_config() -> None:
-    """Reset cached default config (for testing only)."""
-    global _DEFAULT_CONFIG
-    _DEFAULT_CONFIG = None
-
-
-def _field_defaults() -> dict[str, Any]:
-    """Shipped defaults, read off the fields rather than an instance.
-
-    `__post_init__` needs these, and `_get_default_config()` would re-enter it.
-    """
-    return {f.name: f.default for f in dataclass_fields(PipelineConfig)}
-
-
-@dataclass
-class PipelineConfig:
-    """Configuration for pipeline execution.
-
-    Attributes:
-        seed: Random seed for reproducibility (default 42).
-        skip_existing: If True, skip stages with unchanged inputs (default False).
-        stages: List of stage names to run, or None for all stages.
-        dry_run: If True, log what would run without executing (default False).
-        strict: If True, fail on convergence warnings (default False).
-        enforce_lockfile: If True, fail if pixi.lock missing (default True).
-        verbose: If True, enable DEBUG logging (default False).
-        resume: Run ID to resume, or None for fresh run.
-        max_events: Maximum events per entity for model training (default 50).
-        num_chains: Number of parallel MCMC chains (default 4).
-        num_samples: Post-warmup samples per chain (default 1000).
-        num_warmup: Warmup iterations per chain (default 1000).
-        target_accept: Target acceptance probability (default 0.90).
-        max_tree_depth: Maximum tree depth for NUTS (default 10).
-        rhat_threshold: Maximum acceptable R-hat (default 1.01).
-        ess_threshold: Minimum ESS per chain (default 400).
-        allow_divergences: If True, don't fail on divergences (default False).
-        min_ratings: Minimum primary observations per event, or None to resolve
-            from the descriptor's ``primary_min_obs`` at run time (default None).
-        min_events_filter: Minimum events per entity for dynamic effects (default 2).
-        enable_genre: If False, disable genre features (default True).
-        enable_artist: If False, disable artist features (default True).
-        enable_temporal: If False, disable temporal features (default True).
-        n_exponent: Scaling exponent for review count noise adjustment (default 0.0).
-        learn_n_exponent: If True, learn exponent from data using prior (default False).
-        n_exponent_alpha: Beta prior alpha parameter for learned exponent (default 2.0).
-        n_exponent_beta: Beta prior beta parameter for learned exponent (default 4.0).
-        n_exponent_prior: Prior for learned exponent: 'logit-normal' or 'beta'.
-
-    Example:
-        >>> config = PipelineConfig(seed=42, dry_run=True)
-        >>> config.stages is None  # Run all stages
-        True
-    """
-
-    seed: int = 42
-    skip_existing: bool = False
-    stages: list[str] | None = None
-    dry_run: bool = False
-    strict: bool = False
-    enforce_lockfile: bool = True
-    verbose: bool = False
-    # MCMC progress bars: None = auto (stderr TTY only), False = --no-progress.
-    # Execution mechanics only — never affects outputs, skip detection, or resume.
-    progress_bar: bool | None = None
-    resume: str | None = None
-    # Free-form run label recorded in the manifest (surfaced by `runs history`).
-    # Provenance only — never affects outputs or skip detection.
-    tag: str | None = None
-    # Caller-supplied run directory name (#167): lets the select runner name
-    # each arm's run up front instead of racing the mutable `latest` pointer.
-    # None (default) keeps the generated timestamp ids. No CLI flag.
-    run_id: str | None = None
-    # None resolves to the descriptor's max_events, else 50 (#268).
-    max_events: int | None = None
-    # MCMC configuration
-    num_chains: int = 4
-    num_samples: int = 1000
-    num_warmup: int = 1000
-    target_accept: float = 0.90
-    max_tree_depth: int = 10
-    # NUTS initialization strategy: "uniform" (legacy default) | "median" |
-    # "feasible". No CLI flag; via run_config.yaml. External domains whose chains
-    # trap in a degenerate init corner (e.g. the baseball beta_binomial
-    # replication) switch to "median"/"feasible" here.
-    init_strategy: InitStrategy = "uniform"
-    chain_method: ChainMethod = "sequential"
-    checkpoint_every_draws: int | None = None
-    caged_chain_retries: int = 0
-    caged_chain_tree_depth_fraction: float = 0.95
-    caged_chain_boundary_sigma: float = 0.005
-    caged_chain_consensus_ratio: float = 5.0
-    # Warmup-transfer seams (YAML-only; the select runner writes them per arm).
-    warmup_export_path: str | None = None
-    warmup_import_path: str | None = None
-    # Convergence thresholds
-    rhat_threshold: float = 1.01
-    ess_threshold: int = 400
-    allow_divergences: bool = False
-    # Data filtering. min_ratings=None defers to the descriptor's primary_min_obs
-    # (resolved in the orchestrator), so a retargeted domain needs no
-    # --min-ratings on the command line. An explicit value (CLI/YAML) wins.
-    min_ratings: int | None = None
-    min_events_filter: int = 2
-    # Feature flags
-    enable_genre: bool = True
-    enable_artist: bool = True
-    enable_temporal: bool = True
-    # Heteroscedastic noise configuration
-    n_exponent: float = 0.0
-    learn_n_exponent: bool = False
-    n_exponent_alpha: float = 2.0
-    n_exponent_beta: float = 4.0
-    n_exponent_prior: NExponentPrior = "logit-normal"
-    # Likelihood configuration
-    likelihood_df: float = 4.0
-    # Likelihood family gate: "studentt" (legacy) | "normal" | "skew_studentt" /
-    # "skew_normal" (sinh-arcsinh skew) | "split_normal" (two-piece) | "beta"
-    # (bounded mean-precision Beta on [low, high]).
-    # Builtins are the LikelihoodFamily Literal; entry-point plugin families
-    # (#172) are also legal, so the boundary widens to str and the runtime
-    # registry check in _validate_likelihood is the contract.
-    # None resolves to the descriptor's likelihood_family, else "studentt".
-    likelihood_family: str | None = None
-    # Discretization gate: interval-censor the observation to integers (default
-    # off => continuous likelihood). Location-scale families only; not for beta.
-    discretize_observation: bool = False
-    # Debut prev_score fill source: "train_mean" | "dataset_stats" (legacy)
-    debut_prev_score_source: DebutPrevScoreSource = "train_mean"
-    # Target transform gate: "offset_logit" (default since 0.5.0 — promoted on
-    # the corrected #63 ledger, +22 held-out elpd) | "identity" (former default)
-    # None resolves to the descriptor's target_transform, else "offset_logit"
-    # (the default since 0.5.0 — promoted on the corrected #63 ledger).
-    target_transform: str | None = None
-    logit_offset: float = 0.5
-    # AR(1) centering gate: "global" | "none" (legacy) | "artist_running"
-    ar_center: ArCenter = "global"
-    # Latent artist-effect process gate: "rw" (legacy) | "ar1" (experimental)
-    latent_process: LatentProcess = "rw"
-    # sigma_obs prior family gate: "halfnormal" (legacy default) | "lognormal"
-    # (removes the zero-boundary pile-up behind the econ variance-collapse).
-    sigma_obs_prior_type: SigmaObsPriorType = "halfnormal"
-    # sigma_artist prior family gate: "halfnormal" (legacy default) | "lognormal"
-    # (removes the zero-boundary pile-up; mirrors sigma_rw/sigma_obs). No CLI flag.
-    sigma_artist_prior_type: SigmaObsPriorType = "halfnormal"
-    # Artist-effect parameterization: "noncentered" (legacy default) | "zerosum"
-    # (ZeroSumNormal deviations around mu_artist — removes the mu_artist<->effects
-    # location ridge that throttles sigma_artist ESS). No CLI flag.
-    artist_effect_param: ArtistEffectParam = "noncentered"
-    # LogNormal(loc, sigma) parameters for the sigma_rw / sigma_artist priors
-    # (used only when the respective *_prior_type is "lognormal"). The default
-    # locations are sized for the AOTY score scale; external domains on other
-    # scales (e.g. the baseball beta_binomial replication, sigma ~1e-2/1e-3)
-    # right-size them here to avoid prior-likelihood conflict. No CLI flag.
-    sigma_rw_lognormal_loc: float = -2.8
-    sigma_rw_lognormal_sigma: float = 0.6
-    sigma_artist_lognormal_loc: float = -0.9
-    sigma_artist_lognormal_sigma: float = 0.6
-    # Normal(loc, scale) parameters for the AR(1) coefficient prior. The default
-    # centers rho at zero with moderate spread; external domains where the AR
-    # term competes with the artist effects as an alternative persistence channel
-    # (e.g. the baseball replication's previous-season average) set rho_scale
-    # small to pin rho near zero and disable the channel. No CLI flag.
-    rho_loc: float = 0.0
-    rho_scale: float = 0.3
-    # Covariate-block prior gate (#155): "normal" (legacy default, bit-identical
-    # RNG path) | "horseshoe" (regularized horseshoe; global-local shrinkage
-    # against the #76 coefficient dilution). No CLI flag; via run_config.yaml.
-    beta_prior_type: BetaPriorType = "normal"
-    # Horseshoe global scale (tau_0), the sparsity knob a bake-off sweeps.
-    # Read only when beta_prior_type="horseshoe".
-    hs_global_scale: float = 0.1
-    # Entity-level observation overdispersion gate: True (AOTY default since
-    # 0.13.0, #238 — per-entity multiplicative noise inflation, held-out ELPD
-    # +29.8+/-7.0) | False (legacy bit-identical RNG path, pinned by IMDb/econ).
-    # tau_entity_scale sets the prior HalfNormal scale on the entity dispersion.
-    heteroscedastic_entity_obs: bool = True
-    tau_entity_scale: float = 0.25
-    # Errors-in-variables gate (model-v2): de-noise the AR(1) lagged regressor
-    # with a measurement-error latent so rho de-attenuates. Default off => legacy
-    # bit-identical path. No CLI flag; configured via run_config.yaml.
-    errors_in_variables: bool = False
-    # Long-horizon random-walk variance gate (model-v2): at prediction time drop
-    # the album_seq clamp at max_seq_train so deep-extrapolation intervals widen.
-    # Default off => legacy clamp. No CLI flag.
-    propagate_rw_horizon: bool = False
-    # Genre/group pooling level between the global mean and the entity effects
-    # (#41): each entity's init-effect location shifts by a learned zero-sum
-    # group offset. None = auto (default since 0.6.0, promoted on the #85
-    # screening + publication confirmation): on where the domain supports it —
-    # the descriptor names an entity_group_col and the training split has that
-    # column. Explicit True/False always wins (True hard-fails on unsupported
-    # domains). No CLI flag.
-    entity_group_pooling: bool | None = None
-    # Per-group entity-effect variances (#271): each entity group gets its own
-    # sigma_artist via log-scale partial pooling around the shared draw.
-    # "shared" (default) is the legacy bit-identical path. Requires
-    # entity_group_pooling (checked against the resolved gate at train time).
-    # No CLI flag.
-    group_variance: str = "shared"
-    tau_group_sigma_scale: float = 0.3
-    # Latent-population shape seam (#232): "normal" (legacy bit-identical) |
-    # "skew_normal" (learned-alpha skew-normal population on the initial
-    # entity effects — the skewness-pin candidate). Requires
-    # artist_effect_param="noncentered". No CLI flag.
-    entity_effect_prior_type: str = "normal"
-    entity_skew_alpha_scale: float = 2.0
-    # Innovation-shape seam (#233): "normal" (legacy bit-identical) |
-    # "skew_normal" (learned-alpha skew-normal random-walk innovations — the
-    # skewness-via-dynamics candidate; doubles the dominant latent tensor).
-    # No CLI flag.
-    rw_innovation_type: str = "normal"
-    rw_skew_alpha_scale: float = 2.0
-    # Boundary censoring (#234): bound observations contribute CDF mass, the
-    # max-pin candidate. Mutually exclusive with discretize_observation.
-    # No CLI flag.
-    censor_at_bounds: bool = False
-    # Period (calendar-time) effects gate (#269): a constrained additive
-    # offset per period_col value. The declared constraint (zero_sum, or
-    # pin_first / pin_last) is what identifies the block against entity
-    # intercepts + cohorts + age-like covariates (the APC rank deficiency).
-    # Default off => legacy bit-identical path. Requires the descriptor to
-    # name a period_col. No CLI flag.
-    period_effects: bool = False
-    period_constraint: str = "zero_sum"
-    sigma_period_scale: float = 0.5
-    # Missing-covariate treatment gate (#158): train-median imputation plus
-    # <col>__missing indicator columns instead of the legacy fillna(0).
-    # Feature-affecting; default off => byte-identical outputs. No CLI flag.
-    impute_missing: bool = False
-    # Stacked-GBM offset feature block (#86): a gradient-boosted prediction of
-    # the target from the other blocks' outputs enters X as one more covariate
-    # (out-of-fold for train rows). Default on since 0.6.0 (promoted on the
-    # #86 screening + publication confirmation: +224 paired held-out ELPD and
-    # better point accuracy at nominal coverage); works for every domain since
-    # it needs only the descriptor target and row ids. No CLI flag.
-    gbm_offset: bool = True
-    # Opt-in in-sampler exclusion of the rw_raw tensor: never store its draws
-    # on device during sampling (~96% peak-GPU cut at production settings;
-    # posterior parity for all other sites guarded by tests).
-    exclude_rw_raw_from_collection: bool = False
-    # Split configuration. min_train_events matches the documented `run` CLI
-    # default (2) so `stage splits` / `demo` build the same split population.
-    val_events: int = 0
-    min_train_events: int = 2
-    # Rolling-origin backtest offset (0 = the standard split)
-    origin_offset: int = 0
-    # Conformal calibration wrapper on the predictive (#156; needs val_events >= 1)
-    conformal_calibration: bool = False
-    # Multi-step ancestral rollout depth for evaluation (#157). 0 = off (the
-    # default; byte-identical). H > 0 scores h=1..H forecasts into the
-    # separate horizon_rollout.json artifact. No CLI flag.
-    eval_horizon: int = 0
-    # Evaluation configuration
-    calibration_intervals: tuple[float, ...] = (0.80, 0.95)
-    coverage_tolerance: float = 0.03
-    prediction_interval: float = 0.95
-    evaluate_secondary_split: bool = True
-    # Prediction batching (memory/speed trade-off, not statistically relevant)
-    predictive_batch_size: int = 500
-    predict_entity_batch_size: int = 50
-    # priors: auto (#267): derive sigma lognormal locs from train-data moments
-    # at fit time. None resolves to the descriptor's auto_priors, else False.
-    auto_priors: bool | None = None
-    # Dataset descriptor reference (bare name or YAML path; None = AOTY defaults)
-    dataset: str | None = None
-    # YAML keys ignored under --allow-unknown-config-keys (#297). Provenance
-    # only: preserved in the run manifest, never applied, never dumped into
-    # resolved_config.yaml.
-    unknown_config_keys: dict[str, Any] = field(default_factory=dict)
-
-    def __post_init__(self) -> None:
-        """Validate configuration values."""
-        self._validate()
-
-    def _validate(self) -> None:
-        """Validate configuration values.
-
-        Called by __post_init__ and can be called after setattr modifications
-        (e.g., after restoring config from manifest).
-        """
-        valid_priors = ("logit-normal", "beta")
-        if self.n_exponent_prior not in valid_priors:
-            raise ValueError(
-                f"Invalid n_exponent_prior: '{self.n_exponent_prior}'. "
-                f"Must be one of {valid_priors}."
-            )
-        self._validate_run_id()
-        if self.max_events is not None and self.max_events < 1:
-            raise ValueError(f"Invalid max_events: {self.max_events}. Must be >= 1.")
-        if not 5 <= self.max_tree_depth <= 15:
-            raise ValueError(
-                f"Invalid max_tree_depth: {self.max_tree_depth}. Must be between 5 and 15."
-            )
-        if len(self.calibration_intervals) == 0:
-            raise ValueError("calibration_intervals must contain at least one probability level.")
-        for prob in self.calibration_intervals:
-            if not 0.0 < prob < 1.0:
-                raise ValueError(f"Invalid calibration interval {prob}. Must be in (0, 1).")
-        if self.target_transform is not None and self.target_transform not in (
-            "identity",
-            "offset_logit",
-        ):
-            raise ValueError(
-                f"Invalid target_transform: '{self.target_transform}'. "
-                "Must be 'identity' or 'offset_logit'."
-            )
-        self._validate_likelihood()
-        if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
-            raise ValueError(
-                f"Invalid debut_prev_score_source: '{self.debut_prev_score_source}'. "
-                "Must be 'train_mean' or 'dataset_stats'."
-            )
-        if self.ar_center not in ("global", "none", "artist_running"):
-            raise ValueError(
-                f"Invalid ar_center: '{self.ar_center}'. "
-                "Must be 'global', 'none', or 'artist_running'."
-            )
-        if self.latent_process not in ("rw", "ar1"):
-            raise ValueError(
-                f"Invalid latent_process: '{self.latent_process}'. Must be 'rw' or 'ar1'."
-            )
-        if self.sigma_obs_prior_type not in ("halfnormal", "lognormal"):
-            raise ValueError(
-                f"Invalid sigma_obs_prior_type: '{self.sigma_obs_prior_type}'. "
-                "Must be 'halfnormal' or 'lognormal'."
-            )
-        if self.sigma_artist_prior_type not in ("halfnormal", "lognormal"):
-            raise ValueError(
-                f"Invalid sigma_artist_prior_type: '{self.sigma_artist_prior_type}'. "
-                "Must be 'halfnormal' or 'lognormal'."
-            )
-        if self.artist_effect_param not in ("noncentered", "zerosum"):
-            raise ValueError(
-                f"Invalid artist_effect_param: '{self.artist_effect_param}'. "
-                "Must be 'noncentered' or 'zerosum'."
-            )
-        if self.init_strategy not in ("uniform", "median", "feasible"):
-            raise ValueError(
-                f"Invalid init_strategy: '{self.init_strategy}'. "
-                "Must be 'uniform', 'median', or 'feasible'."
-            )
-        if self.beta_prior_type not in ("normal", "horseshoe"):
-            raise ValueError(
-                f"Invalid beta_prior_type: '{self.beta_prior_type}'. "
-                "Must be 'normal' or 'horseshoe'."
-            )
-        self._validate_structural_gates()
-        for scale_field in (
-            "sigma_rw_lognormal_sigma",
-            "sigma_artist_lognormal_sigma",
-            "rho_scale",
-            "hs_global_scale",
-            "tau_entity_scale",
-            "sigma_period_scale",
-            "tau_group_sigma_scale",
-            "entity_skew_alpha_scale",
-            "rw_skew_alpha_scale",
-        ):
-            value = getattr(self, scale_field)
-            if value <= 0.0:
-                raise ValueError(f"Invalid {scale_field}: {value}. Must be > 0.")
-        self._validate_auto_priors()
-        if self.coverage_tolerance < 0.0:
-            raise ValueError("coverage_tolerance must be >= 0.")
-        if not 0.0 < self.prediction_interval < 1.0:
-            raise ValueError("prediction_interval must be in (0, 1).")
-        if self.eval_horizon < 0:
-            raise ValueError(f"eval_horizon must be >= 0, got {self.eval_horizon}.")
-        self._validate_sampling()
-
-    def _validate_sampling(self) -> None:
-        """Validate sampler settings and strict-mode requirements."""
-        if self.num_chains < 1:
-            raise ValueError("num_chains must be >= 1.")
-        if self.num_samples < 1:
-            raise ValueError("num_samples must be >= 1.")
-        if self.num_warmup < 0:
-            raise ValueError("num_warmup must be >= 0.")
-        if not 0.0 < self.target_accept < 1.0:
-            raise ValueError("target_accept must be in (0, 1).")
-        if self.checkpoint_every_draws is not None and self.checkpoint_every_draws < 1:
-            raise ValueError("checkpoint_every_draws must be >= 1 when set.")
-        if type(self.caged_chain_retries) is not int:
-            raise ValueError("caged_chain_retries must be an integer.")
-        if not 0 <= self.caged_chain_retries <= 10:
-            raise ValueError("caged_chain_retries must be between 0 and 10.")
-        for name, value in (
-            ("caged_chain_tree_depth_fraction", self.caged_chain_tree_depth_fraction),
-            ("caged_chain_boundary_sigma", self.caged_chain_boundary_sigma),
-            ("caged_chain_consensus_ratio", self.caged_chain_consensus_ratio),
-        ):
-            if isinstance(value, bool):
-                raise ValueError(f"{name} must be a finite number.")
-            try:
-                finite = math.isfinite(value)
-            except TypeError as exc:
-                raise ValueError(f"{name} must be a finite number.") from exc
-            if not finite:
-                raise ValueError(f"{name} must be a finite number.")
-        if not 0.0 < self.caged_chain_tree_depth_fraction <= 1.0:
-            raise ValueError("caged_chain_tree_depth_fraction must be in (0, 1].")
-        if self.caged_chain_boundary_sigma <= 0.0:
-            raise ValueError("caged_chain_boundary_sigma must be > 0.")
-        if self.caged_chain_consensus_ratio <= 1.0:
-            raise ValueError("caged_chain_consensus_ratio must be > 1.")
-        if self.ess_threshold < 1:
-            raise ValueError("ess_threshold must be >= 1.")
-        if self.strict and self.num_chains < 2:
-            raise ValueError(
-                "strict mode requires num_chains >= 2 for R-hat diagnostics. "
-                "Increase --num-chains or disable --strict."
-            )
-        if self.strict and self.num_samples < self.ess_threshold:
-            raise ValueError(
-                "strict mode requires num_samples >= ess_threshold per chain for ESS checks. "
-                f"Got num_samples={self.num_samples}, ess_threshold={self.ess_threshold}."
-            )
-
-    def _validate_run_id(self) -> None:
-        """Caller-supplied run and resume ids must be bare names (#167, #365).
-
-        Resume is validated here too, so a YAML or direct-API id is rejected
-        before anything on disk is looked up, moved, or deleted.
-        """
-        for name in ("run_id", "resume"):
-            value = getattr(self, name)
-            if value is not None:
-                validate_run_id(value, field=name)
-
-    def _validate_structural_gates(self) -> None:
-        """Enum and coherence checks for the #269/#271 structural gates."""
-        if self.period_constraint not in ("zero_sum", "pin_first", "pin_last"):
-            raise ValueError(
-                f"Invalid period_constraint: '{self.period_constraint}'. "
-                "Must be 'zero_sum', 'pin_first', or 'pin_last'."
-            )
-        if self.group_variance not in ("shared", "per_group"):
-            raise ValueError(
-                f"Invalid group_variance: '{self.group_variance}'. "
-                "Must be 'shared' or 'per_group'."
-            )
-        if self.group_variance == "per_group" and self.entity_group_pooling is False:
-            raise ValueError(
-                "group_variance='per_group' requires entity_group_pooling: "
-                "per-group sigmas are indexed by the entity-group mapping."
-            )
-        if self.entity_effect_prior_type not in ("normal", "skew_normal"):
-            raise ValueError(
-                f"Invalid entity_effect_prior_type: '{self.entity_effect_prior_type}'. "
-                "Must be 'normal' or 'skew_normal'."
-            )
-        if (
-            self.entity_effect_prior_type == "skew_normal"
-            and self.artist_effect_param != "noncentered"
-        ):
-            raise ValueError(
-                "entity_effect_prior_type='skew_normal' requires "
-                "artist_effect_param='noncentered'."
-            )
-        if self.rw_innovation_type not in ("normal", "skew_normal"):
-            raise ValueError(
-                f"Invalid rw_innovation_type: '{self.rw_innovation_type}'. "
-                "Must be 'normal' or 'skew_normal'."
-            )
-        if self.censor_at_bounds and self.discretize_observation:
-            raise ValueError(
-                "censor_at_bounds and discretize_observation are mutually "
-                "exclusive: censoring puts mass at the exact bounds while "
-                "discretization interval-censors every integer."
-            )
-
-    def _validate_auto_priors(self) -> None:
-        """auto_priors derives the sigma locs; explicit values conflict (#267)."""
-        if not self.auto_priors:
-            return
-        defaults = _field_defaults()
-        explicit = [
-            name
-            for name in (
-                "sigma_rw_lognormal_loc",
-                "sigma_rw_lognormal_sigma",
-                "sigma_artist_lognormal_loc",
-                "sigma_artist_lognormal_sigma",
-            )
-            if getattr(self, name) != defaults[name]
-        ]
-        if explicit:
-            raise ValueError(
-                f"auto_priors=True derives {', '.join(explicit)} from the "
-                "training data; remove the explicit value(s) or turn auto off."
-            )
-
-    def _validate_likelihood(self) -> None:
-        """Validate the likelihood family and its structural constraints."""
-        from panelcast.models.bayes.likelihoods import all_likelihoods, find_likelihood
-
-        # Family-independent coupling first: it must hold even while the
-        # family is an unresolved sentinel (#268).
-        if (
-            self.discretize_observation
-            and self.target_transform is not None
-            and self.target_transform != "identity"
-        ):
-            raise ValueError(
-                "discretize_observation=True requires target_transform='identity': "
-                "discretization interval-censors integers on the raw score scale, "
-                f"but target_transform='{self.target_transform}' moves y off that scale."
-            )
-        if self.likelihood_family is None:
-            # Unresolved sentinel: the orchestrator resolves it from the
-            # descriptor and re-validates (#268).
-            return
-        spec = find_likelihood(self.likelihood_family)
-        if spec is None:
-            raise ValueError(
-                f"Invalid likelihood_family: '{self.likelihood_family}'. "
-                f"Must be one of: {', '.join(sorted(all_likelihoods()))}."
-            )
-        if self.discretize_observation and not spec.supports_discretization:
-            supported = [f for f, s in all_likelihoods().items() if s.supports_discretization]
-            raise ValueError(
-                f"discretize_observation=True is not supported by likelihood_family "
-                f"'{self.likelihood_family}'. Supported: {', '.join(supported)}."
-            )
-        if (
-            spec.requires_identity_transform
-            and self.target_transform is not None
-            and self.target_transform != "identity"
-        ):
-            raise ValueError(
-                f"likelihood_family='{self.likelihood_family}' requires "
-                f"target_transform='identity' (got '{self.target_transform}'): "
-                "the bounded likelihood assumes mu is on the score scale."
-            )
-        if spec.samples_bare_phi and self.latent_process == "ar1":
-            raise ValueError(
-                f"likelihood_family='{self.likelihood_family}' cannot be combined "
-                "with latent_process='ar1': both sample a 'phi' site and NUTS "
-                "requires unique site names. Use latent_process='rw', or a "
-                "different likelihood_family."
-            )
-        if not spec.uses_sigma:
-            # Fire only on knobs moved OFF their shipped default: the point is to
-            # catch a request the family would silently ignore, and inheriting a
-            # default is not a request. Comparing to the default rather than to
-            # truthiness keeps that true if one of these is ever promoted on —
-            # the model already no-ops them here (model.py, family_uses_sigma).
-            defaults = _field_defaults()
-            inert = [
-                name
-                for name, value in (
-                    ("learn_n_exponent", self.learn_n_exponent),
-                    ("heteroscedastic_entity_obs", self.heteroscedastic_entity_obs),
-                    ("n_exponent", self.n_exponent),
-                )
-                if value != defaults[name]
-            ]
-            if inert:
-                raise ValueError(
-                    f"{', '.join(inert)} cannot be used with likelihood_family="
-                    f"'{self.likelihood_family}': the family draws its own precision "
-                    "and ignores sigma, so these options would be silently inert."
-                )
-
 
 def _installed_plugins() -> dict[str, dict[str, str]]:
     """Entry-point plugin provenance for the run manifest (#172)."""
     from panelcast.features.registry import discovered_plugins
 
     return discovered_plugins()
-
-
-def resolve_model_facts(config: PipelineConfig, descriptor) -> None:
-    """Resolve descriptor-owned model facts onto a config in place (#268).
-
-    These are properties of the data, so an explicit CLI/YAML value wins, the
-    descriptor is next, and the historical pipeline defaults are last.
-    Re-validates afterwards so family/transform coupling rules see resolved
-    values, then enforces descriptor coherence for beta_binomial. Idempotent:
-    a config that already ran through resolution passes through unchanged.
-    """
-    if config.likelihood_family is None:
-        config.likelihood_family = (
-            descriptor.likelihood_family
-            if descriptor.likelihood_family is not None
-            else "studentt"
-        )
-    if config.target_transform is None:
-        config.target_transform = (
-            descriptor.target_transform
-            if descriptor.target_transform is not None
-            else "offset_logit"
-        )
-    if config.max_events is None:
-        config.max_events = descriptor.max_events if descriptor.max_events is not None else 50
-    if config.auto_priors is None:
-        config.auto_priors = (
-            descriptor.auto_priors if descriptor.auto_priors is not None else False
-        )
-    config._validate()
-    # beta_binomial models the target as the mean of n aggregated ratings, so
-    # it only makes sense when n_obs_col is a true count of independent raters.
-    if config.likelihood_family == "beta_binomial" and not descriptor.n_obs_is_aggregation_count:
-        raise ValueError(
-            "likelihood_family='beta_binomial' models the target as the mean of "
-            f"n={descriptor.n_obs_col} aggregated ratings, but descriptor "
-            f"'{descriptor.name}' sets n_obs_is_aggregation_count=false "
-            f"({descriptor.n_obs_col} is not a count of independent raters). "
-            "Use an aggregation-count domain or a different likelihood_family."
-        )
-    if config.period_effects and descriptor.period_col is None:
-        raise ValueError(
-            "period_effects=true requires the dataset descriptor to declare "
-            f"period_col (descriptor '{descriptor.name}' does not) — the block "
-            "needs to know which column holds calendar time."
-        )
-
-
-# Execution mechanics and per-invocation provenance excluded from resume
-# restore (#296); everything else on PipelineConfig is restored. strict stays a
-# per-invocation gate: it aborts on warnings but never changes outputs, and a
-# user resuming with --strict means it.
-_RESUME_EXCLUDED_KEYS = frozenset(
-    {"resume", "skip_existing", "dry_run", "verbose", "progress_bar",
-     "tag", "run_id", "unknown_config_keys", "strict"}
-)
-_RESUME_CONFIG_KEYS = tuple(
-    f.name for f in dataclass_fields(PipelineConfig) if f.name not in _RESUME_EXCLUDED_KEYS
-)
 
 
 class PipelineOrchestrator:
@@ -1314,193 +687,9 @@ class PipelineOrchestrator:
                 **drift,
             )
 
-    def _build_command_string(self) -> str:  # noqa: C901  # tracked complexity debt
+    def _build_command_string(self) -> str:
         """Build command string representation for manifest."""
-        parts = ["panelcast run"]
-        defaults = _get_default_config()
-        # Descriptor-owned model facts (#268): the effective default is what
-        # the descriptor resolves to, so a domain's default run needs no flag.
-        eff_family = self.descriptor.likelihood_family or "studentt"
-        eff_transform = self.descriptor.target_transform or "offset_logit"
-        eff_max_events = self.descriptor.max_events or 50
-
-        if self.config.seed != defaults.seed:
-            parts.append(f"--seed {self.config.seed}")
-        if self.config.skip_existing:
-            parts.append("--skip-existing")
-        if self.config.stages:
-            parts.append(f"--stages {','.join(self.config.stages)}")
-        if self.config.dry_run:
-            parts.append("--dry-run")
-        if self.config.strict:
-            parts.append("--strict")
-        if not self.config.enforce_lockfile:
-            parts.append("--allow-unlocked-env")
-        if self.config.verbose:
-            parts.append("--verbose")
-        if self.config.progress_bar is False:
-            parts.append("--no-progress")
-        if self.config.max_events != eff_max_events:
-            parts.append(f"--max-events {self.config.max_events}")
-        # MCMC config
-        if self.config.num_chains != defaults.num_chains:
-            parts.append(f"--num-chains {self.config.num_chains}")
-        if self.config.num_samples != defaults.num_samples:
-            parts.append(f"--num-samples {self.config.num_samples}")
-        if self.config.num_warmup != defaults.num_warmup:
-            parts.append(f"--num-warmup {self.config.num_warmup}")
-        if self.config.target_accept != defaults.target_accept:
-            parts.append(f"--target-accept {self.config.target_accept}")
-        if self.config.max_tree_depth != defaults.max_tree_depth:
-            parts.append(f"--max-tree-depth {self.config.max_tree_depth}")
-        if self.config.init_strategy != defaults.init_strategy:
-            parts.append(f"--init-strategy {self.config.init_strategy}")
-        if self.config.chain_method != defaults.chain_method:
-            parts.append(f"--chain-method {self.config.chain_method}")
-        if self.config.checkpoint_every_draws is not None:
-            parts.append(f"--checkpoint-every {self.config.checkpoint_every_draws}")
-        if self.config.caged_chain_retries:
-            parts.append(f"--caged-chain-retries {self.config.caged_chain_retries}")
-        if self.config.caged_chain_tree_depth_fraction != defaults.caged_chain_tree_depth_fraction:
-            parts.append(
-                f"--caged-chain-tree-depth-fraction {self.config.caged_chain_tree_depth_fraction}"
-            )
-        if self.config.caged_chain_boundary_sigma != defaults.caged_chain_boundary_sigma:
-            parts.append(f"--caged-chain-boundary-sigma {self.config.caged_chain_boundary_sigma}")
-        if self.config.caged_chain_consensus_ratio != defaults.caged_chain_consensus_ratio:
-            parts.append(f"--caged-chain-consensus-ratio {self.config.caged_chain_consensus_ratio}")
-        # Convergence thresholds
-        if self.config.rhat_threshold != defaults.rhat_threshold:
-            parts.append(f"--rhat-threshold {self.config.rhat_threshold}")
-        if self.config.ess_threshold != defaults.ess_threshold:
-            parts.append(f"--ess-threshold {self.config.ess_threshold}")
-        if self.config.allow_divergences:
-            parts.append("--allow-divergences")
-        # Data filtering. Record --min-ratings only when it differs from the
-        # descriptor default it would otherwise resolve to (config.min_ratings
-        # is already resolved to an int by __init__).
-        if self.config.min_ratings != self.descriptor.primary_min_obs:
-            parts.append(f"--min-ratings {self.config.min_ratings}")
-        if self.config.min_events_filter != defaults.min_events_filter:
-            parts.append(f"--min-events {self.config.min_events_filter}")
-        # Feature flags
-        if not self.config.enable_genre:
-            parts.append("--no-genre")
-        if not self.config.enable_artist:
-            parts.append("--no-artist")
-        if not self.config.enable_temporal:
-            parts.append("--no-temporal")
-        # Heteroscedastic noise (only if non-default and not learning)
-        if self.config.n_exponent != defaults.n_exponent and not self.config.learn_n_exponent:
-            parts.append(f"--n-exponent {self.config.n_exponent}")
-        if self.config.learn_n_exponent:
-            parts.append("--learn-n-exponent")
-            if self.config.n_exponent_prior != defaults.n_exponent_prior:
-                parts.append(f"--n-exponent-prior {self.config.n_exponent_prior}")
-            # Only emit beta prior params when using beta prior
-            if self.config.n_exponent_prior == "beta":
-                if self.config.n_exponent_alpha != defaults.n_exponent_alpha:
-                    parts.append(f"--n-exponent-alpha {self.config.n_exponent_alpha}")
-                if self.config.n_exponent_beta != defaults.n_exponent_beta:
-                    parts.append(f"--n-exponent-beta {self.config.n_exponent_beta}")
-        if self.config.likelihood_df != defaults.likelihood_df:
-            parts.append(f"--likelihood-df {self.config.likelihood_df}")
-        if self.config.likelihood_family != eff_family:
-            parts.append(f"--likelihood-family {self.config.likelihood_family}")
-        if self.config.discretize_observation != defaults.discretize_observation:
-            parts.append("--discretize-observation")
-        # Model gates. The YAML-only knobs (logit_offset through the period
-        # gates) have no CLI flags — they are recorded flag-style for
-        # provenance and reproduced via run_config.yaml.
-        if self.config.target_transform != eff_transform:
-            parts.append(f"--target-transform {self.config.target_transform}")
-        if self.config.logit_offset != defaults.logit_offset:
-            parts.append(f"--logit-offset {self.config.logit_offset}")
-        if self.config.ar_center != defaults.ar_center:
-            parts.append(f"--ar-center {self.config.ar_center}")
-        if self.config.latent_process != defaults.latent_process:
-            parts.append(f"--latent-process {self.config.latent_process}")
-        if self.config.debut_prev_score_source != defaults.debut_prev_score_source:
-            parts.append(f"--debut-prev-score-source {self.config.debut_prev_score_source}")
-        if self.config.sigma_obs_prior_type != defaults.sigma_obs_prior_type:
-            parts.append(f"--sigma-obs-prior-type {self.config.sigma_obs_prior_type}")
-        if self.config.sigma_artist_prior_type != defaults.sigma_artist_prior_type:
-            parts.append(f"--sigma-artist-prior-type {self.config.sigma_artist_prior_type}")
-        if self.config.artist_effect_param != defaults.artist_effect_param:
-            parts.append(f"--artist-effect-param {self.config.artist_effect_param}")
-        if self.config.sigma_rw_lognormal_loc != defaults.sigma_rw_lognormal_loc:
-            parts.append(f"--sigma-rw-lognormal-loc {self.config.sigma_rw_lognormal_loc}")
-        if self.config.sigma_rw_lognormal_sigma != defaults.sigma_rw_lognormal_sigma:
-            parts.append(f"--sigma-rw-lognormal-sigma {self.config.sigma_rw_lognormal_sigma}")
-        if self.config.sigma_artist_lognormal_loc != defaults.sigma_artist_lognormal_loc:
-            parts.append(f"--sigma-artist-lognormal-loc {self.config.sigma_artist_lognormal_loc}")
-        if self.config.sigma_artist_lognormal_sigma != defaults.sigma_artist_lognormal_sigma:
-            parts.append(
-                f"--sigma-artist-lognormal-sigma {self.config.sigma_artist_lognormal_sigma}"
-            )
-        if self.config.rho_loc != defaults.rho_loc:
-            parts.append(f"--rho-loc {self.config.rho_loc}")
-        if self.config.rho_scale != defaults.rho_scale:
-            parts.append(f"--rho-scale {self.config.rho_scale}")
-        if self.config.beta_prior_type != defaults.beta_prior_type:
-            parts.append(f"--beta-prior-type {self.config.beta_prior_type}")
-        if self.config.hs_global_scale != defaults.hs_global_scale:
-            parts.append(f"--hs-global-scale {self.config.hs_global_scale}")
-        if self.config.heteroscedastic_entity_obs != defaults.heteroscedastic_entity_obs:
-            parts.append(
-                "--heteroscedastic-entity-obs"
-                if self.config.heteroscedastic_entity_obs
-                else "--no-heteroscedastic-entity-obs"
-            )
-        if self.config.tau_entity_scale != defaults.tau_entity_scale:
-            parts.append(f"--tau-entity-scale {self.config.tau_entity_scale}")
-        if self.config.errors_in_variables:
-            parts.append("--errors-in-variables")
-        if self.config.propagate_rw_horizon:
-            parts.append("--propagate-rw-horizon")
-        if self.config.entity_group_pooling is not None:
-            parts.append(
-                "--entity-group-pooling"
-                if self.config.entity_group_pooling
-                else "--no-entity-group-pooling"
-            )
-        if self.config.group_variance != defaults.group_variance:
-            parts.append(f"--group-variance {self.config.group_variance}")
-        if self.config.entity_effect_prior_type != defaults.entity_effect_prior_type:
-            parts.append(
-                f"--entity-effect-prior-type {self.config.entity_effect_prior_type}"
-            )
-        if self.config.rw_innovation_type != defaults.rw_innovation_type:
-            parts.append(f"--rw-innovation-type {self.config.rw_innovation_type}")
-        if self.config.censor_at_bounds:
-            parts.append("--censor-at-bounds")
-        if self.config.period_effects:
-            parts.append("--period-effects")
-            if self.config.period_constraint != defaults.period_constraint:
-                parts.append(f"--period-constraint {self.config.period_constraint}")
-        if self.config.impute_missing:
-            parts.append("--impute-missing")
-        if self.config.gbm_offset != defaults.gbm_offset:
-            parts.append("--gbm-offset" if self.config.gbm_offset else "--no-gbm-offset")
-        if self.config.val_events != defaults.val_events:
-            parts.append(f"--val-events {self.config.val_events}")
-        if self.config.origin_offset != defaults.origin_offset:
-            parts.append(f"--origin-offset {self.config.origin_offset}")
-        if self.config.calibration_intervals != defaults.calibration_intervals:
-            interval_str = ",".join(f"{p:.4g}" for p in self.config.calibration_intervals)
-            parts.append(f"--calibration-intervals {interval_str}")
-        if self.config.coverage_tolerance != defaults.coverage_tolerance:
-            parts.append(f"--coverage-tolerance {self.config.coverage_tolerance}")
-        if self.config.prediction_interval != defaults.prediction_interval:
-            parts.append(f"--prediction-interval {self.config.prediction_interval}")
-        if not self.config.evaluate_secondary_split:
-            parts.append("--no-secondary-split")
-        if self.config.dataset is not None:
-            parts.append(f"--dataset {self.config.dataset}")
-        if self.config.tag is not None:
-            parts.append(f"--tag {self.config.tag}")
-
-        return " ".join(parts)
+        return build_command_string(self.config, self.descriptor)
 
     def _output_verification_roots(self) -> tuple[Path, ...]:
         """Roots a recorded output may legitimately live under (#367).
@@ -1729,78 +918,20 @@ class PipelineOrchestrator:
         return self._resolved_paths
 
     def _resolve_artifact_paths(self) -> ArtifactPaths:
-        """Run-scoped roots, with read roots redirected for consumer-only runs.
-
-        A ``--stages`` selection that excludes a product's writer would
-        otherwise look for that product in the just-created (empty) run dir.
-        Each such root that a selected stage reads resolves to the most recent
-        successful run that produced it; a producer present in the stage list
-        wins over latest-run resolution, so ``--stages evaluate,report`` reads
-        evaluate's fresh output. Writes always target the current run dir.
-        """
-        current = ArtifactPaths.for_run(self._require_run_dir())
-        if self.config.stages is None:
-            return current  # full run: every product is produced here
-        selected = set(self.config.stages)
-        overrides: dict[str, Path] = {}
-        for product, writers in self.PRODUCT_WRITERS.items():
-            if selected.intersection(writers):
-                continue
-            readers = selected.intersection(self.PRODUCT_READERS.get(product, ()))
-            if not readers:
-                continue
-            source = self._find_run_with_product(product, writers)
-            if source is None:
-                if self.config.dry_run:
-                    # A dry run only previews the plan; a missing source is
-                    # worth a warning, not a failure.
-                    log.warning(
-                        "artifact_root_unresolved",
-                        product=product,
-                        readers=sorted(readers),
-                    )
-                    continue
-                raise PipelineError(
-                    f"Stage(s) {sorted(readers)} read '{product}' artifacts, but this "
-                    f"invocation does not run {list(writers)} and no previous "
-                    f"successful run under {self.output_base} contains '{product}'. "
-                    f"Run `panelcast stage {writers[0]}` (or a full `panelcast run`) "
-                    "first.",
-                    stage="setup",
-                )
-            overrides[product] = source / product
-            log.info(
-                "artifact_root_from_previous_run",
-                product=product,
-                source_run=source.name,
-                readers=sorted(readers),
-            )
-        return dataclass_replace(current, **overrides) if overrides else current
+        """Run-scoped roots, with read roots redirected for consumer-only runs."""
+        return resolve_artifact_paths(
+            run_dir=self._require_run_dir(),
+            output_base=self.output_base,
+            stages=self.config.stages,
+            dry_run=self.config.dry_run,
+            product_writers=self.PRODUCT_WRITERS,
+            product_readers=self.PRODUCT_READERS,
+            find_source=self._find_run_with_product,
+        )
 
     def _find_run_with_product(self, product: str, writers: tuple[str, ...]) -> Path | None:
         """Most recent successful non-dry run whose dir contains ``product``."""
-        try:
-            candidates = sorted(
-                (p for p in self.output_base.iterdir() if p.is_dir()), reverse=True
-            )
-        except OSError:
-            return None
-        for run_dir in candidates:
-            if run_dir == self.run_dir or run_dir.name in ("latest", "failed"):
-                continue
-            if not path_is_within(run_dir, self.output_base):
-                continue
-            try:
-                manifest = load_run_manifest(run_dir / "manifest.json")
-            except Exception:
-                continue
-            if not manifest.success or manifest.flags.get("dry_run"):
-                continue
-            if not any(w in manifest.stages_completed for w in writers):
-                continue
-            if (run_dir / product).is_dir():
-                return run_dir
-        return None
+        return find_run_with_product(self.output_base, self.run_dir, product, writers)
 
     def _create_stage_context(self) -> StageContext:
         """Create StageContext for stage execution.
@@ -1808,97 +939,16 @@ class PipelineOrchestrator:
         Returns:
             StageContext with current configuration.
         """
-        return StageContext(
+        return build_stage_context(
+            self.config,
+            self.descriptor,
             run_dir=self.run_dir or Path("outputs"),
             paths=self._artifact_paths(),
-            seed=self.config.seed,
-            strict=self.config.strict,
-            verbose=self.config.verbose,
-            progress_bar=self.config.progress_bar,
             manifest=self.manifest,
             max_events=self._resolved_event_cap(),
-            # MCMC configuration
-            num_chains=self.config.num_chains,
-            num_samples=self.config.num_samples,
-            num_warmup=self.config.num_warmup,
-            target_accept=self.config.target_accept,
-            max_tree_depth=self.config.max_tree_depth,
-            init_strategy=self.config.init_strategy,
-            chain_method=self.config.chain_method,
-            checkpoint_every_draws=self.config.checkpoint_every_draws,
-            caged_chain_retries=self.config.caged_chain_retries,
-            caged_chain_tree_depth_fraction=self.config.caged_chain_tree_depth_fraction,
-            caged_chain_boundary_sigma=self.config.caged_chain_boundary_sigma,
-            caged_chain_consensus_ratio=self.config.caged_chain_consensus_ratio,
-            # Convergence thresholds
-            rhat_threshold=self.config.rhat_threshold,
-            ess_threshold=self.config.ess_threshold,
-            allow_divergences=self.config.allow_divergences,
-            # Data filtering
             min_ratings=self._resolved_min_ratings(),
-            min_events_filter=self.config.min_events_filter,
-            # Feature flags
-            enable_genre=self.config.enable_genre,
-            enable_artist=self.config.enable_artist,
-            enable_temporal=self.config.enable_temporal,
-            # Heteroscedastic noise configuration
-            n_exponent=self.config.n_exponent,
-            learn_n_exponent=self.config.learn_n_exponent,
-            n_exponent_alpha=self.config.n_exponent_alpha,
-            n_exponent_beta=self.config.n_exponent_beta,
-            n_exponent_prior=self.config.n_exponent_prior,
-            likelihood_df=self.config.likelihood_df,
             likelihood_family=self._resolved_likelihood_family(),
-            auto_priors=bool(self.config.auto_priors),
-            discretize_observation=self.config.discretize_observation,
-            debut_prev_score_source=self.config.debut_prev_score_source,
             target_transform=self._resolved_target_transform(),
-            logit_offset=self.config.logit_offset,
-            ar_center=self.config.ar_center,
-            latent_process=self.config.latent_process,
-            sigma_obs_prior_type=self.config.sigma_obs_prior_type,
-            sigma_artist_prior_type=self.config.sigma_artist_prior_type,
-            artist_effect_param=self.config.artist_effect_param,
-            sigma_rw_lognormal_loc=self.config.sigma_rw_lognormal_loc,
-            sigma_rw_lognormal_sigma=self.config.sigma_rw_lognormal_sigma,
-            sigma_artist_lognormal_loc=self.config.sigma_artist_lognormal_loc,
-            sigma_artist_lognormal_sigma=self.config.sigma_artist_lognormal_sigma,
-            rho_loc=self.config.rho_loc,
-            rho_scale=self.config.rho_scale,
-            beta_prior_type=self.config.beta_prior_type,
-            hs_global_scale=self.config.hs_global_scale,
-            heteroscedastic_entity_obs=self.config.heteroscedastic_entity_obs,
-            tau_entity_scale=self.config.tau_entity_scale,
-            errors_in_variables=self.config.errors_in_variables,
-            propagate_rw_horizon=self.config.propagate_rw_horizon,
-            entity_group_pooling=self.config.entity_group_pooling,
-            group_variance=self.config.group_variance,
-            tau_group_sigma_scale=self.config.tau_group_sigma_scale,
-            entity_effect_prior_type=self.config.entity_effect_prior_type,
-            entity_skew_alpha_scale=self.config.entity_skew_alpha_scale,
-            rw_innovation_type=self.config.rw_innovation_type,
-            rw_skew_alpha_scale=self.config.rw_skew_alpha_scale,
-            censor_at_bounds=self.config.censor_at_bounds,
-            period_effects=self.config.period_effects,
-            period_constraint=self.config.period_constraint,
-            sigma_period_scale=self.config.sigma_period_scale,
-            impute_missing=self.config.impute_missing,
-            gbm_offset=self.config.gbm_offset,
-            exclude_rw_raw_from_collection=self.config.exclude_rw_raw_from_collection,
-            warmup_export_path=self.config.warmup_export_path,
-            warmup_import_path=self.config.warmup_import_path,
-            val_events=self.config.val_events,
-            origin_offset=self.config.origin_offset,
-            conformal_calibration=self.config.conformal_calibration,
-            eval_horizon=self.config.eval_horizon,
-            min_train_events=self.config.min_train_events,
-            calibration_intervals=self.config.calibration_intervals,
-            coverage_tolerance=self.config.coverage_tolerance,
-            prediction_interval=self.config.prediction_interval,
-            evaluate_secondary_split=self.config.evaluate_secondary_split,
-            predictive_batch_size=self.config.predictive_batch_size,
-            predict_entity_batch_size=self.config.predict_entity_batch_size,
-            descriptor=self.descriptor,
         )
 
     def _observe_data_stamps(self) -> None:
@@ -2121,67 +1171,15 @@ class PipelineOrchestrator:
 
     def _write_failure_payload(self, error: Exception, stage: str) -> None:
         """Structured forensics for `runs why`; must never raise."""
-        if self.run_dir is None or not self.run_dir.exists():
-            return
-        import traceback
-
-        from panelcast.pipelines.errors import failure_hint
-        from panelcast.utils.logging import recent_events
-
-        try:
-            payload = {
-                "run_id": self.manifest.run_id if self.manifest else None,
-                "stage": stage,
-                "exception_type": type(error).__name__,
-                "message": str(error),
-                "traceback_tail": traceback.format_exception(error)[-8:],
-                "stages_completed": (
-                    list(self.manifest.stages_completed) if self.manifest else []
-                ),
-                "hint": failure_hint(error),
-                "resume_command": f"panelcast run --resume {self.run_dir.name}",
-                "recent_events": recent_events(),
-            }
-            (self.run_dir / "failure.json").write_text(
-                json.dumps(payload, indent=2, default=str), encoding="utf-8"
-            )
-        except Exception as e:  # forensics must never mask the real failure
-            log.debug("failure_payload_write_failed", error=str(e))
+        write_failure_payload(self.run_dir, self.manifest, error, stage)
 
     def _print_failure_epilogue(self, error: Exception, stage: str, final_path) -> None:
         """The 10-second answer to 'what happened and what do I type next'."""
-        from rich.console import Console
-
-        from panelcast.pipelines.errors import failure_hint
-
-        console = Console(stderr=True)
-        run_name = final_path.name if final_path is not None else "unknown"
-        console.print(f"\n[red bold]{stage} failed:[/] {type(error).__name__}: {error}")
-        if final_path is not None:
-            console.print(f"run moved to: {final_path}")
-        console.print(f"resume with:  panelcast run --resume {run_name}")
-        hint = failure_hint(error)
-        if hint:
-            console.print(f"hint:         {hint}")
-        console.print(f"details:      panelcast runs why {run_name}")
+        print_failure_epilogue(error, stage, final_path)
 
     def _close_log_handlers(self) -> None:
-        """Close file handlers to release locks (needed for Windows).
-
-        On Windows, file handlers keep files locked which prevents moving
-        directories containing log files. This closes all handlers on the
-        root logger to release those locks.
-        """
-        root_logger = logging.getLogger()
-        handlers_to_remove = []
-
-        for handler in root_logger.handlers[:]:
-            if isinstance(handler, logging.FileHandler):
-                handler.close()
-                handlers_to_remove.append(handler)
-
-        for handler in handlers_to_remove:
-            root_logger.removeHandler(handler)
+        """Close file handlers to release locks (needed for Windows)."""
+        close_log_handlers()
 
     def _finalize_success(self) -> None:
         """Finalize successful run with manifest update and latest pointer."""
