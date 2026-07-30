@@ -70,6 +70,15 @@ def test_random_walk_site_names_cover_both_prefix_conventions():
     assert rw_latent_sites("user_", "skew_normal", max_seq=1).present() == ()
 
 
+def test_the_model_accepts_exactly_the_innovation_types_the_helper_knows():
+    """RW_INNOVATION_TYPES decides which walk latents a memory exclusion can
+    name, so it must not drift from the set the model itself implements."""
+    for innovation in RW_INNOVATION_TYPES:
+        _seeded_trace(_model_args(PriorConfig(rw_innovation_type=innovation)))
+    with pytest.raises(ValueError, match="Unknown rw_innovation_type"):
+        _seeded_trace(_model_args(PriorConfig(rw_innovation_type="student_t")))
+
+
 @pytest.mark.parametrize("innovation", RW_INNOVATION_TYPES)
 @pytest.mark.parametrize("max_seq", [1, 3])
 def test_every_named_random_walk_site_is_one_the_model_samples(innovation, max_seq):

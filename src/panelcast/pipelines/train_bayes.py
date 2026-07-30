@@ -182,10 +182,13 @@ def build_training_priors(
         entity_group_pooling=entity_group_pooling,
         group_variance=str(getattr(ctx, "group_variance", "shared")),
         tau_group_sigma_scale=float(getattr(ctx, "tau_group_sigma_scale", 0.3)),
-        entity_effect_prior_type=str(getattr(ctx, "entity_effect_prior_type", "normal")),
-        entity_skew_alpha_scale=float(getattr(ctx, "entity_skew_alpha_scale", 2.0)),
         # A null in the config means "unset", not the literal string "None" —
-        # which the model would reject as an unknown innovation at fit time.
+        # which decides whether the skew latents exist and, for the walk, is a
+        # value the model rejects outright at fit time.
+        entity_effect_prior_type=str(
+            getattr(ctx, "entity_effect_prior_type", None) or "normal"
+        ),
+        entity_skew_alpha_scale=float(getattr(ctx, "entity_skew_alpha_scale", 2.0)),
         rw_innovation_type=str(getattr(ctx, "rw_innovation_type", None) or "normal"),
         rw_skew_alpha_scale=float(getattr(ctx, "rw_skew_alpha_scale", 2.0)),
         censor_at_bounds=bool(getattr(ctx, "censor_at_bounds", False)),

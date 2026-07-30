@@ -68,7 +68,7 @@ def rw_latent_sites(
     innovation with its own latent that silently reported the gaussian sites
     would leave that latent out of every memory exclusion built from here.
     """
-    if innovation_type is not None and innovation_type not in RW_INNOVATION_TYPES:
+    if innovation_type and innovation_type not in RW_INNOVATION_TYPES:
         raise ValueError(
             f"Unknown rw_innovation_type: '{innovation_type}'. "
             f"Must be one of {RW_INNOVATION_TYPES}."

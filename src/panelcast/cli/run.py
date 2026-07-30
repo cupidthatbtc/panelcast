@@ -310,13 +310,15 @@ def _run_full_preflight(
         "entity_group_pooling": effective_group_pooling,
     }
     model_signature.update(_period_signature(config))
-    # Mirror the production fit's memory gate in the calibration runs:
-    # with the rw_raw exclusion on, the dominant memory term disappears
-    # and the projection must reflect that. Gate on site presence exactly
-    # like train_bayes does (#400) — a single-event panel never samples the
-    # walk. The mini-run reconciles this against its own args, so a wrong
-    # value here no longer crashes it, but it still keys the calibration
-    # cache signature and must describe what actually gets measured.
+    # Mirror the memory gate in the calibration runs: with the exclusion on,
+    # the dominant memory term disappears and the projection must reflect
+    # that. What the MINI-RUN samples decides this, not the production fit —
+    # the mini-run cannot be configured for the skew walk, so a skew
+    # production fit excludes two sites here and one there, overstating the
+    # projection (the safe direction). Gate on site presence like train_bayes
+    # does (#400): a single-event panel never samples the walk. The mini-run
+    # reconciles the value against its own args, so a wrong one no longer
+    # crashes it, but it still keys the calibration cache signature.
     preflight_max_seq = int(model_args.get("max_seq") or 0)
     preflight_exclude_collection = (
         rw_collection_excludes(

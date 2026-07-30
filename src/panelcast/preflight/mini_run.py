@@ -52,14 +52,34 @@ import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-__all__ = ["mini_run_priors", "run_and_measure", "rw_collection_excludes"]
+if TYPE_CHECKING:
+    from panelcast.models.bayes.priors import PriorConfig
+
+__all__ = [
+    "mini_run_priors",
+    "run_and_measure",
+    "rw_collection_excludes",
+    "uses_transform_priors",
+]
 
 logger = logging.getLogger(__name__)
 
 
-def mini_run_priors(target_transform: str = "identity", *, entity_group_pooling: bool = False):
+def uses_transform_priors(target_transform: str, entity_group_pooling: bool) -> bool:
+    """Whether the mini-run builds a PriorConfig instead of taking the model's.
+
+    The forwarding gate and the priors themselves must never disagree: a run
+    whose priors say skew while the model runs on defaults would exclude a
+    site nothing sampled.
+    """
+    return target_transform != "identity" or entity_group_pooling
+
+
+def mini_run_priors(
+    target_transform: str = "identity", *, entity_group_pooling: bool = False
+) -> PriorConfig:
     """The prior configuration the mini-run's model runs under.
 
     Callers sizing a collection exclusion need the same answer the mini-run
@@ -67,7 +87,7 @@ def mini_run_priors(target_transform: str = "identity", *, entity_group_pooling:
     """
     from panelcast.models.bayes.priors import get_default_priors, priors_for_transform
 
-    if target_transform == "identity" and not entity_group_pooling:
+    if not uses_transform_priors(target_transform, entity_group_pooling):
         return get_default_priors()
     return priors_for_transform(target_transform, entity_group_pooling=entity_group_pooling)
 
@@ -208,7 +228,7 @@ def run_and_measure(
     # byte-identical to the legacy mini-run; the model applies this same
     # fallback when the kwarg is absent.
     run_priors = mini_run_priors(target_transform, entity_group_pooling=entity_group_pooling)
-    if target_transform != "identity" or entity_group_pooling:
+    if uses_transform_priors(target_transform, entity_group_pooling):
         model_args["priors"] = run_priors
         model_args["target_bounds"] = target_bounds
 
