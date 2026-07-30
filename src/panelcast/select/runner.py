@@ -717,13 +717,17 @@ def _unresolvable(output_base: Path, run_id: str) -> tuple[Path, Exception] | No
 
     Probes the same two operands ``path_is_within`` resolves, in its order and
     on the same exception pair, so the two agree by construction rather than by
-    an argument about which one can fail. Two states reach here: a *relative*
-    ``output_base`` whose cwd has been removed (non-strict ``resolve()``
-    swallows per-component ``lstat`` failures, so its other raise is the
-    ``getcwd()`` inside ``abspath``, which an absolute base skips), and — on
-    the Pythons that convert ``ELOOP`` — a symlink loop anywhere along either
-    path, including at the run name itself. ``refusal_detail`` explains what
-    the caller does with the answer and why it is consulted where it is.
+    an argument about which one can fail. The states known to reach here are a
+    *relative* ``output_base`` whose cwd has been removed (non-strict
+    ``resolve()`` swallows per-component ``lstat`` failures, so its other raise
+    is the ``getcwd()`` inside ``abspath``, which an absolute base skips), and
+    — on the Pythons that convert ``ELOOP`` — a symlink loop anywhere along
+    either path, including at the run name itself. The list is deliberately not
+    closed: the caller reports the errno rather than inferring a cause, so a
+    trigger nobody anticipated (a ``RecursionError`` from a long symlink chain,
+    say) renders correctly without being enumerated here. ``refusal_detail``
+    explains what the caller does with the answer and why it is consulted where
+    it is.
     """
     for path in (output_base, output_base / run_id):
         try:
@@ -776,11 +780,12 @@ def refusal_detail(
     exact only while that stays the whole of ``safe_run_dir``'s shape check.
 
     An *unresolvable* operand comes next, before the breadcrumb is built,
-    because both of its triggers make one misleading rather than impossible: a
-    dead working directory leaves nothing that can be made absolute, and for a
-    symlink loop the breadcrumb builds fine — ``is_symlink`` and ``readlink``
-    do not traverse — but renders a hop pointing back at itself. So the branch
-    names the path that would not resolve, reports
+    because its triggers make one misleading rather than impossible: a dead
+    working directory leaves nothing that can be made absolute, while a loop
+    leaves the breadcrumb perfectly buildable — ``is_symlink`` and ``readlink``
+    do not traverse — and useless, since its single hop lands somewhere inside
+    a cycle nobody can follow out of, or on a component that is not the loop at
+    all. So the branch names the path that would not resolve, reports
     the errno, and stops — no inference about which trigger fired, because
     every proxy for that (an absolute base, a path unequal to the root) is
     right for one and wrong for the other. It owns its own tail, because
