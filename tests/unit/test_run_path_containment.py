@@ -653,6 +653,9 @@ class TestSelectRunLookupContainment:
         # Only the RunPathError branch names the field, so an ordinary
         # "was never created" miss cannot make this assertion pass.
         assert problem is not None and "arm run_id" in problem
+        # There is no pre-launch arm resolve, so every containment refusal here
+        # is the post-fit case, and the message has to say so.
+        assert "after the arm ran" in problem
         assert claimed == set()
 
     def test_claim_named_run_refuses_a_symlinked_escape(self, tmp_path):
@@ -672,6 +675,9 @@ class TestSelectRunLookupContainment:
 
         assert run_dir is None
         assert problem is not None and "arm run_id" in problem
+        # There is no pre-launch arm resolve, so every containment refusal here
+        # is the post-fit case, and the message has to say so.
+        assert "after the arm ran" in problem
         assert claimed == set()
 
     def test_claim_named_run_never_creates_the_run_dir(self, tmp_path):
@@ -724,9 +730,8 @@ class TestSelectRunLookupContainment:
         assert launches == []
         assert "before launching" in result.seeds[0].error
 
-    def test_confirmation_lookup_refuses_a_symlinked_escape(self, tmp_path):
-        # The up-front resolve is lexical (nothing exists yet), so the symlink
-        # half of containment has to bite on the post-fit lookup instead.
+    def _escaping_confirmation(self, tmp_path, relative: bool = False):
+        """Run a confirmation whose fit plants an escaping link at its run name."""
         from panelcast.select.confirmation import run_confirmation
 
         base = tmp_path / "outputs"
@@ -738,7 +743,7 @@ class TestSelectRunLookupContainment:
 
         def launch(config_path: Path, panelcast_bin: str, timeout_seconds=None):
             link = base / _minted_run_id(config_path)
-            _symlink_dir(link, outside)
+            _symlink_dir(link, Path("..") / "outside" if relative else outside)
             links.append(link)
             return 0, "ok"
 
@@ -746,6 +751,12 @@ class TestSelectRunLookupContainment:
             {"latent_process": "ar1"}, _confirmation_cfg(tmp_path, base), seeds=(42,),
             launch=launch,
         )
+        return result, links, outside
+
+    def test_confirmation_lookup_refuses_a_symlinked_escape(self, tmp_path):
+        # The up-front resolve is lexical (nothing exists yet), so the symlink
+        # half of containment has to bite on the post-fit lookup instead.
+        result, links, outside = self._escaping_confirmation(tmp_path)
 
         assert not result.confirmed
         assert result.seeds[0].error is not None
@@ -758,6 +769,27 @@ class TestSelectRunLookupContainment:
         assert str(links[0]) in result.seeds[0].error
         assert links[0].is_symlink()
         assert (outside / "keep.txt").exists()
+
+    def test_the_breadcrumb_names_a_relative_link_absolutely(self, tmp_path):
+        # readlink() returns the link's contents verbatim, which for a relative
+        # link means nothing without knowing where the link itself sits.
+        result, _, outside = self._escaping_confirmation(tmp_path, relative=True)
+
+        named = result.seeds[0].error.split(" -> ", 1)[1].split(" is left in place")[0]
+        assert Path(named).is_absolute()
+        assert Path(named).resolve() == outside.resolve()
+
+    def test_an_unreadable_link_does_not_eat_the_refusal(self, tmp_path, monkeypatch):
+        # Formatting the breadcrumb must never replace the containment error.
+        def refuse_readlink(self):
+            raise OSError("gone")
+
+        monkeypatch.setattr(Path, "readlink", refuse_readlink)
+        result, _, _ = self._escaping_confirmation(tmp_path)
+
+        assert "confirmation run_id" in result.seeds[0].error
+        assert "after its fit" in result.seeds[0].error
+        assert " -> " not in result.seeds[0].error
 
     def test_confirmation_lookup_tolerates_an_unwritten_output_base(self, tmp_path):
         # A confirmation-only entry point can be the first thing to touch its

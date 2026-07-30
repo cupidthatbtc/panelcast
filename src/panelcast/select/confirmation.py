@@ -293,7 +293,15 @@ def run_confirmation(
         except RunPathError as exc:
             if after_fit:
                 refused = (cfg.pipeline_output_base / run_id).absolute()
-                target = f" -> {refused.readlink()}" if refused.is_symlink() else ""
+                target = ""
+                try:
+                    if refused.is_symlink():
+                        # Joined to the link's own directory: readlink returns
+                        # the link's contents verbatim, relative to that
+                        # directory rather than to cwd. Lexical — never followed.
+                        target = f" -> {refused.parent / refused.readlink()}"
+                except OSError:  # a message we cannot finish must not eat the refusal
+                    target = ""
                 phase = (
                     "refused after its fit (artifacts may exist outside the output base; "
                     f"anything at {refused}{target} is left in place, unread)"
