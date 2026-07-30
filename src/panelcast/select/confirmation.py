@@ -293,7 +293,7 @@ def run_confirmation(
         except RunPathError as exc:
             if after_fit:
                 detail = refusal_detail(cfg.pipeline_output_base, run_id)
-                phase = f"refused after its fit ({detail}, unread)"
+                phase = f"refused after its fit ({detail})"
             else:
                 phase = "refused before launching (nothing ran)"
             raise RuntimeError(f"{label} fit on seed {seed} {phase}: {exc}") from exc

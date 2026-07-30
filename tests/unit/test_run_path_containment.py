@@ -655,10 +655,12 @@ class TestSelectRunLookupContainment:
         assert problem is not None and "arm run_id" in problem
         # There is no pre-launch arm resolve, so every containment refusal here
         # is the post-fit case, and the message has to say so. None of these
-        # ids is well formed, so the orchestrator would have refused it before
-        # creating anything: the message must not send anyone looking.
+        # ids is well formed, so the orchestrator would have refused the same
+        # shape before creating anything — including "latest", which names a
+        # real directory here that this run nonetheless never wrote. The
+        # message must not send anyone looking.
         assert "after the arm ran" in problem
-        assert "never named a run directory" in problem
+        assert "never wrote under that name" in problem
         assert "artifacts may exist" not in problem
         assert claimed == set()
 

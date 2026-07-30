@@ -1496,10 +1496,14 @@ select's mint-then-fit paths the run directory is created by the subprocess
 select launched — the orchestrator validates the id's *shape* before creating
 it, so a pre-planted symlink is written through — and select's gate refuses the
 read, and on the arm path the attribution, not the write. Every refusal says
-whether the fit had already run and leaves the refused name alone, because a
-post-fit refusal means artifacts may exist outside the output base and — when
-the refused name is a symlink — that name is the only surviving record of where
-they went. (The confirmation path has no attribution step of its own: an id
+whether the fit had already run and leaves the refused name alone. What it
+says next depends on which half refused: a post-fit refusal of a *well-formed*
+id means artifacts may exist outside the output base, so the message names that
+path and — when it is a symlink — follows one hop, because the link is the only
+surviving record of where they went; a refusal of a *malformed* id means the
+orchestrator refused the same shape before creating anything, so nothing was
+written under that name and the refusal names no path at all. (The confirmation
+path has no attribution step of its own: an id
 that resolves to another run's directory *inside* the output base is contained,
 and only the arm handshake re-checks the manifest behind it.)
 
