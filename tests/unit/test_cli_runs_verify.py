@@ -181,6 +181,26 @@ class TestRunsVerify:
             result.output
         )
 
+    def test_the_output_base_decides_which_copy_is_verified(self, tmp_path, monkeypatch):
+        # End to end for the re-rooting order: a stale copy sits where the
+        # manifest recorded it, the real run has been archived under a
+        # different base, and the two differ — so a green result also says
+        # *which* bytes were hashed, not merely which path was formed.
+        import shutil
+
+        base = _write_run(tmp_path)
+        archive = tmp_path / "archive" / "outputs"
+        archive.parent.mkdir()
+        shutil.copytree(base, archive)
+        stale = base / "run_a" / "evaluation" / "metrics.json"
+        stale.write_text(json.dumps({"mae": 9.9}), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(archive)])
+
+        assert result.exit_code == 0, result.output
+        assert "OK           evaluate:metrics" in result.output
+
     def test_another_runs_copy_of_the_same_artifact_is_refused(self, tmp_path):
         # The substitution containment exists for: identical bytes, so the
         # hash matches, but the artifact belongs to a different run.

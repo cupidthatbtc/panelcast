@@ -471,13 +471,16 @@ class TestTheDeclaredCallerDifference:
     def test_a_foreign_workspace_manifest_does_not_verify_clean(self, fx):
         # End to end through `runs verify`, which is where a laundered path
         # would turn "this manifest is not about this workspace" into exit 0.
-        # The recorded path must *not* exist, or `reroot_under` returns before
-        # the ownership check and the case proves nothing.
+        # The foreign artifact is real and hashes correctly, so refusal cannot
+        # come from its absence — ownership is what decides it.
         foreign = fx.tmp_path / "elsewhere" / "run_a" / "evaluation" / "metrics.json"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
         fx.outputs[fx.key] = str(foreign)
+        fx.output_hashes[fx.key] = sha256_path(foreign)
         fx.quarantine()
 
-        assert not foreign.exists()
+        assert foreign.exists()
         assert fx.verify_accepts() is False
 
     def test_a_same_named_base_elsewhere_is_indistinguishable_from_relocation(self, fx):
@@ -492,7 +495,12 @@ class TestTheDeclaredCallerDifference:
         fx.quarantine()
         moved = fx.output_base / "failed" / "run_a"
         sibling = fx.tmp_path / "other" / "outputs" / "run_a" / "evaluation" / "metrics.json"
+        sibling.parent.mkdir(parents=True)
+        sibling.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
 
+        # Existing, not merely absent: since ownership is decided before the
+        # path is consulted, a live sibling maps the same way a stale spelling
+        # does, and the residue is the same size either way.
         assert reroot_under(sibling, moved) == moved / "evaluation" / "metrics.json"
         # ...and a base spelled differently is refused, which is the half the
         # ownership check can actually decide.

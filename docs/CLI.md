@@ -700,9 +700,11 @@ is loud; from **another checkout of the same project** the path and its root
 land in that tree together, containment passes, and a reproducible pipeline
 reports `OK` against a workspace that is not the one you asked about. A green
 result is only evidence about the intended run when the command runs where the
-run did. Run-scoped artifacts are unaffected: they re-root onto
-`--output-base` whether or not a copy also happens to sit under the working
-directory, so which artifact gets verified is decided by `--output-base` alone.
+run did. Run-scoped artifacts are unaffected *as long as the output base keeps
+its name*: they re-root onto `--output-base` whether or not a copy also sits
+under the working directory, so `--output-base` alone decides which artifact is
+verified. Moving `outputs/` elsewhere keeps working; renaming it does not, and
+a run whose base was renamed reports `UNBOUND` on intact artifacts.
 
 Output verification is the same primitive the incremental `--skip-existing`
 path uses (`pipelines/output_integrity.py`), so the per-key rules and the
