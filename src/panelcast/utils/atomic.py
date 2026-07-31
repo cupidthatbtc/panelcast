@@ -72,9 +72,8 @@ def sweep_orphan_temps(directory: Path) -> list[Path]:
     Deliberately *not* called from ``atomic_write`` itself: a concurrent writer
     on the same target is holding a temporary that is alive, not orphaned, and
     nothing about the file distinguishes the two. Call this where sole
-    ownership of the directory is already established — the orchestrator claims
-    a run directory by exclusive ``mkdir`` or by moving it back out of
-    quarantine, and sweeps it there.
+    ownership of the directory is already established — the orchestrator takes
+    a quarantined run directory back for a resume, and sweeps it there.
 
     Best-effort: a temporary that will not delete is skipped, since failing to
     tidy is never worth failing the run over.
@@ -93,21 +92,29 @@ def sweep_orphan_temps(directory: Path) -> list[Path]:
     return removed
 
 
-def _inherit_mode(target: Path, tmp: Path) -> None:
-    """Carry an existing target's permissions onto the file replacing it.
+def _inherit_mode(target: Path, handle: BinaryIO) -> None:
+    """Give the replacement file an existing target's permission bits.
 
     ``write_text`` truncated in place and kept the mode; a rename brings the
     temporary's own, created under the current umask. The manifest records the
     command line and flags verbatim, so an operator who tightened permissions
     on one must not have them widened again at the next stage boundary.
+
+    Applied to the open handle *before* the caller writes anything, not to the
+    finished temporary: a chmod at commit time would leave the payload sitting
+    at the umask default for the whole write and fsync — the longest and most
+    interruptible part — which is the exposure the tightened mode was for.
+
+    Permission bits only. A rename still drops POSIX ACLs, xattrs and SELinux
+    labels that in-place truncation preserved; nothing here restores those.
     """
     try:
         mode = stat.S_IMODE(os.stat(target).st_mode)
     except OSError:
         return  # nothing there yet: the umask default is the right answer
     try:
-        os.chmod(tmp, mode)
-    except OSError:  # pragma: no cover - platform/filesystem dependent
+        os.fchmod(handle.fileno(), mode)
+    except (AttributeError, OSError):  # no fchmod on Windows; modes are advisory there
         pass
 
 
@@ -125,10 +132,10 @@ def atomic_write(path: Path) -> Iterator[BinaryIO]:
     committed = False
     try:
         with tmp.open("wb") as handle:
+            _inherit_mode(path, handle)
             yield handle
             handle.flush()
             os.fsync(handle.fileno())
-        _inherit_mode(path, tmp)
         os.replace(tmp, path)
         committed = True
     finally:

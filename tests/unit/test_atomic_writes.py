@@ -134,6 +134,21 @@ class TestAtomicWrite:
 
         assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_the_temporary_is_never_wider_than_the_file_it_replaces(self, tmp_path: Path):
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+        target.chmod(0o600)
+
+        seen: list[int] = []
+        with atomic_write(target) as handle:
+            # Whatever a reader could open between here and the rename — the
+            # window that holds the payload while it is written and fsynced.
+            seen = [stat.S_IMODE(p.stat().st_mode) for p in _temps(tmp_path)]
+            handle.write(b"{}")
+
+        assert seen == [0o600]
+
 
 class TestAtomicWriteText:
     def test_replaces_the_file_whole(self, tmp_path: Path):
@@ -263,24 +278,23 @@ class TestLatestPointerIsAtomic:
         assert not _temps(tmp_path)
 
 
-class TestRunDirTempsAreReclaimed:
-    def test_claiming_a_run_dir_sweeps_a_killed_attempts_debris(self, tmp_path: Path):
+class TestResumeReclaimsRunDirTemps:
+    """The crash-resume-crash cycle #424 is about, driven end to end."""
+
+    def test_resuming_a_quarantined_run_clears_a_killed_attempts_debris(self, tmp_path: Path):
         from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+
+        failed_dir = tmp_path / "failed" / "run-one"
+        failed_dir.mkdir(parents=True)
+        save_run_manifest(_manifest(run_id="run-one"), failed_dir)
+        (failed_dir / f"manifest.json{TMP_MARKER}999-deadbeef").write_text(
+            "half a manifest", encoding="utf-8"
+        )
+
+        orchestrator = PipelineOrchestrator(PipelineConfig(resume="run-one"), output_base=tmp_path)
+        orchestrator._setup_resume()
 
         run_dir = tmp_path / "run-one"
-        run_dir.mkdir()
-        orphan = run_dir / f"manifest.json{TMP_MARKER}999-deadbeef"
-        orphan.write_text("half a manifest", encoding="utf-8")
-
-        orchestrator = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)
-        orchestrator.run_dir = run_dir
-        orchestrator._sweep_run_dir_temps()
-
-        assert not orphan.exists()
-
-    def test_sweeping_without_a_run_dir_is_a_no_op(self, tmp_path: Path):
-        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
-
-        orchestrator = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)
-        orchestrator.run_dir = None
-        orchestrator._sweep_run_dir_temps()
+        assert not _temps(run_dir)
+        assert orchestrator.manifest is not None
+        assert orchestrator.manifest.run_id == "run-one"
