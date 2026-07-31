@@ -499,6 +499,35 @@ class TestTheDeclaredCallerDifference:
         elsewhere = fx.tmp_path / "other" / "elsewhere" / "run_a" / "evaluation" / "metrics.json"
         assert reroot_under(elsewhere, moved) == elsewhere
 
+        # The verdict itself, not just the mapping: for a reproducible pipeline
+        # the hashes agree across checkouts, so this is the expected state
+        # rather than a corner case. `runs verify` says the bytes match; it
+        # does not say the manifest was written about this workspace.
+        fx.outputs[fx.key] = str(sibling)
+        assert fx.verify_accepts() is True
+
+    def test_a_run_id_repeated_in_the_output_base_finds_the_right_occurrence(self, tmp_path):
+        # Locating `<base>/<id>` as a unit, right to left: scanning for the id
+        # alone would match inside the base's own path and compare the wrong
+        # pair, declaring a healthy run's output foreign.
+        from panelcast.pipelines.output_integrity import reroot_under
+
+        moved = tmp_path / "run_a" / "outputs" / "failed" / "run_a"
+        recorded = Path("run_a") / "outputs" / "run_a" / "evaluation" / "metrics.json"
+
+        assert reroot_under(recorded, moved) == moved / "evaluation" / "metrics.json"
+
+    def test_an_output_base_of_dot_still_reroots(self, tmp_path, monkeypatch):
+        # `--output-base .` leaves the base with no name to match, so the run
+        # id stands alone rather than the mapping bailing out.
+        from panelcast.pipelines.output_integrity import reroot_under
+
+        monkeypatch.chdir(tmp_path)
+        moved = Path("failed") / "gone"
+        recorded = Path("gone") / "evaluation" / "metrics.json"
+
+        assert reroot_under(recorded, moved) == moved / "evaluation" / "metrics.json"
+
     def test_the_reroot_mapping_is_generic_over_what_it_moves(self, fx):
         # Not output-specific on purpose: run-owned *inputs* need the same
         # mapping (#420), which this module does not verify but must not block.

@@ -123,13 +123,18 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     """
     if path.exists():
         return path
+    base_name = _output_base_name(run_dir)
+    # `<base>/<id>` as a unit, matched right to left. Scanning for the run id
+    # alone and then looking left would compare the wrong pair whenever the id
+    # also appears inside the output base's own path, and taking the first
+    # match would pick that earlier occurrence over the real one. An output
+    # base of `.` contributes no name, so the marker is the id by itself.
+    marker = (base_name, run_dir.name) if base_name else (run_dir.name,)
     parts = path.parts
-    if run_dir.name not in parts:
-        return path
-    index = parts.index(run_dir.name)
-    if not index or parts[index - 1] != _output_base_name(run_dir):
-        return path
-    return run_dir.joinpath(*parts[index + 1 :])
+    for index in range(len(parts) - len(marker), -1, -1):
+        if parts[index : index + len(marker)] == marker:
+            return run_dir.joinpath(*parts[index + len(marker) :])
+    return path
 
 
 def _output_base_name(run_dir: Path) -> str:
