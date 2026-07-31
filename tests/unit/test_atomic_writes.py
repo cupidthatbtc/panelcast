@@ -177,6 +177,8 @@ class TestAtomicWrite:
         atomic_write_text(target, "{}")
         target.chmod(0o664)
 
+        # os.umask is process-global and not thread-safe; restored below, and
+        # safe under xdist because that forks rather than threads.
         previous = os.umask(0o077)  # would strip the group bits from a bare create
         try:
             atomic_write_text(target, '{"rewritten": true}')
@@ -198,12 +200,65 @@ class TestAtomicWrite:
         def refuse(_fd, _mode):
             raise OSError("operation not supported")
 
+        # Deliberately the real `os` module rather than a module-local seam:
+        # `_open_temp` reaches it through `getattr(os, "fchmod")` so there is
+        # no local name to patch, and nothing else in-process calls it.
         monkeypatch.setattr(os, "fchmod", refuse)
         atomic_write_text(target, '{"rewritten": true}')
 
         assert target.read_text(encoding="utf-8") == '{"rewritten": true}'
         # Whatever survived, the create can only have narrowed it.
         assert stat.S_IMODE(target.stat().st_mode) & ~0o664 == 0
+
+    def test_a_handle_that_cannot_be_wrapped_leaves_nothing_behind(
+        self, tmp_path: Path, monkeypatch
+    ):
+        real = os.fdopen
+
+        def boom(fd, *args, **kwargs):
+            real(fd, "wb").close()  # fdopen owns the descriptor even when it fails
+            raise OSError("cannot wrap")
+
+        monkeypatch.setattr(os, "fdopen", boom)
+
+        with pytest.raises(OSError, match="cannot wrap"):
+            atomic_write_text(tmp_path / "record.json", "x")
+
+        assert not list(tmp_path.iterdir())
+
+    def test_a_holder_on_the_target_is_waited_out_rather_than_fatal(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Windows denies the rename while another process has the target open.
+        # Simulated here because POSIX has no equivalent to reproduce.
+        real = os.replace
+        attempts = {"n": 0}
+
+        def busy(src, dst):
+            attempts["n"] += 1
+            if attempts["n"] < 3:
+                raise PermissionError("the file is in use by another process")
+            real(src, dst)
+
+        monkeypatch.setattr(atomic_module.os, "replace", busy)
+        monkeypatch.setattr(atomic_module.time, "sleep", lambda _: None)
+
+        atomic_write_text(tmp_path / "manifest.json", "{}")
+
+        assert attempts["n"] == 3
+        assert (tmp_path / "manifest.json").read_text(encoding="utf-8") == "{}"
+
+    def test_a_holder_that_never_lets_go_still_raises(self, tmp_path: Path, monkeypatch):
+        def busy(_src, _dst):
+            raise PermissionError("the file is in use by another process")
+
+        monkeypatch.setattr(atomic_module.os, "replace", busy)
+        monkeypatch.setattr(atomic_module.time, "sleep", lambda _: None)
+
+        with pytest.raises(PermissionError):
+            atomic_write_text(tmp_path / "manifest.json", "{}")
+
+        assert not _temps(tmp_path)
 
     def test_a_name_collision_never_deletes_the_other_writers_temporary(
         self, tmp_path: Path, monkeypatch
@@ -254,6 +309,8 @@ class TestAtomicWriteText:
     ):
         target = tmp_path / "record.json"
         atomic_write_text(target, "first")
+        synced: list[Path] = []
+        monkeypatch.setattr(atomic_module, "fsync_dir", synced.append)
         _fail_the_commit(monkeypatch)
 
         with pytest.raises(OSError):
@@ -261,6 +318,7 @@ class TestAtomicWriteText:
 
         assert target.read_text(encoding="utf-8") == "first"
         assert [p.name for p in tmp_path.iterdir()] == ["record.json"]
+        assert synced == []  # a failed write never claims a durable rename
 
     def test_an_unencodable_value_never_creates_a_file(self, tmp_path: Path):
         target = tmp_path / "record.txt"

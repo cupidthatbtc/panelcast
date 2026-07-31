@@ -24,12 +24,16 @@ Three consequences of committing by rename, all deliberate:
   platform now, matching the checkpoint artifacts that were always binary.
 - A killed process leaves its temporary behind, where a fixed temp name would
   have been overwritten by the next attempt. Reclaiming those is #445.
+- On Windows the rename needs DELETE access on the destination, which another
+  process holding it open denies, where truncating in place did not.
+  ``_commit`` retries briefly rather than failing the write.
 """
 
 from __future__ import annotations
 
 import os
 import stat
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -110,17 +114,47 @@ def _open_temp(tmp: Path, mode: int | None) -> BinaryIO:
     fchmod = getattr(os, "fchmod", None)  # POSIX only; modes are advisory on Windows
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     fd = os.open(tmp, flags, 0o666 if mode is None else mode)
+    if mode is not None and fchmod is not None:
+        try:
+            fchmod(fd, mode)
+        except OSError:
+            pass
     try:
-        if mode is not None and fchmod is not None:
-            try:
-                fchmod(fd, mode)
-            except OSError:
-                pass
         return os.fdopen(fd, "wb")
-    except BaseException:  # pragma: no cover - a freshly created descriptor rarely refuses
-        os.close(fd)
+    except BaseException:
+        # ``fdopen`` closes the descriptor itself when it fails, so there is
+        # nothing here to close: doing it anyway could land on a descriptor
+        # the runtime has already handed to something else. Only the file it
+        # created is ours to take back.
         tmp.unlink(missing_ok=True)
         raise
+
+
+_COMMIT_RETRY_DELAYS = (0.05, 0.1, 0.2, 0.4)
+
+
+def _commit(tmp: Path, path: Path) -> None:
+    """Rename ``tmp`` over ``path``, retrying a Windows sharing violation.
+
+    ``os.replace`` needs DELETE access on the destination, and CPython opens
+    files without ``FILE_SHARE_DELETE``, so on Windows any other process
+    holding the target open — a concurrent ``runs show``, a virus scanner
+    touching a freshly written manifest — makes the rename raise
+    ``PermissionError`` where the truncate-in-place it replaced would have
+    succeeded. Every such holder is transient, so a bounded backoff turns a
+    run killed at a stage boundary into a few milliseconds of delay.
+
+    Not gated on the platform. A ``PermissionError`` that POSIX raises here is
+    about the directory rather than a holder and will not clear, but it costs
+    under a second to find that out, and one code path beats two.
+    """
+    for delay in _COMMIT_RETRY_DELAYS:
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            time.sleep(delay)
+    os.replace(tmp, path)
 
 
 @contextmanager
@@ -144,7 +178,7 @@ def atomic_write(path: Path) -> Iterator[BinaryIO]:
             yield handle
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, path)
+        _commit(tmp, path)
         committed = True
     finally:
         if not committed:
