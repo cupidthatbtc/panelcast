@@ -823,12 +823,13 @@ class PipelineOrchestrator:
 
                 # Check if stage should be skipped
                 if self.config.skip_existing and not self.config.dry_run:
-                    # `skip_decision` returns before reading roots when there is
-                    # no previous manifest, and no previous run means no
-                    # previous manifest — so this argument is unread in that
-                    # case rather than meaning anything. `None` is the shape
-                    # that says so; an empty list would instead say every
-                    # recorded output escapes, a tampering verdict this is not.
+                    # Unread when there is no previous run, so the value cannot
+                    # matter: `skip_decision` returns before consulting roots
+                    # without a manifest, and the manifest is loaded from the
+                    # run. Both halves are pinned —
+                    # `test_the_default_roots_are_never_consulted_without_a_manifest`
+                    # and
+                    # `test_a_manifest_never_arrives_without_the_run_that_named_its_roots`.
                     decision = stage.skip_decision(
                         previous_manifest,
                         force=False,

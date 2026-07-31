@@ -54,23 +54,23 @@ class OutputVerdict:
         return self.label == OK
 
 
-def _contained_path(resolved: Path, roots: Sequence[Path]) -> Path | None:
-    """``resolved`` — an already-resolved path — if it lands inside a root.
+def _is_contained(resolved: Path, roots: Sequence[Path]) -> bool:
+    """Whether ``resolved`` — an already-resolved path — lands inside a root.
 
     Module-private, because the precondition is load-bearing and unenforceable:
     handed an *unresolved* path, this answers about the literal join, so
     ``<root>/link/secret`` with ``link`` pointing out of the root is contained
-    and comes back for the caller to read. Resolution lives in the caller so
-    that "will not resolve" and "resolves outside" stay two answers rather than
-    one ``None`` to guess at — and keeping the function private is what stops
-    that trade becoming a safety property some future caller has to remember.
+    and the caller goes on to read it. Resolution lives in the caller so that
+    "will not resolve" and "resolves outside" stay two answers rather than one
+    — and keeping the function private is what stops that trade becoming a
+    safety property some future caller has to remember.
 
     Manifests are just files on disk; a tampered one must not be able to aim
     the integrity check at something outside the workspace it describes.
     Resolution is what makes a symlinked component that leaves the root fail
-    before the read rather than at it, and the resolved form is what comes
-    back, so the caller reads and hashes the path this proved rather than
-    walking the same symlink a second time and possibly landing elsewhere.
+    before the read rather than at it, and the caller reads and hashes the
+    resolved path this answered about rather than walking the same symlink a
+    second time and possibly landing elsewhere.
 
     A root that will not resolve is skipped rather than fatal. The roots are a
     shared workspace an operator may have symlinked, and one bad entry among
@@ -82,8 +82,8 @@ def _contained_path(resolved: Path, roots: Sequence[Path]) -> Path | None:
         except (OSError, ValueError, RuntimeError):
             continue
         if resolved == resolved_root or resolved_root in resolved.parents:
-            return resolved
-    return None
+            return True
+    return False
 
 
 def reroot_under(path: Path, run_dir: Path) -> Path:
@@ -245,7 +245,7 @@ def verify_output_records(
             if rerooted != path:
                 resolved = None  # a different path, so the walk above is stale
             path = rerooted
-        # Resolved here, not inside `_contained_path`, so a path the tool could
+        # Resolved here, not inside `_is_contained`, so a path the tool could
         # not locate is never reported as one that escaped: it may be sitting
         # squarely inside the run root. Reused from the binding when that ran
         # on this same path, so a declared key walks its symlink chain once and
@@ -258,13 +258,12 @@ def verify_output_records(
                     key, UNBOUND, "recorded output path is unreadable", untrusted=True
                 )
                 continue
-        contained = _contained_path(resolved, roots)
-        if contained is None:
+        if not _is_contained(resolved, roots):
             yield OutputVerdict(
                 key, UNBOUND, "recorded output path escapes the run roots", untrusted=True
             )
             continue
-        path = contained
+        path = resolved
         # Both ways of failing to read it are the same kind of fact, so they
         # take the severity from the same place: with a declared path behind
         # the key, disk is *contradicting* the manifest; without one, nothing

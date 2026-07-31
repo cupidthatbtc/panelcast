@@ -672,7 +672,8 @@ panelcast runs history [OPTIONS]
 ### `runs verify` — Check a Run Against Its Manifest
 
 Re-hash a recorded run's entire provenance chain and exit `1` on anything it
-cannot prove, in order: every recorded output, every recorded raw-input hash,
+cannot prove about what the manifest records, in order: every recorded output,
+every recorded raw-input hash,
 the shared data-root stamps, and the `pixi.lock` hash. Data-root stamps protect
 the shared roots *during* a run; `runs verify` protects the whole run directory
 *after* it, indefinitely.
@@ -730,6 +731,12 @@ sense, for different reasons:
   the same run directory* — where containment has nothing to say. `runs
   verify` cannot: the manifest does not record which outputs were declared.
   Such a redirect is reported `OK` here (#439).
+- **Completeness.** For the same reason, the skip path notices a declared
+  output the manifest never recorded, and `runs verify` cannot. A green result
+  proves the outputs the manifest *lists* are intact, not that it lists
+  everything the run produced — a record deleted from both `outputs` and
+  `output_hashes` leaves nothing to check. No verification of the document
+  alone can close that; it needs something outside it (#439).
 
 ```bash
 panelcast runs verify [RUN_ID] [OPTIONS]
