@@ -211,6 +211,15 @@ def run_owned_path(path: Path, run_dir: Path) -> Path | None:
     spelling onto ``run_dir``, which is why a changed path cannot answer
     ownership either way. Containment can, and it is the same question.
 
+    Ownership is decided on the *resolved* location, so it also declines an
+    artifact reached through a symlink inside the run directory that leaves it
+    — a run whose ``models/`` points at shared storage, say. That is the bound
+    on purpose, not an oversight about the recorded tail: it is the same bound
+    ``verify_output_records`` applies to a path in the same place, which
+    reports it ``UNBOUND``. Such a layout is unverifiable on both sides rather
+    than lenient on one, and the two callers agreeing about which paths a run
+    owns is worth more than reaching a product stored outside it.
+
     Not folded into ``reroot_under`` itself, because for an *output* an
     escaping tail is worth reporting rather than quietly declining: the
     manifest is claiming something about a path outside the run, and only a

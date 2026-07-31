@@ -135,11 +135,12 @@ def _input_label(path: Path, path_str: str) -> str:
     someone greps that file for.
     """
     try:
-        if path.resolve() == Path(path_str).resolve():
-            return str(path)
+        moved = path.resolve() != Path(path_str).resolve()
     except (OSError, ValueError, RuntimeError):
-        pass
-    return f"{path} (recorded as {path_str})"
+        # The suffix is the part that asserts something, so with no evidence
+        # either way the label says less rather than something untrue.
+        moved = False
+    return f"{path} (recorded as {path_str})" if moved else str(path)
 
 
 def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:

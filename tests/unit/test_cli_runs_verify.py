@@ -6,6 +6,7 @@ import json
 import shutil
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from panelcast.cli import app
@@ -400,6 +401,42 @@ class TestTheInputMappingIsBounded:
         assert f"OK       input {product}" in result.output
         assert "recorded as" not in result.output
 
+    def test_an_artifact_symlinked_out_of_the_run_is_not_owned(self, tmp_path):
+        # Resolved containment, deliberately. A symlink inside the run that
+        # leaves it is declined here for the reason `verify_output_records`
+        # reports the *output* at the same path UNBOUND: a layout storing
+        # products outside the run directory is unverifiable on both sides
+        # rather than lenient on one, and the two callers agreeing about which
+        # paths a run owns is worth more than reaching such a product.
+        from panelcast.pipelines.output_integrity import (
+            UNBOUND,
+            run_owned_path,
+            verify_output_records,
+        )
+
+        run_dir = tmp_path / "outputs" / "run_a"
+        run_dir.mkdir(parents=True)
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        (shared / "manifest.json").write_text("{}", encoding="utf-8")
+        try:
+            (run_dir / "models").symlink_to(shared)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"symlinks unavailable: {exc}")
+        recorded = Path("outputs") / "run_a" / "models" / "manifest.json"
+
+        assert run_owned_path(recorded, run_dir) is None
+
+        key = "train:models/manifest.json"
+        (verdict,) = verify_output_records(
+            {key: str(recorded)},
+            {key: sha256_path(run_dir / "models" / "manifest.json")},
+            roots=[run_dir],
+            reroot=run_dir,
+        )
+
+        assert verdict.label == UNBOUND
+
     def test_the_input_pass_declines_to_follow_an_escaping_tail(self, tmp_path):
         # End to end, and discriminating: a file whose bytes match the recorded
         # hash sits exactly where the unguarded mapping would land, so
@@ -446,7 +483,9 @@ class TestReproduceOnAQuarantinedRun:
         # premise untested.
         self.launched = []
         monkeypatch.setattr(
-            orchestrator, "run_pipeline", lambda config, **kw: self.launched.append(config) or 0
+            orchestrator,
+            "run_pipeline",
+            lambda config, **kw: self.launched.append((config, kw)) or 0,
         )
         return runner.invoke(app, ["runs", "reproduce", "run_a", "--output-base", str(base)])
 
@@ -466,11 +505,15 @@ class TestReproduceOnAQuarantinedRun:
         # than quoted from the docstring: a reproduction that resumed or
         # skipped could reuse a run-owned input the gate no longer proves is
         # there, turning an early abort into a stage-level crash midway.
-        self._reproduce(tmp_path, monkeypatch)
+        result = self._reproduce(tmp_path, monkeypatch)
 
-        (config,) = self.launched
+        assert result.exit_code == 0, result.output
+        (config, kwargs) = self.launched[0]
         assert config.resume is None
         assert config.skip_existing is False
+        # Both argument channels: a keyword taking precedence over the config
+        # would leave the assertions above reading defaults nothing acts on.
+        assert set(kwargs) == {"output_base"}
 
     def test_pruning_the_failed_runs_models_does_not_abort_it_either(
         self, tmp_path, monkeypatch
