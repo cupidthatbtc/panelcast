@@ -27,11 +27,47 @@ import numpy as np
 
 __all__ = [
     "CRPSResult",
+    "NonFinitePredictionError",
     "PointMetrics",
     "compute_crps",
     "compute_point_metrics",
     "posterior_mean",
+    "require_finite",
 ]
+
+
+class NonFinitePredictionError(ValueError):
+    """A metric input contained NaN or an infinity.
+
+    Distinct from the shape errors around it so a caller can tell a numerical
+    blow-up from a wiring mistake, and so the evaluation stage reports it as a
+    numerical failure rather than letting infinite metrics serialize to null.
+    """
+
+
+def require_finite(values: np.ndarray, name: str) -> np.ndarray:
+    """Return ``values`` as an array, raising if any entry is not finite.
+
+    Infinity is as fatal as NaN here: an infinite prediction propagates into
+    infinite MAE/RMSE/bias, which strict JSON cannot represent, so it would be
+    written as a null and read as a metric that simply was not computed.
+    """
+    array = np.asarray(values)
+    finite = np.isfinite(array)
+    if finite.all():
+        return array
+    detail = f"{int(np.count_nonzero(~finite))} of {array.size} values"
+    if array.ndim == 2:
+        bad_draws = int(np.count_nonzero(~finite.all(axis=1)))
+        bad_rows = int(np.count_nonzero(~finite.all(axis=0)))
+        detail += f" ({bad_draws} of {array.shape[0]} draws, {bad_rows} of {array.shape[1]} rows)"
+    else:
+        detail += f" (rows {np.flatnonzero(~finite)[:5].tolist()})"
+    raise NonFinitePredictionError(
+        f"{name} contains non-finite values (NaN or infinity): {detail}. "
+        "Predictive overflow is a numerical failure, not a missing metric; "
+        "inspect the fit rather than the metrics artifact."
+    )
 
 
 @dataclass
@@ -198,6 +234,8 @@ def compute_crps(
         raise ValueError(
             f"y_samples has {y_samples.shape[1]} observations, but y_true has {len(y_true)}"
         )
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
 
     n_obs = len(y_true)
 
@@ -278,11 +316,8 @@ def compute_point_metrics(
             f"y_true has {len(y_true)} observations, but y_pred_mean has {len(y_pred_mean)}"
         )
 
-    if np.isnan(y_true).any() or np.isnan(y_pred_mean).any():
-        raise ValueError(
-            "y_true or y_pred_mean contains NaN values. "
-            "Filter invalid observations before computing metrics."
-        )
+    require_finite(y_true, "y_true")
+    require_finite(y_pred_mean, "y_pred_mean")
 
     # Compute errors
     errors = y_true - y_pred_mean

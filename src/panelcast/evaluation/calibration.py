@@ -24,6 +24,8 @@ from decimal import ROUND_CEILING, Decimal
 
 import numpy as np
 
+from panelcast.evaluation.metrics import require_finite
+
 __all__ = [
     "PIT_DEFAULT_SEED",
     "PIT_METHOD",
@@ -286,6 +288,8 @@ def compute_coverage(
         raise ValueError(
             f"y_samples has {y_samples.shape[1]} observations, but y_true has {len(y_true)}"
         )
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
     _validate_probability(prob)
     if interval_type not in ("equal_tailed", "hdi"):
         raise ValueError(f"interval_type must be 'equal_tailed' or 'hdi', got '{interval_type}'")
@@ -400,6 +404,8 @@ def compute_reliability_data(
         raise ValueError(
             f"y_samples has {y_samples.shape[1]} observations, but y_true has {len(y_true)}"
         )
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
 
     if n_bins < 1:
         raise ValueError(f"n_bins must be >= 1, got {n_bins}")
@@ -476,6 +482,8 @@ def compute_interval_score(
         raise ValueError(
             f"y_samples has {y_samples.shape[1]} observations, but y_true has {len(y_true)}"
         )
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
     _validate_probability(prob)
     if y_samples.shape[0] < 1:
         raise ValueError("y_samples must include at least one posterior sample.")
@@ -556,6 +564,8 @@ def compute_weighted_interval_score(
         raise ValueError(
             f"y_samples has {y_samples.shape[1]} observations, but y_true has {len(y_true)}"
         )
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
     if y_samples.shape[0] < 1:
         raise ValueError("y_samples must include at least one posterior sample.")
     if len(probs) == 0:
@@ -644,6 +654,8 @@ def compute_pit_per_row(
         raise ValueError(
             f"y_samples shape {y_samples.shape} incompatible with y_true {y_true.shape}"
         )
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
     n_draws = y_samples.shape[0]
     if n_draws < 1:
         raise ValueError("y_samples must include at least one predictive draw.")
