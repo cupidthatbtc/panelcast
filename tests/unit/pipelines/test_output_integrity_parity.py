@@ -705,7 +705,12 @@ class TestTheDeclaredCallerDifference:
         # would not have matched it. Asserted rather than only described,
         # because it is the surprising direction — the quarantine gate reads
         # as narrowing.
-        from panelcast.pipelines.output_integrity import reroot_under
+        from panelcast.pipelines.output_integrity import (
+            MODIFIED,
+            OK,
+            reroot_under,
+            verify_output_records,
+        )
 
         workspace = tmp_path / "ws"
         active = workspace / "failed" / "run_a"
@@ -713,9 +718,32 @@ class TestTheDeclaredCallerDifference:
 
         assert reroot_under(foreign, active) == active / "evaluation" / "metrics.json"
 
-        # Bounded the same way regardless: the mapping only ever aims into the
-        # run directory, so containment and the recorded hash still decide.
-        assert active in reroot_under(foreign, active).parents
+        # And what that costs at the verdict, which is the part that matters:
+        # the foreign record is mapped onto this run's artifact and checked
+        # against the foreign manifest's hash, so it passes when the bytes
+        # agree. Bounded rather than harmless — the mapping only aims into the
+        # run directory, so a differing artifact is still caught.
+        artifact = active / "evaluation" / "metrics.json"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text('{"mae": 5.3}', encoding="utf-8")
+        digest = sha256_path(artifact)
+
+        (matched,) = verify_output_records(
+            {"evaluate:metrics": str(foreign)},
+            {"evaluate:metrics": digest},
+            roots=(active,),
+            reroot=active,
+        )
+        assert matched.label == OK
+
+        artifact.write_text('{"mae": 9.9}', encoding="utf-8")
+        (differing,) = verify_output_records(
+            {"evaluate:metrics": str(foreign)},
+            {"evaluate:metrics": digest},
+            roots=(active,),
+            reroot=active,
+        )
+        assert differing.label == MODIFIED
 
     def test_a_foreign_workspace_manifest_does_not_verify_clean(self, fx):
         # End to end through `runs verify`, which is where a laundered path
@@ -822,10 +850,11 @@ class TestTheDeclaredCallerDifference:
 
     def test_the_quarantine_name_has_one_definition(self):
         # `reroot_under` recognizes a moved run by matching `<base>/failed/<id>`,
-        # so it is a *reader* of the name. This pins the reader to the layout's
-        # definition; it cannot pin the writers, which still use literals. What
-        # it rules out is this module drifting from the layout and reporting
-        # every intact quarantined run as tampered rather than moved.
+        # so it is a *reader* of the name, as is `resolve_run_dir` in the same
+        # command path — both import it. This pins one of those readers to the
+        # layout's definition; it does not pin the writers, which still spell
+        # the name themselves. What it rules out is this module drifting from
+        # the layout and reporting an intact quarantined run as tampered.
         #
         # Static, not `is`: CPython interns identifier-like string constants, so
         # a restored local `QUARANTINE_DIR = "failed"` would be the *same
@@ -839,10 +868,14 @@ class TestTheDeclaredCallerDifference:
         from panelcast.pipelines import output_integrity
 
         tree = ast.parse(Path(output_integrity.__file__).read_text(encoding="utf-8"))
+        # Keyed on the module too: importing `QUARANTINE_DIR` from anywhere is
+        # not the property — importing it from the layout that owns it is.
+        # A re-export through some third module would satisfy a bare name check
+        # while reintroducing exactly the indirection this forbids.
         imported = {
             alias.asname or alias.name
             for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom)
+            if isinstance(node, ast.ImportFrom) and node.module == "panelcast.paths"
             for alias in node.names
         }
         # `AnnAssign` as well as `Assign`: a re-declaration is at least as
@@ -857,8 +890,14 @@ class TestTheDeclaredCallerDifference:
             if isinstance(target, ast.Name)
         }
 
-        assert "QUARANTINE_DIR" in imported
-        assert "QUARANTINE_DIR" not in assigned
+        assert "QUARANTINE_DIR" in imported, (
+            "output_integrity must import QUARANTINE_DIR from panelcast.paths; "
+            "reading it from anywhere else reintroduces the indirection"
+        )
+        assert "QUARANTINE_DIR" not in assigned, (
+            "output_integrity re-declares QUARANTINE_DIR locally; the layout "
+            "owns the name and a second definition can drift from it"
+        )
         # Not `QUARANTINE_DIR in _RESERVED_RUN_IDS` — the set is built from the
         # constant, so that holds by construction. The reserved id is a
         # separate fact about the layout, so assert the value it must have.

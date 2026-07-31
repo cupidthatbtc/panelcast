@@ -18,7 +18,13 @@ from panelcast.cli import runs_app
 
 def resolve_run_dir(run_id: str, output_base: Path = Path("outputs")) -> Path:
     """Resolve a run id against outputs/, outputs/failed/, or 'latest'."""
-    from panelcast.paths import RunPathError, resolve_latest, safe_run_dir, validate_run_id
+    from panelcast.paths import (
+        QUARANTINE_DIR,
+        RunPathError,
+        resolve_latest,
+        safe_run_dir,
+        validate_run_id,
+    )
 
     if run_id == "latest":
         run_dir = resolve_latest(output_base)
@@ -29,7 +35,7 @@ def resolve_run_dir(run_id: str, output_base: Path = Path("outputs")) -> Path:
         validate_run_id(run_id)
     except RunPathError as exc:
         raise typer.BadParameter(str(exc), param_hint="RUN_ID") from exc
-    for subdir in (None, "failed"):
+    for subdir in (None, QUARANTINE_DIR):
         try:
             candidate = safe_run_dir(output_base, run_id, subdir=subdir)
         except RunPathError:
@@ -501,13 +507,13 @@ def _compare_reproduction(old_manifest, output_base: Path, bit_exact: bool) -> N
 
 
 def _load_metrics_from_manifest_dir(manifest, output_base: Path) -> dict:
-    from panelcast.paths import RunPathError, safe_run_dir, validate_run_id
+    from panelcast.paths import QUARANTINE_DIR, RunPathError, safe_run_dir, validate_run_id
 
     try:
         validate_run_id(manifest.run_id)
     except RunPathError:
         return {}
-    for subdir in (None, "failed"):
+    for subdir in (None, QUARANTINE_DIR):
         try:
             candidate = safe_run_dir(output_base, manifest.run_id, subdir=subdir)
         except RunPathError:
@@ -530,9 +536,9 @@ def runs_why(
     import json
 
     if run_id is None:
-        from panelcast.paths import path_is_within
+        from panelcast.paths import QUARANTINE_DIR, path_is_within
 
-        failed_root = output_base / "failed"
+        failed_root = output_base / QUARANTINE_DIR
         candidates = sorted(
             (
                 p

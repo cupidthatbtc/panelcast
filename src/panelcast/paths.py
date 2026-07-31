@@ -86,12 +86,13 @@ class RunPathError(ValueError):
     """A run identifier is malformed or escapes its output root."""
 
 
-# The layout owns this name, so anything that has to *recognize* a quarantined
-# run reads it from here rather than spelling it again. `reroot_under` maps a
-# recorded path back onto the run by matching `<base>/failed/<id>`; a reader
-# that guessed the name wrong would report every intact quarantined run as
-# tampered rather than moved, which is silent and backwards. Writers still use
-# their own literals — retiring those is a wider change than the readers need.
+# The layout owns this name. Both readers in the `runs verify` path import it:
+# `resolve_run_dir` looks for the run under it, and `reroot_under` maps a
+# recorded path back onto the run by matching `<base>/failed/<id>`. Neither can
+# be checked against the other at runtime, so a drifted spelling would be
+# silent and backwards — an intact quarantined run reported as tampered rather
+# than moved. Writers elsewhere still spell it themselves; retiring those is a
+# wider change, and it is the readers that fail quietly.
 QUARANTINE_DIR = "failed"
 
 # Reserved by the layout itself: `latest` is the pointer link, `failed` the
