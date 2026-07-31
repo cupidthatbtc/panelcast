@@ -1504,14 +1504,14 @@ it to `runs/` does not; a path that
 merely contains a directory with the run's name is left where the manifest put
 it and refused by containment. The mapping is generic over what it moves, and a
 run's recorded *inputs* need it too: a stage reads earlier stages' run-scoped
-products, so a run that failed at or after `evaluate` recorded `<output
-base>/<id>/models/…` as an input. `output_integrity.run_owned_path` answers
-where the run holds such a path, or `None` when it does not own it, declining a
-mapping whose tail would leave the run directory — the input callers only stat
-and hash, so they have no containment step of their own to refuse it
-afterwards, and an unowned path is then checked wherever the manifest recorded
-it. Ownership is decided on the *resolved* location, so a product reached
-through a symlink that leaves the run directory is not owned either. That costs
+products, so a run that failed at or after `evaluate` recorded
+`<output base>/<id>/models/…` as an input. `output_integrity.run_owned_path`
+answers where the run holds such a path, or `None` when it does not own it,
+declining a mapping whose tail would leave the run directory — the input
+callers only stat and hash, so they have no containment step of their own to
+refuse it afterwards, and an unowned path is then checked wherever the manifest
+recorded it. Ownership is decided on the *resolved* location, so a product
+reached through a symlink that leaves the run directory is not owned. That costs
 the re-rooting rather than the read — an active run still verifies that input
 through the link, a quarantined one reports it `MISSING` — and it lines up with
 the output side only partway, because the two contain against different sets.

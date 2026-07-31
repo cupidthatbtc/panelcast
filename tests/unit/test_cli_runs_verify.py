@@ -105,6 +105,34 @@ def _symlinked_product_run(tmp_path: Path, target: str = "shared") -> tuple[Path
 
 
 _MUTATORS = frozenset({"update", "setdefault", "pop", "popitem", "clear"})
+_VALIDATORS = frozenset({"model_validate", "model_validate_json", "model_construct"})
+
+
+def _manifest_callee(func: ast.expr) -> str | None:
+    """The name of a call that builds a `RunManifest`, or None.
+
+    That exact class, not any manifest: `replicate/pack.py` builds a
+    `PackManifest` from `**data`, which has no `input_hashes` to set.
+    """
+    if isinstance(func, ast.Name) and func.id == "RunManifest":
+        return func.id
+    if (
+        isinstance(func, ast.Attribute)
+        and func.attr in _VALIDATORS
+        and isinstance(func.value, ast.Name)
+        and func.value.id == "RunManifest"
+    ):
+        return f"{func.value.id}.{func.attr}"
+    return None
+
+
+def _called_names(node: ast.AST) -> set[str]:
+    """Names used as callees inside ``node`` — `str(path)` is not keyed on `str`."""
+    return {
+        call.func.id
+        for call in ast.walk(node)
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+    }
 
 
 def _parsed(module: Path) -> ast.AST:
@@ -123,7 +151,11 @@ def _input_hashes_writes(tree: ast.AST):
     Method calls are filtered to the mutating ones, so reading the map — which
     both `runs verify` and `runs reproduce` do — is not reported as writing it.
     Handing the map to a call *is*, whether that call builds a manifest or
-    merely receives it: either way the callee can put entries in.
+    merely receives it: either way the callee can put entries in. Two forms
+    name no field and still set it — a `**` unpacking into a manifest
+    constructor, and pydantic's validators, which is how the deserializer both
+    commands read through populates it — so a call reaching a `RunManifest`
+    that way counts whatever it was handed.
     """
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
@@ -135,13 +167,24 @@ def _input_hashes_writes(tree: ast.AST):
                 and func.value.attr == "input_hashes"
             ):
                 yield f"input_hashes.{func.attr}()"
+            callee = _manifest_callee(func)
             for keyword in node.keywords:
                 if keyword.arg == "input_hashes":
                     yield "input_hashes="
-        if isinstance(node, ast.Assign | ast.AugAssign):
-            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-            for target in targets:
-                inner = target.value if isinstance(target, ast.Subscript) else target
+                elif keyword.arg is None and callee:
+                    yield f"{callee}(**)"
+            if callee and isinstance(func, ast.Attribute):
+                yield f"{callee}()"
+        targets: list[ast.expr] = []
+        if isinstance(node, ast.Assign):
+            targets = list(node.targets)
+        elif isinstance(node, ast.AugAssign | ast.AnnAssign):
+            targets = [node.target]
+        for target in targets:
+            # Tuple targets too: `m.input_hashes, other = ...` binds the field
+            # while looking like an unrelated unpack.
+            for element in getattr(target, "elts", [target]):
+                inner = element.value if isinstance(element, ast.Subscript) else element
                 if isinstance(inner, ast.Attribute) and inner.attr == "input_hashes":
                     yield "input_hashes ="
 
@@ -791,15 +834,41 @@ class TestReproduceOnAQuarantinedRun:
         # one: a second loop appended below the first satisfies "such a loop
         # exists" while feeding the same local dict, which the package sweep
         # cannot see either — the entries never touch a `.input_hashes` node.
-        capture = textwrap.dedent(
-            inspect.getsource(PipelineOrchestrator._capture_stage_input_hashes)
+        capture = ast.parse(
+            textwrap.dedent(inspect.getsource(PipelineOrchestrator._capture_stage_input_hashes))
         )
+        # Containment rather than equality, so wrapping the walk — `sorted(...)`
+        # for a deterministic manifest, `dict.fromkeys(...)` to dedupe — is not
+        # reported as a second source.
         iterated = [
             ast.unparse(node.iter)
-            for node in ast.walk(ast.parse(capture))
+            for node in ast.walk(capture)
             if isinstance(node, ast.For | ast.comprehension)
         ]
-        assert iterated == ["stage.input_paths"]
+        assert len(iterated) == 1
+        assert "stage.input_paths" in iterated[0]
+
+        # ...and every key stored into the returned mapping is derived from a
+        # name that walk binds. Iteration alone is the wrong question: one
+        # `hashes[str(self.descriptor_path)] = ...` adds an entry with no new
+        # source, and the package sweep cannot see it either — the local dict
+        # is nobody's `.input_hashes` attribute.
+        bound = {
+            node.target.id
+            for node in ast.walk(capture)
+            if isinstance(node, ast.For) and isinstance(node.target, ast.Name)
+        }
+        keyed_from = {
+            name.id
+            for node in ast.walk(capture)
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Subscript)
+            for name in ast.walk(target.slice)
+            if isinstance(name, ast.Name) and name.id not in _called_names(target.slice)
+        }
+        assert keyed_from
+        assert keyed_from <= bound
 
         package = Path(inspect.getfile(PipelineOrchestrator)).parents[1]
         writes = sorted(
@@ -809,6 +878,11 @@ class TestReproduceOnAQuarantinedRun:
         )
 
         assert writes == [
+            # The deserializer both commands read through, named rather than
+            # only carved out in prose: it sets the field from the file, which
+            # is why the sweep bounds what this version records and not what
+            # they are handed.
+            "pipelines/manifest.py: RunManifest.model_validate_json()",
             "pipelines/orchestrator.py: input_hashes.update()",
             "pipelines/orchestrator.py: input_hashes=",
         ]
