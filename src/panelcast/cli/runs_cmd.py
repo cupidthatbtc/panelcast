@@ -42,43 +42,35 @@ def resolve_run_dir(run_id: str, output_base: Path = Path("outputs")) -> Path:
     )
 
 
-def _resolve_recorded(path_str: str, run_dir: Path) -> Path:
-    """Recorded path, re-rooted at the run dir when the run was moved (failed/)."""
-    path = Path(path_str)
-    if path.exists():
-        return path
-    parts = path.parts
-    if run_dir.name in parts:
-        rerooted = run_dir.joinpath(*parts[parts.index(run_dir.name) + 1 :])
-        if rerooted.exists():
-            return rerooted
-    return path
-
-
 def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:
-    from panelcast.utils.hashing import sha256_path
+    """Report every recorded output, one line each; any non-OK is a problem.
+
+    The verdicts come from ``output_integrity.verify_output_records``, shared
+    with the incremental skip path, so the two cannot disagree about what
+    counts as proof. Two arguments are this caller's own: ``reroot``, because a
+    quarantined run's manifest still names its pre-move location, and roots
+    that admit the run dir and the working tree, since a run's outputs span
+    both its own directory and the flat data roots.
+
+    No ``declared`` map — there are no stage objects here, so every key is
+    treated as dynamic, which only ever makes a verdict softer.
+    """
+    from panelcast.pipelines.output_integrity import OK, verify_output_records
 
     if not manifest.output_hashes:
         typer.echo("outputs: no hashes recorded for this run (pre-0.9.0 manifest)")
         return
-    for key, recorded in sorted(manifest.output_hashes.items()):
-        path_str = manifest.outputs.get(key)
-        path = _resolve_recorded(path_str, run_dir) if path_str else None
-        if path is None or not path.exists():
-            typer.echo(f"MISSING  {key}")
-            problems.append(key)
+    for verdict in verify_output_records(
+        manifest.outputs,
+        manifest.output_hashes,
+        roots=(run_dir, Path.cwd()),
+        reroot=run_dir,
+    ):
+        if verdict.label == OK:
+            typer.echo(f"{OK:<8} {verdict.key}")
             continue
-        try:
-            current = sha256_path(path)
-        except OSError as exc:
-            typer.echo(f"MISSING  {key} ({exc})")
-            problems.append(key)
-            continue
-        if current != recorded:
-            typer.echo(f"MODIFIED {key}")
-            problems.append(key)
-        else:
-            typer.echo(f"OK       {key}")
+        typer.echo(f"{verdict.label:<8} {verdict.key} ({verdict.reason})")
+        problems.append(verdict.key)
 
 
 def _verify_inputs(manifest, problems: list[str]) -> None:

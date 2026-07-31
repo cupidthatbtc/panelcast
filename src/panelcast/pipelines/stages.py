@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 
 from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.paths import ArtifactPaths
+from panelcast.pipelines.output_integrity import verify_output_records
 from panelcast.utils.hashing import sha256_path
 
 if TYPE_CHECKING:
@@ -34,24 +35,6 @@ class SkipDecision:
     outputs_untrusted: bool = False
     key: str = ""
     outputs_unverifiable: bool = False
-
-
-def _contained_path(path_str: str, roots: Sequence[Path]) -> Path | None:
-    """A recorded output path, but only if it resolves inside one of ``roots``.
-
-    Manifests are just files on disk; a tampered one must not be able to aim
-    the integrity check at something outside the workspace it describes.
-    """
-    path = Path(path_str)
-    try:
-        resolved = path.resolve()
-        for root in roots:
-            resolved_root = Path(root).resolve()
-            if resolved == resolved_root or resolved_root in resolved.parents:
-                return path
-    except (OSError, ValueError):
-        return None
-    return None
 
 
 @dataclass
@@ -327,11 +310,17 @@ class PipelineStage:
         cannot be proven — a legacy manifest with no hashes, an output the
         manifest never hashed, a declared output the manifest never recorded —
         counts as unverifiable rather than unchanged.
+
+        The per-key work is ``output_integrity.verify_output_records``, shared
+        with ``panelcast runs verify``; what stays here is the stage-level
+        framing around it and the first-failure exit, which the generator
+        supports by never hashing past the verdict this returns on. No
+        re-rooting: the skip path follows the active ``latest`` pointer and is
+        never looking at a quarantined run.
         """
         roots = self._default_roots() if allowed_roots is None else tuple(allowed_roots)
         prefix = f"{self.name}:"
         recorded = {k: v for k, v in (manifest.outputs or {}).items() if k.startswith(prefix)}
-        hashes = manifest.output_hashes or {}
         declared = {f"{prefix}{path.as_posix()}": path for path in self.output_paths}
 
         if not recorded:
@@ -342,48 +331,28 @@ class PipelineStage:
                     outputs_unverifiable=True,
                 )
             return SkipDecision(True)
-        if not hashes:
+        if not manifest.output_hashes:
             return SkipDecision(
                 False,
                 "manifest records no output hashes (pre-0.9.0)",
                 outputs_unverifiable=True,
             )
 
-        for key, path_str in sorted(recorded.items()):
-            expected = hashes.get(key)
-            if not expected:
+        for verdict in verify_output_records(
+            manifest.outputs,
+            manifest.output_hashes,
+            roots=roots,
+            prefix=prefix,
+            declared=declared,
+        ):
+            if not verdict.ok:
                 return SkipDecision(
                     False,
-                    "recorded output has no hash",
-                    key=key,
-                    outputs_unverifiable=True,
+                    verdict.reason,
+                    outputs_untrusted=verdict.untrusted,
+                    key=verdict.key,
+                    outputs_unverifiable=not verdict.untrusted,
                 )
-            if key in declared:
-                try:
-                    if Path(path_str).resolve() != declared[key].resolve():
-                        return SkipDecision(
-                            False, "recorded output path disagrees with its manifest key", True, key
-                        )
-                except (OSError, ValueError):
-                    return SkipDecision(False, "recorded output path is unreadable", True, key)
-            path = _contained_path(path_str, roots)
-            if path is None:
-                return SkipDecision(False, "recorded output path escapes the run roots", True, key)
-            if not path.exists():
-                if key not in declared:
-                    return SkipDecision(
-                        False,
-                        "dynamically recorded output is no longer available",
-                        key=key,
-                        outputs_unverifiable=True,
-                    )
-                return SkipDecision(False, "recorded output is missing", True, key)
-            try:
-                actual = sha256_path(path)
-            except OSError as e:
-                return SkipDecision(False, f"recorded output unreadable: {e}", True, key)
-            if actual != expected:
-                return SkipDecision(False, "recorded output no longer matches its hash", True, key)
 
         unrecorded = [p for p in self.output_paths if f"{prefix}{p.as_posix()}" not in recorded]
         if unrecorded:

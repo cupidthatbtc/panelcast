@@ -672,11 +672,27 @@ panelcast runs history [OPTIONS]
 ### `runs verify` — Check a Run Against Its Manifest
 
 Re-hash a recorded run's entire provenance chain and exit `1` on any mismatch,
-in order: every recorded output hash (`OK` / `MODIFIED` / `MISSING`), every
-recorded raw-input hash, the shared data-root stamps, and the `pixi.lock` hash.
-Data-root stamps protect the shared roots *during* a run; `runs verify` protects
-the whole run directory *after* it, indefinitely. Pre-0.9.0 manifests carried no
-output hashes and are reported as such.
+in order: every recorded output, every recorded raw-input hash, the shared
+data-root stamps, and the `pixi.lock` hash. Data-root stamps protect the shared
+roots *during* a run; `runs verify` protects the whole run directory *after*
+it, indefinitely. Pre-0.9.0 manifests carried no output hashes and are reported
+as such.
+
+Each output gets one line, with the reason after the status:
+
+| Status | Meaning |
+|--------|---------|
+| `OK` | Present and hashing to the recorded digest |
+| `MODIFIED` | Present and hashing to something else |
+| `MISSING` | Recorded but not there, or unreadable |
+| `UNBOUND` | Recorded at a path outside the run directory and the working tree |
+| `UNVERIFIABLE` | Recorded on only one side — a path with no hash, or a hash with no path — so nothing can be checked |
+
+Output verification is the same primitive the incremental `--skip-existing`
+path uses (`pipelines/output_integrity.py`), so what one caller accepts as
+proof the other does too. The one deliberate difference is re-rooting: `runs
+verify` maps a quarantined run's recorded paths onto `outputs/failed/<id>/`,
+while skip-existing only ever follows the active `latest` pointer.
 
 ```bash
 panelcast runs verify [RUN_ID] [OPTIONS]

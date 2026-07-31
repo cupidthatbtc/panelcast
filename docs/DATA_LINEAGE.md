@@ -1454,13 +1454,24 @@ For each stage in topological order:
 existence is not integrity, so a skip is only granted when the bytes on disk
 still hash to what the manifest recorded. Recorded paths are resolved inside
 the run roots first. A manifest with no output hashes (pre-0.9.0), a recorded
-output that is missing, unreadable, or modified, and a declared output the
-manifest never recorded all block the skip and rerun the stage. Missing legacy
+output that is missing, unreadable, or modified, a key recorded on only one of
+`outputs`/`output_hashes`, and a declared output the manifest never recorded
+all block the skip and rerun the stage. Missing legacy
 hash evidence is logged as an informational upgrade path; an actual mismatch,
 missing artifact, substitution, or root escape is a warning. Verified hashes are
 carried into the new manifest so consecutive runs remain skippable. This check
 fully reads each candidate artifact (including directory trees), so
 `--skip-existing` trades additional startup I/O for corruption detection.
+
+The per-key work lives in `pipelines/output_integrity.py` and is shared with
+`panelcast runs verify` (§10), so the two callers cannot drift apart in what
+they accept as proof. Their one deliberate difference is parameterized rather
+than implied: `runs verify` re-roots a quarantined run's recorded paths onto
+`outputs/failed/<id>/`, while the skip path follows the active `latest` pointer
+and never looks under `failed/` — a quarantined run is not a source of truth
+for a new one. The stage caller also passes the declared output paths, which
+bind a key to the path the stage says it writes; `runs verify` has no stage
+objects and treats every key as dynamic, which only ever softens a verdict.
 
 **Hash computation** (`stages.py:PipelineStage.compute_input_hash`):
 1. For each `input_path` (sorted), compute `sha256_file(path)`

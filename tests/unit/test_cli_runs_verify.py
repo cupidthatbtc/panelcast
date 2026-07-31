@@ -110,3 +110,56 @@ class TestRunsVerify:
         base = _write_run(tmp_path)
         result = runner.invoke(app, ["runs", "verify", "nope", "--output-base", str(base)])
         assert result.exit_code != 0
+
+    def test_every_failure_line_says_why(self, tmp_path):
+        # The column is unchanged; what is new is the parenthetical, since a
+        # bare status told an operator which key failed but not what about it.
+        base = _write_run(tmp_path, tamper="delete")
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+        assert "MISSING  evaluate:metrics (recorded output is missing" in result.output
+
+    def test_a_hash_with_no_recorded_path_is_unverifiable(self, tmp_path):
+        # Previously reported as a bare MISSING, which reads as "the artifact
+        # is gone" when the truth is the manifest never said where it was.
+        base = _write_run(tmp_path)
+        manifest_path = base / "run_a" / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["outputs"] = {}
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+        assert result.exit_code == 1
+        assert "UNVERIFIABLE evaluate:metrics (hashed output has no recorded path)" in result.output
+
+    def test_a_recorded_path_with_no_hash_is_unverifiable(self, tmp_path):
+        # Previously skipped in silence: the CLI iterated `output_hashes`, so a
+        # key present only in `outputs` was never looked at.
+        base = _write_run(tmp_path)
+        manifest_path = base / "run_a" / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["outputs"]["evaluate:extra"] = str(base / "run_a" / "evaluation" / "extra.json")
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+        assert result.exit_code == 1
+        assert "UNVERIFIABLE evaluate:extra (recorded output has no hash)" in result.output
+
+    def test_an_output_outside_the_run_and_the_tree_is_refused(self, tmp_path, monkeypatch):
+        # Containment the CLI did not have: a tampered manifest could aim the
+        # re-hash at any readable path and have a match reported as OK.
+        outside = tmp_path / "outside" / "metrics.json"
+        outside.parent.mkdir(parents=True)
+        outside.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
+        base = _write_run(tmp_path)
+        manifest_path = base / "run_a" / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["outputs"]["evaluate:metrics"] = str(outside)
+        payload["output_hashes"]["evaluate:metrics"] = sha256_path(outside)
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.chdir(tmp_path / "outside" / "..")
+        monkeypatch.chdir(base)
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 1
+        assert "UNBOUND  evaluate:metrics (recorded output path escapes the run roots)" in (
+            result.output
+        )
