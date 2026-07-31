@@ -40,7 +40,11 @@ from pathlib import Path
 from typing import BinaryIO
 from uuid import uuid4
 
+import structlog
+
 __all__ = ["TMP_MARKER", "atomic_write", "atomic_write_text", "fsync_dir"]
+
+log = structlog.get_logger()
 
 # In the temporary's name so a killed writer's leftovers are identifiable, and
 # so two writers racing on one target cannot end up sharing a scratch file.
@@ -153,13 +157,26 @@ def _commit(tmp: Path, path: Path) -> None:
     Not gated on the platform. A ``PermissionError`` that POSIX raises here is
     about the directory rather than a holder and will not clear, but it costs
     under a second to find that out, and one code path beats two.
+
+    Logged, because a scanner touching every file it sees is a property of the
+    machine rather than a one-off, and the checkpoint store commits once per
+    sampling block: a fit that pays the backoff on every block is a fit that
+    got mysteriously slower. Silently slow is worse to diagnose than loudly
+    failed.
     """
-    for delay in _COMMIT_RETRY_DELAYS:
+    for attempt, delay in enumerate(_COMMIT_RETRY_DELAYS, start=1):
         try:
             os.replace(tmp, path)
             return
         except PermissionError:
+            log.debug("atomic_commit_denied", path=str(path), attempt=attempt)
             time.sleep(delay)
+    log.warning(
+        "atomic_commit_still_denied",
+        path=str(path),
+        attempts=len(_COMMIT_RETRY_DELAYS),
+        message="something is holding the destination open; renaming one last time",
+    )
     os.replace(tmp, path)
 
 

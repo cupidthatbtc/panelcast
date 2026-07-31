@@ -88,6 +88,45 @@ def _no_backoff(monkeypatch) -> None:
     monkeypatch.setattr(atomic_module, "_COMMIT_RETRY_DELAYS", (0.0, 0.0, 0.0, 0.0))
 
 
+def _fdopen_that_fails(error: BaseException):
+    """An `os.fdopen` stand-in that takes the descriptor, then fails.
+
+    Ownership is the point: the real one closes the fd on its own error path,
+    so a stand-in that leaves it open would let a double close pass.
+    """
+    real = os.fdopen
+
+    def boom(fd, *_args, **_kwargs):
+        real(fd, "wb").close()
+        raise error
+
+    return boom
+
+
+def _deny_replace(monkeypatch, target: Path, until: int | None) -> dict[str, int]:
+    """Refuse renames onto ``target`` the way Windows refuses a held file.
+
+    Simulated, because POSIX has no equivalent to reproduce. `os.replace` has
+    no module-local name to patch, so the stand-in goes on the shared module
+    and passes every other destination straight through — anything else
+    renaming in-process during the test, pytest's own bytecode commits
+    included, must not see a denial that was meant for one path.
+    """
+    real = os.replace
+    attempts = {"n": 0}
+
+    def busy(src, dst):
+        if Path(dst) != target:
+            return real(src, dst)
+        attempts["n"] += 1
+        if until is None or attempts["n"] < until:
+            raise PermissionError("the file is in use by another process")
+        return real(src, dst)
+
+    monkeypatch.setattr(atomic_module.os, "replace", busy)
+    return attempts
+
+
 def _temps(directory: Path) -> list[Path]:
     return sorted(p for p in directory.iterdir() if TMP_MARKER in p.name)
 
@@ -223,54 +262,55 @@ class TestAtomicWrite:
     def test_a_handle_that_cannot_be_wrapped_leaves_nothing_behind(
         self, tmp_path: Path, monkeypatch
     ):
-        real = os.fdopen
-
-        def boom(fd, *args, **kwargs):
-            real(fd, "wb").close()  # fdopen owns the descriptor even when it fails
-            raise OSError("cannot wrap")
-
-        monkeypatch.setattr(os, "fdopen", boom)
+        # Patched on the shared `os` because `_open_temp` reaches it there and
+        # there is no local name; the stand-in takes the descriptor the way
+        # the real one does, so an unrelated caller in the window would be
+        # left as `fdopen` leaves it rather than with a live fd.
+        monkeypatch.setattr(os, "fdopen", _fdopen_that_fails(OSError("cannot wrap")))
 
         with pytest.raises(OSError, match="cannot wrap"):
             atomic_write_text(tmp_path / "record.json", "x")
 
         assert not list(tmp_path.iterdir())
 
+    def test_an_open_cleanup_failure_never_replaces_the_original_error(
+        self, tmp_path: Path, monkeypatch
+    ):
+        monkeypatch.setattr(os, "fdopen", _fdopen_that_fails(ValueError("cannot wrap")))
+
+        def refuse(_self, missing_ok: bool = False):
+            raise OSError("read-only directory")
+
+        monkeypatch.setattr(Path, "unlink", refuse)
+
+        with pytest.raises(ValueError, match="cannot wrap"):
+            atomic_write_text(tmp_path / "record.json", "x")
+
     def test_a_holder_on_the_target_is_waited_out_rather_than_fatal(
         self, tmp_path: Path, monkeypatch
     ):
         # Windows denies the rename while another process has the target open.
         # Simulated, because POSIX has no equivalent to reproduce.
-        real = os.replace
-        attempts = {"n": 0}
-
-        def busy(src, dst):
-            attempts["n"] += 1
-            if attempts["n"] < 3:
-                raise PermissionError("the file is in use by another process")
-            real(src, dst)
-
+        target = tmp_path / "manifest.json"
+        attempts = _deny_replace(monkeypatch, target, until=3)
         _no_backoff(monkeypatch)
-        monkeypatch.setattr(atomic_module.os, "replace", busy)
 
-        atomic_write_text(tmp_path / "manifest.json", "{}")
+        atomic_write_text(target, "{}")
 
-        # `>=`, not `==`: patching the shared `os` also counts any rename
-        # something else in-process makes inside the window — pytest's
-        # assertion rewriter commits bytecode this way.
-        assert attempts["n"] >= 3
-        assert (tmp_path / "manifest.json").read_text(encoding="utf-8") == "{}"
+        assert attempts["n"] == 3
+        assert target.read_text(encoding="utf-8") == "{}"
 
     def test_a_holder_that_never_lets_go_still_raises(self, tmp_path: Path, monkeypatch):
-        def busy(_src, _dst):
-            raise PermissionError("the file is in use by another process")
-
+        target = tmp_path / "manifest.json"
+        attempts = _deny_replace(monkeypatch, target, until=None)
         _no_backoff(monkeypatch)
-        monkeypatch.setattr(atomic_module.os, "replace", busy)
 
         with pytest.raises(PermissionError):
-            atomic_write_text(tmp_path / "manifest.json", "{}")
+            atomic_write_text(target, "{}")
 
+        # Four backoffs and the final unguarded attempt: the loop is bounded
+        # by the delay tuple and the last try is the one that reports.
+        assert attempts["n"] == len(atomic_module._COMMIT_RETRY_DELAYS) + 1
         assert not _temps(tmp_path)
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
