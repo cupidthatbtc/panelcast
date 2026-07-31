@@ -1474,9 +1474,10 @@ a sibling run. Two things still differ, both parameterized rather than implied.
 directory, so a run quarantined under `outputs/failed/<id>/` still verifies,
 while the skip path follows the active `latest` pointer and never looks under
 `failed/` — a quarantined run is not a source of truth for a new one. Run-owned
-means recorded under this workspace's output base; a path that merely happens
-to contain a directory of the same name is left where the manifest put it and
-refused by containment. The declared-path binding is the second, and the one
+means recorded as `<output base>/<run id>/…`, with the base matched by name so
+a relocated or differently-spelled `--output-base` still verifies; a path that
+merely contains a directory with the run's name is left where the manifest put
+it and refused by containment. The declared-path binding is the second, and the one
 place `runs verify` is the weaker side: only the stage caller holds the paths a
 stage declares, so only it refuses a manifest that redirects a static output at
 another file inside the run's own directory, where containment has nothing to

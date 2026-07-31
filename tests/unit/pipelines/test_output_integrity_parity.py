@@ -431,10 +431,10 @@ class TestTheDeclaredCallerDifference:
         assert fx.verify_accepts() is False
 
     def test_a_same_named_directory_elsewhere_is_not_run_owned(self, fx):
-        # The membership test is "recorded under this workspace's output base",
-        # not "contains a component with this name" — otherwise a manifest
-        # describing a different workspace launders its paths into this run
-        # directory and verifies clean.
+        # The membership test is `<output base>/<run id>/…`, not "contains a
+        # component with this name" — otherwise a manifest describing a
+        # different workspace launders its paths into this run directory and
+        # verifies clean.
         from panelcast.pipelines.output_integrity import reroot_under
 
         fx.quarantine()
@@ -445,6 +445,28 @@ class TestTheDeclaredCallerDifference:
         # ...while the run's own pre-move spelling still maps.
         recorded = fx.output_base / "run_a" / "evaluation" / "metrics.json"
         assert reroot_under(recorded, moved) == moved / "evaluation" / "metrics.json"
+
+    def test_a_relocated_output_base_still_maps(self, tmp_path):
+        # The base is matched by name, so the spelling a manifest recorded —
+        # usually the relative default — still maps onto a run directory that
+        # is absolute, moved, or both. Comparing them as paths would resolve
+        # the recorded one against whatever directory the command runs in.
+        from panelcast.pipelines.output_integrity import reroot_under
+
+        recorded = Path("outputs") / "gone" / "evaluation" / "metrics.json"
+        moved = tmp_path / "archive" / "outputs" / "failed" / "gone"
+        active = tmp_path / "archive" / "outputs" / "gone"
+
+        assert reroot_under(recorded, moved) == moved / "evaluation" / "metrics.json"
+        assert reroot_under(recorded, active) == active / "evaluation" / "metrics.json"
+
+    def test_the_quarantine_directory_is_not_mistaken_for_the_base(self, tmp_path):
+        # An active run's grandparent is the workspace, not an output base, so
+        # accepting it would launder `<workspace>/<id>/…` back in.
+        from panelcast.pipelines.output_integrity import reroot_under
+
+        active = tmp_path / "outputs" / "run_a"
+        assert reroot_under(tmp_path / "run_a" / "x.json", active) == tmp_path / "run_a" / "x.json"
 
     def test_a_foreign_workspace_manifest_does_not_verify_clean(self, fx):
         # End to end: the same shape through `runs verify`, which is where a

@@ -18,6 +18,9 @@ from pathlib import Path
 
 from panelcast.utils.hashing import sha256_path
 
+# Where the orchestrator moves a failed run; `paths.py` reserves the name.
+QUARANTINE_DIR = "failed"
+
 # Verdict labels, doubling as the `runs verify` status column.
 OK = "OK"
 MISSING = "MISSING"
@@ -84,13 +87,20 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     the same mapping applies to run-owned *inputs* (#420), which this module
     does not verify but must not stand in the way of.
 
-    "Run-owned" is recorded *under this workspace's output base*, not merely
-    containing a component of the same name: a bare-name match would launder
+    "Run-owned" means recorded as ``<output base>/<run id>/<rest>``: the run
+    id alone is not enough, since a bare-name match would launder
     ``/somewhere/else/<id>/metrics.json`` into the run directory and let a
-    manifest that describes a different workspace verify clean. The base is
-    the run directory's parent for an active run and its grandparent for one
-    under ``failed/``, which is the pre- and post-move spelling of the same
-    place.
+    manifest describing a different workspace verify clean.
+
+    The base is matched by *name*, not by identity. A manifest records whatever
+    ``--output-base`` was spelled as — usually the relative default ``outputs``
+    — while the run directory now in hand may be absolute, relocated, or both,
+    and comparing them as paths would resolve the recorded one against whatever
+    directory the command happens to run in. Comparing names keeps a moved
+    workspace verifiable and still refuses a sibling tree, which is the
+    distinction that matters; anything it lets through is judged by containment
+    afterwards. The name comes from the run's parent, or its grandparent when
+    the run sits under the quarantine directory.
 
     A run-owned path maps whether or not the target survived the move: where a
     deleted artifact *should* be is the useful answer, and reporting the
@@ -109,18 +119,15 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     if run_dir.name not in parts:
         return path
     index = parts.index(run_dir.name)
-    recorded_base = Path(*parts[:index]) if index else Path()
-    if not any(_same_dir(recorded_base, base) for base in (run_dir.parent, run_dir.parent.parent)):
+    if not index or parts[index - 1] != _output_base_name(run_dir):
         return path
     return run_dir.joinpath(*parts[index + 1 :])
 
 
-def _same_dir(left: Path, right: Path) -> bool:
-    """Whether two spellings name the same directory; unresolvable is not."""
-    try:
-        return left.resolve() == right.resolve()
-    except (OSError, ValueError, RuntimeError):
-        return False
+def _output_base_name(run_dir: Path) -> str:
+    """The name of the output base ``run_dir`` sits in, seeing past quarantine."""
+    parent = run_dir.parent
+    return parent.parent.name if parent.name == QUARANTINE_DIR else parent.name
 
 
 def verify_output_records(
