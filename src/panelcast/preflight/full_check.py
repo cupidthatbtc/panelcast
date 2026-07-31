@@ -177,6 +177,8 @@ def _run_mini_mcmc_subprocess(
         - success: bool - Whether mini-run completed
         - peak_memory_bytes: int - Peak GPU memory in bytes
         - runtime_seconds: float - Mini-run execution time
+        - effective_exclude_collection: list[str] - the exclusion the mini-run
+          actually applied, which reconciliation can shorten
         - error: str (only if success=False)
     """
     # Set up environment with preallocation disabled for accurate measurement
