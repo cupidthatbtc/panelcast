@@ -466,6 +466,16 @@ class TestConfirmationResume:
                 "the run was fit with another value",
                 "latent_process",
             ),
+            (
+                lambda m: m["experiment_identity"]["config_payload"].pop("seed"),
+                "manifest does not record the key that identifies this fit",
+                "seed",
+            ),
+            (
+                lambda m: m["experiment_identity"]["config_payload"].pop("latent_process"),
+                "manifest does not record the key that identifies this fit",
+                "latent_process",
+            ),
         ],
     )
     def test_a_cached_run_that_cannot_prove_itself_refits(
@@ -553,15 +563,42 @@ class TestConfirmationResume:
             None,
         )
 
-    def test_an_unresolved_descriptor_leaves_the_ledger_in_place(self):
+    def test_a_ledger_written_blind_survives_the_healthy_call(self):
         """A stale mount must not cost the refit twice — once now, once when it heals."""
         healthy = {"promote_z": 2.0, "dataset_descriptor_hash": "abc"}
         blind = {"promote_z": 2.0, "dataset_descriptor_hash": None}
-        assert _identity_changes(healthy, blind) == []
         assert _identity_changes(blind, healthy) == []
+        # The mirror case still archives: this call reuses nothing either way,
+        # and the checkpoint would overwrite the ledger without a copy.
+        assert _identity_changes(healthy, blind) == ["dataset_descriptor_hash"]
         assert _identity_changes({"dataset_descriptor_hash": "xyz"}, healthy) == [
             "dataset_descriptor_hash",
             "promote_z",
+        ]
+
+    def test_a_blind_descriptor_refits_every_seed_without_raising(
+        self, tmp_path, monkeypatch
+    ):
+        """The whole path, not its helpers: a descriptor that will not load."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+
+        def unloadable(_ref):
+            raise OSError("stale mount")
+
+        monkeypatch.setattr("panelcast.select.confirmation.load_descriptor", unloadable)
+        calls, counting = self._counting(launch)
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2
+        assert result.dataset_descriptor_hash is None
+        persisted = json.loads(
+            (cfg.sweep_dir / "confirmation.json").read_text(encoding="utf-8")
+        )
+        assert persisted["dataset_descriptor_hash"] is None
+        assert [
+            p
+            for p in cfg.sweep_dir.iterdir()
+            if p.name.startswith("confirmation_") and p.suffix == ".json"
         ]
 
     def test_reused_seed_rechecks_convergence(self, tmp_path, monkeypatch):

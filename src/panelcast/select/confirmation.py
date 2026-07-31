@@ -144,13 +144,24 @@ def _base_config_payload(
 
 
 def _canonical_hash(payload: dict[str, Any]) -> str:
+    """SHA-256 of a payload's canonical JSON.
+
+    ``default=str`` is a backstop rather than a coercion that matters:
+    ``_write_config`` hands the same payload to ``yaml.safe_dump``, which
+    refuses anything that is not a YAML scalar, so a value that can reach a fit
+    at all is already JSON-shaped. It only keeps the identity from raising
+    *before* that clearer failure.
+    """
     return hashlib.sha256(
         json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     ).hexdigest()
 
 
 def _cached_run_mismatch(
-    run_dir: Path, descriptor_hash: str | None, fit_config: dict[str, Any]
+    run_dir: Path,
+    descriptor_hash: str | None,
+    fit_config: dict[str, Any],
+    discriminating: frozenset[str] = frozenset(),
 ) -> tuple[str, str | None] | None:
     """Why this run's manifest is not the fit it stands for; None = it is.
 
@@ -170,7 +181,12 @@ def _cached_run_mismatch(
     evidence.
 
     Only keys the manifest recorded are compared: a config knob it never
-    mentions has no recorded value to disagree with.
+    mentions has no recorded value to disagree with. That rule needs a floor,
+    or a manifest that records none of the keys telling the two runs apart
+    passes with zero comparisons — removing a key would defeat the gate more
+    cheaply than forging one. ``discriminating`` is the set that must be
+    *present*: the seed, the knobs the winner differs from the reference by,
+    and the dataset when one is set.
     """
     if descriptor_hash is None:
         return "this call could not resolve its own dataset descriptor", None
@@ -191,6 +207,9 @@ def _cached_run_mismatch(
     recorded = identity.get("config_payload")
     if not isinstance(recorded, dict):
         return "manifest records no config payload", None
+    missing = sorted(discriminating - set(recorded))
+    if missing:
+        return "manifest does not record the key that identifies this fit", missing[0]
     for key, value in fit_config.items():
         if key not in recorded:
             continue
@@ -204,18 +223,19 @@ def _cached_run_mismatch(
 def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> list[str]:
     """Identity keys whose stored value contradicts this call's.
 
-    An unresolved descriptor hash on either side is unknown, not different.
-    Archiving on it would cost a full publication-scale refit for a stale mount
-    — and cost a second one on the next healthy call, which would find the
-    ledger the unresolved call wrote and archive that too. Reuse is refused
-    per run while the hash is unresolved, so nothing is admitted by the
-    silence.
+    A descriptor hash the *ledger* never resolved is unknown rather than
+    different: archiving on it would make a stale mount cost a full
+    publication-scale refit on the healthy call that follows it. The mirror
+    case — this call blind against a ledger that knows its hash — is not
+    exempted, because it buys nothing: reuse is refused per run while the hash
+    is unresolved, so the seeds refit and the per-seed checkpoint overwrites
+    the ledger either way. Archiving at least keeps a copy of what it replaced.
     """
     return sorted(
         key
         for key, value in identity.items()
         if recorded.get(key) != value
-        and not (key == "dataset_descriptor_hash" and None in (value, recorded.get(key)))
+        and not (key == "dataset_descriptor_hash" and recorded.get(key) is None)
     )
 
 
@@ -224,6 +244,7 @@ def _reusable_prior_seeds(
     identity: dict[str, Any],
     descriptor_hash: str | None,
     fit_config: Callable[[str, int], dict[str, Any]],
+    discriminating: frozenset[str],
 ) -> dict[int, SeedResult]:
     """Prior seeds whose snapshots survive, IF the stored protocol matches this call.
 
@@ -262,7 +283,7 @@ def _reusable_prior_seeds(
             for label, run in (("reference", ref), ("winner", win))
             if (
                 mismatch := _cached_run_mismatch(
-                    Path(run), descriptor_hash, fit_config(label, seed)
+                    Path(run), descriptor_hash, fit_config(label, seed), discriminating
                 )
             )
         ]
@@ -437,13 +458,25 @@ def run_confirmation(
         "dataset_descriptor_hash": descriptor_hash,
         "base_config_hash": result.base_config_hash,
     }
+    # One source for both sides: the fits are launched from this, and cached
+    # runs are checked against it, so the two cannot drift into a cache that
+    # rejects every run it built.
     arms = {"reference": dict(base), "winner": {**base, **winner_knobs}}
+    # What a manifest has to record before it can be believed to be this fit
+    # rather than the other side of the pair, or another seed, or another domain.
+    discriminating = frozenset(
+        {"seed"}
+        | {k for k, v in arms["winner"].items() if arms["reference"].get(k) != v}
+        | ({"dataset"} if cfg.dataset is not None else set())
+    )
 
     def fit_config(label: str, seed: int) -> dict[str, Any]:
         """What the run behind ``label`` on ``seed`` must say it was fit with."""
         return _fit_config_payload(cfg, arms[label], sampler_overrides, seed)
 
-    prior = _reusable_prior_seeds(out_path, identity, descriptor_hash, fit_config)
+    prior = _reusable_prior_seeds(
+        out_path, identity, descriptor_hash, fit_config, discriminating
+    )
     timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
     def _resolve(run_id: str, seed: int, label: str, *, after_fit: bool) -> Path:
@@ -471,7 +504,7 @@ def run_confirmation(
             phase = "after its fit" if after_fit else "before launching"
             raise RuntimeError(f"{label} fit on seed {seed} refused {phase} {detail}") from exc
 
-    def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:
+    def _one_fit(seed: int, label: str) -> Path | None:
         config_path = cfg.sweep_dir / f"confirm_{label}_seed{seed}.yaml"
         # Named up front (#167 handshake) — no dependence on the mutable
         # `latest` pointer; unique per attempt so retries never collide.
@@ -482,7 +515,7 @@ def run_confirmation(
         # post-fit call below can see a symlink escape
         # (test_confirmation_lookup_refuses_a_symlinked_escape covers both).
         _resolve(run_id, seed, label, after_fit=False)
-        _write_config(cfg, merged, seed, config_path, sampler_overrides, run_id=run_id)
+        _write_config(cfg, arms[label], seed, config_path, sampler_overrides, run_id=run_id)
         log.info("confirmation_fit_start", label=label, seed=seed, timeout=timeout)
         started = time.monotonic()
         code, tail = launch(config_path, panelcast_bin, timeout)
@@ -510,9 +543,9 @@ def run_confirmation(
             continue
         seed_result = SeedResult(seed=seed)
         try:
-            ref_run = _one_fit(dict(base), seed, "reference")
+            ref_run = _one_fit(seed, "reference")
             seed_result.reference_run = str(ref_run) if ref_run else None
-            win_run = _one_fit({**base, **winner_knobs}, seed, "winner")
+            win_run = _one_fit(seed, "winner")
             seed_result.winner_run = str(win_run) if win_run else None
             seed_result.winner_converged = _run_converged(win_run)
             if ref_run is None or win_run is None:
