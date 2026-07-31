@@ -664,7 +664,6 @@ class TestConfirmationResume:
         assert calls["n"] == 0
         assert second.fit_config_hash == first.fit_config_hash
 
-
     def test_an_option_the_manifest_never_recorded_still_reuses(self, tmp_path, monkeypatch):
         """A key with no recorded value has nothing to disagree with."""
         cfg, launch = _fake_env(tmp_path, monkeypatch)
@@ -734,6 +733,7 @@ class TestConfirmationResume:
                 {"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting
             )
             assert calls["n"] == 2
+            assert [e["event"] for e in logs].count("confirmation_cache_unusable") == 1
             # Not "the dataset changed", which is what a stale mount must never
             # be reported as — and the only thing distinguishing the guard orders.
             assert [
@@ -786,6 +786,9 @@ class TestConfirmationResume:
         def unloadable(_ref):
             raise OSError("stale mount")
 
+        def failing(config_path, panelcast_bin, timeout_seconds=None):
+            return 1, "boom"
+
         def archives():
             return sorted(
                 p.name
@@ -795,14 +798,18 @@ class TestConfirmationResume:
 
         with monkeypatch.context() as blind:
             blind.setattr("panelcast.select.confirmation.load_descriptor", unloadable)
-            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+            # Failing, so the ledger it leaves names no run dirs: only a real
+            # protocol change can be what moves it aside.
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=failing)
             first = archives()
             with structlog.testing.capture_logs() as logs:
                 run_confirmation({"latent_process": "gp"}, cfg, seeds=(42,), launch=launch)
         assert len(archives()) == len(first) + 1
         assert [
-            e["changed"] for e in logs if e["event"] == "confirmation_cache_archived"
-        ] == [["fit_config_hash", "winner_knobs"]]
+            (e["reason"], e["changed"])
+            for e in logs
+            if e["event"] == "confirmation_cache_archived"
+        ] == [("protocol changed", ["fit_config_hash", "winner_knobs"])]
 
     def test_retries_on_a_dataset_that_is_gone_do_not_pile_up_copies(
         self, tmp_path, monkeypatch
@@ -830,6 +837,27 @@ class TestConfirmationResume:
             run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=failing)
             run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=failing)
         assert archives() == after_first
+
+    def test_a_seed_that_paired_badly_is_still_worth_a_copy(self, tmp_path, monkeypatch):
+        """Worth keeping is a lower bar than worth reusing: the run dirs are real."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        out = cfg.sweep_dir / "confirmation.json"
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        payload["seeds"][0]["error"] = "pairing raised after both fits landed"
+        out.write_text(json.dumps(payload), encoding="utf-8")
+
+        def unloadable(_ref):
+            raise OSError("stale mount")
+
+        with monkeypatch.context() as blind:
+            blind.setattr("panelcast.select.confirmation.load_descriptor", unloadable)
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        assert [
+            p
+            for p in cfg.sweep_dir.iterdir()
+            if p.name.startswith("confirmation_") and p.suffix == ".json"
+        ]
 
     def test_reused_seed_rechecks_convergence(self, tmp_path, monkeypatch):
         cfg, launch = _fake_env(tmp_path, monkeypatch)

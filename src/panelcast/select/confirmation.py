@@ -268,9 +268,16 @@ def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> lis
 
 
 def _holds_a_paired_seed(payload: dict[str, Any]) -> bool:
-    """Whether a stored ledger records a seed a healthy call could have reused."""
+    """Whether a stored ledger is the only index into a pair of finished fits.
+
+    Deliberately wider than the reuse rule below, which also demands no error:
+    a seed whose two fits completed and whose *pairing* then failed still names
+    two publication-scale run dirs under ids unique per attempt, and losing the
+    file is losing the only mapping from seed and label to those directories.
+    Worth keeping is a lower bar than worth reusing.
+    """
     return any(
-        entry.get("reference_run") and entry.get("winner_run") and not entry.get("error")
+        entry.get("reference_run") and entry.get("winner_run")
         for entry in payload.get("seeds", [])
     )
 
@@ -318,21 +325,23 @@ def _reusable_prior_seeds(
     if descriptor_hash is None:
         # Ahead of the identity comparison, which would otherwise report the
         # unresolved hash as a changed dataset — the one conclusion a stale
-        # mount must not lead to. Said once, rather than once per run: no
-        # snapshot can be tied to a domain this call could not name.
-        log.warning("confirmation_cache_unusable", reason="unresolved dataset descriptor")
+        # mount must not lead to. That this call is blind has already been said
+        # by the caller, once, before any cache was consulted.
+        #
         # The ledger moves aside because the per-seed checkpoint is about to
-        # overwrite it — but only while it holds something a healthy call would
-        # have reused. A descriptor that is *gone* also fails every fit, so its
-        # retries leave ledgers with no paired seed in them and stop piling up
-        # copies; one that merely could not be read leaves a complete verdict
-        # whose run dirs nothing else indexes. The changed keys come with the
-        # descriptor hash removed: it differs because this call is blind, the
-        # reason says so, and listing it would read as the changed dataset.
+        # overwrite it — but only while it is worth keeping. A descriptor that
+        # is *gone* also fails every fit, so its retries leave ledgers naming no
+        # run dirs at all and stop piling up copies; one that merely could not
+        # be read leaves a file that is the only index into finished fits. The
+        # changed keys come with the descriptor hash removed: it differs
+        # because this call is blind, and listing it would read as the changed
+        # dataset.
         changed = [k for k in _identity_changes(payload, identity) if k != _DESCRIPTOR_KEY]
         if changed or _holds_a_paired_seed(payload):
             _archive(
-                out_path, reason="unresolved dataset descriptor", changed=changed or None
+                out_path,
+                reason="protocol changed" if changed else "unresolved dataset descriptor",
+                changed=changed or None,
             )
         return {}
     changed = _identity_changes(payload, identity)
@@ -552,6 +561,16 @@ def run_confirmation(
             "compare the reference with itself."
         )
     descriptor_hash = _descriptor_hash(dataset)
+    if descriptor_hash is None:
+        # Once, here, rather than wherever a cache happens to be consulted: a
+        # first confirmation in a fresh sweep dir reaches no cache at all, and
+        # would otherwise persist a null hash — which every later call then
+        # treats as unknown rather than changed — with nothing having said so.
+        log.warning(
+            "confirmation_cache_unusable",
+            reason="unresolved dataset descriptor",
+            dataset=dataset,
+        )
     result = ConfirmationResult(
         winner_knobs=winner_knobs,
         promote_z=promote_z,
