@@ -10,7 +10,9 @@ rebuilds the flat caches (strictly serial, like the sweep).
 
 from __future__ import annotations
 
+import hashlib
 import json
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -21,6 +23,7 @@ from typing import Any
 import structlog
 import yaml  # type: ignore[import-untyped]
 
+from panelcast.config.descriptor import load_descriptor
 from panelcast.paths import RunPathError
 from panelcast.select.runner import (
     SweepConfig,
@@ -37,6 +40,10 @@ log = structlog.get_logger()
 
 _CONFIRMATION_STAGES = ["splits", "features", "train", "evaluate"]
 
+# The identity key both blind-path branches special-case, named once so they
+# cannot disagree about which one it is.
+_DESCRIPTOR_KEY = "dataset_descriptor_hash"
+
 
 @dataclass
 class SeedResult:
@@ -52,8 +59,10 @@ class SeedResult:
 class ConfirmationResult:
     """Per-seed paired verdicts plus the holds-on-every-seed conclusion.
 
-    ``sampler``/``version``/``seeds_planned`` echo the protocol so a resumed
-    confirmation can prove the stored ledger belongs to the same call.
+    ``sampler``/``version``/``seeds_planned``/``dataset_descriptor_hash``/
+    ``fit_config_hash`` echo the protocol so a resumed confirmation can prove
+    the stored ledger belongs to the same call, on the same data, from the same
+    configuration — reference arm included, not only the winner's delta from it.
     """
 
     winner_knobs: dict[str, Any]
@@ -62,6 +71,8 @@ class ConfirmationResult:
     sampler: dict[str, Any] | None = None
     version: str | None = None
     seeds_planned: list[int] = field(default_factory=list)
+    dataset_descriptor_hash: str | None = None
+    fit_config_hash: str | None = None
 
     @property
     def confirmed(self) -> bool:
@@ -90,6 +101,8 @@ class ConfirmationResult:
             "sampler": self.sampler,
             "version": self.version,
             "seeds_planned": self.seeds_planned,
+            "dataset_descriptor_hash": self.dataset_descriptor_hash,
+            "fit_config_hash": self.fit_config_hash,
             "seeds": [asdict(s) for s in self.seeds],
         }
 
@@ -103,37 +116,342 @@ def _sampler_echo(cfg: SweepConfig, sampler_overrides: dict[str, int] | None) ->
     }
 
 
-def _reusable_prior_seeds(out_path: Path, identity: dict[str, Any]) -> dict[int, SeedResult]:
+def _descriptor_hash(dataset: str | None) -> str | None:
+    """Hash of the descriptor these fits will resolve, or None if it won't load.
+
+    Takes the reference out of the fit payload rather than out of ``cfg``:
+    ``cfg.dataset`` only overwrites the payload's ``dataset`` when it is set, so
+    an ``extra_config`` entry can send the fits to a domain ``cfg`` never names.
+    Reading what will be written is what makes this the domain the fits actually
+    run against. An unset dataset resolves the same default the fits will, so
+    the identity holds the hash their manifests record either way. A descriptor
+    that cannot be loaded is not a value: None would equal the None a manifest
+    that recorded no hash produces, so ``_reusable_prior_seeds`` refuses every
+    cached run while it is unresolved rather than letting the two absences match.
+    """
+    try:
+        return load_descriptor(dataset).descriptor_hash()
+    except (OSError, ValueError, yaml.YAMLError):
+        return None
+
+
+def _as_recorded(value: Any) -> Any:
+    """``value`` as it comes back out of a JSON file.
+
+    Both maps this module compares against were written as JSON, where a tuple
+    is a list and a non-string dict key is a string. Round-tripping this side
+    the same way keeps a comparison from being decided by that rather than by
+    the values, at any nesting depth — otherwise a tuple-valued knob makes the
+    identity never match, refitting on every call.
+
+    ``default=str`` is a backstop rather than a coercion that matters:
+    ``_write_config`` hands the same payload to ``yaml.safe_dump``, whose
+    representers cover the scalars and containers JSON also covers and refuse
+    the rest, so a value that can reach a fit at all round-trips here on its
+    own. It only keeps this from raising *before* that clearer failure.
+    """
+    return json.loads(json.dumps(value, default=str))
+
+
+def _canonical_hash(payload: dict[str, Any]) -> str:
+    """SHA-256 of a payload's canonical JSON, normalized the way both gates are."""
+    return hashlib.sha256(
+        json.dumps(_as_recorded(payload), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _discriminating_keys(
+    reference: dict[str, Any], winner: dict[str, Any], dataset: str | None
+) -> frozenset[str]:
+    """Keys a manifest must record before it can be believed to be one of these fits.
+
+    Not "this is the same experiment" — that is the identity file's job — but
+    "this run is *this* side of the pair, on *this* seed, in *this* domain".
+    Diffed on the payloads rather than on the arms behind them, because a knob
+    a later base assignment overwrites is the same in both payloads and
+    separates nothing.
+    """
+    return frozenset(
+        {"seed"}
+        | {k for k in set(reference) | set(winner) if reference.get(k) != winner.get(k)}
+        | ({"dataset"} if dataset is not None else set())
+    )
+
+
+def _cached_run_mismatch(
+    run_dir: Path,
+    descriptor_hash: str,
+    fit_config: dict[str, Any],
+    discriminating: frozenset[str],
+) -> tuple[str, str | None] | None:
+    """Why this run's manifest is not the fit it stands for; None = it is.
+
+    Returns ``(reason, config key)`` — the key is None when what failed is not
+    a config comparison, so a reader is never left guessing whether a value is
+    prose or a knob name.
+
+    The identity file proves what the *previous call* declared; only the run's
+    own manifest proves what was fit. Both are needed: an identity file written
+    by a version that recorded less, or copied alongside its snapshots, would
+    otherwise carry a foreign run into this verdict. ``fit_config`` is the
+    arm's own payload rather than the arm-free base, so the reference and the
+    winner of a seed are told apart — swap the two run dirs and the knobs no
+    longer agree with the manifests. A run that recorded no experiment identity
+    cannot be tied to this one either way, so it refits: the paired z is the
+    evidence a promotion is argued from, and an unprovable snapshot is not
+    evidence.
+
+    Only keys the manifest recorded are compared: a config knob it never
+    mentions has no recorded value to disagree with. That rule needs a floor,
+    or a manifest that records none of the keys telling the two runs apart
+    passes with zero comparisons — removing a key would defeat the gate more
+    cheaply than forging one. ``discriminating`` is the set that must be
+    *present*: the seed, the keys the two payloads differ on, and the dataset
+    when one is set.
+    """
+    try:
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "no readable manifest", None
+    if manifest.get("success") is not True:
+        return "manifest does not record a successful run", None
+    identity = manifest.get("experiment_identity")
+    if not isinstance(identity, dict) or not identity:
+        return "manifest records no experiment identity", None
+    recorded_hash = identity.get("descriptor_hash")
+    if recorded_hash is None:
+        return "manifest records no dataset descriptor hash", None
+    if recorded_hash != descriptor_hash:
+        return "the run was fit on another dataset", "dataset_descriptor_hash"
+    recorded = identity.get("config_payload")
+    if not isinstance(recorded, dict):
+        return "manifest records no config payload", None
+    # A key whose value here is None has nothing to be recorded: the recorder
+    # omits None. What separates the two runs on such a key is the *other*
+    # side's value, which is recorded and compared below.
+    missing = sorted(
+        key
+        for key in discriminating
+        if key not in recorded and fit_config.get(key) is not None
+    )
+    if missing:
+        return "manifest does not record the key that identifies this fit", missing[0]
+    for key, value in fit_config.items():
+        if key in recorded and recorded[key] != _as_recorded(value):
+            return "the run was fit with another value", key
+    return None
+
+
+def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> list[str]:
+    """Identity keys whose stored value contradicts this call's.
+
+    A descriptor hash the *ledger* never resolved is unknown rather than
+    different: archiving on it would make a stale mount cost a full
+    publication-scale refit on the healthy call that follows it. The mirror
+    case — this call blind against a ledger that knows its hash — is not
+    exempted, but nothing here decides it either: ``_reusable_prior_seeds``
+    returns before this runs while its own hash is unresolved, so the
+    one-sidedness is what keeps that ordering from mattering rather than a
+    verdict anyone reaches.
+
+    The exemption cannot tell a recorded ``null`` from an absent key, so a
+    ledger written before this field existed reads as blind on it. What still
+    archives such a file is ``fit_config_hash``, absent from it for the same
+    reason and not exempted — retiring that key would quietly make pre-#418
+    ledgers reusable.
+    """
+    return sorted(
+        key
+        for key, value in identity.items()
+        if recorded.get(key) != _as_recorded(value)
+        and not (key == _DESCRIPTOR_KEY and recorded.get(key) is None)
+    )
+
+
+def _indexes_a_run(entry: dict[str, Any]) -> bool:
+    """Whether a ledger entry is the only name a finished run dir has.
+
+    Deliberately wider than the reuse rule below, which demands both sides and
+    no error: a seed whose winner crashed after its reference landed, or whose
+    two fits landed and whose *pairing* then raised, still names
+    publication-scale run dirs under ids unique per attempt. Losing the file is
+    losing the only mapping from seed and label to those directories, so worth
+    keeping is a lower bar than worth reusing.
+    """
+    return bool(entry.get("reference_run") or entry.get("winner_run"))
+
+
+def _entry_seed(entry: dict[str, Any]) -> int | None:
+    """The seed a ledger entry stands for, or None if it does not name one.
+
+    A ledger is a file on disk that this module already treats as externally
+    mutable, so a malformed seed makes an entry unusable rather than fatal —
+    the same answer an unparseable ledger gets.
+    """
+    try:
+        return int(entry["seed"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _orphaned_entries(
+    payload: dict[str, Any], reusable: dict[int, SeedResult]
+) -> list[dict[str, Any]]:
+    """Ledger entries naming a finished run this call will not carry forward."""
+    return [
+        entry
+        for entry in payload.get("seeds", [])
+        if _indexes_a_run(entry) and _entry_seed(entry) not in reusable
+    ]
+
+
+def _archive(
+    out_path: Path, *, reason: str, changed: list[str] | None = None, keep: bool = False
+) -> None:
+    """Put the prior ledger somewhere it will survive the next checkpoint.
+
+    Moved by default — evidence is never mixed across protocols, and a caller
+    that reuses nothing has no use for the original. ``keep`` copies instead,
+    for the one caller that hands back reusable seeds: taking the file away
+    there would leave no ledger on disk until the first checkpoint, and an
+    interruption in that window would refit seeds that were verified minutes
+    earlier.
+
+    Microseconds in the name because the blind path archives on every re-entry:
+    at second granularity two archives in one run would replace each other, and
+    the copy exists precisely so nothing is lost. ``changed`` stays its own
+    field rather than being folded into ``reason``, so a reader never has to
+    split prose to learn which key moved.
+
+    Best-effort by construction: the copy is a courtesy to whoever has to find
+    the orphaned run dirs later, and failing to take it must not stop a
+    confirmation that is otherwise able to run.
+    """
+    archived = out_path.with_name(f"confirmation_{datetime.now():%Y%m%dT%H%M%S%f}.json")
+    try:
+        if keep:
+            shutil.copyfile(out_path, archived)
+        else:
+            out_path.replace(archived)
+    except OSError as exc:
+        log.warning("confirmation_cache_unarchivable", path=str(out_path), error=str(exc))
+        return
+    log.warning(
+        "confirmation_cache_archived", archived=str(archived), reason=reason, changed=changed
+    )
+
+
+def _reusable_prior_seeds(
+    out_path: Path,
+    identity: dict[str, Any],
+    descriptor_hash: str | None,
+    fit_config: Callable[[str, int], dict[str, Any]],
+    discriminating: frozenset[str],
+) -> dict[int, SeedResult]:
     """Prior seeds whose snapshots survive, IF the stored protocol matches this call.
 
-    Any identity mismatch (knobs, z bar, sampler scale, seeds tuple, version)
-    archives the old ledger and starts fresh — evidence is never mixed across
-    protocols. Old-format files without the echo fields mismatch by construction.
+    Any identity mismatch (knobs, z bar, sampler scale, seeds tuple, version,
+    dataset, base config) archives the old ledger and starts fresh — evidence is
+    never mixed across protocols, with the one exemption ``_identity_changes``
+    documents. Old-format files without the echo fields mismatch by
+    construction. A seed whose runs survive the identity file still has both
+    its run dirs checked against their own manifests, each against the arm and
+    seed it stands for; a call that cannot resolve its own descriptor hash has
+    nothing to check them against and reuses none of them.
+
+    The ledger is also put aside — protocol or no protocol — whenever this call
+    will overwrite one that is the only name a finished run dir has, including
+    one it cannot parse. Run ids are unique per attempt, so nothing else maps a
+    seed and a label onto those directories.
     """
     if not out_path.exists():
         return {}
     try:
         payload = json.loads(out_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        # Unreadable is not the same as worthless: a truncated ledger still
+        # names the run dirs a verdict could be rebuilt from, and the
+        # checkpoint is about to write over it.
+        _archive(out_path, reason="unreadable ledger")
         return {}
-    if {k: payload.get(k) for k in identity} != identity:
-        archived = out_path.with_name(f"confirmation_{time.strftime('%Y%m%dT%H%M%S')}.json")
-        out_path.replace(archived)
-        log.warning("confirmation_protocol_changed", archived=str(archived))
+    if descriptor_hash is None:
+        # Ahead of the identity comparison, which would otherwise report the
+        # unresolved hash as a changed dataset — the one conclusion a stale
+        # mount must not lead to. That this call is blind has already been said
+        # by the caller, once, before any cache was consulted.
+        #
+        # The ledger moves aside because the per-seed checkpoint is about to
+        # overwrite it — but only while it is worth keeping. A descriptor that
+        # is *gone* also fails every fit, so its retries leave ledgers naming no
+        # run dirs at all and stop piling up copies; one that merely could not
+        # be read leaves a file that is the only index into finished fits. The
+        # changed keys come with the descriptor hash removed: it differs
+        # because this call is blind, and listing it would read as the changed
+        # dataset.
+        changed = [k for k in _identity_changes(payload, identity) if k != _DESCRIPTOR_KEY]
+        if changed or _orphaned_entries(payload, {}):
+            _archive(
+                out_path,
+                reason="protocol changed" if changed else "unresolved dataset descriptor",
+                changed=changed or None,
+            )
+        return {}
+    changed = _identity_changes(payload, identity)
+    if changed:
+        _archive(out_path, reason="protocol changed", changed=changed)
         return {}
     reusable: dict[int, SeedResult] = {}
     for entry in payload.get("seeds", []):
         ref, win = entry.get("reference_run"), entry.get("winner_run")
-        if not ref or not win or entry.get("error"):
+        seed = _entry_seed(entry)
+        # Said per seed, because the archive below cannot: a seed that never
+        # finished was refused by nothing, so an operator grepping for the
+        # rejection that caused the copy would come back empty.
+        if not ref or not win or entry.get("error") or seed is None:
+            if _indexes_a_run(entry):
+                log.warning(
+                    "confirmation_cached_seed_unusable",
+                    seed=seed,
+                    reason="the seed did not finish",
+                )
             continue
         if not (
             (Path(ref) / "evaluation" / "log_likelihood.nc").exists()
             and (Path(win) / "evaluation" / "log_likelihood.nc").exists()
         ):
+            log.warning(
+                "confirmation_cached_seed_unusable",
+                seed=seed,
+                reason="its log-likelihood snapshot is gone",
+            )
             continue
-        reusable[int(entry["seed"])] = SeedResult(
-            seed=int(entry["seed"]), reference_run=ref, winner_run=win
-        )
+        rejected = [
+            (label, mismatch)
+            for label, run in (("reference", ref), ("winner", win))
+            if (
+                mismatch := _cached_run_mismatch(
+                    Path(run), descriptor_hash, fit_config(label, seed), discriminating
+                )
+            )
+        ]
+        if rejected:
+            for label, (reason, key) in rejected:
+                log.warning(
+                    "confirmation_cached_run_rejected",
+                    seed=seed,
+                    label=label,
+                    reason=reason,
+                    key=key,
+                )
+            continue
+        reusable[seed] = SeedResult(seed=seed, reference_run=ref, winner_run=win)
+    # Same doctrine as the blind branch, on the path that reaches it most
+    # often: everything the gate refuses is a fit that ran — the snapshot
+    # check above already passed — so a seed this call will refit takes its
+    # run dirs' only name with it unless a copy is kept. Copied rather than
+    # moved, because this is the one caller that hands seeds back.
+    if _orphaned_entries(payload, reusable):
+        _archive(out_path, reason="cached seeds were not carried forward", keep=True)
     return reusable
 
 
@@ -164,20 +482,20 @@ def _run_converged(run_dir: Path | None) -> bool:
     return isinstance(payload, dict) and payload.get("passed") is True
 
 
-def _write_config(
+def _fit_config_payload(
     cfg: SweepConfig,
     merged: dict[str, Any],
-    seed: int,
-    path: Path,
-    sampler_overrides: dict[str, int] | None = None,
-    run_id: str | None = None,
-) -> None:
+    sampler_overrides: dict[str, int] | None,
+    seed: int | None = None,
+) -> dict[str, Any]:
+    """One confirmation fit's config, less the run id it is named by."""
     payload: dict[str, Any] = {
         **cfg.extra_config,
         **merged,
-        "seed": seed,
         "stages": _CONFIRMATION_STAGES,
     }
+    if seed is not None:
+        payload["seed"] = seed
     if cfg.dataset is not None:
         payload["dataset"] = cfg.dataset
     for key, value in (
@@ -188,6 +506,18 @@ def _write_config(
         if value is not None:
             payload[key] = value
     payload.update(sampler_overrides or {})
+    return payload
+
+
+def _write_config(
+    cfg: SweepConfig,
+    merged: dict[str, Any],
+    seed: int,
+    path: Path,
+    sampler_overrides: dict[str, int] | None = None,
+    run_id: str | None = None,
+) -> None:
+    payload = _fit_config_payload(cfg, merged, sampler_overrides, seed)
     if run_id is not None:
         payload["run_id"] = run_id
     path.write_text(yaml.safe_dump(payload, sort_keys=True), encoding="utf-8")
@@ -249,21 +579,79 @@ def run_confirmation(
     confirmation at publication scale. Results checkpoint to
     ``<sweep_dir>/confirmation.json`` after every seed, and a re-entry reuses
     any prior seed whose run dirs still carry their log-likelihood snapshots
-    (re-pairing is cheap; only missing seeds refit).
+    and whose manifests still prove they are this experiment (re-pairing is
+    cheap; only missing or unprovable seeds refit).
     """
     from panelcast import __version__
 
+    if "seed" in (sampler_overrides or {}):
+        raise ValueError(
+            "sampler_overrides must not set seed: it wins over the per-seed value, so "
+            "every fit would run the same seed and the across-seed consistency the "
+            "verdict rests on would be one draw repeated."
+        )
     launch = launch or launch_arm
     panelcast_bin = cfg.panelcast_bin or _default_panelcast_bin()
     out_path = cfg.sweep_dir / "confirmation.json"
     cfg.sweep_dir.mkdir(parents=True, exist_ok=True)
     base = default_arm()
+    # One source for both sides: the fits are launched from this, and cached
+    # runs are checked against it, so the two cannot drift into a cache that
+    # rejects every run it built.
+    arms = {"reference": dict(base), "winner": {**base, **winner_knobs}}
+
+    def fit_config(label: str, seed: int | None = None) -> dict[str, Any]:
+        """What the run behind ``label`` on ``seed`` must say it was fit with."""
+        return _fit_config_payload(cfg, arms[label], sampler_overrides, seed)
+
+    # Seed-free, so one hash covers every seed of this call.
+    payloads = {label: fit_config(label) for label in arms}
+    # From the payload, not from cfg: both are only ever one of three writers of
+    # the dataset key, and what the fits run on is what gets written.
+    dataset = payloads["reference"].get("dataset")
+    if dataset != payloads["winner"].get("dataset"):
+        raise ValueError(
+            f"the two arms name different datasets ({dataset!r} and "
+            f"{payloads['winner'].get('dataset')!r}): a pair split across domains is "
+            "not paired evidence, and only one of them could be recorded as the "
+            "confirmation's."
+        )
+    discriminating = _discriminating_keys(payloads["reference"], payloads["winner"], dataset)
+    if not discriminating - {"seed", "dataset"}:
+        # Which cause, decided by whether the knob survived into the payload:
+        # a value that reached the fit and still matches the reference was not
+        # overwritten by anything, and sending its operator to hunt for a
+        # collision in cfg would be the wrong errand.
+        overwritten = sorted(k for k, v in winner_knobs.items() if payloads["winner"].get(k) != v)
+        raise ValueError(
+            (
+                f"the winner knobs are overwritten by a base option before the fits are "
+                f"written ({overwritten}): "
+                if overwritten
+                else f"the winner arm does not differ from the reference arm ({winner_knobs}): "
+            )
+            + "both sides would run the same configuration, so the pairing would "
+            "compare the reference with itself."
+        )
+    descriptor_hash = _descriptor_hash(dataset)
+    if descriptor_hash is None:
+        # Once, here, rather than wherever a cache happens to be consulted: a
+        # first confirmation in a fresh sweep dir reaches no cache at all, and
+        # would otherwise persist a null hash — which every later call then
+        # treats as unknown rather than changed — with nothing having said so.
+        log.warning(
+            "confirmation_cache_unusable",
+            reason="unresolved dataset descriptor",
+            dataset=dataset,
+        )
     result = ConfirmationResult(
         winner_knobs=winner_knobs,
         promote_z=promote_z,
         sampler=_sampler_echo(cfg, sampler_overrides),
         version=__version__,
         seeds_planned=list(seeds),
+        dataset_descriptor_hash=descriptor_hash,
+        fit_config_hash=_canonical_hash(payloads),
     )
     identity = {
         "winner_knobs": winner_knobs,
@@ -271,8 +659,19 @@ def run_confirmation(
         "sampler": result.sampler,
         "version": result.version,
         "seeds_planned": result.seeds_planned,
+        # The winner knobs say what varies; these say what it varies *from*.
+        # Hashing the two payloads the fits are launched from — rather than the
+        # options minus the arms — is what puts the reference arm itself under
+        # the identity: a shipped default that moves is otherwise invisible to
+        # both gates, since the recorder omits a None and the run check only
+        # compares keys a manifest already holds.
+        "dataset_descriptor_hash": descriptor_hash,
+        "fit_config_hash": result.fit_config_hash,
     }
-    prior = _reusable_prior_seeds(out_path, identity)
+
+    prior = _reusable_prior_seeds(
+        out_path, identity, descriptor_hash, fit_config, discriminating
+    )
     timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
     def _resolve(run_id: str, seed: int, label: str, *, after_fit: bool) -> Path:
@@ -300,7 +699,7 @@ def run_confirmation(
             phase = "after its fit" if after_fit else "before launching"
             raise RuntimeError(f"{label} fit on seed {seed} refused {phase} {detail}") from exc
 
-    def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:
+    def _one_fit(seed: int, label: str) -> Path | None:
         config_path = cfg.sweep_dir / f"confirm_{label}_seed{seed}.yaml"
         # Named up front (#167 handshake) — no dependence on the mutable
         # `latest` pointer; unique per attempt so retries never collide.
@@ -311,7 +710,7 @@ def run_confirmation(
         # post-fit call below can see a symlink escape
         # (test_confirmation_lookup_refuses_a_symlinked_escape covers both).
         _resolve(run_id, seed, label, after_fit=False)
-        _write_config(cfg, merged, seed, config_path, sampler_overrides, run_id=run_id)
+        _write_config(cfg, arms[label], seed, config_path, sampler_overrides, run_id=run_id)
         log.info("confirmation_fit_start", label=label, seed=seed, timeout=timeout)
         started = time.monotonic()
         code, tail = launch(config_path, panelcast_bin, timeout)
@@ -339,9 +738,9 @@ def run_confirmation(
             continue
         seed_result = SeedResult(seed=seed)
         try:
-            ref_run = _one_fit(dict(base), seed, "reference")
+            ref_run = _one_fit(seed, "reference")
             seed_result.reference_run = str(ref_run) if ref_run else None
-            win_run = _one_fit({**base, **winner_knobs}, seed, "winner")
+            win_run = _one_fit(seed, "winner")
             seed_result.winner_run = str(win_run) if win_run else None
             seed_result.winner_converged = _run_converged(win_run)
             if ref_run is None or win_run is None:
