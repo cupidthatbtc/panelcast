@@ -132,11 +132,14 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     while the containment check that judges the result compares ``Path``s —
     which are case-*insensitive* on Windows. So a differently-cased
     ``--output-base`` against a case-insensitive filesystem is the one input
-    whose verdict is platform-dependent: nothing re-roots either way, and then
-    Windows finds the unmapped path contained while macOS does not. Both are
-    refusals of the right thing on a moved run and neither admits a foreign
-    path; making them agree means deciding case-folding for the layout as a
-    whole, which is #440 rather than this module's to settle.
+    whose verdict is platform-dependent, and the split is not symmetric:
+    nothing re-roots either way, and then Windows finds the unmapped path
+    contained and verifies the right bytes, while macOS — ``PosixPath``
+    comparison over a filesystem that does not care about case — finds it
+    outside the roots and reports a healthy run ``UNBOUND``, at tampering
+    severity. Neither admits a foreign path, but one of them is wrong about a
+    run that is fine. Making them agree means deciding case-folding for the
+    layout as a whole, which is #440 rather than this module's to settle.
 
     Be precise about what that admits: it refuses a tree whose base is spelled
     differently, not every foreign one. Another checkout of the *same* project
@@ -191,9 +194,18 @@ def _output_base_name(run_dir: Path) -> str:
     A run *id* of ``failed`` is impossible — the layout reserves it — but the
     output *base* is the operator's to name and nothing reserves anything
     there, so ``--output-base ./failed`` makes this read the grandparent when
-    the run was never quarantined. The mapping only ever aims *into* the run
-    directory, so the worst case is a recorded path left unmapped and refused
-    by containment: a wrong verdict on a moved run, not a path escaping one.
+    the run was never quarantined.
+
+    That *widens* the match rather than narrowing it: the marker becomes
+    ``(<grandparent>, <run id>)``, so a recorded path from a foreign workspace
+    whose base happens to be named like this run's grandparent now pairs and
+    gets mapped in, where the true base name would not have matched it. It is
+    not a new class of hole — it is the same laundering the name-matching
+    paragraph above already admits for another checkout spelling its base the
+    same way, reached by a different spelling — and it is still bounded the
+    same way: the mapping only aims *into* this run's directory, so the result
+    must clear containment and then the recorded hash. But the effect is to
+    accept more, not to leave more unmapped.
     """
     parent = run_dir.parent
     return parent.parent.name if parent.name == QUARANTINE_DIR else parent.name

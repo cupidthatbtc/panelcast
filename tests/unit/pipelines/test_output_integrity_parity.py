@@ -819,19 +819,27 @@ class TestTheDeclaredCallerDifference:
 
         tree = ast.parse(Path(output_integrity.__file__).read_text(encoding="utf-8"))
         imported = {
-            alias.name
+            alias.asname or alias.name
             for node in ast.walk(tree)
             if isinstance(node, ast.ImportFrom)
             for alias in node.names
         }
+        # `AnnAssign` as well as `Assign`: a re-declaration is at least as
+        # likely to arrive annotated (`QUARANTINE_DIR: str = "failed"`), and
+        # sweeping only `Assign` would let the one that reads as more careful
+        # through.
         assigned = {
             target.id
             for node in ast.walk(tree)
-            if isinstance(node, ast.Assign)
-            for target in node.targets
+            if isinstance(node, ast.Assign | ast.AnnAssign)
+            for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
             if isinstance(target, ast.Name)
         }
 
         assert "QUARANTINE_DIR" in imported
         assert "QUARANTINE_DIR" not in assigned
-        assert paths.QUARANTINE_DIR in paths._RESERVED_RUN_IDS
+        # Not `QUARANTINE_DIR in _RESERVED_RUN_IDS` — the set is built from the
+        # constant, so that holds by construction. The reserved id is a
+        # separate fact about the layout, so assert the value it must have.
+        assert paths.QUARANTINE_DIR == "failed"
+        assert "failed" in paths._RESERVED_RUN_IDS
