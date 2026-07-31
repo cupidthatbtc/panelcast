@@ -476,6 +476,7 @@ def compute_interval_score(
     >>> y_samples = y_true + np.random.normal(0, 10, (1000, n_obs))
     >>> result = compute_interval_score(y_true, y_samples, prob=0.95)
     >>> print(f"IS: {result.mean_score:.2f}")
+
     Raises:
         NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """

@@ -61,9 +61,18 @@ def require_finite(values: np.ndarray, name: str) -> np.ndarray:
     Raises:
         NonFinitePredictionError: if any entry is NaN or an infinity.
     """
-    array = np.asarray(values, dtype=float)
-    if array.size == 0 or np.isfinite(array.sum()):
+    array = np.asarray(values)
+    if array.dtype.kind not in "fc":
+        # Object or integer input: converting is the only way to ask numpy
+        # whether it is finite, and an integer array always is.
+        array = np.asarray(values, dtype=float)
+    if array.size == 0:
         return array
+    with np.errstate(invalid="ignore", over="ignore"):
+        # inf + -inf is NaN and an overflowing sum is inf: both land on the
+        # slow path, which is where the real answer is computed.
+        if np.isfinite(array.sum()):
+            return array
     finite = np.isfinite(array)
     if finite.all():
         return array
@@ -77,10 +86,17 @@ def require_finite(values: np.ndarray, name: str) -> np.ndarray:
         shown = np.flatnonzero(~finite)[:5].tolist()
         more = f" (+{n_bad - len(shown)} more)" if n_bad > len(shown) else ""
         detail += f" (rows {shown}{more})"
+    observed = name.startswith(("y_true", "y_obs"))
+    guidance = (
+        "Filter invalid observations before computing metrics."
+        if observed
+        else (
+            "Predictive overflow is a numerical failure, not a missing metric; "
+            "inspect the fit rather than the metrics artifact."
+        )
+    )
     raise NonFinitePredictionError(
-        f"{name} contains non-finite values (NaN or infinity): {detail}. "
-        "Predictive overflow is a numerical failure, not a missing metric; "
-        "inspect the fit rather than the metrics artifact."
+        f"{name} contains non-finite values (NaN or infinity): {detail}. {guidance}"
     )
 
 
