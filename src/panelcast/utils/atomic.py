@@ -66,7 +66,11 @@ def fsync_dir(directory: Path) -> None:
     except OSError:  # pragma: no cover - some filesystems reject it
         pass
     finally:
-        os.close(fd)
+        # Suppressed like everything else here: this runs after the rename has
+        # landed, so a raise would report a failed write for a file that is
+        # correct on disk.
+        with suppress(OSError):
+            os.close(fd)
 
 
 def _target_mode(path: Path) -> int | None:
@@ -169,6 +173,21 @@ def _commit(tmp: Path, path: Path) -> None:
     read the same.
     """
     started = time.monotonic()
+
+    def report_failure() -> None:
+        # Whatever the write ended with, not just another denial: the backoff
+        # was spent either way, and time nobody can account for is the thing
+        # the logging exists to prevent. Both causes are named because the
+        # retry is deliberately not platform-gated, and pointing a Linux
+        # operator at a holding process sends them after something that
+        # cannot be there.
+        logger.warning(
+            "Rename of %s failed after %.2fs of retries: another process may be holding "
+            "it open, or this directory may not permit the rename",
+            path,
+            time.monotonic() - started,
+        )
+
     for attempt, delay in enumerate(_COMMIT_RETRY_DELAYS, start=1):
         try:
             os.replace(tmp, path)
@@ -176,20 +195,14 @@ def _commit(tmp: Path, path: Path) -> None:
         except PermissionError:
             logger.debug("Rename of %s denied (attempt %d); retrying", path, attempt)
             time.sleep(delay)
+        except OSError:
+            if attempt > 1:  # nothing was spent before the first attempt
+                report_failure()
+            raise
     try:
         os.replace(tmp, path)
     except OSError:
-        # Any failure here, not just another denial: the backoff was spent
-        # either way, and time nobody can account for is the thing the logging
-        # exists to prevent. Both causes named, because the retry is
-        # deliberately not platform-gated and pointing a Linux operator at a
-        # holding process sends them after something that cannot be there.
-        logger.warning(
-            "Rename of %s failed after %.2fs of retries: another process may be holding "
-            "it open, or this directory may not permit the rename",
-            path,
-            time.monotonic() - started,
-        )
+        report_failure()
         raise
     # Elapsed, not the configured delays: the point of the line is where the
     # time went, and a contended rename oversleeps and syscalls besides.

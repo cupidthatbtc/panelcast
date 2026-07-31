@@ -95,17 +95,18 @@ def _no_backoff(monkeypatch) -> None:
     )
 
 
-def _fdopen_that_fails(error: BaseException):
+def _fdopen_that_fails(error: Callable[[], BaseException]):
     """An `os.fdopen` stand-in that takes the descriptor, then fails.
 
     Ownership is the point: the real one closes the fd on its own error path,
-    so a stand-in that leaves it open would let a double close pass.
+    so a stand-in that leaves it open would let a double close pass. ``error``
+    is a factory so repeated calls do not accrete onto one traceback.
     """
     real = os.fdopen
 
     def boom(fd, *_args, **_kwargs):
         real(fd, "wb").close()
-        raise error
+        raise error()
 
     return boom
 
@@ -309,7 +310,7 @@ class TestAtomicWrite:
         # there is no local name; the stand-in takes the descriptor the way
         # the real one does, so an unrelated caller in the window would be
         # left as `fdopen` leaves it rather than with a live fd.
-        monkeypatch.setattr(os, "fdopen", _fdopen_that_fails(OSError("cannot wrap")))
+        monkeypatch.setattr(os, "fdopen", _fdopen_that_fails(lambda: OSError("cannot wrap")))
 
         with pytest.raises(OSError, match="cannot wrap"):
             atomic_write_text(tmp_path / "record.json", "x")
@@ -319,7 +320,7 @@ class TestAtomicWrite:
     def test_an_open_cleanup_failure_never_replaces_the_original_error(
         self, tmp_path: Path, monkeypatch
     ):
-        monkeypatch.setattr(os, "fdopen", _fdopen_that_fails(ValueError("cannot wrap")))
+        monkeypatch.setattr(os, "fdopen", _fdopen_that_fails(lambda: ValueError("cannot wrap")))
 
         def refuse(_self, missing_ok: bool = False):
             raise OSError("read-only directory")
@@ -384,6 +385,33 @@ class TestAtomicWrite:
         assert "holding" in _warnings(caplog)[0]
         assert "directory" in _warnings(caplog)[0]
 
+    @pytest.mark.parametrize("denials", [1, 4])
+    def test_a_non_denial_after_a_denial_still_reports_the_time_spent(
+        self, tmp_path: Path, monkeypatch, caplog, denials: int
+    ):
+        # The holder let go and the disk filled. Backoff was spent either way,
+        # so the write must not end without saying where the time went —
+        # whether the change of luck lands mid-loop or on the last attempt.
+        target = tmp_path / "manifest.json"
+        calls = {"n": 0}
+
+        def escalating() -> OSError:
+            calls["n"] += 1
+            if calls["n"] <= denials:
+                return PermissionError("the file is in use by another process")
+            return OSError(errno.ENOSPC, "no space left on device")
+
+        attempts = _deny_replace(monkeypatch, target, until=None, error=escalating)
+        _no_backoff(monkeypatch)
+
+        with _capture_logs(caplog), pytest.raises(OSError) as excinfo:
+            atomic_write_text(target, "{}")
+
+        assert excinfo.value.errno == errno.ENOSPC
+        assert attempts["n"] == denials + 1
+        assert len(_warnings(caplog)) == 1
+        assert "failed" in _warnings(caplog)[0]
+
     @pytest.mark.parametrize("code", [errno.EXDEV, errno.ENOSPC, errno.EROFS])
     def test_a_rename_that_can_never_succeed_is_not_retried(
         self, tmp_path: Path, monkeypatch, caplog, code: int
@@ -442,8 +470,12 @@ class TestAtomicWrite:
         loop = tmp_path / "manifest.json"
         loop.symlink_to(loop)  # stat raises ELOOP, not FileNotFoundError
 
-        with pytest.raises(OSError):
+        with pytest.raises(OSError) as excinfo:
             atomic_write_text(loop, "{}")
+
+        # By errno, not message: ELOOP reads differently across platforms, and
+        # an unrelated OSError from another line would otherwise pass.
+        assert excinfo.value.errno == errno.ELOOP
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
     def test_a_brand_new_file_gets_the_umask_default(self, tmp_path: Path):
