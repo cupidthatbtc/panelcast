@@ -1486,7 +1486,9 @@ a sibling run. Each caller also scopes itself: a stage drains only the keys
 carrying its own `<stage>:` prefix, while `runs verify` has no stage to be and
 drains the whole manifest — a division of which keys each is responsible for,
 not a difference in what either accepts as proof. Three things differ in the
-latter sense, the first parameterized rather than implied.
+latter sense, the first two parameterized rather than implied — the third is
+not the primitive's at all, which is why reading a declared list would not on
+its own close it.
 `runs verify` re-roots a *run-owned* recorded path onto the run's current
 directory, so a run quarantined under `outputs/failed/<id>/` still verifies,
 while the skip path follows the active `latest` pointer and never looks under
@@ -1514,10 +1516,12 @@ output a stage declares that the manifest never recorded — and beneath it sits
 a blind spot they *share*: for a dynamic key nothing outside the document says
 it ever existed, so an erased record is indistinguishable from one never
 written, both callers accept, and the skip path is the side that then reuses
-artifacts on that basis. Its
-containment roots are the run directory plus the `ArtifactPaths` roots — not
-the working tree, which would admit any file whose bytes happen to hash
-correctly, including another run's run-scoped copy of the same artifact. Under
+artifacts on that basis.
+
+Both callers' containment roots are the run directory plus the `ArtifactPaths`
+roots — not the working tree, which would admit any file whose bytes happen to
+hash correctly, including another run's run-scoped copy of the same artifact.
+Under
 the flat layout those roots are shared across runs by construction, so
 containment cannot separate one run's copy from another's there; the
 declared-path binding is what does that, and only the stage caller has it.

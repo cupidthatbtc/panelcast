@@ -738,8 +738,11 @@ Both of those come from the same asymmetry: the skip path's list of declared
 paths comes from **code** — the stage objects it holds — while `runs verify`
 has only the document it is checking. Recording the list in the manifest (#439)
 makes it *available*, which closes both against a manifest that is merely
-incomplete; it does not make it *trustworthy*, because a list inside the
-document can be shortened along with the records it describes.
+incomplete — the binding by passing the list to the shared verifier, the
+missing record by a loop over it that the verifier does not do, since it walks
+only the keys the manifest recorded. It does not make the list *trustworthy*,
+because a list inside the document can be shortened along with the records it
+describes.
 
 That is also the shape of the blind spot both callers share, worth knowing
 next to the exit code: for a *dynamic* output nothing outside the document says

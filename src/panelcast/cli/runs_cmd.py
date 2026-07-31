@@ -88,9 +88,11 @@ def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:
     binding, so a manifest redirecting a static output at another file inside
     the same run directory is reported clean here while the skip path refuses
     it; and noticing an output a stage declares that the manifest never
-    recorded. #439 would make the list available — but a list inside the
-    document can be shortened with it, so it closes these against an
-    incomplete manifest rather than a tampered one. The skip path is strong
+    recorded. #439 would make the list available — the last of those needs a
+    loop over it as well, since the verifier walks only recorded keys — but a
+    list inside the document can be shortened with it, so it closes these
+    against an incomplete manifest rather than a tampered one. The skip path is
+    strong
     here because its list comes from code, which is not something this caller
     can import.
 
