@@ -149,10 +149,13 @@ class TestRunsVerify:
         result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
 
         assert result.exit_code == 1
-        assert "unreadable: permission denied" in result.output
         # The summary only prints once the whole chain has run, so it is what
-        # separates a verdict from a traceback that took the rest with it.
-        assert "FAILED: 1 mismatch(es)" in result.output
+        # separates a verdict from a traceback that took the stamps and the
+        # lockfile with it. Counted rather than totalled: the output pass binds
+        # `sha256_path` at import and so is not stubbed here, and a change to
+        # that should not fail this test for an unrelated reason.
+        assert result.output.count("unreadable: permission denied") == 1
+        assert "FAILED:" in result.output
 
     def test_a_manifest_with_no_hashes_is_unverifiable_not_excused(self, tmp_path):
         # Shape cannot tell a pre-0.9.0 run from a modern one someone emptied
@@ -361,8 +364,8 @@ class TestRunsVerify:
         assert "UNBOUND      evaluate:metrics" in result.output
 
 
-class TestTheInputMappingIsBounded:
-    """What locating an input may not do, since nothing judges it afterwards."""
+class TestWhatTheRunOwns:
+    """Where the ownership answer stops, since nothing judges it afterwards."""
 
     def test_a_tail_that_climbs_out_of_the_run_is_not_owned(self, tmp_path):
         # `verify_output_records` maps first and refuses the result by
@@ -422,6 +425,22 @@ class TestTheInputMappingIsBounded:
 
         assert run_owned_path(recorded, active) == active / "models" / "manifest.json"
 
+    def test_a_flat_layout_product_is_not_owned(self, tmp_path):
+        # The limit of a containment-scoped answer, pinned rather than implied.
+        # Under the flat layout a stage's model inputs are recorded relative to
+        # the project root, where nothing distinguishes them from data the run
+        # did not produce — so `runs reproduce` still gates on them, and
+        # pruning or overwriting `models/` still aborts an earlier run.
+        from panelcast.pipelines.output_integrity import run_owned_path
+
+        run_dir = tmp_path / "outputs" / "run_a"
+
+        assert run_owned_path(Path("models") / "manifest.json", run_dir) is None
+
+
+class TestWhatUnownedStillReads:
+    """Unowned is not unread: where such a path is checked, and how it reads."""
+
     def test_an_unresolvable_recorded_spelling_names_what_was_checked(
         self, tmp_path, monkeypatch
     ):
@@ -469,8 +488,7 @@ class TestTheInputMappingIsBounded:
 
     def _symlinked_product_run(self, tmp_path):
         """A run whose `models/` points outside it, recorded as input and output."""
-        base = _write_run(tmp_path)
-        run_dir = base / "run_a"
+        run_dir = _write_run(tmp_path) / "run_a"
         shared = tmp_path / "shared"
         shared.mkdir()
         product = shared / "manifest.json"
@@ -486,7 +504,7 @@ class TestTheInputMappingIsBounded:
         payload["output_hashes"]["train:models"] = sha256_path(product)
         payload["input_hashes"] = {str(recorded): sha256_path(product)}
         manifest_path.write_text(json.dumps(payload), encoding="utf-8")
-        return base, recorded
+        return run_dir, recorded
 
     def test_a_symlinked_out_product_is_unowned_but_still_read(self, tmp_path):
         # Resolved containment, deliberately — but stated for what it does.
@@ -498,11 +516,13 @@ class TestTheInputMappingIsBounded:
         # compares two things of the same kind against the roots that ship.
         from panelcast.pipelines.output_integrity import run_owned_path
 
-        base, recorded = self._symlinked_product_run(tmp_path)
+        run_dir, recorded = self._symlinked_product_run(tmp_path)
 
-        assert run_owned_path(recorded, base / "run_a") is None
+        assert run_owned_path(recorded, run_dir) is None
 
-        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+        result = runner.invoke(
+            app, ["runs", "verify", "run_a", "--output-base", str(run_dir.parent)]
+        )
 
         assert result.exit_code == 1
         assert "UNBOUND      train:models (recorded output path escapes the run roots)" in (
@@ -516,7 +536,8 @@ class TestTheInputMappingIsBounded:
         # reads MISSING. That is #420's own failure surviving for this layout
         # — on a run whose outputs are UNBOUND regardless, which is why the
         # trade is worth the callers agreeing about ownership.
-        base, recorded = self._symlinked_product_run(tmp_path)
+        run_dir, recorded = self._symlinked_product_run(tmp_path)
+        base = run_dir.parent
         _quarantine(base)
 
         result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
@@ -689,3 +710,17 @@ class TestReproduceOnAQuarantinedRun:
 
         assert result.exit_code == 1
         assert f"ABORT: recorded input missing: {tmp_path / 'raw.csv'}" in result.output
+
+    def test_raw_data_that_cannot_be_read_aborts_legibly(self, tmp_path, monkeypatch):
+        # The gate's whole job is turning a late failure into an early legible
+        # one, so it must not be the thing that raises. `runs verify` says the
+        # same about the same file one function away.
+        def refuse(path, *args, **kwargs):
+            raise OSError("permission denied")
+
+        monkeypatch.setattr("panelcast.utils.hashing.sha256_path", refuse)
+        result = self._reproduce(tmp_path, monkeypatch)
+
+        assert result.exit_code == 1
+        assert "ABORT: recorded input unreadable" in result.output
+        assert "permission denied" in result.output

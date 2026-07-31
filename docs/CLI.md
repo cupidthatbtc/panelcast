@@ -834,8 +834,13 @@ raw inputs must be unchanged on disk, or it aborts (exit `1`). That second gate
 covers only the inputs the run does **not** own: a stage records earlier stages'
 run-scoped products as inputs, and a reproduction regenerates all of them, so
 gating on them would abandon a quarantined run to its recorded paths and would
-still make any run unreproducible for the ordinary cleanup of pruning the
-directory it failed in. The environment fingerprint frames the expectation up
+make a run-scoped run unreproducible for the ordinary cleanup of pruning the
+directory it failed in. Ownership is containment, so this reaches only the
+run-scoped layout. Under the flat layout a stage's model inputs are recorded
+relative to the project root, where nothing distinguishes them from data the
+run did not produce — so they are still gated, and pruning `models/`, or simply
+running again and overwriting it, still aborts an earlier run's reproduction.
+The environment fingerprint frames the expectation up
 front — bit-exact outputs within a matching fingerprint, statistical
 reproduction otherwise — and the post-run comparison follows suit (exact
 output-hash match vs headline-metric deltas). A reproduction always runs fresh:

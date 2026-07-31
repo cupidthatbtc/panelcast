@@ -138,7 +138,7 @@ def _input_label(path: Path, path_str: str) -> str:
     a path nothing had stat'd, and that must not come back through an error
     path.
     """
-    if path == Path(path_str):  # unowned: nothing was mapped, so nothing moved
+    if path == Path(path_str):  # identical spellings, so nothing moved
         return path_str
     try:
         if path.resolve() == Path(path_str).resolve():
@@ -508,7 +508,14 @@ def runs_reproduce(
         if not path.exists():
             typer.echo(f"ABORT: recorded input missing: {path_str}")
             raise typer.Exit(code=1)
-        if sha256_path(path) != recorded:
+        try:
+            actual = sha256_path(path)
+        except (OSError, ValueError, RuntimeError) as exc:
+            # The gate exists to turn a late failure into an early legible one,
+            # so it must not be the thing that raises.
+            typer.echo(f"ABORT: recorded input unreadable: {path_str} ({exc})")
+            raise typer.Exit(code=1) from exc
+        if actual != recorded:
             typer.echo(f"ABORT: raw input changed since the run: {path_str}")
             raise typer.Exit(code=1)
 

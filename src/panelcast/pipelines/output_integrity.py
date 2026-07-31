@@ -219,19 +219,20 @@ def run_owned_path(path: Path, run_dir: Path) -> Path | None:
     artifact reached through a symlink inside the run directory that leaves it
     — a run whose ``models/`` points at shared storage, say. That is the bound
     on purpose, not an oversight about the recorded tail: it is the same bound
-    ``verify_output_records`` applies to a path in the same place, and such a
-    run's *outputs* under that directory are already ``UNBOUND``, so the layout
-    is not verifiable either way.
+    ``verify_output_records`` applies to a path in the same place.
 
-    Be exact about what it costs, since unowned does not mean unread. An
+    Be exact about what that costs, since unowned does not mean unread. An
     unowned path is checked where the manifest recorded it, so on an active run
     a symlinked-out product still verifies through the link — the same file the
-    output side refuses. What is given up is the re-rooting: quarantine that
+    output side refuses, which is an asymmetry in the *consequence* even though
+    ownership is symmetric. What is given up is the re-rooting: quarantine that
     run and the recorded location is gone, so the input reads ``MISSING`` and
     the reproduce gate treats the product as external. That is #420's own
-    failure surviving for one layout, on runs whose outputs cannot be verified
-    regardless, and it is the price of the two callers not disagreeing about
-    which paths a run owns.
+    failure surviving for one layout, and what makes the trade worth taking is
+    that such a run already fails `runs verify` on its *outputs* under the same
+    directory, which are ``UNBOUND`` — so the price is paid on runs that were
+    not going to verify anyway, and it buys the two callers never disagreeing
+    about which paths a run owns.
 
     Not folded into ``reroot_under`` itself, because for an *output* an
     escaping tail is worth reporting rather than quietly declining: the
