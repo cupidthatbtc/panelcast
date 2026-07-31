@@ -312,6 +312,21 @@ class TestSeverity:
         assert verdict.label == UNBOUND
         assert verdict.untrusted is True
 
+        # The half the name is actually about: the binding is checked *before*
+        # existence, so a redirect at a path that is not there is still a
+        # redirect. Move that check below `path.exists()` and this becomes
+        # `MISSING`, with `untrusted` coincidentally still True.
+        decoy.unlink()
+        (verdict,) = verify_output_records(
+            {fx.key: str(decoy)},
+            {fx.key: fx.output_hashes[fx.key]},
+            roots=[fx.run_dir],
+            declared={fx.key: fx.artifact},
+        )
+
+        assert verdict.label == UNBOUND
+        assert verdict.reason == "recorded output path disagrees with its manifest key"
+
     def test_a_workspace_that_cannot_resolve_the_declared_path_is_not_tampering(self, fx):
         from panelcast.pipelines.output_integrity import UNVERIFIABLE, verify_output_records
 
@@ -352,12 +367,13 @@ class TestContainment:
                 raise OSError("symlink loop")
             return real_resolve(self)
 
+        resolved = artifact.resolve()
         monkeypatch.setattr(Path, "resolve", resolve)
 
         # A bad root ahead of the good one must be skipped, not fatal: the
         # roots are a shared workspace, and one bent entry out of eight cannot
         # turn every output in every run into an apparent escape.
-        assert contained_path(artifact, [bad, good]) is not None
+        assert contained_path(resolved, [bad, good]) is not None
 
     @pytest.mark.parametrize("layout", ["flat", "run"])
     def test_the_root_enumeration_is_the_dataclass(self, tmp_path, layout):
@@ -476,7 +492,31 @@ class TestContainment:
 
         # Returning the resolved form is what keeps the read from walking the
         # same symlink a second time and landing somewhere else.
-        assert contained_path(link, [root]) == real.resolve()
+        assert contained_path(link.resolve(), [root]) == real.resolve()
+
+    def test_an_unlocatable_dynamic_path_is_not_reported_as_an_escape(self, fx, monkeypatch):
+        # One `None` for two facts would say a path the tool never located had
+        # escaped the roots — a false statement about a path that may be
+        # sitting squarely inside them. A declared key gets the accurate reason
+        # from the binding; this is the same fact for a dynamic one.
+        from panelcast.pipelines.output_integrity import UNBOUND, verify_output_records
+
+        key = f"{STAGE}:dataset_hash"
+        target = fx.run_dir / "dataset_hash.txt"
+        real = Path.resolve
+
+        def refuse(self, strict=False):
+            if self == target:
+                raise OSError("symlink loop")
+            return real(self)
+
+        monkeypatch.setattr(Path, "resolve", refuse)
+        (verdict,) = verify_output_records(
+            {key: str(target)}, {key: "0" * 64}, roots=[fx.run_dir]
+        )
+
+        assert verdict.label == UNBOUND
+        assert verdict.reason == "recorded output path is unreadable"
 
 
 class TestTheDeclaredCallerDifference:

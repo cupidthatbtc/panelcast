@@ -50,24 +50,22 @@ class OutputVerdict:
         return self.label == OK
 
 
-def contained_path(path: Path, roots: Sequence[Path]) -> Path | None:
-    """The *resolved* ``path``, but only if it lands inside one of ``roots``.
+def contained_path(resolved: Path, roots: Sequence[Path]) -> Path | None:
+    """``resolved`` — an already-resolved path — if it lands inside a root.
 
     Manifests are just files on disk; a tampered one must not be able to aim
     the integrity check at something outside the workspace it describes.
     Resolution is what makes a symlinked component that leaves the root fail
-    here rather than at the eventual read — and the resolved form is what is
-    returned, so the caller reads and hashes the path this proved rather than
-    walking the same symlink a second time and possibly landing elsewhere.
+    here rather than at the eventual read, and it happens in the caller so that
+    "will not resolve" and "resolves outside" stay two answers rather than one
+    ``None`` the caller has to guess at. The resolved form is what comes back,
+    so the caller reads and hashes the path this proved rather than walking the
+    same symlink a second time and possibly landing elsewhere.
 
     A root that will not resolve is skipped rather than fatal. The roots are a
     shared workspace an operator may have symlinked, and one bad entry among
     eight must not turn every output in every run into an apparent escape.
     """
-    try:
-        resolved = path.resolve()
-    except (OSError, ValueError, RuntimeError):
-        return None
     for root in roots:
         try:
             resolved_root = root.resolve()
@@ -233,7 +231,18 @@ def verify_output_records(
                 continue
         if reroot is not None:
             path = reroot_under(path, reroot)
-        contained = contained_path(path, roots)
+        # Resolved here, not inside `contained_path`, so a path the tool could
+        # not locate is never reported as one that escaped: it may be sitting
+        # squarely inside the run root. A declared key already got this verdict
+        # from the binding above; this is the same fact for a dynamic one.
+        try:
+            resolved = path.resolve()
+        except (OSError, ValueError, RuntimeError):
+            yield OutputVerdict(
+                key, UNBOUND, "recorded output path is unreadable", untrusted=True
+            )
+            continue
+        contained = contained_path(resolved, roots)
         if contained is None:
             yield OutputVerdict(
                 key, UNBOUND, "recorded output path escapes the run roots", untrusted=True

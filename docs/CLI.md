@@ -684,7 +684,7 @@ Each output gets one line, with the reason after the status:
 | `OK` | Present and hashing to the recorded digest |
 | `MODIFIED` | Present and hashing to something else |
 | `MISSING` | Recorded but not there, or unreadable |
-| `UNBOUND` | Recorded at a path outside the run directory and the artifact roots |
+| `UNBOUND` | The recorded path cannot be tied to this run — outside the run directory and the artifact roots, or not locatable at all |
 | `UNVERIFIABLE` | Nothing to check it against — a path with no hash, a hash with no path, or an empty hash |
 
 A manifest carrying no output hashes at all (pre-0.9.0, or a modern one whose
