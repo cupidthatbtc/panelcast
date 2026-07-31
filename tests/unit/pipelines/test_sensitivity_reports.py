@@ -451,6 +451,64 @@ class TestRunSplitSeedSensitivity:
         assert call["discretize_observation"] is True
         assert call["fixed_n_exponent"] == pytest.approx(0.5)
 
+    def test_threads_a_recorded_zero_logit_offset(self, monkeypatch):
+        """A recorded 0.0 is the plain logit, not a missing value (#427)."""
+        posterior_samples = self._make_posterior_samples()
+        summary = self._make_summary()
+        summary["target_transform"] = "offset_logit"
+        summary["logit_offset"] = 0.0
+        source_df = self._make_source_df()
+
+        captured: list[dict] = []
+        monkeypatch.setattr(
+            "panelcast.data.split.entity_disjoint_split",
+            lambda df, **kw: (df, df, pd.DataFrame({"Artist": ["A1"], "Score": [70.0]})),
+        )
+
+        def _capture(*a, **kw):
+            captured.append(kw)
+            return {"y": np.full((200, 1), 75.0)}
+
+        monkeypatch.setattr("panelcast.models.bayes.predict.predict_new_entity", _capture)
+        monkeypatch.setattr(
+            "panelcast.pipelines.training_summary.ar_center_on_model_scale",
+            lambda s: 0.0,
+        )
+
+        run_split_seed_sensitivity(source_df, posterior_samples, summary, seeds=(42,))
+
+        assert captured
+        assert captured[0]["logit_offset"] == 0.0
+        assert captured[0]["target_transform"] == "offset_logit"
+
+    def test_a_null_target_transform_resolves_to_identity(self, monkeypatch):
+        """The old .get(..., "identity") idiom handed None to get_transform."""
+        posterior_samples = self._make_posterior_samples()
+        summary = self._make_summary()
+        summary["target_transform"] = None
+        source_df = self._make_source_df()
+
+        captured: list[dict] = []
+        monkeypatch.setattr(
+            "panelcast.data.split.entity_disjoint_split",
+            lambda df, **kw: (df, df, pd.DataFrame({"Artist": ["A1"], "Score": [70.0]})),
+        )
+
+        def _capture(*a, **kw):
+            captured.append(kw)
+            return {"y": np.full((200, 1), 75.0)}
+
+        monkeypatch.setattr("panelcast.models.bayes.predict.predict_new_entity", _capture)
+        monkeypatch.setattr(
+            "panelcast.pipelines.training_summary.ar_center_on_model_scale",
+            lambda s: 0.0,
+        )
+
+        run_split_seed_sensitivity(source_df, posterior_samples, summary, seeds=(42,))
+
+        assert captured
+        assert captured[0]["target_transform"] == "identity"
+
 
 # ============================================================================
 # run_sensitivity_suite — lines 1158-1285

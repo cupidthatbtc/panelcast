@@ -24,7 +24,11 @@ from panelcast.config.gates import (
     SigmaObsPriorType,
 )
 from panelcast.paths import validate_run_id
-from panelcast.pipelines.training_summary import DEFAULT_LOGIT_OFFSET
+
+# One-directional by design: training_summary owns the recorded-artifact
+# contract and must never import config, so the write and read paths can share
+# the offset domain without a cycle.
+from panelcast.pipelines.training_summary import DEFAULT_LOGIT_OFFSET, coerce_logit_offset
 
 # Module-level reference for default config values (used to detect non-default flags)
 _DEFAULT_CONFIG: PipelineConfig | None = None
@@ -534,15 +538,12 @@ class PipelineConfig:
     def _validate_logit_offset(self) -> None:
         """Zero is a supported offset (the plain logit) and is propagated as
         recorded; a negative or non-finite one puts the offset-logit argument
-        outside (0, 1) and yields NaN log-likelihoods instead of an error."""
-        try:
-            offset = float(self.logit_offset)
-        except (TypeError, ValueError):
-            raise ValueError(
-                f"Invalid logit_offset: {self.logit_offset!r}. Must be a number."
-            ) from None
-        if not math.isfinite(offset) or offset < 0.0:
-            raise ValueError(f"Invalid logit_offset: {offset}. Must be finite and >= 0.")
+        outside (0, 1) and yields NaN log-likelihoods instead of an error.
+
+        Normalizes rather than only checking: the coerced float is written
+        back, so a YAML string never reaches the summary as a string that the
+        read-side resolver would then reject after training has already run."""
+        self.logit_offset = coerce_logit_offset(self.logit_offset, context="the run config")
 
     def _validate_likelihood(self) -> None:
         """Validate the likelihood family and its structural constraints."""

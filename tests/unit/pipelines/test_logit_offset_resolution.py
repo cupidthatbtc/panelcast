@@ -22,9 +22,10 @@ import numpy as np
 import pytest
 
 import panelcast
+from panelcast.config.descriptor import DEFAULT_DESCRIPTOR
 from panelcast.models.bayes.transforms import get_transform
 from panelcast.pipelines.evaluate import _transform_from_summary
-from panelcast.pipelines.pipeline_config import PipelineConfig
+from panelcast.pipelines.pipeline_config import PipelineConfig, resolve_model_facts
 from panelcast.pipelines.training_summary import (
     DEFAULT_LOGIT_OFFSET,
     ar_center_on_model_scale,
@@ -34,20 +35,19 @@ from panelcast.pipelines.training_summary import (
 
 SRC = Path(panelcast.__file__).resolve().parent
 
-# The resolvers themselves are the one place that may read the raw keys.
-RESOLVER_MODULE = "pipelines/training_summary.py"
-
 GUARDED_KEYS = ("logit_offset", "target_transform")
 
-
-def _reads_the_summary(node: ast.expr) -> bool:
-    """Whether an access targets a training-summary mapping.
-
-    Keeps the scan on summary reads: sweep arms and space enumerations carry a
-    ``target_transform`` key of their own that has nothing to do with what a fit
-    recorded.
-    """
-    return isinstance(node, ast.Name) and node.id in ("summary", "raw")
+# The resolvers own the recorded keys. The select modules read a
+# target_transform off sweep arms and the enumerated space, which is a
+# configuration axis rather than anything a fit recorded.
+EXEMPT_MODULES = frozenset(
+    {
+        "pipelines/training_summary.py",
+        "select/prior_screen.py",
+        "select/runner.py",
+        "select/space.py",
+    }
+)
 
 
 def _summary(**overrides) -> dict:
@@ -88,10 +88,16 @@ class TestResolver:
         with pytest.raises(ValueError, match="logit_offset"):
             logit_offset_from_summary({"logit_offset": value})
 
-    @pytest.mark.parametrize("value", [True, "0.5", [0.5]])
+    @pytest.mark.parametrize("value", [True, "wide", [0.5]])
     def test_non_numeric_recorded_offsets_are_rejected(self, value):
         with pytest.raises(ValueError, match="logit_offset"):
             logit_offset_from_summary({"logit_offset": value})
+
+    @pytest.mark.parametrize("value", ["0.5", np.float32(0.25)])
+    def test_the_read_path_accepts_everything_the_write_path_records(self, value):
+        """Both sides coerce through the same helper, so a config that trains
+        can never produce a summary that crashes every consumer."""
+        assert logit_offset_from_summary({"logit_offset": value}) == pytest.approx(float(value))
 
 
 class TestTargetTransformResolver:
@@ -104,7 +110,16 @@ class TestTargetTransformResolver:
         assert target_transform_from_summary({"target_transform": None}) == "identity"
 
     def test_recorded_name_is_returned(self):
-        assert target_transform_from_summary({"target_transform": "offset_logit"}) == "offset_logit"
+        recorded = {"target_transform": "offset_logit"}
+        assert target_transform_from_summary(recorded) == "offset_logit"
+
+    def test_the_write_path_records_a_resolved_name(self):
+        """The identity fallback is only correct because a null never reaches
+        the summary from a post-gate run: resolve_model_facts fills it in."""
+        config = PipelineConfig(run_id="transform-unset")
+        assert config.target_transform is None
+        resolve_model_facts(config, DEFAULT_DESCRIPTOR)
+        assert config.target_transform is not None
 
 
 class TestConsumersUseTheRecordedOffset:
@@ -135,12 +150,12 @@ class TestConsumersUseTheRecordedOffset:
 class TestSingleResolver:
     """No module outside the resolvers re-derives either recorded field.
 
-    Scans the whole package rather than a roster of today's consumers: a new
-    pipeline, report writer or CLI path that starts reading the summary is
-    caught by default instead of by remembering to extend a list. Both access
-    forms count -- ``summary.get("logit_offset")`` and the subscript
-    ``summary["logit_offset"]`` -- because the historical idioms disagreed on
-    zero and on an explicit null respectively.
+    Scans the whole package with an explicit exemption list rather than a
+    roster of today's consumers: a new pipeline, report writer or CLI path that
+    starts reading the summary fails by default, whatever it names its variable.
+    Both access forms count -- ``.get("logit_offset")`` and the subscript
+    ``["logit_offset"]`` -- because the historical idioms disagreed on zero and
+    on an explicit null respectively.
     """
 
     def _inline_reads(self, path: Path) -> list[tuple[int, str]]:
@@ -151,7 +166,6 @@ class TestSingleResolver:
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
                 and node.func.attr == "get"
-                and _reads_the_summary(node.func.value)
                 and node.args
                 and isinstance(node.args[0], ast.Constant)
                 and node.args[0].value in GUARDED_KEYS
@@ -161,35 +175,42 @@ class TestSingleResolver:
             elif (
                 isinstance(node, ast.Subscript)
                 and isinstance(node.ctx, ast.Load)
-                and _reads_the_summary(node.value)
                 and isinstance(node.slice, ast.Constant)
                 and node.slice.value in GUARDED_KEYS
             ):
                 found.append((node.lineno, str(node.slice.value)))
         return found
 
-    def test_the_resolver_module_is_the_only_reader(self):
+    def test_the_resolvers_are_the_only_readers(self):
         offenders = {
             str(path.relative_to(SRC)): self._inline_reads(path)
             for path in sorted(SRC.rglob("*.py"))
-            if str(path.relative_to(SRC)).replace("\\", "/") != RESOLVER_MODULE
+            if str(path.relative_to(SRC)).replace("\\", "/") not in EXEMPT_MODULES
         }
         offenders = {k: v for k, v in offenders.items() if v}
         assert offenders == {}, (
-            f"inline summary reads outside {RESOLVER_MODULE}: {offenders}; "
+            f"inline reads of {GUARDED_KEYS} outside {sorted(EXEMPT_MODULES)}: {offenders}; "
             "use logit_offset_from_summary / target_transform_from_summary."
         )
 
-    def test_the_guard_sees_both_access_forms(self, tmp_path):
-        """A guard that only matched .get() would miss the subscript form."""
+    def test_the_guard_sees_both_access_forms_and_any_receiver(self, tmp_path):
+        """A guard keyed on `.get()` or on the variable being named `summary`
+        would miss most of the ways the next consumer will write this."""
         sample = tmp_path / "sample.py"
         sample.write_text(
             "a = summary.get('logit_offset')\n"
-            "b = summary['target_transform']\n"
+            "b = loaded['target_transform']\n"
+            "c = self.summary.get('logit_offset')\n"
+            "d = ctx.summary['target_transform']\n"
             "summary['logit_offset'] = 1.0\n",
             encoding="utf-8",
         )
-        assert self._inline_reads(sample) == [(1, "logit_offset"), (2, "target_transform")]
+        assert self._inline_reads(sample) == [
+            (1, "logit_offset"),
+            (2, "target_transform"),
+            (3, "logit_offset"),
+            (4, "target_transform"),
+        ]
 
 
 class TestConfigValidation:
@@ -202,10 +223,18 @@ class TestConfigValidation:
         with pytest.raises(ValueError, match="logit_offset"):
             PipelineConfig(run_id="offset-bad", logit_offset=value)
 
-    def test_non_numeric_offset_raises_value_error_not_type_error(self):
+    @pytest.mark.parametrize("value", ["wide", True, None])
+    def test_non_numeric_offsets_raise_value_error_not_type_error(self, value):
         """Callers wrap config construction in `except ValueError`."""
         with pytest.raises(ValueError, match="logit_offset"):
-            PipelineConfig(run_id="offset-str", logit_offset="wide")
+            PipelineConfig(run_id="offset-bad-type", logit_offset=value)
+
+    def test_a_parseable_offset_is_normalized_not_merely_checked(self):
+        """A YAML string that only validated would reach the summary verbatim
+        and then be rejected on every read, after training had already run."""
+        config = PipelineConfig(run_id="offset-str", logit_offset="0.25")
+        assert config.logit_offset == 0.25
+        assert isinstance(config.logit_offset, float)
 
     def test_the_config_default_is_the_resolver_default(self):
         assert PipelineConfig(run_id="offset-default").logit_offset == DEFAULT_LOGIT_OFFSET

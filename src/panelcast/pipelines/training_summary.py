@@ -186,15 +186,35 @@ DEFAULT_LOGIT_OFFSET = 0.5
 DEFAULT_TARGET_TRANSFORM = "identity"
 
 
+def coerce_logit_offset(value: Any, *, context: str) -> float:
+    """Validate one logit_offset and normalize it to a plain float.
+
+    Shared by config validation and the summary resolver so the write path and
+    the read path accept exactly the same domain: anything float-able except
+    ``bool``, finite and non-negative. Zero is legal -- the plain logit, valid
+    when observations sit strictly inside the bounds. Duck-typing through
+    ``float`` also accepts numpy scalars, which an in-process summary can carry.
+    """
+    try:
+        if isinstance(value, bool):
+            raise TypeError
+        offset = float(value)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"Invalid logit_offset in {context}: {value!r}. Must be a number."
+        ) from None
+    if not math.isfinite(offset) or offset < 0.0:
+        raise ValueError(f"Invalid logit_offset in {context}: {offset}. Must be finite and >= 0.")
+    return offset
+
+
 def logit_offset_from_summary(summary: dict[str, Any]) -> float:
     """Offset-logit continuity offset the model was actually fit under.
 
     Only a missing key or an explicit ``null`` (legacy / pre-gate summaries)
     falls back to :data:`DEFAULT_LOGIT_OFFSET`. A recorded ``0.0`` is a real
-    configuration -- the plain logit, valid when observations sit strictly
-    inside the bounds -- and is propagated as zero, so evaluation, prediction
-    and rollout apply the same forward transform, inverse and Jacobian the
-    fit used.
+    configuration and is propagated as zero, so evaluation, prediction and
+    rollout apply the same forward transform, inverse and Jacobian the fit used.
 
     An out-of-range recorded offset is rejected here rather than downstream:
     every summary written before the config-side guard existed is unvalidated,
@@ -204,12 +224,9 @@ def logit_offset_from_summary(summary: dict[str, Any]) -> float:
     value = summary.get("logit_offset")
     if value is None:
         return DEFAULT_LOGIT_OFFSET
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"Recorded logit_offset must be a number, got {value!r}.")
-    offset = float(value)
-    if not math.isfinite(offset) or offset < 0.0:
-        raise ValueError(f"Recorded logit_offset must be finite and >= 0, got {offset}.")
-    return offset
+    return coerce_logit_offset(
+        value, context="the training summary (re-run the train stage to rewrite it)"
+    )
 
 
 def target_transform_from_summary(summary: dict[str, Any]) -> str:
@@ -220,6 +237,12 @@ def target_transform_from_summary(summary: dict[str, Any]) -> str:
     ``.get("target_transform", "identity")`` hands ``None`` to
     ``get_transform`` while ``.get(...) or "identity"`` resolves correctly.
     One resolver, so the two idioms cannot disagree.
+
+    ``identity`` is the right fallback because the write path records a
+    RESOLVED name: ``resolve_model_facts`` fills a null config value from the
+    descriptor (else ``offset_logit``) before the stage context exists, so a
+    null in a summary means the summary predates the transform gate, when
+    identity was the only behavior.
     """
     return summary.get("target_transform") or DEFAULT_TARGET_TRANSFORM
 
