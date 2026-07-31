@@ -1460,14 +1460,15 @@ all block the skip and rerun the stage.
 
 Severity is sorted by what is *known*, not by which way the check failed, and
 is stated as a predicate rather than a list so it cannot drift as cases are
-added. A verdict is a **warning** when disk contradicts the manifest — the
-bytes differ, the recorded path is not the one its key names, or it is not
-somewhere this run could have written. It is **informational** when nothing
-can be proven either way: no hash to compare against, no path to compare at,
-or a local obstacle between the tool and the answer. An artifact that is
-missing or unreadable falls on whichever side its key sits: with a declared
-path behind it, disk is contradicting the manifest; without one, nothing said
-this run still owned that file. Verified hashes are
+added. A verdict is a **warning** when the manifest's own claim fails: the
+bytes differ, or the path it recorded cannot be tied to this run — not the one
+its key names, not somewhere this run could have written, or not locatable at
+all. It is **informational** when nothing can be proven either way: no hash to
+compare against, no path to compare at, or a local obstacle between the tool
+and the answer. An artifact that is missing or unreadable falls on whichever
+side its key sits: with a declared path behind it, disk is contradicting the
+manifest; without one, nothing said this run still owned that file. Verified
+hashes are
 carried into the new manifest so consecutive runs remain skippable. This check
 fully reads each candidate artifact (including directory trees), so
 `--skip-existing` trades additional startup I/O for corruption detection.

@@ -493,10 +493,11 @@ class TestContainment:
 
         assert fx.stage.skip_decision(None).skip is False
 
-        # The other half — that a skip check with a previous manifest always
-        # names its roots — needs a real pipeline, so it lives beside the
-        # orchestrator harness as
-        # `test_every_skip_check_with_a_previous_run_names_its_roots`.
+        # The other half — that the manifest and the roots are present or
+        # absent together, so the `None` above never reaches a call that would
+        # read it — needs a real pipeline, so it lives beside the orchestrator
+        # harness as
+        # `test_a_manifest_never_arrives_without_the_run_that_named_its_roots`.
 
     def test_the_contained_path_is_the_one_that_gets_hashed(self, tmp_path):
         from panelcast.pipelines.output_integrity import contained_path
