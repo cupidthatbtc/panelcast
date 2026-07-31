@@ -267,19 +267,17 @@ def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> lis
     )
 
 
-def _holds_a_paired_seed(payload: dict[str, Any]) -> bool:
-    """Whether a stored ledger is the only index into a pair of finished fits.
+def _indexes_a_run(entry: dict[str, Any]) -> bool:
+    """Whether a ledger entry is the only name a finished run dir has.
 
-    Deliberately wider than the reuse rule below, which also demands no error:
-    a seed whose two fits completed and whose *pairing* then failed still names
-    two publication-scale run dirs under ids unique per attempt, and losing the
-    file is losing the only mapping from seed and label to those directories.
-    Worth keeping is a lower bar than worth reusing.
+    Deliberately wider than the reuse rule below, which demands both sides and
+    no error: a seed whose winner crashed after its reference landed, or whose
+    two fits landed and whose *pairing* then raised, still names
+    publication-scale run dirs under ids unique per attempt. Losing the file is
+    losing the only mapping from seed and label to those directories, so worth
+    keeping is a lower bar than worth reusing.
     """
-    return any(
-        entry.get("reference_run") and entry.get("winner_run")
-        for entry in payload.get("seeds", [])
-    )
+    return bool(entry.get("reference_run") or entry.get("winner_run"))
 
 
 def _archive(out_path: Path, *, reason: str, changed: list[str] | None = None) -> None:
@@ -290,9 +288,17 @@ def _archive(out_path: Path, *, reason: str, changed: list[str] | None = None) -
     the copy exists precisely so nothing is lost. ``changed`` stays its own
     field rather than being folded into ``reason``, so a reader never has to
     split prose to learn which key moved.
+
+    Best-effort by construction: the copy is a courtesy to whoever has to find
+    the orphaned run dirs later, and failing to take it must not stop a
+    confirmation that is otherwise able to run.
     """
     archived = out_path.with_name(f"confirmation_{datetime.now():%Y%m%dT%H%M%S%f}.json")
-    out_path.replace(archived)
+    try:
+        out_path.replace(archived)
+    except OSError as exc:
+        log.warning("confirmation_cache_unarchivable", path=str(out_path), error=str(exc))
+        return
     log.warning(
         "confirmation_cache_archived", archived=str(archived), reason=reason, changed=changed
     )
@@ -321,6 +327,10 @@ def _reusable_prior_seeds(
     try:
         payload = json.loads(out_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
+        # Unreadable is not the same as worthless: a truncated ledger still
+        # names the run dirs a verdict could be rebuilt from, and the
+        # checkpoint is about to write over it.
+        _archive(out_path, reason="unreadable ledger")
         return {}
     if descriptor_hash is None:
         # Ahead of the identity comparison, which would otherwise report the
@@ -337,7 +347,7 @@ def _reusable_prior_seeds(
         # because this call is blind, and listing it would read as the changed
         # dataset.
         changed = [k for k in _identity_changes(payload, identity) if k != _DESCRIPTOR_KEY]
-        if changed or _holds_a_paired_seed(payload):
+        if changed or any(_indexes_a_run(entry) for entry in payload.get("seeds", [])):
             _archive(
                 out_path,
                 reason="protocol changed" if changed else "unresolved dataset descriptor",
@@ -379,6 +389,17 @@ def _reusable_prior_seeds(
                 )
             continue
         reusable[seed] = SeedResult(seed=seed, reference_run=ref, winner_run=win)
+    # Same doctrine as the blind branch, on the path that reaches it most
+    # often: everything the gate refuses is a fit that ran — the snapshot
+    # check above already passed — so a seed this call will refit takes its
+    # run dirs' only name with it unless a copy is kept.
+    orphaned = [
+        entry
+        for entry in payload.get("seeds", [])
+        if _indexes_a_run(entry) and int(entry.get("seed", -1)) not in reusable
+    ]
+    if orphaned:
+        _archive(out_path, reason="cached runs could not be verified")
     return reusable
 
 

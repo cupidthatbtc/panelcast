@@ -838,6 +838,48 @@ class TestConfirmationResume:
             run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=failing)
         assert archives() == after_first
 
+    def _archives(self, cfg):
+        return sorted(
+            p.name
+            for p in cfg.sweep_dir.iterdir()
+            if p.name.startswith("confirmation_") and p.suffix == ".json"
+        )
+
+    def test_a_rejected_cached_run_leaves_a_copy(self, tmp_path, monkeypatch):
+        """Everything the gate refuses is a fit that ran; its run dirs keep a name."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        (Path(result.seeds[0].winner_run) / "manifest.json").unlink()
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        assert self._archives(cfg)
+
+    def test_a_half_finished_seed_is_worth_a_copy(self, tmp_path, monkeypatch):
+        """The reference landed and the winner crashed: one run dir is still real."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+
+        def winner_fails(config_path, panelcast_bin, timeout_seconds=None):
+            if "winner" in Path(config_path).stem:
+                return 1, "boom"
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        def unloadable(_ref):
+            raise OSError("stale mount")
+
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=winner_fails)
+        assert not self._archives(cfg)
+        with monkeypatch.context() as blind:
+            blind.setattr("panelcast.select.confirmation.load_descriptor", unloadable)
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=winner_fails)
+        assert self._archives(cfg)
+
+    def test_an_unreadable_ledger_is_moved_aside(self, tmp_path, monkeypatch):
+        """Unreadable is not worthless: it still names the run dirs."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        (cfg.sweep_dir / "confirmation.json").write_text("{ truncated", encoding="utf-8")
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        assert self._archives(cfg)
+
     def test_a_seed_that_paired_badly_is_still_worth_a_copy(self, tmp_path, monkeypatch):
         """Worth keeping is a lower bar than worth reusing: the run dirs are real."""
         cfg, launch = _fake_env(tmp_path, monkeypatch)
