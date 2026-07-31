@@ -283,21 +283,21 @@ class TestContainment:
 
         assert set(paths.roots()) == every
 
-    def test_both_callers_cover_the_shared_root_definition(self, tmp_path):
-        # *Which* roots is part of what a caller accepts as proof, so it is the
-        # last place the two could drift. Containment is `⊆`, not `=`, on
-        # purpose: each adds what only it knows about — the orchestrator its
-        # output base, `runs verify` the resolved run dir — but neither may
-        # narrow the shared set.
+    def test_both_callers_have_exactly_the_shared_roots_and_one_run(self, tmp_path):
+        # Equality, not containment. Every root defect this change went through
+        # — the working tree, the output base, the current run's own products —
+        # was an *extra* root, which `⊆` cannot see. Both sides are now the
+        # same sentence: the artifact roots, plus the one run being verified.
         from panelcast.cli.runs_cmd import _output_roots
         from panelcast.paths import ArtifactPaths
         from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
 
-        declared = set(ArtifactPaths.flat().roots())
+        run_dir = tmp_path / "run_a"
+        expected = {*ArtifactPaths.flat().roots(), run_dir}
         orchestrator = PipelineOrchestrator(PipelineConfig(dry_run=True), output_base=tmp_path)
 
-        assert declared <= set(orchestrator._output_verification_roots("run_a"))
-        assert declared <= set(_output_roots(tmp_path / "run_a"))
+        assert set(orchestrator._output_verification_roots(run_dir)) == expected
+        assert set(_output_roots(run_dir)) == expected
 
     def test_a_dynamic_key_may_not_reach_a_sibling_run(self, fx, tmp_path):
         # A dynamic key has no declared binding, so containment is the only
@@ -331,11 +331,26 @@ class TestContainment:
         orchestrator.run_dir = base / "current"
         orchestrator._resolved_paths = ArtifactPaths.for_run(orchestrator.run_dir)
 
-        roots = set(orchestrator._output_verification_roots("prev"))
+        roots = set(orchestrator._output_verification_roots(base / "prev"))
 
         assert base / "prev" in roots
         assert base not in roots
         assert not any(str(r).startswith(str(base / "current")) for r in roots)
+
+    def test_the_run_root_comes_from_where_the_manifest_was_read(self, tmp_path):
+        # Not from a field of the manifest: deriving it from `run_id` would let
+        # the document under verification choose which run it is checked
+        # against, which is the whole class of thing containment exists for.
+        import inspect
+
+        from panelcast.pipelines.orchestrator import PipelineOrchestrator
+
+        signature = inspect.signature(PipelineOrchestrator._output_verification_roots)
+        (name, parameter), *_ = list(signature.parameters.items())[1:]
+
+        assert name == "previous_run"
+        assert parameter.annotation == "Path"
+        assert parameter.default is inspect.Parameter.empty
 
     def test_the_stages_default_roots_are_deliberately_narrower(self, fx):
         # Not part of the shared definition and not a gap: with no caller-named
