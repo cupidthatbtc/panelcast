@@ -527,6 +527,28 @@ class TestTheDeclaredCallerDifference:
         recorded = Path("gone") / "evaluation" / "metrics.json"
 
         assert reroot_under(recorded, moved) == moved / "evaluation" / "metrics.json"
+        # ...anchored at the first component, not scanned for: without a base
+        # name to pair it with, matching the id anywhere would be exactly the
+        # bare-name laundering the pairing exists to refuse.
+        foreign = Path("/somewhere/else") / "gone" / "evaluation" / "metrics.json"
+        assert reroot_under(foreign, moved) == foreign
+
+    def test_the_output_base_decides_which_copy_is_verified(self, tmp_path, monkeypatch):
+        # Not the working directory: a stale copy sitting under cwd must not
+        # be the one checked (and then refused as outside the roots) while the
+        # real artifact under `--output-base` goes unread.
+        from panelcast.pipelines.output_integrity import reroot_under
+
+        monkeypatch.chdir(tmp_path)
+        stale = tmp_path / "outputs" / "run_a" / "evaluation" / "metrics.json"
+        stale.parent.mkdir(parents=True)
+        stale.write_text("{}", encoding="utf-8")
+        archived = tmp_path / "archive" / "outputs" / "run_a"
+
+        recorded = Path("outputs") / "run_a" / "evaluation" / "metrics.json"
+
+        assert stale.exists()
+        assert reroot_under(recorded, archived) == archived / "evaluation" / "metrics.json"
 
     def test_the_reroot_mapping_is_generic_over_what_it_moves(self, fx):
         # Not output-specific on purpose: run-owned *inputs* need the same

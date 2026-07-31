@@ -110,30 +110,40 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     manifest passes only where the run id, the run-relative path and the bytes
     all already agree.
 
-    A run-owned path maps whether or not the target survived the move: where a
-    deleted artifact *should* be is the useful answer, and reporting the
-    pre-move location instead turns a plain deletion into an apparent escape
-    from the run root. Paths the run does not own — shared data roots, external
-    files — are returned untouched, and containment judges them where they lie.
+    A run-owned path maps unconditionally — not only when the recorded location
+    has gone missing. The run directory in hand is the authority for that run's
+    own artifacts, so consulting the recorded path's existence first would let
+    the working directory decide which copy gets verified: a stale relative
+    copy under cwd would be checked, and then refused as outside the roots,
+    while the real artifact under ``--output-base`` went unread. It also means
+    a deleted artifact reports where it *should* be rather than turning a plain
+    deletion into an apparent escape. For an active run the mapping is a no-op.
 
-    Passed by callers that may be looking at a moved run — `runs verify`
+    Paths the run does not own — shared data roots, external files — are
+    returned untouched, and containment judges them where they lie.
+
+    Passed by callers that may be looking at a moved run: `runs verify`
     resolves active and quarantined runs alike and cannot know which it has
-    until it looks. An active run's paths exist, so this returns before mapping
-    anything. The skip path follows the active pointer and never passes it.
+    until it looks. The skip path follows the active pointer and never passes
+    it.
     """
-    if path.exists():
-        return path
     base_name = _output_base_name(run_dir)
+    parts = path.parts
+    if not base_name:
+        # An output base of `.` contributes no name, so the recorded path is
+        # already run-relative and the id must be its *first* component.
+        # Scanning for it anywhere would be the bare-name match this refuses.
+        if parts[:1] == (run_dir.name,):
+            return run_dir.joinpath(*parts[1:])
+        return path
     # `<base>/<id>` as a unit, matched right to left. Scanning for the run id
     # alone and then looking left would compare the wrong pair whenever the id
     # also appears inside the output base's own path, and taking the first
-    # match would pick that earlier occurrence over the real one. An output
-    # base of `.` contributes no name, so the marker is the id by itself.
-    marker = (base_name, run_dir.name) if base_name else (run_dir.name,)
-    parts = path.parts
-    for index in range(len(parts) - len(marker), -1, -1):
-        if parts[index : index + len(marker)] == marker:
-            return run_dir.joinpath(*parts[index + len(marker) :])
+    # match would pick that earlier occurrence over the real one.
+    marker = (base_name, run_dir.name)
+    for index in range(len(parts) - 2, -1, -1):
+        if parts[index : index + 2] == marker:
+            return run_dir.joinpath(*parts[index + 2 :])
     return path
 
 

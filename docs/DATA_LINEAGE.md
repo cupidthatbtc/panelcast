@@ -1474,8 +1474,10 @@ a sibling run. Two things still differ, both parameterized rather than implied.
 directory, so a run quarantined under `outputs/failed/<id>/` still verifies,
 while the skip path follows the active `latest` pointer and never looks under
 `failed/` — a quarantined run is not a source of truth for a new one. Run-owned
-means recorded as `<output base>/<run id>/…`, with the base matched by name so
-a relocated or differently-spelled `--output-base` still verifies; a path that
+means recorded as `<output base>/<run id>/…`, with the base matched by name, so
+a relocated `--output-base` still verifies as long as the base directory's own
+name is preserved — `mv proj/outputs /archive/outputs` keeps working, renaming
+it to `runs/` does not; a path that
 merely contains a directory with the run's name is left where the manifest put
 it and refused by containment. Name-matching cannot separate a relocated
 workspace from another checkout of the same project — both spell the base
