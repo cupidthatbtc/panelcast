@@ -89,7 +89,7 @@ from panelcast.pipelines.stamps import (
     verify_stamps,
     write_stamp,
 )
-from panelcast.utils.atomic import atomic_write_text
+from panelcast.utils.atomic import atomic_write_text, sweep_orphan_temps
 from panelcast.utils.environment import ensure_environment_locked, verify_environment
 from panelcast.utils.git_state import capture_git_state
 from panelcast.utils.hashing import sha256_path
@@ -368,6 +368,8 @@ class PipelineOrchestrator:
                     stage="setup",
                 )
 
+        self._sweep_run_dir_temps()
+
         # Capture git state and environment
         git_state = capture_git_state()
         environment = capture_environment()
@@ -433,6 +435,21 @@ class PipelineOrchestrator:
             dump_resolved_config(self.config), encoding="utf-8"
         )
 
+    def _sweep_run_dir_temps(self) -> None:
+        """Reclaim atomic-write temporaries a killed run left in this run dir.
+
+        Safe here and only here: the run directory was just claimed, either by
+        an exclusive ``mkdir`` or by moving it back out of quarantine, so
+        anything matching the temp marker belongs to a process that is gone.
+        The manifest is rewritten at every stage boundary, so this is where the
+        debris would otherwise pile up — one file per killed attempt.
+        """
+        if self.run_dir is None:
+            return
+        removed = sweep_orphan_temps(self.run_dir)
+        if removed:
+            log.debug("removed_orphan_temps", n=len(removed), run_dir=str(self.run_dir))
+
     # Config fields NOT restored from the manifest on resume: execution
     # mechanics and per-invocation provenance that never affect outputs. Every
     # other field — the complete resolved experiment — is restored (#296), so a
@@ -489,6 +506,8 @@ class PipelineOrchestrator:
             # Move back from failed for retry
             self.run_dir = run_dir
             shutil.move(str(failed_dir), str(run_dir))
+
+        self._sweep_run_dir_temps()
 
         # Load existing manifest
         manifest_path = self.run_dir / "manifest.json"

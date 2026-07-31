@@ -7,6 +7,9 @@ property that makes that safe: a failed write leaves the previous file, whole.
 """
 
 import json
+import os
+import stat
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -19,7 +22,13 @@ from panelcast.pipelines.manifest import (
     save_run_manifest,
 )
 from panelcast.pipelines.stamps import read_stamp, write_stamp
-from panelcast.utils.atomic import atomic_write_text
+from panelcast.utils import atomic as atomic_module
+from panelcast.utils.atomic import (
+    TMP_MARKER,
+    atomic_write,
+    atomic_write_text,
+    sweep_orphan_temps,
+)
 
 
 def _manifest(**overrides) -> RunManifest:
@@ -54,13 +63,76 @@ def _manifest(**overrides) -> RunManifest:
     return RunManifest(**fields)
 
 
-def _fail_fsync(monkeypatch) -> None:
-    """Make persistence fail after the temporary is open and written."""
+def _fail_the_commit(monkeypatch) -> None:
+    """Let the payload reach the temporary, then fail before it is published.
 
-    def boom(_fd):
-        raise OSError("no space left on device")
+    Patches the ``atomic_write`` name inside its own module — the one every
+    text writer resolves at call time — rather than reaching into the real
+    ``os`` module, so exactly one commit fails and nothing else in the process
+    is affected.
+    """
+    real = atomic_module.atomic_write
 
-    monkeypatch.setattr("panelcast.utils.atomic.os.fsync", boom)
+    @contextmanager
+    def guarded(path):
+        with real(path) as handle:
+            yield handle
+            raise OSError("no space left on device")
+
+    monkeypatch.setattr(atomic_module, "atomic_write", guarded)
+
+
+def _temps(directory: Path) -> list[Path]:
+    return sorted(p for p in directory.iterdir() if TMP_MARKER in p.name)
+
+
+class TestAtomicWrite:
+    def test_the_handle_replaces_the_target_only_on_success(self, tmp_path: Path):
+        target = tmp_path / "payload.bin"
+        target.write_bytes(b"original")
+
+        with atomic_write(target) as handle:
+            handle.write(b"replacement")
+
+        assert target.read_bytes() == b"replacement"
+        assert not _temps(tmp_path)
+
+    def test_an_exception_in_the_body_leaves_the_previous_bytes(self, tmp_path: Path):
+        target = tmp_path / "payload.bin"
+        target.write_bytes(b"original")
+
+        with pytest.raises(ValueError):
+            with atomic_write(target) as handle:
+                handle.write(b"partial")
+                raise ValueError("mid-write")
+
+        assert target.read_bytes() == b"original"
+        assert not _temps(tmp_path)
+
+    def test_two_writers_on_one_target_do_not_share_a_temporary(self, tmp_path: Path):
+        target = tmp_path / "payload.bin"
+        with atomic_write(target) as first, atomic_write(target) as second:
+            first.write(b"a")
+            second.write(b"bb")
+            assert len({p.name for p in _temps(tmp_path)}) == 2
+
+    def test_the_directory_entry_is_synced_after_the_rename(self, tmp_path: Path, monkeypatch):
+        synced: list[Path] = []
+        monkeypatch.setattr(atomic_module, "fsync_dir", synced.append)
+
+        atomic_write_text(tmp_path / "payload.txt", "x")
+
+        assert synced == [tmp_path]
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_an_existing_target_keeps_its_permissions(self, tmp_path: Path):
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+        target.chmod(0o600)
+
+        atomic_write_text(target, '{"rewritten": true}')
+
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
 
 
 class TestAtomicWriteText:
@@ -77,7 +149,7 @@ class TestAtomicWriteText:
     ):
         target = tmp_path / "record.json"
         atomic_write_text(target, "first")
-        _fail_fsync(monkeypatch)
+        _fail_the_commit(monkeypatch)
 
         with pytest.raises(OSError):
             atomic_write_text(target, "second")
@@ -93,13 +165,41 @@ class TestAtomicWriteText:
 
         assert not list(tmp_path.iterdir())
 
+    def test_newlines_are_written_exactly_as_given(self, tmp_path: Path):
+        target = tmp_path / "record.json"
+        atomic_write_text(target, '{\n  "a": 1\n}')
+
+        assert target.read_bytes() == b'{\n  "a": 1\n}'
+
+
+class TestSweepOrphanTemps:
+    def test_removes_what_a_killed_writer_left_and_nothing_else(self, tmp_path: Path):
+        orphan = tmp_path / f"manifest.json{TMP_MARKER}999-deadbeef"
+        orphan.write_text("half a manifest", encoding="utf-8")
+        keeper = tmp_path / "manifest.json"
+        keeper.write_text("{}", encoding="utf-8")
+
+        assert sweep_orphan_temps(tmp_path) == [orphan]
+        assert not orphan.exists()
+        assert keeper.exists()
+
+    def test_a_missing_directory_is_not_an_error(self, tmp_path: Path):
+        assert sweep_orphan_temps(tmp_path / "nowhere") == []
+
+    def test_debris_does_not_stop_the_next_write(self, tmp_path: Path):
+        (tmp_path / f"record.json{TMP_MARKER}999-deadbeef").write_text("junk", encoding="utf-8")
+
+        atomic_write_text(tmp_path / "record.json", "fresh")
+
+        assert (tmp_path / "record.json").read_text(encoding="utf-8") == "fresh"
+
 
 class TestManifestWritesAreAtomic:
     def test_persistence_failure_keeps_the_previous_manifest(self, tmp_path: Path, monkeypatch):
         manifest = _manifest()
         save_run_manifest(manifest, tmp_path)
         manifest.stages_completed.append("splits")
-        _fail_fsync(monkeypatch)
+        _fail_the_commit(monkeypatch)
 
         with pytest.raises(OSError):
             save_run_manifest(manifest, tmp_path)
@@ -133,7 +233,7 @@ class TestStampWritesAreAtomic:
     def test_a_failed_stamp_write_keeps_the_recorded_stamp(self, tmp_path: Path, monkeypatch):
         root = tmp_path / "features"
         write_stamp(root, "features", "hash-one", "run-one")
-        _fail_fsync(monkeypatch)
+        _fail_the_commit(monkeypatch)
 
         with pytest.raises(OSError):
             write_stamp(root, "features", "hash-two", "run-two")
@@ -155,9 +255,32 @@ class TestLatestPointerIsAtomic:
 
         orchestrator.run_dir = tmp_path / "run-two"
         orchestrator.run_dir.mkdir()
-        _fail_fsync(monkeypatch)
+        _fail_the_commit(monkeypatch)
         orchestrator._write_latest_pointer()  # warns, never raises
 
         pointer = json.loads((tmp_path / "latest.json").read_text(encoding="utf-8"))
         assert pointer["run_dir"] == "run-one"
-        assert not list(tmp_path.glob("latest.json.tmp*"))
+        assert not _temps(tmp_path)
+
+
+class TestRunDirTempsAreReclaimed:
+    def test_claiming_a_run_dir_sweeps_a_killed_attempts_debris(self, tmp_path: Path):
+        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+
+        run_dir = tmp_path / "run-one"
+        run_dir.mkdir()
+        orphan = run_dir / f"manifest.json{TMP_MARKER}999-deadbeef"
+        orphan.write_text("half a manifest", encoding="utf-8")
+
+        orchestrator = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)
+        orchestrator.run_dir = run_dir
+        orchestrator._sweep_run_dir_temps()
+
+        assert not orphan.exists()
+
+    def test_sweeping_without_a_run_dir_is_a_no_op(self, tmp_path: Path):
+        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+
+        orchestrator = PipelineOrchestrator(PipelineConfig(), output_base=tmp_path)
+        orchestrator.run_dir = None
+        orchestrator._sweep_run_dir_temps()
