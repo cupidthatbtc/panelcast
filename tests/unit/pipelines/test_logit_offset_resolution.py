@@ -273,7 +273,9 @@ class TestSingleResolver:
             "panelcast/pipelines/sensitivity.py",
             "panelcast/pipelines/training_summary.py",
         }, f"the guard did not reach the consumer modules; it scanned {sorted(scanned_modules)}"
-        if any(label == "scripts" for label, _ in SCAN_ROOTS):
+        # Gated on the repo, not on the root the assertion is checking: the
+        # is_dir() skip must not be able to switch the scan off silently.
+        if (SCRIPTS.parent / "pyproject.toml").exists():
             assert "scripts/predict_entity.py" in scanned_modules
         assert offenders == {}, (
             f"inline reads of {GUARDED_KEYS} outside the resolvers: {offenders}; "
@@ -388,8 +390,10 @@ class TestConfigValidation:
 
         from panelcast.cli.runs_cmd import _reproduce_config
 
+        from panelcast.paths import RunPathError
+
         manifest = SimpleNamespace(flags={"run_id": "../escape"})
-        with pytest.raises(Exception, match="run_id"):
+        with pytest.raises(RunPathError, match="run_id"):
             _reproduce_config(tmp_path / "missing", manifest)
 
     def test_a_recorded_list_is_restored_as_the_tuple_the_field_declares(self, tmp_path):

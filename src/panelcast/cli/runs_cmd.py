@@ -385,7 +385,6 @@ def runs_diff(
 
 def _reproduce_config(run_dir: Path, manifest) -> tuple["object", str]:
     """(PipelineConfig, provenance tier) for re-executing a recorded run."""
-    from dataclasses import MISSING
     from dataclasses import fields as dataclass_fields
 
     from panelcast.config.pipeline_yaml import load_resolved_config
@@ -400,13 +399,12 @@ def _reproduce_config(run_dir: Path, manifest) -> tuple["object", str]:
     # skips __post_init__, so a recorded value reached the re-executed run
     # neither validated nor normalized, while the resolved_config branch above
     # has always been validated by construction.
-    # Field.default is the MISSING sentinel under default_factory, and
-    # non-init fields are not constructor keywords, so both are resolved here
-    # rather than read off a live instance.
+    # Types come off a constructed default, so a field __post_init__
+    # normalizes reads as the type it actually holds; the init filter keeps
+    # methods, dunders and non-init fields out of the constructor call.
+    template = PipelineConfig()
     defaults = {
-        f.name: (f.default_factory() if f.default_factory is not MISSING else f.default)
-        for f in dataclass_fields(PipelineConfig)
-        if f.init
+        f.name: getattr(template, f.name) for f in dataclass_fields(PipelineConfig) if f.init
     }
     kwargs: dict = {}
     for key, value in (manifest.flags or {}).items():
