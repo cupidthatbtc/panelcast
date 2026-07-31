@@ -274,6 +274,34 @@ def _resolve_eval_horizon(
     return album_seq, max_seq_eval
 
 
+def _preceding_event_counts(
+    train_df: pd.DataFrame | None,
+    val_df: pd.DataFrame | None,
+    *,
+    entity_col: str,
+) -> pd.Series:
+    """Per-entity count of events that chronologically precede the test era.
+
+    One computation feeds both clocks a test row runs on: the latent sequence
+    position and the AR ``prev_score`` lag. The lag already takes the last
+    validation event when ``val_events >= 1``, so indexing the latent effect at
+    a train-only position left it one step behind the observation it scores,
+    and the ancestral rollout compounded one fewer innovation than the horizon
+    it reported (#428). A validation event is an unscored transition, not a
+    training row -- the walk advances through it whether or not the fit saw it.
+
+    Distinct from the ``max_events`` cap offset, which stays train-only on
+    purpose so test events keep the frame training assigned them (#247).
+    """
+    counts = pd.Series(dtype=int)
+    for frame in (train_df, val_df):
+        if frame is None or frame.empty or entity_col not in frame.columns:
+            continue
+        sizes = frame.groupby(entity_col).size()
+        counts = sizes if counts.empty else counts.add(sizes, fill_value=0)
+    return counts.astype(int)
+
+
 def _eiv_prev_nrev_base(
     test_df: pd.DataFrame,
     val_df: pd.DataFrame | None,
@@ -467,10 +495,16 @@ def _build_horizon_panel(
     if transform.name != "identity":
         y_last = np.asarray(transform.forward(y_last), dtype=np.float32)
 
+    # y_last already starts after validation, so the terminal-step count must
+    # too, or the rollout forecasts horizon 1 from a state one innovation short
+    # of the score it conditions on. Eligibility stays on train counts: it
+    # mirrors the training-time dynamic-effects filter, not the clock.
+    preceding = _preceding_event_counts(train_df, val_df, entity_col=entity_col)
+    history_counts = pd.Series(entity_ids).map(preceding).fillna(0)
     train_counts = pd.Series(entity_ids).map(train_df.groupby(entity_col).size()).fillna(0)
     max_seq_train = int(summary["max_seq"])
     min_albums_filter = int(summary.get("min_albums_filter", 2))
-    n_train_events = np.minimum(train_counts.to_numpy(dtype=int), max_seq_train)
+    n_train_events = np.minimum(history_counts.to_numpy(dtype=int), max_seq_train)
     dynamic_mask = (train_counts >= min_albums_filter).to_numpy()
 
     return {
@@ -651,17 +685,14 @@ def _prepare_test_model_args(
     artist_idx = artist_idx_raw.astype(np.int32)
 
     if train_df is not None:
-        train_artist_last_seq = (
-            train_df.groupby(entity_col).cumcount().groupby(train_df[entity_col]).last() + 1
-        )
         train_artist_last_score = train_df.groupby(entity_col)[target_col].last()
     else:
-        train_artist_last_seq = pd.Series(dtype=int)
         train_artist_last_score = pd.Series(dtype=float)
 
     raw_seq = test_df.groupby(entity_col).cumcount() + 1
-    train_offset = test_df[entity_col].map(train_artist_last_seq).fillna(0).astype(int)
-    album_seq = (raw_seq + train_offset).values
+    history_counts = _preceding_event_counts(train_df, val_df, entity_col=entity_col)
+    history_offset = test_df[entity_col].map(history_counts).fillna(0).astype(int)
+    album_seq = (raw_seq + history_offset).values
 
     min_albums_filter = summary.get("min_albums_filter", 2)
     # Apply the same dynamic-effects eligibility rule used in training:
