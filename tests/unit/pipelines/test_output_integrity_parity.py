@@ -848,13 +848,19 @@ class TestTheDeclaredCallerDifference:
 
         assert reroot_under(recorded_input, moved) == moved / "models" / "manifest.json"
 
-    def test_the_quarantine_name_has_one_definition(self):
-        # `reroot_under` recognizes a moved run by matching `<base>/failed/<id>`,
-        # so it is a *reader* of the name, as is `resolve_run_dir` in the same
-        # command path — both import it. This pins one of those readers to the
-        # layout's definition; it does not pin the writers, which still spell
-        # the name themselves. What it rules out is this module drifting from
-        # the layout and reporting an intact quarantined run as tampered.
+    @pytest.mark.parametrize(
+        "module_name",
+        ["panelcast.pipelines.output_integrity", "panelcast.cli.runs_cmd"],
+    )
+    def test_the_quarantine_name_has_one_definition(self, module_name):
+        # Both readers, not one. `reroot_under` recognizes a moved run by
+        # matching `<base>/failed/<id>`; `resolve_run_dir` looks for the run
+        # under the same directory, and it is the pair of them inside a single
+        # `runs verify` that makes a drifted spelling silent — one half finds
+        # the run and the other declines to map its paths. Pinning only the
+        # module the constant was introduced for would leave the half that
+        # made the failure loud unguarded. Writers elsewhere still spell the
+        # name themselves; this does not pin those.
         #
         # Static, not `is`: CPython interns identifier-like string constants, so
         # a restored local `QUARANTINE_DIR = "failed"` would be the *same
@@ -863,21 +869,12 @@ class TestTheDeclaredCallerDifference:
         # binding anyway, so "one definition" is not observable at runtime —
         # it is a property of the source, and the source is what to read.
         import ast
+        import importlib
 
         from panelcast import paths
-        from panelcast.pipelines import output_integrity
 
-        tree = ast.parse(Path(output_integrity.__file__).read_text(encoding="utf-8"))
-        # Keyed on the module too: importing `QUARANTINE_DIR` from anywhere is
-        # not the property — importing it from the layout that owns it is.
-        # A re-export through some third module would satisfy a bare name check
-        # while reintroducing exactly the indirection this forbids.
-        imported = {
-            alias.asname or alias.name
-            for node in ast.walk(tree)
-            if isinstance(node, ast.ImportFrom) and node.module == "panelcast.paths"
-            for alias in node.names
-        }
+        module = importlib.import_module(module_name)
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
         # `AnnAssign` as well as `Assign`: a re-declaration is at least as
         # likely to arrive annotated (`QUARANTINE_DIR: str = "failed"`), and
         # sweeping only `Assign` would let the one that reads as more careful
@@ -889,14 +886,27 @@ class TestTheDeclaredCallerDifference:
             for target in (node.targets if isinstance(node, ast.Assign) else [node.target])
             if isinstance(target, ast.Name)
         }
+        # Keyed on the module too: importing `QUARANTINE_DIR` from anywhere is
+        # not the property — importing it from the layout that owns it is.
+        # A re-export through some third module would satisfy a bare name check
+        # while reintroducing exactly the indirection this forbids.
+        imported = {
+            alias.asname or alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module == "panelcast.paths"
+            for alias in node.names
+        }
 
-        assert "QUARANTINE_DIR" in imported, (
-            "output_integrity must import QUARANTINE_DIR from panelcast.paths; "
-            "reading it from anywhere else reintroduces the indirection"
-        )
+        # Re-declaration first: it is the likely regression and it *causes* the
+        # missing import, so checking the import first would fire on the
+        # symptom and never reach the line that names the defect.
         assert "QUARANTINE_DIR" not in assigned, (
-            "output_integrity re-declares QUARANTINE_DIR locally; the layout "
-            "owns the name and a second definition can drift from it"
+            f"{module_name} re-declares QUARANTINE_DIR; the layout owns the "
+            "name and a second definition can drift from it silently"
+        )
+        assert "QUARANTINE_DIR" in imported, (
+            f"{module_name} must import QUARANTINE_DIR from panelcast.paths; "
+            "spelling it inline or re-exporting it restores the indirection"
         )
         # Not `QUARANTINE_DIR in _RESERVED_RUN_IDS` — the set is built from the
         # constant, so that holds by construction. The reserved id is a
