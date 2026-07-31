@@ -1534,19 +1534,18 @@ containment and the recorded hash decide the rest. The declared-path binding is
 the second, and the first of the two places `runs verify` is the weaker side —
 both of them consequences of the same missing list: only the stage caller holds
 the paths a stage declares, so only it refuses a manifest that redirects a
-static output at
-another file inside the run's own directory, where containment has nothing to
-say. The manifest does not record which outputs were declared, so there is
-nothing for `runs verify` to read it from — tracked in #439, which makes that
-list *available* without making it *trustworthy*: a list inside the document
-can be shortened along with the records it describes, and the skip path is
-strong here precisely because its list comes from code instead. The third is
-the same asymmetry applied to completeness — only the skip path notices an
-output a stage declares that the manifest never recorded — and beneath it sits
-a blind spot they *share*: for a dynamic key nothing outside the document says
-it ever existed, so an erased record is indistinguishable from one never
-written, both callers accept, and the skip path is the side that then reuses
-artifacts on that basis.
+static output at another file inside the run's own directory, where containment
+has nothing to say. The manifest does not record which outputs were declared,
+so there is nothing for `runs verify` to read it from — tracked in #439, which
+makes that list *available* without making it *trustworthy*: a list inside the
+document can be shortened along with the records it describes, and the skip
+path is strong here precisely because its list comes from code instead. The
+third is the same asymmetry applied to completeness — only the skip path
+notices an output a stage declares that the manifest never recorded — and
+beneath it sits a blind spot they *share*: for a dynamic key nothing outside
+the document says it ever existed, so an erased record is indistinguishable
+from one never written, both callers accept, and the skip path is the side that
+then reuses artifacts on that basis.
 
 Both callers' containment roots are the run directory plus the `ArtifactPaths`
 roots — not the working tree, which would admit any file whose bytes happen to

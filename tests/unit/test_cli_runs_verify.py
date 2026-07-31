@@ -695,6 +695,32 @@ class TestReproduceOnAQuarantinedRun:
         # call does not read as the premise breaking.
         assert not {"resume", "skip_existing"} & set(kwargs)
 
+    def test_every_input_inside_the_run_is_something_a_stage_writes(self, tmp_path):
+        # The link between the skip's *bound* and its *justification*, which
+        # are different predicates. The bound is containment — inside the run
+        # directory — while the reason is regeneration. They coincide only if
+        # nothing recorded under the run is a file the pipeline does not write:
+        # a config or an operator-supplied file staged there would be skipped
+        # by containment and not recreated, turning an early abort into the
+        # mid-run crash the skip exists to avoid.
+        from panelcast.paths import ArtifactPaths
+        from panelcast.pipelines.stages import build_optional_stages, build_pipeline_stages
+
+        run_dir = tmp_path / "outputs" / "run_a"
+        paths = ArtifactPaths.for_run(run_dir)
+        stages = [*build_pipeline_stages(paths=paths), *build_optional_stages(paths=paths)]
+        written = {p.resolve() for stage in stages for p in stage.output_paths}
+
+        inside = {
+            p.resolve()
+            for stage in stages
+            for p in stage.input_paths
+            if run_dir in p.resolve().parents
+        }
+
+        assert inside, "no stage reads from the run directory; the skip has nothing to bound"
+        assert inside <= written
+
     def test_the_planted_flag_is_one_a_resolved_config_can_carry(self, tmp_path):
         # The other half of the True case's premise: `skip_existing` is a
         # mapped key, so it is inheritable at all and clearing it is a thing
@@ -749,7 +775,7 @@ class TestReproduceOnAQuarantinedRun:
         monkeypatch.chdir(tmp_path)
         base = _write_run(tmp_path, run_owned_input=True)
         product = tmp_path / "models" / "manifest.json"
-        product.parent.mkdir()
+        product.parent.mkdir(exist_ok=True)
         product.write_text("{}", encoding="utf-8")
         manifest_path = base / "run_a" / "manifest.json"
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -781,15 +807,21 @@ class TestReproduceOnAQuarantinedRun:
         from panelcast.pipelines import orchestrator
 
         run_dir, recorded = _symlinked_product_run(tmp_path)
+        base = run_dir.parent
         monkeypatch.setattr(orchestrator, "run_pipeline", lambda config, **kw: 0)
-        _quarantine(run_dir.parent)
+        argv = ["runs", "reproduce", "run_a", "--output-base", str(base)]
 
-        result = runner.invoke(
-            app, ["runs", "reproduce", "run_a", "--output-base", str(run_dir.parent)]
-        )
+        # The claim is comparative, so the before half has to be asserted:
+        # active, the recorded path exists through the link and the gate passes.
+        before = runner.invoke(app, argv)
+        assert before.exit_code == 0, before.output
+        assert "ABORT" not in before.output
 
-        assert result.exit_code == 1
-        assert f"ABORT: recorded input missing: {recorded}" in result.output
+        _quarantine(base)
+        after = runner.invoke(app, argv)
+
+        assert after.exit_code == 1
+        assert f"ABORT: recorded input missing: {recorded}" in after.output
 
     def test_raw_data_that_cannot_be_read_aborts_legibly(self, tmp_path, monkeypatch):
         # The gate's whole job is turning a late failure into an early legible
