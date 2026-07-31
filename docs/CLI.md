@@ -700,9 +700,10 @@ after `evaluate` has already recorded `outputs/<id>/models/manifest.json` as an
 input; after quarantine that file is under `outputs/failed/<id>/`, and it is
 checked there rather than reported missing on the run someone is debugging.
 Inputs the run does not own — the shared data roots, external files — have no
-mapping to make and are checked where the manifest recorded them. A line names
-the path actually checked, with the recorded spelling after it when the two
-differ.
+mapping to make and are checked where the manifest recorded them, and so is a
+run-owned path whose recorded tail climbs back out of the run directory. Each
+line names the recorded spelling, preceded by the location actually checked
+when the artifact moved.
 
 **Run it from the project root.** A flat-layout run records its data, model and
 report artifacts as paths relative to the project root, so `runs verify`
@@ -833,8 +834,8 @@ still make any run unreproducible for the ordinary cleanup of pruning the
 directory it failed in. The environment fingerprint frames the expectation up
 front — bit-exact outputs within a matching fingerprint, statistical
 reproduction otherwise — and the post-run comparison follows suit (exact
-output-hash match vs headline-metric deltas). A reproduction
-always runs fresh: never resumes, never skips.
+output-hash match vs headline-metric deltas). A reproduction always runs fresh:
+never resumes, never skips.
 
 ```bash
 panelcast runs reproduce RUN_ID [OPTIONS]

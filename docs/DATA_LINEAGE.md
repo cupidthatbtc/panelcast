@@ -1502,27 +1502,26 @@ a relocated `--output-base` still verifies as long as the base directory's own
 name is preserved — `mv proj/outputs /archive/outputs` keeps working, renaming
 it to `runs/` does not; a path that
 merely contains a directory with the run's name is left where the manifest put
-it and refused by containment. The mapping is generic over what it moves, and
-a run's recorded *inputs* need it too: a stage reads earlier stages'
-run-scoped products, so a run that failed at or after `evaluate` recorded
-`<output base>/<id>/models/…` as an input. `output_integrity.run_owned_path`
-answers where the run holds such a path, or `None` when it does not own it,
-declining a mapping whose tail would leave the run directory — the input
-callers only stat and hash, so they have no containment step of their own to
-refuse it afterwards. Ownership is decided on the *resolved* location, so a
+it and refused by containment. The mapping is generic over what it moves, and a
+run's recorded *inputs* need it too: a stage reads earlier stages' run-scoped
+products, so a run that failed at or after `evaluate` recorded `<output
+base>/<id>/models/…` as an input. `output_integrity.run_owned_path` answers
+where the run holds such a path, or `None` when it does not own it, declining a
+mapping whose tail would leave the run directory — the input callers only stat
+and hash, so they have no containment step of their own to refuse it
+afterwards, and an unowned path is then checked wherever the manifest recorded
+it. Ownership is decided on the *resolved* location, so a
 product reached through a symlink that leaves the run directory is not owned
 either — the same bound `verify_output_records` applies to an output in that
 place, which reports it `UNBOUND`. `runs verify` re-hashes run-owned inputs at
 the location it returns; `runs reproduce`'s pre-flight gate uses the `None` to
 check only external inputs, since a reproduction regenerates the run's own
-products.
-Name-matching cannot separate a relocated workspace from another checkout of
-the same project — both spell the base `outputs` — so what bounds it is that
-the mapping only aims *into* the run directory: containment and the recorded
-hash decide the rest. The declared-path
-binding is the second, and the first
-of the two places `runs verify` is the weaker side — both of them consequences
-of the same missing list: only the stage caller holds the paths a
+products. Name-matching cannot separate a relocated workspace from another
+checkout of the same project — both spell the base `outputs` — so what bounds
+it is that the mapping only aims *into* the run directory: containment and the
+recorded hash decide the rest. The declared-path binding is the second, and the
+first of the two places `runs verify` is the weaker side — both of them
+consequences of the same missing list: only the stage caller holds the paths a
 stage declares, so only it refuses a manifest that redirects a static output at
 another file inside the run's own directory, where containment has nothing to
 say. The manifest does not record which outputs were declared, so there is

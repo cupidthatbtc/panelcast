@@ -130,7 +130,7 @@ class TestRunsVerify:
         result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
 
         assert result.exit_code == 0, result.output
-        assert "OK       input raw.csv" in result.output
+        assert "OK       input ./raw.csv" in result.output
         assert "recorded as" not in result.output
 
     def test_a_manifest_with_no_hashes_is_unverifiable_not_excused(self, tmp_path):
@@ -370,9 +370,10 @@ class TestTheInputMappingIsBounded:
         assert run_owned_path(Path("data") / "raw" / "albums.csv", moved) is None
 
     def test_an_active_runs_own_product_is_owned_though_nothing_moved(self, tmp_path):
-        # The mapping is the identity for an active run, so "did the path
-        # change" cannot answer ownership — which is why the answer comes from
-        # containment and `runs reproduce` can rely on it.
+        # For an active run the mapping moves nothing — but it still rewrites
+        # the spelling onto `run_dir`, as the assertion below shows, so a
+        # changed path cannot answer ownership in either direction. Containment
+        # can, which is what lets `runs reproduce` rely on it.
         from panelcast.pipelines.output_integrity import run_owned_path
 
         active = tmp_path / "outputs" / "run_a"
@@ -383,9 +384,9 @@ class TestTheInputMappingIsBounded:
     def test_an_active_run_verified_by_an_absolute_base_claims_no_move(
         self, tmp_path, monkeypatch
     ):
-        # The mapping moves nothing here, but it does rewrite the spelling onto
-        # an absolute run directory, so a label decided on spelling would
-        # announce a relocation for an artifact sitting where it was written.
+        # The rewritten spelling reaches the report, so a label decided on
+        # spelling would announce a relocation for an artifact sitting exactly
+        # where it was written.
         base = _write_run(tmp_path, run_owned_input=True)
         product = base / "run_a" / "models" / "manifest.json"
         manifest_path = base / "run_a" / "manifest.json"
@@ -398,50 +399,71 @@ class TestTheInputMappingIsBounded:
         result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
 
         assert result.exit_code == 0, result.output
-        assert f"OK       input {product}" in result.output
+        assert f"OK       input {recorded}" in result.output
         assert "recorded as" not in result.output
 
     def test_an_artifact_symlinked_out_of_the_run_is_not_owned(self, tmp_path):
         # Resolved containment, deliberately. A symlink inside the run that
-        # leaves it is declined here for the reason `verify_output_records`
-        # reports the *output* at the same path UNBOUND: a layout storing
-        # products outside the run directory is unverifiable on both sides
-        # rather than lenient on one, and the two callers agreeing about which
-        # paths a run owns is worth more than reaching such a product.
-        from panelcast.pipelines.output_integrity import (
-            UNBOUND,
-            run_owned_path,
-            verify_output_records,
-        )
+        # leaves it is declined here for the reason `runs verify` reports the
+        # *output* at the same path UNBOUND: a layout storing products outside
+        # the run directory is unverifiable on both sides rather than lenient
+        # on one, and the two callers agreeing about which paths a run owns is
+        # worth more than reaching such a product. The output half goes through
+        # the CLI so the parity claim is made against the roots that ship, not
+        # against the strictest set this could have passed.
+        from panelcast.pipelines.output_integrity import run_owned_path
 
-        run_dir = tmp_path / "outputs" / "run_a"
-        run_dir.mkdir(parents=True)
+        base = _write_run(tmp_path)
+        run_dir = base / "run_a"
         shared = tmp_path / "shared"
         shared.mkdir()
-        (shared / "manifest.json").write_text("{}", encoding="utf-8")
+        product = shared / "manifest.json"
+        product.write_text("{}", encoding="utf-8")
         try:
             (run_dir / "models").symlink_to(shared)
         except (OSError, NotImplementedError) as exc:
             pytest.skip(f"symlinks unavailable: {exc}")
-        recorded = Path("outputs") / "run_a" / "models" / "manifest.json"
+        recorded = run_dir / "models" / "manifest.json"
+        manifest_path = run_dir / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["outputs"]["train:models"] = str(recorded)
+        payload["output_hashes"]["train:models"] = sha256_path(product)
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
         assert run_owned_path(recorded, run_dir) is None
 
-        key = "train:models/manifest.json"
-        (verdict,) = verify_output_records(
-            {key: str(recorded)},
-            {key: sha256_path(run_dir / "models" / "manifest.json")},
-            roots=[run_dir],
-            reroot=run_dir,
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 1
+        assert "UNBOUND      train:models (recorded output path escapes the run roots)" in (
+            result.output
         )
 
-        assert verdict.label == UNBOUND
+    def test_an_escaping_recorded_input_is_checked_where_it_was_recorded(self, tmp_path):
+        # What unowned means, stated so the guard is not read as a refusal to
+        # read: an active run's escaping recorded input is still stat'd and
+        # hashed at the location the manifest names, exactly as it was before
+        # any re-rooting existed. The guard bounds where the *mapping* may aim.
+        base = _write_run(tmp_path)
+        outside = tmp_path / "secret.txt"
+        outside.write_text("real", encoding="utf-8")
+        recorded_at = base / "run_a" / ".." / ".." / "secret.txt"
+        manifest_path = base / "run_a" / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["input_hashes"] = {str(recorded_at): sha256_path(outside)}
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    def test_the_input_pass_declines_to_follow_an_escaping_tail(self, tmp_path):
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 0, result.output
+        assert f"OK       input {recorded_at}" in result.output
+
+    def test_the_input_pass_does_not_follow_the_mapping_out_of_the_run(self, tmp_path):
         # End to end, and discriminating: a file whose bytes match the recorded
         # hash sits exactly where the unguarded mapping would land, so
-        # following it would report this run clean. The guard leaves the path
-        # where the manifest put it, which after the move is nowhere.
+        # following it would report this run clean. Quarantine is what makes
+        # the two places differ — the mapped `../../` climbs to `<base>`, the
+        # recorded one to `<tmp>` — so the verdict cannot be a coincidence.
         from panelcast.pipelines.output_integrity import reroot_under
 
         base = _write_run(tmp_path)
@@ -469,11 +491,21 @@ class TestTheInputMappingIsBounded:
 class TestReproduceOnAQuarantinedRun:
     """The pre-flight gate is about raw data, not the run's own products (#420)."""
 
-    def _reproduce(self, tmp_path, monkeypatch, *, prune: bool = False, drift: bool = False):
+    def _reproduce(
+        self,
+        tmp_path,
+        monkeypatch,
+        *,
+        prune: bool = False,
+        drift: bool = False,
+        resolved_config: bool = False,
+    ):
         from panelcast.pipelines import orchestrator
 
         base = _write_run(tmp_path, run_owned_input=True)
         moved = _quarantine(base)
+        if resolved_config:
+            (moved / "resolved_config.yaml").write_text("skip_existing: true\n", encoding="utf-8")
         if prune:
             shutil.rmtree(moved / "models")
         if drift:
@@ -498,14 +530,20 @@ class TestReproduceOnAQuarantinedRun:
         assert "ABORT" not in result.output, result.output
         assert result.exit_code == 0, result.output
 
+    @pytest.mark.parametrize("resolved_config", [False, True])
     def test_the_reproduction_regenerates_what_the_gate_stopped_checking(
-        self, tmp_path, monkeypatch
+        self, tmp_path, monkeypatch, resolved_config
     ):
         # The premise the skip rests on, asserted where it is decided rather
         # than quoted from the docstring: a reproduction that resumed or
         # skipped could reuse a run-owned input the gate no longer proves is
         # there, turning an early abort into a stage-level crash midway.
-        result = self._reproduce(tmp_path, monkeypatch)
+        #
+        # Both config tiers, because they are not equally interesting. In the
+        # pre-0.9.0 fallback `resume is None` is nearly free — no flag records
+        # one. `resolved_config.yaml` *can* carry `skip_existing`, so that is
+        # the tier where the premise could be inherited rather than set.
+        result = self._reproduce(tmp_path, monkeypatch, resolved_config=resolved_config)
 
         assert result.exit_code == 0, result.output
         (config, kwargs) = self.launched[0]
@@ -514,6 +552,18 @@ class TestReproduceOnAQuarantinedRun:
         # Both argument channels: a keyword taking precedence over the config
         # would leave the assertions above reading defaults nothing acts on.
         assert set(kwargs) == {"output_base"}
+
+    def test_the_resolved_config_tier_is_the_one_that_could_inherit_it(self, tmp_path):
+        # The premise of the parametrization above: `skip_existing: true` in a
+        # resolved config really does reach `PipelineConfig`, so the True case
+        # is asserting that `runs reproduce` clears it rather than that the
+        # file was ignored.
+        from panelcast.config.pipeline_yaml import load_resolved_config
+
+        resolved = tmp_path / "resolved_config.yaml"
+        resolved.write_text("skip_existing: true\n", encoding="utf-8")
+
+        assert load_resolved_config(resolved)["skip_existing"] is True
 
     def test_pruning_the_failed_runs_models_does_not_abort_it_either(
         self, tmp_path, monkeypatch

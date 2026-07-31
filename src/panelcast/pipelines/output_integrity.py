@@ -203,10 +203,14 @@ def run_owned_path(path: Path, run_dir: Path) -> Path | None:
 
     Two things ``reroot_under`` alone cannot give a caller that only stats and
     hashes. It maps unconditionally once the pair matches, so a recorded tail
-    that climbs back out — ``outputs/<id>/../../etc/shadow`` — would be
-    followed; ``verify_output_records`` catches that with the containment step
-    it runs afterwards, and these callers have no such step, so here the guard
-    travels with the mapping and an escaping tail reads as unowned. And for an
+    that climbs back out — ``outputs/<id>/../../etc/shadow`` — would be aimed
+    into this run's directory and read there; ``verify_output_records`` catches
+    that with the containment step it runs afterwards, and these callers have
+    no such step, so here the guard travels with the mapping and an escaping
+    tail reads as unowned. Unowned is all it means: the caller then treats the
+    path as external and checks it wherever the manifest recorded it, which is
+    what it did before any of this existed. What is bounded is where the
+    *mapping* may aim, not what the manifest may name. And for an
     *active* run the mapping moves nothing — though it still rewrites the
     spelling onto ``run_dir``, which is why a changed path cannot answer
     ownership either way. Containment can, and it is the same question.

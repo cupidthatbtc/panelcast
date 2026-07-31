@@ -125,14 +125,15 @@ def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:
 
 
 def _input_label(path: Path, path_str: str) -> str:
-    """Where the input was checked, naming the recorded spelling when it moved.
+    """Where the input was checked, naming the recorded spelling either way.
 
     Moved is a question about *locations*, and the spellings answer it wrong in
     both directions: ``Path`` normalizes ``./x``, while re-rooting rewrites a
     relative recorded path onto an absolute run directory even for an active
-    run that never moved. So the two are compared resolved, and the recorded
-    side is printed exactly as the manifest holds it, which is the string
-    someone greps that file for.
+    run that never moved. So the two are compared resolved, and the manifest's
+    own string is what gets printed — verbatim when nothing moved, since that
+    is both accurate and the string someone greps the manifest for, and after
+    the checked location when something did.
     """
     try:
         moved = path.resolve() != Path(path_str).resolve()
@@ -140,7 +141,7 @@ def _input_label(path: Path, path_str: str) -> str:
         # The suffix is the part that asserts something, so with no evidence
         # either way the label says less rather than something untrue.
         moved = False
-    return f"{path} (recorded as {path_str})" if moved else str(path)
+    return f"{path} (recorded as {path_str})" if moved else path_str
 
 
 def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
