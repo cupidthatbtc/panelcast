@@ -112,7 +112,7 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     paths still name ``outputs/<id>/...`` while the artifacts now live under
     ``outputs/failed/<id>/...``. Deliberately generic over what the path is: the
     same mapping applies to run-owned *inputs*, which this module does not
-    verify but does map for the callers that do, through ``reroot_contained``
+    verify but does locate for the callers that do, through ``run_owned_path``
     (#420).
 
     "Run-owned" means recorded as ``<output base>/<run id>/<rest>``: the run
@@ -191,31 +191,39 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     return path
 
 
-def reroot_contained(path: Path, run_dir: Path) -> Path:
-    """``reroot_under``, applied only where the result stays under ``run_dir``.
+def run_owned_path(path: Path, run_dir: Path) -> Path | None:
+    """Where ``run_dir`` holds ``path``, or None if the run does not own it.
 
-    ``verify_output_records`` maps first and judges the result by containment
-    afterwards, so a recorded path whose run-relative tail climbs back out —
-    ``outputs/<id>/../../etc/shadow`` — is refused before anything reads it.
-    Callers that only stat and hash a run-owned path have no second step to
-    catch that, and `runs verify`'s input pass and `runs reproduce`'s input
-    gate are both of those (#420), so for them the guard travels with the
-    mapping: a tail that leaves the run directory is left at its recorded
-    location, which is where it was checked before any re-rooting existed.
+    ``reroot_under`` followed by the containment step, returning the ownership
+    answer the mapping already had to compute. `runs verify`'s input pass
+    re-hashes a run-owned input at the location this gives it; `runs
+    reproduce`'s pre-flight gate uses the None to tell an *external* input —
+    raw data whose drift would invalidate the comparison — from one of the
+    run's own products, which a fresh reproduction regenerates (#420).
 
-    Not folded into ``reroot_under`` itself, because for an *output* the
-    escaping tail is worth reporting rather than quietly declining — the
-    manifest is claiming something about a path outside the run — and only a
+    Two things ``reroot_under`` alone cannot give a caller that only stats and
+    hashes. It maps unconditionally once the pair matches, so a recorded tail
+    that climbs back out — ``outputs/<id>/../../etc/shadow`` — would be
+    followed; ``verify_output_records`` catches that with the containment step
+    it runs afterwards, and these callers have no such step, so here the guard
+    travels with the mapping and an escaping tail reads as unowned. And for an
+    *active* run the mapping is the identity, so whether the path changed
+    cannot answer ownership — containment can, and it is the same question.
+
+    Not folded into ``reroot_under`` itself, because for an *output* an
+    escaping tail is worth reporting rather than quietly declining: the
+    manifest is claiming something about a path outside the run, and only a
     caller that produces verdicts can say so.
     """
+    # A run dir that will not resolve is dropped here, leaving no roots, so
+    # nothing is contained and the caller gets the same None as an escape.
+    roots = _resolved_roots((run_dir,))
     mapped = reroot_under(path, run_dir)
-    if mapped == path:
-        return path
     try:
         resolved = mapped.resolve()
     except (OSError, ValueError, RuntimeError):
-        return path
-    return mapped if _is_contained(resolved, _resolved_roots((run_dir,))) else path
+        return None
+    return mapped if _is_contained(resolved, roots) else None
 
 
 def _output_base_name(run_dir: Path) -> str:
@@ -380,7 +388,7 @@ __all__ = [
     "UNBOUND",
     "UNVERIFIABLE",
     "OutputVerdict",
-    "reroot_contained",
     "reroot_under",
+    "run_owned_path",
     "verify_output_records",
 ]

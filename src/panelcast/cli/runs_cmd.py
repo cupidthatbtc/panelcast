@@ -124,9 +124,14 @@ def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:
         problems.append(verdict.key)
 
 
-def _input_label(path: Path, path_str: str) -> str:
-    """Where the input was checked, naming the recorded spelling when it moved."""
-    return str(path) if str(path) == path_str else f"{path} (recorded as {path_str})"
+def _input_label(path: Path, recorded_at: Path) -> str:
+    """Where the input was checked, naming the recorded spelling when it moved.
+
+    Compared as paths rather than strings: ``Path`` normalizes ``./x`` and
+    ``a//b``, so a recorded spelling that merely normalizes would otherwise
+    claim a move that never happened.
+    """
+    return str(path) if path == recorded_at else f"{path} (recorded as {recorded_at})"
 
 
 def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
@@ -143,20 +148,23 @@ def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
     Inputs the run does not own — the shared data roots, external files — have
     no such mapping and are checked where they were recorded. The problem is
     keyed on the recorded spelling either way, since that is what the manifest
-    records and what a second `runs verify` will name again.
+    holds and what a second `runs verify` will name again.
     """
-    from panelcast.pipelines.output_integrity import reroot_contained
+    from panelcast.pipelines.output_integrity import run_owned_path
     from panelcast.utils.hashing import sha256_path
 
-    for path_str, recorded in sorted(manifest.input_hashes.items()):
-        path = reroot_contained(Path(path_str), run_dir)
-        label = _input_label(path, path_str)
+    for path_str, recorded in sorted((manifest.input_hashes or {}).items()):
+        recorded_at = Path(path_str)
+        path = run_owned_path(recorded_at, run_dir) or recorded_at
+        label = _input_label(path, recorded_at)
         if not path.exists():
             typer.echo(f"MISSING  input {label}")
             problems.append(path_str)
             continue
         if sha256_path(path) != recorded:
-            typer.echo(f"MODIFIED input {label} (raw data changed since this run)")
+            # Not "raw data" any more: this pass also covers the run's own
+            # products, where the likely cause is an edited run directory.
+            typer.echo(f"MODIFIED input {label} (contents changed since this run)")
             problems.append(path_str)
         else:
             typer.echo(f"OK       input {label}")
@@ -442,7 +450,7 @@ def runs_reproduce(
     """
     from panelcast.config.descriptor import load_descriptor
     from panelcast.pipelines.manifest import capture_environment, load_run_manifest
-    from panelcast.pipelines.output_integrity import reroot_contained
+    from panelcast.pipelines.output_integrity import run_owned_path
     from panelcast.utils.hashing import sha256_path
 
     run_dir = resolve_run_dir(run_id, output_base)
@@ -460,18 +468,23 @@ def runs_reproduce(
             )
             raise typer.Exit(code=1)
 
-    # Re-rooted for the same reason `runs verify` does it: a run quarantined
-    # after `evaluate` recorded its own `models/` products as inputs, and
-    # aborting on those would make a failed run unreproducible precisely
-    # because it failed.
+    # Only the inputs the run does not own. A stage records earlier stages'
+    # run-scoped products as inputs, so a run that failed at or after
+    # `evaluate` carries its own `models/` artifacts here — and a reproduction
+    # never resumes and never skips, so it regenerates every one of them.
+    # Gating on them abandoned a quarantined run to its recorded paths, and
+    # would still make any run unreproducible for the ordinary cleanup of
+    # pruning the directory it failed in. What the gate is for is raw data
+    # drifting underneath the comparison, which is what is left.
     for path_str, recorded in sorted((manifest.input_hashes or {}).items()):
-        path = reroot_contained(Path(path_str), run_dir)
-        label = _input_label(path, path_str)
+        path = Path(path_str)
+        if run_owned_path(path, run_dir) is not None:
+            continue
         if not path.exists():
-            typer.echo(f"ABORT: recorded input missing: {label}")
+            typer.echo(f"ABORT: recorded input missing: {path_str}")
             raise typer.Exit(code=1)
         if sha256_path(path) != recorded:
-            typer.echo(f"ABORT: raw input changed since the run: {label}")
+            typer.echo(f"ABORT: raw input changed since the run: {path_str}")
             raise typer.Exit(code=1)
 
     old_fingerprint = manifest.environment.fingerprint

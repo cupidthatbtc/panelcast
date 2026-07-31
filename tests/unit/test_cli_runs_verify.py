@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -111,7 +112,25 @@ class TestRunsVerify:
         base = _write_run(tmp_path, tamper="input")
         result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
         assert result.exit_code == 1
-        assert "raw data changed" in result.output
+        assert "contents changed since this run" in result.output
+
+    def test_a_recorded_spelling_that_only_normalises_is_not_called_a_move(
+        self, tmp_path, monkeypatch
+    ):
+        # `Path("./raw.csv") == Path("raw.csv")` but the strings differ, so
+        # comparing them would announce a re-rooting that never happened.
+        base = _write_run(tmp_path)
+        manifest_path = base / "run_a" / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["input_hashes"] = {"./raw.csv": sha256_path(tmp_path / "raw.csv")}
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 0, result.output
+        assert "OK       input raw.csv" in result.output
+        assert "recorded as" not in result.output
 
     def test_a_manifest_with_no_hashes_is_unverifiable_not_excused(self, tmp_path):
         # Shape cannot tell a pre-0.9.0 run from a modern one someone emptied
@@ -258,7 +277,7 @@ class TestRunsVerify:
         result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
 
         assert result.exit_code == 1
-        assert f"MODIFIED input {raw} (raw data changed since this run)" in result.output
+        assert f"MODIFIED input {raw} (contents changed since this run)" in result.output
 
     def test_a_deleted_run_owned_input_still_reads_as_missing(self, tmp_path):
         # Mapping unconditionally reports where the artifact *should* be; it
@@ -273,6 +292,20 @@ class TestRunsVerify:
         assert result.exit_code == 1
         assert f"MISSING  input {moved / 'models' / 'manifest.json'} (recorded as" in result.output
 
+    def test_an_edited_run_owned_input_still_reads_as_modified(self, tmp_path):
+        # The half that pins re-rooting to the *hash* rather than to existence:
+        # the mapping changes which bytes get read, so the digest has to be
+        # taken at the moved location and still be the recorded one.
+        base = _write_run(tmp_path, run_owned_input=True)
+        moved = _quarantine(base)
+        edited = moved / "models" / "manifest.json"
+        edited.write_text(json.dumps({"stage": "tampered"}), encoding="utf-8")
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 1
+        assert f"MODIFIED input {edited} (recorded as" in result.output
+
     def test_the_evaluate_stage_really_declares_inputs_inside_the_run(self, tmp_path):
         # The premise the fixture stands on, asserted rather than assumed: if
         # the run-scoped layout stopped putting `evaluate`'s inputs under the
@@ -286,7 +319,7 @@ class TestRunsVerify:
 
         run_owned = [p for p in stage.input_paths if run_dir in p.parents]
 
-        assert [p.name for p in run_owned] == ["manifest.json", "training_summary.json"]
+        assert sorted(p.name for p in run_owned) == ["manifest.json", "training_summary.json"]
 
     def test_another_runs_copy_of_the_same_artifact_is_refused(self, tmp_path):
         # The substitution containment exists for: identical bytes, so the
@@ -307,14 +340,13 @@ class TestRunsVerify:
 
 
 class TestTheInputMappingIsBounded:
-    """What re-rooting an input may not do, since nothing judges it afterwards."""
+    """What locating an input may not do, since nothing judges it afterwards."""
 
-    def test_a_tail_that_climbs_out_of_the_run_is_not_mapped(self, tmp_path):
+    def test_a_tail_that_climbs_out_of_the_run_is_not_owned(self, tmp_path):
         # `verify_output_records` maps first and refuses the result by
-        # containment; the input pass only stats and hashes, so the guard has
-        # to sit in the mapping. Left at the recorded spelling, which is where
-        # it was checked before any re-rooting existed.
-        from panelcast.pipelines.output_integrity import reroot_contained, reroot_under
+        # containment; the input callers only stat and hash, so the guard has
+        # to sit in the mapping.
+        from panelcast.pipelines.output_integrity import reroot_under, run_owned_path
 
         moved = tmp_path / "outputs" / "failed" / "run_a"
         escaping = Path("outputs") / "run_a" / ".." / ".." / "secret.txt"
@@ -322,48 +354,93 @@ class TestTheInputMappingIsBounded:
         # The premise: the pair still matches, so it is containment declining
         # the result rather than the mapping never firing.
         assert reroot_under(escaping, moved) != escaping
-        assert reroot_contained(escaping, moved) == escaping
+        assert run_owned_path(escaping, moved) is None
 
         # ...and a tail that stays inside still maps, or the guard would be
         # refusing everything and the assertion above would prove nothing.
         inside = Path("outputs") / "run_a" / "models" / "manifest.json"
-        assert reroot_contained(inside, moved) == moved / "models" / "manifest.json"
+        assert run_owned_path(inside, moved) == moved / "models" / "manifest.json"
 
-    def test_a_path_the_run_does_not_own_is_returned_untouched(self, tmp_path):
-        from panelcast.pipelines.output_integrity import reroot_contained
+    def test_a_path_the_run_does_not_own_has_no_location(self, tmp_path):
+        from panelcast.pipelines.output_integrity import run_owned_path
 
         moved = tmp_path / "outputs" / "failed" / "run_a"
-        shared = Path("data") / "raw" / "albums.csv"
 
-        assert reroot_contained(shared, moved) == shared
+        assert run_owned_path(Path("data") / "raw" / "albums.csv", moved) is None
+
+    def test_an_active_runs_own_product_is_owned_though_nothing_moved(self, tmp_path):
+        # The mapping is the identity for an active run, so "did the path
+        # change" cannot answer ownership — which is why the answer comes from
+        # containment and `runs reproduce` can rely on it.
+        from panelcast.pipelines.output_integrity import run_owned_path
+
+        active = tmp_path / "outputs" / "run_a"
+        recorded = Path("outputs") / "run_a" / "models" / "manifest.json"
+
+        assert run_owned_path(recorded, active) == active / "models" / "manifest.json"
+
+    def test_the_input_pass_declines_to_follow_an_escaping_tail(self, tmp_path):
+        # End to end, and discriminating: a file whose bytes match the recorded
+        # hash sits exactly where the unguarded mapping would land, so
+        # following it would report this run clean. The guard leaves the path
+        # where the manifest put it, which after the move is nowhere.
+        base = _write_run(tmp_path)
+        decoy = base / "secret.txt"
+        decoy.write_text("real", encoding="utf-8")
+        recorded_at = base / "run_a" / ".." / ".." / "secret.txt"
+        manifest_path = base / "run_a" / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["input_hashes"] = {str(recorded_at): sha256_path(decoy)}
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        _quarantine(base)
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 1
+        assert f"MISSING  input {recorded_at}" in result.output
+        assert "recorded as" not in result.output
 
 
 class TestReproduceOnAQuarantinedRun:
-    """`runs reproduce` reads the same recorded inputs, and aborts on them (#420)."""
+    """The pre-flight gate is about raw data, not the run's own products (#420)."""
 
-    def _reproduce(self, tmp_path, monkeypatch, *, delete: bool = False):
+    def _reproduce(self, tmp_path, monkeypatch, *, prune: bool = False, drift: bool = False):
         from panelcast.pipelines import orchestrator
 
         base = _write_run(tmp_path, run_owned_input=True)
         moved = _quarantine(base)
-        if delete:
-            (moved / "models" / "manifest.json").unlink()
+        if prune:
+            shutil.rmtree(moved / "models")
+        if drift:
+            (tmp_path / "raw.csv").write_text("a,b\n9,9\n", encoding="utf-8")
         monkeypatch.setattr(orchestrator, "run_pipeline", lambda *a, **k: 0)
         return runner.invoke(app, ["runs", "reproduce", "run_a", "--output-base", str(base)])
 
-    def test_a_moved_input_does_not_abort_the_reproduction(self, tmp_path, monkeypatch):
-        # The hard-abort half of #420: unmapped, a run that failed at
-        # `evaluate` could never be reproduced, because the very products it
-        # failed while reading were reported gone.
+    def test_a_quarantined_runs_own_products_do_not_abort_it(self, tmp_path, monkeypatch):
+        # The hard-abort half of #420: read at their recorded paths, the very
+        # products the run failed while reading were reported gone, so a run
+        # could not be reproduced precisely because it had failed.
         result = self._reproduce(tmp_path, monkeypatch)
 
         assert "ABORT" not in result.output, result.output
         assert result.exit_code == 0, result.output
 
-    def test_an_input_that_really_is_gone_still_aborts(self, tmp_path, monkeypatch):
-        # Tolerance, not permissiveness: the gate exists to refuse a
-        # reproduction whose inputs no longer stand behind it.
-        result = self._reproduce(tmp_path, monkeypatch, delete=True)
+    def test_pruning_the_failed_runs_models_does_not_abort_it_either(
+        self, tmp_path, monkeypatch
+    ):
+        # One step further out, and the reason the gate skips run-owned inputs
+        # rather than merely re-rooting them: a reproduction never resumes and
+        # never skips, so it regenerates `models/`. Gating on it would make
+        # cleaning up after a failed training run permanent.
+        result = self._reproduce(tmp_path, monkeypatch, prune=True)
+
+        assert "ABORT" not in result.output, result.output
+        assert result.exit_code == 0, result.output
+
+    def test_raw_data_that_drifted_still_aborts(self, tmp_path, monkeypatch):
+        # Tolerance, not permissiveness. What the gate is for is untouched:
+        # data changing underneath the comparison invalidates it.
+        result = self._reproduce(tmp_path, monkeypatch, drift=True)
 
         assert result.exit_code == 1
-        assert "ABORT: recorded input missing" in result.output
+        assert "ABORT: raw input changed since the run" in result.output

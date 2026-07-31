@@ -825,9 +825,12 @@ Re-execute a recorded run from its run directory alone, then compare. The config
 is rebuilt from the run's `resolved_config.yaml` (falling back to the manifest
 flags for pre-0.9.0 runs — weaker provenance). Two guards run before any compute:
 the dataset descriptor must still hash-match the recorded one, and the recorded
-raw inputs must be unchanged on disk, or it aborts (exit `1`). That gate re-roots
-run-owned inputs exactly as `runs verify` does, so a quarantined run is
-reproducible rather than aborting on its own moved artifacts. The environment
+raw inputs must be unchanged on disk, or it aborts (exit `1`). That second gate
+covers only the inputs the run does **not** own: a stage records earlier stages'
+run-scoped products as inputs, and a reproduction regenerates all of them, so
+gating on them would abandon a quarantined run to its recorded paths and would
+still make any run unreproducible for the ordinary cleanup of pruning the
+directory it failed in. The environment
 fingerprint frames the expectation up front — bit-exact outputs within a matching
 fingerprint, statistical reproduction otherwise — and the post-run comparison
 follows suit (exact output-hash match vs headline-metric deltas). A reproduction

@@ -1505,11 +1505,14 @@ merely contains a directory with the run's name is left where the manifest put
 it and refused by containment. The mapping is generic over what it moves, and
 a run's recorded *inputs* need it too: a stage reads earlier stages'
 run-scoped products, so a run that failed at or after `evaluate` recorded
-`<output base>/<id>/models/…` as an input. `runs verify`'s input pass and
-`runs reproduce`'s pre-flight gate take those through
-`output_integrity.reroot_contained`, which declines a mapping whose tail would
-leave the run directory — those callers only stat and hash, so they have no
-containment step of their own to refuse it afterwards. Name-matching cannot separate a relocated
+`<output base>/<id>/models/…` as an input. `output_integrity.run_owned_path`
+answers where the run holds such a path, or `None` when it does not own it,
+declining a mapping whose tail would leave the run directory — the input
+callers only stat and hash, so they have no containment step of their own to
+refuse it afterwards. `runs verify` re-hashes run-owned inputs at the location
+it returns; `runs reproduce`'s pre-flight gate uses the `None` to check only
+external inputs, since a reproduction regenerates the run's own products.
+Name-matching cannot separate a relocated
 workspace from another checkout of the same project — both spell the base
 `outputs` — so what bounds it is that the mapping only aims *into* the run
 directory: containment and the recorded hash decide the rest. The declared-path
