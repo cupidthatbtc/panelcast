@@ -184,6 +184,7 @@ def upgrade_training_summary(raw: dict[str, Any], source: str = "<dict>") -> Tra
 
 DEFAULT_LOGIT_OFFSET = 0.5
 DEFAULT_TARGET_TRANSFORM = "identity"
+TARGET_TRANSFORMS = ("identity", "offset_logit")
 
 
 def coerce_logit_offset(value: Any, *, context: str) -> float:
@@ -195,9 +196,9 @@ def coerce_logit_offset(value: Any, *, context: str) -> float:
     when observations sit strictly inside the bounds. Duck-typing through
     ``float`` also accepts numpy scalars, which an in-process summary can carry.
     """
+    if isinstance(value, bool):
+        raise ValueError(f"Invalid logit_offset in {context}: {value!r}. Must be a number.")
     try:
-        if isinstance(value, bool):
-            raise TypeError
         offset = float(value)
     except (TypeError, ValueError):
         raise ValueError(
@@ -206,6 +207,22 @@ def coerce_logit_offset(value: Any, *, context: str) -> float:
     if not math.isfinite(offset) or offset < 0.0:
         raise ValueError(f"Invalid logit_offset in {context}: {offset}. Must be finite and >= 0.")
     return offset
+
+
+def coerce_target_transform(value: Any, *, context: str) -> str:
+    """Validate a configured target_transform against the shipped names.
+
+    The config side only knows how to run the shipped pair. The read side is
+    deliberately looser (see :func:`target_transform_from_summary`): the
+    transform registry is extensible, so a recorded name is checked against the
+    live registry rather than this tuple.
+    """
+    if value not in TARGET_TRANSFORMS:
+        raise ValueError(
+            f"Invalid target_transform in {context}: {value!r}. "
+            f"Must be one of {TARGET_TRANSFORMS}."
+        )
+    return str(value)
 
 
 def logit_offset_from_summary(summary: dict[str, Any]) -> float:
@@ -242,9 +259,21 @@ def target_transform_from_summary(summary: dict[str, Any]) -> str:
     RESOLVED name: ``resolve_model_facts`` fills a null config value from the
     descriptor (else ``offset_logit``) before the stage context exists, so a
     null in a summary means the summary predates the transform gate, when
-    identity was the only behavior.
+    identity was the only behavior. Only a null gets that fallback: an empty
+    string is a recorded value, and rewriting it to a default is the same shape
+    of bug as substituting a zero offset. Names themselves are checked by
+    ``get_transform`` against the live registry, which stays extensible and
+    already raises with the registered set.
     """
-    return summary.get("target_transform") or DEFAULT_TARGET_TRANSFORM
+    value = summary.get("target_transform")
+    if value is None:
+        return DEFAULT_TARGET_TRANSFORM
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            "Invalid target_transform in the training summary "
+            f"(re-run the train stage to rewrite it): {value!r}. Must be a transform name."
+        )
+    return value
 
 
 def ar_center_on_model_scale(summary: dict[str, Any]) -> float:

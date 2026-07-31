@@ -37,15 +37,17 @@ SRC = Path(panelcast.__file__).resolve().parent
 
 GUARDED_KEYS = ("logit_offset", "target_transform")
 
-# The resolvers own the recorded keys. The select modules read a
-# target_transform off sweep arms and the enumerated space, which is a
-# configuration axis rather than anything a fit recorded.
-EXEMPT_MODULES = frozenset(
+# Exemptions are (module, key) pairs, not whole modules: the select modules
+# read a target_transform off sweep arms and the enumerated space, which is a
+# configuration axis rather than anything a fit recorded -- but a select module
+# that started reading a recorded logit_offset is still a defect.
+EXEMPT_READS = frozenset(
     {
-        "pipelines/training_summary.py",
-        "select/prior_screen.py",
-        "select/runner.py",
-        "select/space.py",
+        ("pipelines/training_summary.py", "logit_offset"),
+        ("pipelines/training_summary.py", "target_transform"),
+        ("select/prior_screen.py", "target_transform"),
+        ("select/runner.py", "target_transform"),
+        ("select/space.py", "target_transform"),
     }
 )
 
@@ -93,11 +95,19 @@ class TestResolver:
         with pytest.raises(ValueError, match="logit_offset"):
             logit_offset_from_summary({"logit_offset": value})
 
-    @pytest.mark.parametrize("value", ["0.5", np.float32(0.25)])
-    def test_the_read_path_accepts_everything_the_write_path_records(self, value):
-        """Both sides coerce through the same helper, so a config that trains
-        can never produce a summary that crashes every consumer."""
-        assert logit_offset_from_summary({"logit_offset": value}) == pytest.approx(float(value))
+    @pytest.mark.parametrize("configured", [0.0, 0.25, "0.5", None])
+    def test_a_configured_offset_survives_the_round_trip_to_a_consumer(self, configured):
+        """The property that matters end to end: whatever the config accepts,
+        serializes and resolves back to the same number. Fails if either guard
+        drifts from the other."""
+        config = PipelineConfig(run_id="offset-round-trip", logit_offset=configured)
+        recorded = json.loads(json.dumps({"logit_offset": config.logit_offset}))
+        assert logit_offset_from_summary(recorded) == pytest.approx(config.logit_offset)
+
+    def test_numpy_scalars_resolve(self):
+        """An in-process summary (sensitivity takes one as a parameter) can
+        carry numpy scalars that never pass through JSON."""
+        assert logit_offset_from_summary({"logit_offset": np.float32(0.25)}) == pytest.approx(0.25)
 
 
 class TestTargetTransformResolver:
@@ -112,6 +122,21 @@ class TestTargetTransformResolver:
     def test_recorded_name_is_returned(self):
         recorded = {"target_transform": "offset_logit"}
         assert target_transform_from_summary(recorded) == "offset_logit"
+
+    @pytest.mark.parametrize("value", ["", "   ", 42])
+    def test_a_recorded_non_name_is_rejected(self, value):
+        """The empty string pins that a falsy recorded value is not silently
+        rewritten to the default -- the same shape as substituting a zero
+        offset. Unknown *names* stay the registry's job, since it is extensible
+        and already raises with the registered set."""
+        with pytest.raises(ValueError, match="target_transform"):
+            target_transform_from_summary({"target_transform": value})
+
+    def test_an_unknown_name_reaches_the_registry_error(self):
+        recorded = {"target_transform": "offset-logit"}
+        assert target_transform_from_summary(recorded) == "offset-logit"
+        with pytest.raises(ValueError, match="Unknown target_transform"):
+            get_transform(target_transform_from_summary(recorded))
 
     def test_the_write_path_records_a_resolved_name(self):
         """The identity fallback is only correct because a null never reaches
@@ -182,14 +207,16 @@ class TestSingleResolver:
         return found
 
     def test_the_resolvers_are_the_only_readers(self):
-        offenders = {
-            str(path.relative_to(SRC)): self._inline_reads(path)
-            for path in sorted(SRC.rglob("*.py"))
-            if str(path.relative_to(SRC)).replace("\\", "/") not in EXEMPT_MODULES
-        }
-        offenders = {k: v for k, v in offenders.items() if v}
+        offenders: dict[str, list[tuple[int, str]]] = {}
+        for path in sorted(SRC.rglob("*.py")):
+            module = path.relative_to(SRC).as_posix()
+            found = [
+                read for read in self._inline_reads(path) if (module, read[1]) not in EXEMPT_READS
+            ]
+            if found:
+                offenders[module] = found
         assert offenders == {}, (
-            f"inline reads of {GUARDED_KEYS} outside {sorted(EXEMPT_MODULES)}: {offenders}; "
+            f"inline reads of {GUARDED_KEYS} outside the resolvers: {offenders}; "
             "use logit_offset_from_summary / target_transform_from_summary."
         )
 
@@ -223,11 +250,22 @@ class TestConfigValidation:
         with pytest.raises(ValueError, match="logit_offset"):
             PipelineConfig(run_id="offset-bad", logit_offset=value)
 
-    @pytest.mark.parametrize("value", ["wide", True, None])
+    @pytest.mark.parametrize("value", ["wide", True, [0.5]])
     def test_non_numeric_offsets_raise_value_error_not_type_error(self, value):
         """Callers wrap config construction in `except ValueError`."""
         with pytest.raises(ValueError, match="logit_offset"):
             PipelineConfig(run_id="offset-bad-type", logit_offset=value)
+
+    def test_null_is_the_unset_sentinel_on_both_paths(self):
+        """`logit_offset: null` in YAML reaches the dataclass as None, and it
+        resolved to the default before this change."""
+        assert PipelineConfig(run_id="offset-null", logit_offset=None).logit_offset == (
+            DEFAULT_LOGIT_OFFSET
+        )
+
+    def test_an_unrecognized_transform_is_rejected(self):
+        with pytest.raises(ValueError, match="target_transform"):
+            PipelineConfig(run_id="transform-bad", target_transform="offset-logit")
 
     def test_a_parseable_offset_is_normalized_not_merely_checked(self):
         """A YAML string that only validated would reach the summary verbatim

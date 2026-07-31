@@ -28,7 +28,11 @@ from panelcast.paths import validate_run_id
 # One-directional by design: training_summary owns the recorded-artifact
 # contract and must never import config, so the write and read paths can share
 # the offset domain without a cycle.
-from panelcast.pipelines.training_summary import DEFAULT_LOGIT_OFFSET, coerce_logit_offset
+from panelcast.pipelines.training_summary import (
+    DEFAULT_LOGIT_OFFSET,
+    coerce_logit_offset,
+    coerce_target_transform,
+)
 
 # Module-level reference for default config values (used to detect non-default flags)
 _DEFAULT_CONFIG: PipelineConfig | None = None
@@ -340,14 +344,8 @@ class PipelineConfig:
         for prob in self.calibration_intervals:
             if not 0.0 < prob < 1.0:
                 raise ValueError(f"Invalid calibration interval {prob}. Must be in (0, 1).")
-        if self.target_transform is not None and self.target_transform not in (
-            "identity",
-            "offset_logit",
-        ):
-            raise ValueError(
-                f"Invalid target_transform: '{self.target_transform}'. "
-                "Must be 'identity' or 'offset_logit'."
-            )
+        if self.target_transform is not None:
+            coerce_target_transform(self.target_transform, context="the run config")
         self._validate_logit_offset()
         self._validate_likelihood()
         if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
@@ -542,7 +540,13 @@ class PipelineConfig:
 
         Normalizes rather than only checking: the coerced float is written
         back, so a YAML string never reaches the summary as a string that the
-        read-side resolver would then reject after training has already run."""
+        read-side resolver would then reject after training has already run.
+        ``None`` is the unset sentinel on both ends -- ``logit_offset: null``
+        in a config resolves to the default here exactly as a recorded null
+        does in the resolver."""
+        if self.logit_offset is None:
+            self.logit_offset = DEFAULT_LOGIT_OFFSET
+            return
         self.logit_offset = coerce_logit_offset(self.logit_offset, context="the run config")
 
     def _validate_likelihood(self) -> None:
