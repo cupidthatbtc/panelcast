@@ -379,11 +379,34 @@ class TestTheInputMappingIsBounded:
 
         assert run_owned_path(recorded, active) == active / "models" / "manifest.json"
 
+    def test_an_active_run_verified_by_an_absolute_base_claims_no_move(
+        self, tmp_path, monkeypatch
+    ):
+        # The mapping moves nothing here, but it does rewrite the spelling onto
+        # an absolute run directory, so a label decided on spelling would
+        # announce a relocation for an artifact sitting where it was written.
+        base = _write_run(tmp_path, run_owned_input=True)
+        product = base / "run_a" / "models" / "manifest.json"
+        manifest_path = base / "run_a" / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        recorded = Path("outputs") / "run_a" / "models" / "manifest.json"
+        payload["input_hashes"] = {str(recorded): sha256_path(product)}
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 0, result.output
+        assert f"OK       input {product}" in result.output
+        assert "recorded as" not in result.output
+
     def test_the_input_pass_declines_to_follow_an_escaping_tail(self, tmp_path):
         # End to end, and discriminating: a file whose bytes match the recorded
         # hash sits exactly where the unguarded mapping would land, so
         # following it would report this run clean. The guard leaves the path
         # where the manifest put it, which after the move is nowhere.
+        from panelcast.pipelines.output_integrity import reroot_under
+
         base = _write_run(tmp_path)
         decoy = base / "secret.txt"
         decoy.write_text("real", encoding="utf-8")
@@ -392,7 +415,12 @@ class TestTheInputMappingIsBounded:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         payload["input_hashes"] = {str(recorded_at): sha256_path(decoy)}
         manifest_path.write_text(json.dumps(payload), encoding="utf-8")
-        _quarantine(base)
+        moved = _quarantine(base)
+
+        # The premise, since the case is only discriminating while it holds:
+        # the pairing rule fires on this absolute spelling, and unguarded it
+        # lands on the decoy rather than merely somewhere else.
+        assert reroot_under(recorded_at, moved).resolve() == decoy.resolve()
 
         result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
 
@@ -413,7 +441,13 @@ class TestReproduceOnAQuarantinedRun:
             shutil.rmtree(moved / "models")
         if drift:
             (tmp_path / "raw.csv").write_text("a,b\n9,9\n", encoding="utf-8")
-        monkeypatch.setattr(orchestrator, "run_pipeline", lambda *a, **k: 0)
+        # Captured rather than discarded: the skip below rests on what this
+        # call is made with, so a stub that threw it away would leave the
+        # premise untested.
+        self.launched = []
+        monkeypatch.setattr(
+            orchestrator, "run_pipeline", lambda config, **kw: self.launched.append(config) or 0
+        )
         return runner.invoke(app, ["runs", "reproduce", "run_a", "--output-base", str(base)])
 
     def test_a_quarantined_runs_own_products_do_not_abort_it(self, tmp_path, monkeypatch):
@@ -425,13 +459,25 @@ class TestReproduceOnAQuarantinedRun:
         assert "ABORT" not in result.output, result.output
         assert result.exit_code == 0, result.output
 
+    def test_the_reproduction_regenerates_what_the_gate_stopped_checking(
+        self, tmp_path, monkeypatch
+    ):
+        # The premise the skip rests on, asserted where it is decided rather
+        # than quoted from the docstring: a reproduction that resumed or
+        # skipped could reuse a run-owned input the gate no longer proves is
+        # there, turning an early abort into a stage-level crash midway.
+        self._reproduce(tmp_path, monkeypatch)
+
+        (config,) = self.launched
+        assert config.resume is None
+        assert config.skip_existing is False
+
     def test_pruning_the_failed_runs_models_does_not_abort_it_either(
         self, tmp_path, monkeypatch
     ):
         # One step further out, and the reason the gate skips run-owned inputs
-        # rather than merely re-rooting them: a reproduction never resumes and
-        # never skips, so it regenerates `models/`. Gating on it would make
-        # cleaning up after a failed training run permanent.
+        # rather than merely re-rooting them: cleaning up after a failed
+        # training run would otherwise make it permanently unreproducible.
         result = self._reproduce(tmp_path, monkeypatch, prune=True)
 
         assert "ABORT" not in result.output, result.output

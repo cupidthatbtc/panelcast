@@ -124,14 +124,22 @@ def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:
         problems.append(verdict.key)
 
 
-def _input_label(path: Path, recorded_at: Path) -> str:
+def _input_label(path: Path, path_str: str) -> str:
     """Where the input was checked, naming the recorded spelling when it moved.
 
-    Compared as paths rather than strings: ``Path`` normalizes ``./x`` and
-    ``a//b``, so a recorded spelling that merely normalizes would otherwise
-    claim a move that never happened.
+    Moved is a question about *locations*, and the spellings answer it wrong in
+    both directions: ``Path`` normalizes ``./x``, while re-rooting rewrites a
+    relative recorded path onto an absolute run directory even for an active
+    run that never moved. So the two are compared resolved, and the recorded
+    side is printed exactly as the manifest holds it, which is the string
+    someone greps that file for.
     """
-    return str(path) if path == recorded_at else f"{path} (recorded as {recorded_at})"
+    try:
+        if path.resolve() == Path(path_str).resolve():
+            return str(path)
+    except (OSError, ValueError, RuntimeError):
+        pass
+    return f"{path} (recorded as {path_str})"
 
 
 def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
@@ -156,7 +164,7 @@ def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
     for path_str, recorded in sorted((manifest.input_hashes or {}).items()):
         recorded_at = Path(path_str)
         path = run_owned_path(recorded_at, run_dir) or recorded_at
-        label = _input_label(path, recorded_at)
+        label = _input_label(path, path_str)
         if not path.exists():
             typer.echo(f"MISSING  input {label}")
             problems.append(path_str)

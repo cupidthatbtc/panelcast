@@ -207,8 +207,9 @@ def run_owned_path(path: Path, run_dir: Path) -> Path | None:
     followed; ``verify_output_records`` catches that with the containment step
     it runs afterwards, and these callers have no such step, so here the guard
     travels with the mapping and an escaping tail reads as unowned. And for an
-    *active* run the mapping is the identity, so whether the path changed
-    cannot answer ownership — containment can, and it is the same question.
+    *active* run the mapping moves nothing — though it still rewrites the
+    spelling onto ``run_dir``, which is why a changed path cannot answer
+    ownership either way. Containment can, and it is the same question.
 
     Not folded into ``reroot_under`` itself, because for an *output* an
     escaping tail is worth reporting rather than quietly declining: the
@@ -216,7 +217,8 @@ def run_owned_path(path: Path, run_dir: Path) -> Path | None:
     caller that produces verdicts can say so.
     """
     # A run dir that will not resolve is dropped here, leaving no roots, so
-    # nothing is contained and the caller gets the same None as an escape.
+    # nothing is contained and the answer is None — the same answer an escape
+    # gets, which each caller then reads its own way.
     roots = _resolved_roots((run_dir,))
     mapped = reroot_under(path, run_dir)
     try:

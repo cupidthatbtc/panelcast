@@ -830,9 +830,9 @@ covers only the inputs the run does **not** own: a stage records earlier stages'
 run-scoped products as inputs, and a reproduction regenerates all of them, so
 gating on them would abandon a quarantined run to its recorded paths and would
 still make any run unreproducible for the ordinary cleanup of pruning the
-directory it failed in. The environment
-fingerprint frames the expectation up front — bit-exact outputs within a matching
-fingerprint, statistical reproduction otherwise — and the post-run comparison
+directory it failed in. The environment fingerprint frames the expectation up
+front — bit-exact outputs within a matching fingerprint, statistical
+reproduction otherwise — and the post-run comparison
 follows suit (exact output-hash match vs headline-metric deltas). A reproduction
 always runs fresh: never resumes, never skips.
 

@@ -837,7 +837,7 @@ class TestTheDeclaredCallerDifference:
 
     def test_the_reroot_mapping_is_generic_over_what_it_moves(self, fx):
         # Not output-specific on purpose: run-owned *inputs* take the same
-        # mapping, through `reroot_contained` (#420). This module does not
+        # mapping, through `run_owned_path` (#420). This module does not
         # verify them; the pairing rule is what they needed from it.
         from panelcast.pipelines.output_integrity import reroot_under
 

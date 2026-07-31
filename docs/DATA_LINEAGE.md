@@ -1512,8 +1512,8 @@ callers only stat and hash, so they have no containment step of their own to
 refuse it afterwards. `runs verify` re-hashes run-owned inputs at the location
 it returns; `runs reproduce`'s pre-flight gate uses the `None` to check only
 external inputs, since a reproduction regenerates the run's own products.
-Name-matching cannot separate a relocated
-workspace from another checkout of the same project — both spell the base
+Name-matching cannot separate a relocated workspace from another checkout of
+the same project — both spell the base
 `outputs` — so what bounds it is that the mapping only aims *into* the run
 directory: containment and the recorded hash decide the rest. The declared-path
 binding is the second, and the first
