@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import shutil
 from pathlib import Path
@@ -100,6 +101,32 @@ def _symlinked_product_run(tmp_path: Path, target: str = "shared") -> tuple[Path
     payload["input_hashes"] = {str(recorded): sha256_path(product)}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     return run_dir, recorded
+
+
+def _input_hashes_writes(tree: ast.AST):
+    """Every way a module records into a manifest's `input_hashes`.
+
+    Walks the tree rather than matching text: a comment naming the field would
+    otherwise read as a writer, and a reformat of a real one as its removal.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            func = node.func
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Attribute)
+                and func.value.attr == "input_hashes"
+            ):
+                yield f"input_hashes.{func.attr}()"
+            for keyword in node.keywords:
+                if keyword.arg == "input_hashes":
+                    yield "input_hashes="
+        if isinstance(node, ast.Assign | ast.AugAssign):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
+                inner = target.value if isinstance(target, ast.Subscript) else target
+                if isinstance(inner, ast.Attribute) and inner.attr == "input_hashes":
+                    yield "input_hashes ="
 
 
 def _quarantine(output_base: Path, run_id: str = "run_a") -> Path:
@@ -731,28 +758,33 @@ class TestReproduceOnAQuarantinedRun:
 
         # ...and the assertion is about the set the gate walks, as far as the
         # writers can say: `_capture_stage_input_hashes` iterates
-        # `stage.input_paths`, and nothing else in the orchestrator touches
-        # `input_hashes`. Read from source because it is a property of the
-        # code. It bounds what *this* version records, not what the commands
-        # read — both take `input_hashes` from the run's own `manifest.json`,
-        # so an older release's or a hand-edited entry inside the run directory
-        # is still skipped by containment and not regenerated. That is the
-        # lenient direction rather than the crash one, and it is the same
-        # weaker-provenance caveat the pre-0.9.0 config tier carries.
+        # `stage.input_paths`, and it is the only thing in the package that
+        # records into `input_hashes`. Swept over every module rather than the
+        # orchestrator alone, because a second writer anywhere would record a
+        # run-directory input no stage regenerates — the crash direction, and
+        # what this test exists to exclude.
+        #
+        # It bounds what *this* version records, not what the commands read:
+        # both take `input_hashes` from the run's own `manifest.json`, so an
+        # older release's or a hand-edited entry inside the run directory is
+        # skipped by containment and goes unchecked. That is the lenient
+        # direction, and the same weaker-provenance caveat the pre-0.9.0 config
+        # tier carries.
         capture = inspect.getsource(PipelineOrchestrator._capture_stage_input_hashes)
         assert "for path in stage.input_paths:" in capture
-        orchestrator_src = Path(inspect.getfile(PipelineOrchestrator)).read_text(encoding="utf-8")
-        writes = [
-            line.strip()
-            for line in orchestrator_src.splitlines()
-            # `.setdefault(` as well as `=` and `.update(`: it is the one way
-            # of adding to a mapping that carries neither of the others.
-            if "input_hashes" in line
-            and any(t in line for t in ("=", ".update(", ".setdefault("))
-        ]
+
+        package = Path(inspect.getfile(PipelineOrchestrator)).parents[1]
+        writes = sorted(
+            f"{module.relative_to(package).as_posix()}: {kind}"
+            for module in package.rglob("*.py")
+            for kind in _input_hashes_writes(
+                ast.parse(module.read_text(encoding="utf-8"))
+            )
+        )
+
         assert writes == [
-            "input_hashes={},",
-            "self.manifest.input_hashes.update(self._capture_stage_input_hashes(stage))",
+            "pipelines/orchestrator.py: input_hashes.update()",
+            "pipelines/orchestrator.py: input_hashes=",
         ]
 
     def test_the_planted_flag_is_one_a_resolved_config_can_carry(self, tmp_path):
@@ -848,7 +880,10 @@ class TestReproduceOnAQuarantinedRun:
         argv = ["runs", "reproduce", "run_a", "--output-base", str(base)]
 
         # The claim is comparative, so the before half has to be asserted:
-        # active, the recorded path exists through the link and the gate passes.
+        # active, the recorded path exists through the link and the gate
+        # passes. Invoke-mutate-invoke is safe here only because `run_pipeline`
+        # is stubbed, so the first call writes nothing the second reads — and
+        # the `before` assertions would catch it if that stopped holding.
         before = runner.invoke(app, argv)
         assert before.exit_code == 0, before.output
         assert "ABORT" not in before.output

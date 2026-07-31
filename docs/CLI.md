@@ -706,9 +706,9 @@ leaves it. That last case is the mapping's cost — a run whose `models/` points
 at shared storage verifies its inputs through the link while it is active, and
 after quarantine reads `MISSING`. Ownership asks about the run directory alone
 while output verification also accepts the artifact roots, so a symlink target
-outside every root is `UNBOUND` as an output too and the input verdict is lost
-on a run that was not going to verify anyway, while a target inside one
-verifies as an output and still reads `MISSING` as a quarantined input. Each
+outside every root is `UNBOUND` as an output too and nothing is lost on a run
+that was not going to verify anyway, while a target inside one verifies as an
+output and still reads `MISSING` as a quarantined input. Each
 line names the recorded spelling, preceded by the location actually checked
 when the artifact moved — or only that location, when the two cannot be
 compared at all.
