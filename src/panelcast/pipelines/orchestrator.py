@@ -89,6 +89,7 @@ from panelcast.pipelines.stamps import (
     verify_stamps,
     write_stamp,
 )
+from panelcast.utils.atomic import atomic_write_text
 from panelcast.utils.environment import ensure_environment_locked, verify_environment
 from panelcast.utils.git_state import capture_git_state
 from panelcast.utils.hashing import sha256_path
@@ -1249,10 +1250,8 @@ class PipelineOrchestrator:
             "run_dir": run_dir_rel.as_posix(),
         }
         pointer = self.output_base / "latest.json"
-        tmp = self.output_base / "latest.json.tmp"
         try:
-            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            os.replace(tmp, pointer)
+            atomic_write_text(pointer, json.dumps(payload, indent=2))
         except OSError as e:
             log.warning("failed_to_write_latest_pointer", error=str(e))
 

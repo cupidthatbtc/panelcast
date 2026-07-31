@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from panelcast.pipelines.errors import StaleArtifactError
+from panelcast.utils.atomic import atomic_write_text
 
 STAMP_FILENAME = ".stamp.json"
 
@@ -42,9 +43,7 @@ def write_stamp(root: Path, stage: str, input_hash: str, run_id: str) -> dict:
     }
     path = stamp_path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    tmp.replace(path)
+    atomic_write_text(path, json.dumps(payload, indent=2))
     return payload
 
 
