@@ -33,6 +33,7 @@ from panelcast.paths import ArtifactPaths
 from panelcast.pipelines.training_summary import (
     ar_center_on_model_scale,
     load_training_summary,
+    logit_offset_from_summary,
 )
 
 if TYPE_CHECKING:
@@ -271,7 +272,7 @@ def _predict_known_entities(
     transform = get_transform(
         summary.get("target_transform") or "identity",
         target_bounds=target_bounds,
-        offset=float(summary.get("logit_offset") or 0.5),
+        offset=logit_offset_from_summary(summary),
     )
     ar_center = ar_center_on_model_scale(summary)
     scaler = summary.get("feature_scaler")
@@ -493,7 +494,7 @@ def _predict_new_entities(
     prefix = ds_block.get("model_prefix", "user")
     target_bounds = tuple(ds_block.get("target_bounds", (0.0, 100.0)))
     target_transform = summary.get("target_transform") or "identity"
-    logit_offset = float(summary.get("logit_offset") or 0.5)
+    logit_offset = logit_offset_from_summary(summary)
     if target_transform != "identity":
         transform = get_transform(target_transform, target_bounds, logit_offset)
         prev_score_default = float(np.asarray(transform.forward(prev_score_default)))

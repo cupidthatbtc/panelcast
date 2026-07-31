@@ -61,6 +61,7 @@ from panelcast.pipelines.train_bayes import _apply_max_albums_cap
 from panelcast.pipelines.training_summary import (
     ar_center_on_model_scale,
     load_training_summary,
+    logit_offset_from_summary,
 )
 
 if TYPE_CHECKING:
@@ -221,7 +222,7 @@ def _transform_from_summary(summary: dict):
     return get_transform(
         summary.get("target_transform") or "identity",
         target_bounds=ds["target_bounds"],
-        offset=float(summary.get("logit_offset") or 0.5),
+        offset=logit_offset_from_summary(summary),
     )
 
 
@@ -525,7 +526,7 @@ def _evaluate_horizon_rollout(
         target_bounds=ds["target_bounds"],
         likelihood_df=float(summary.get("likelihood_df", 4.0)),
         target_transform=summary.get("target_transform") or "identity",
-        logit_offset=float(summary.get("logit_offset") or 0.5),
+        logit_offset=logit_offset_from_summary(summary),
         likelihood_family=priors_obj.likelihood_family,
         skew_tailweight=priors_obj.skew_tailweight,
         discretize_observation=priors_obj.discretize_observation,
@@ -1101,7 +1102,7 @@ def _run_new_artist_predictive(
         "skew_tailweight": priors_obj.skew_tailweight,
         "discretize_observation": priors_obj.discretize_observation,
         "target_transform": summary.get("target_transform") or "identity",
-        "logit_offset": float(summary.get("logit_offset") or 0.5),
+        "logit_offset": logit_offset_from_summary(summary),
         "ar_center": _ar_center_from_summary(summary),
     }
 

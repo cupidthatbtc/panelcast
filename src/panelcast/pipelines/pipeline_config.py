@@ -343,6 +343,13 @@ class PipelineConfig:
                 f"Invalid target_transform: '{self.target_transform}'. "
                 "Must be 'identity' or 'offset_logit'."
             )
+        # Zero is a supported offset (the plain logit) and is propagated as
+        # recorded; a negative or non-finite one puts the offset-logit argument
+        # outside (0, 1) and yields NaN log-likelihoods instead of an error.
+        if not math.isfinite(self.logit_offset) or self.logit_offset < 0.0:
+            raise ValueError(
+                f"Invalid logit_offset: {self.logit_offset}. Must be finite and >= 0."
+            )
         self._validate_likelihood()
         if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
             raise ValueError(

@@ -181,6 +181,25 @@ def upgrade_training_summary(raw: dict[str, Any], source: str = "<dict>") -> Tra
     return TrainingSummary(**raw)
 
 
+DEFAULT_LOGIT_OFFSET = 0.5
+
+
+def logit_offset_from_summary(summary: dict[str, Any]) -> float:
+    """Offset-logit continuity offset the model was actually fit under.
+
+    Only a missing key or an explicit ``null`` (legacy / pre-gate summaries)
+    falls back to :data:`DEFAULT_LOGIT_OFFSET`. A recorded ``0.0`` is a real
+    configuration -- the plain logit, valid when observations sit strictly
+    inside the bounds -- and is propagated as zero, so evaluation, prediction
+    and rollout apply the same forward transform, inverse and Jacobian the
+    fit used.
+    """
+    value = summary.get("logit_offset")
+    if value is None:
+        return DEFAULT_LOGIT_OFFSET
+    return float(value)
+
+
 def ar_center_on_model_scale(summary: dict[str, Any]) -> float:
     """Model-scale AR(1) centering value recorded in a training summary.
 
@@ -203,6 +222,6 @@ def ar_center_on_model_scale(summary: dict[str, Any]) -> float:
     transform = get_transform(
         summary.get("target_transform") or "identity",
         target_bounds=tuple(block.get("target_bounds", (0.0, 100.0))),
-        offset=float(summary.get("logit_offset") or 0.5),
+        offset=logit_offset_from_summary(summary),
     )
     return float(transform.forward(float(value)))
