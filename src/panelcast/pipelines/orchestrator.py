@@ -823,15 +823,18 @@ class PipelineOrchestrator:
 
                 # Check if stage should be skipped
                 if self.config.skip_existing and not self.config.dry_run:
+                    # Roots are only consulted once a previous manifest exists,
+                    # and no previous run means no previous manifest. `None`
+                    # says "nothing to name" by falling back to the stage's own
+                    # roots; an empty list would say every recorded output
+                    # escapes them, which is a tampering verdict this is not.
                     decision = stage.skip_decision(
                         previous_manifest,
                         force=False,
-                        # No previous run means no skip either way, so there is
-                        # no directory to name and nothing to allow.
                         allowed_roots=(
                             self._output_verification_roots(previous_run)
                             if previous_run is not None
-                            else ()
+                            else None
                         ),
                     )
                     if decision.skip:

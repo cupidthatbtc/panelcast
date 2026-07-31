@@ -95,9 +95,17 @@ class Fixture:
         roots = [self.run_dir] if allowed_roots is None else allowed_roots
         return self.stage.skip_decision(self._manifest(), allowed_roots=roots).skip
 
-    def skip_accepts_on_default_roots(self) -> bool:
-        """The same, but through `_default_roots()` rather than a stub."""
-        return self.stage.skip_decision(self._manifest()).skip
+    def skip_accepts_on_production_roots(self) -> bool:
+        """The same, through the roots the orchestrator actually passes."""
+        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+
+        orchestrator = PipelineOrchestrator(
+            PipelineConfig(dry_run=True), output_base=self.output_base
+        )
+        return self.stage.skip_decision(
+            self._manifest(),
+            allowed_roots=orchestrator._output_verification_roots(self.run_dir),
+        ).skip
 
     def verify_accepts(self) -> bool:
         """Whether `runs verify` reports the run as matching its manifest."""
@@ -132,22 +140,22 @@ class TestBothCallersAgree:
     def test_valid_manifest_is_accepted_by_both(self, fx):
         assert fx.skip_accepts() is True
         assert fx.verify_accepts() is True
-        # Not only through the stubbed roots: the stage's own derivation has to
-        # accept its own artifact too, or the parity cases below are measuring
-        # a configuration production never runs.
-        assert fx.skip_accepts_on_default_roots() is True
+        # Not only through the stubbed roots: the roots the orchestrator
+        # actually passes have to accept the artifact too, or the parity cases
+        # below are measuring a configuration production never runs.
+        assert fx.skip_accepts_on_production_roots() is True
 
-    def test_an_escaping_path_is_refused_on_the_stages_own_roots(self, fx):
+    def test_an_escaping_path_is_refused_on_the_production_roots(self, fx):
         # A *dynamic* key, so nothing but containment is behind it — pointing a
         # declared key elsewhere is refused by the binding first, which is why
-        # that version of this test never reached `_default_roots()` at all.
+        # an earlier version of this test never reached containment at all.
         outside = fx.tmp_path / "outside.json"
         outside.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
         key = f"{STAGE}:dataset_hash"
         fx.outputs[key] = str(outside)
         fx.output_hashes[key] = sha256_path(outside)
 
-        assert fx.skip_accepts_on_default_roots() is False
+        assert fx.skip_accepts_on_production_roots() is False
         assert fx.skip_accepts() is False
 
     def test_a_modified_output_is_refused_by_both(self, fx):
@@ -358,11 +366,11 @@ class TestContainment:
         assert parameter.annotation == "Path"
         assert parameter.default is inspect.Parameter.empty
 
-    def test_the_stages_default_roots_are_deliberately_narrower(self, fx):
-        # Not part of the shared definition and not a gap: with no caller-named
-        # roots a stage vouches only for the parents of the outputs it declares
-        # itself. `runs verify` has no stages, which is why it needs the
-        # workspace enumeration instead.
+    def test_the_stages_default_roots_are_a_fallback_nothing_takes(self, fx):
+        # With no caller-named roots a stage vouches only for the parents of
+        # the outputs it declares itself. The orchestrator always names roots,
+        # so this is the shape of the fallback rather than a production path —
+        # pinned so that stays true by choice rather than by accident.
         assert fx.stage._default_roots() == (fx.artifact.parent,)
 
     def test_the_contained_path_is_the_one_that_gets_hashed(self, tmp_path):
