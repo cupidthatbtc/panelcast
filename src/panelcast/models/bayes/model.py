@@ -48,8 +48,6 @@ from numpyro.infer.reparam import LocScaleReparam
 
 from panelcast.models.bayes.model_math import _CLIP_SHARPNESS, soft_clip  # noqa: F401
 from panelcast.models.bayes.priors import (
-    ENTITY_PRIOR_TYPES,
-    RW_INNOVATION_TYPES,
     PriorConfig,
     entity_skew_sites,
     get_default_priors,
@@ -446,10 +444,10 @@ def _sample_init_artist_effect(
             f"{prefix}init_artist_effect",
             mu_artist + sigma_artist * (skew_z - mean) / sd,
         )
-    if priors.entity_effect_prior_type not in ENTITY_PRIOR_TYPES:
+    if priors.entity_effect_prior_type != "normal":
         raise ValueError(
             f"Invalid entity_effect_prior_type: '{priors.entity_effect_prior_type}'. "
-            f"Must be one of {ENTITY_PRIOR_TYPES}."
+            "Must be 'normal' or 'skew_normal'."
         )
     if priors.artist_effect_param == "zerosum":
         z = numpyro.sample(
@@ -544,12 +542,12 @@ def _build_latent_effects(
         innovations = sigma_rw * standardized_skew_innovation(
             rw_raw_abs, rw_raw, rw_skew_alpha
         )
-    elif priors.rw_innovation_type in RW_INNOVATION_TYPES:
+    elif priors.rw_innovation_type == "normal":
         innovations = sigma_rw * rw_raw  # (n_artists, max_seq - 1)
     else:
         raise ValueError(
             f"Unknown rw_innovation_type: '{priors.rw_innovation_type}'. "
-            f"Must be one of {RW_INNOVATION_TYPES}."
+            "Must be 'normal' or 'skew_normal'."
         )
 
     if priors.latent_process == "ar1":

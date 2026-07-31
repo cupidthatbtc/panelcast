@@ -39,13 +39,6 @@ DEFAULT_BETA_BOUNDARY_EPS = 1e-3
 # this rather than assuming one configuration is maximal.
 RW_INNOVATION_TYPES = ("normal", "skew_normal")
 
-# Every entity-effect prior the model implements. The structural twin of
-# RW_INNOVATION_TYPES: entity_skew_sites gates its latents the same way
-# rw_latent_sites does, so it has to reject an unknown type the same way --
-# a latent that is sampled but never named is a KeyError in every memory
-# exclusion built from the helper.
-ENTITY_PRIOR_TYPES = ("normal", "skew_normal")
-
 
 def is_skew_rw_innovation(value: object) -> bool:
     """The rw_raw_abs site exists exactly when this predicate is true."""
@@ -102,18 +95,6 @@ class EntitySkewLatentSites:
 
 
 def entity_skew_sites(prefix: str, prior_type: object) -> EntitySkewLatentSites:
-    """Return the entity-effect latents eligible for memory exclusion.
-
-    Unknown prior types are rejected rather than resolved to "no skew sites",
-    for the reason :func:`rw_latent_sites` rejects unknown innovations: a prior
-    with its own latent that reported nothing here would leave that latent out
-    of every exclusion built from this helper. Falsy still means "unset".
-    """
-    if prior_type and prior_type not in ENTITY_PRIOR_TYPES:
-        raise ValueError(
-            f"Unknown entity_effect_prior_type: '{prior_type}'. "
-            f"Must be one of {ENTITY_PRIOR_TYPES}."
-        )
     if (prior_type or "normal") != "skew_normal":
         return EntitySkewLatentSites(None, None)
     return EntitySkewLatentSites(
