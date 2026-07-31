@@ -183,6 +183,7 @@ def upgrade_training_summary(raw: dict[str, Any], source: str = "<dict>") -> Tra
 
 
 DEFAULT_LOGIT_OFFSET = 0.5
+
 # The pre-gate behavior a legacy summary with no recorded name means -- NOT
 # the shipped config default, which resolves to offset_logit. Named apart from
 # DEFAULT_LOGIT_OFFSET (which is the config default) so the two cannot be used
@@ -206,10 +207,10 @@ def coerce_logit_offset(value: Any, *, context: str) -> float:
     middle of the bounds rather than leaving the transform's domain, so it is a
     modeling choice to be judged by the fit, not a malformed value.
     """
-    scalar = value.item() if hasattr(value, "item") and not isinstance(value, str) else value
-    if isinstance(scalar, bool):
-        raise ValueError(f"Invalid logit_offset in {context}: {value!r}. Must be a number.")
     try:
+        scalar = value.item() if hasattr(value, "item") and not isinstance(value, str) else value
+        if isinstance(scalar, bool):
+            raise TypeError
         offset = float(scalar)
     except (TypeError, ValueError):
         raise ValueError(

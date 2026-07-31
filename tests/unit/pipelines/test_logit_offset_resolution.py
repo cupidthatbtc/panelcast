@@ -38,7 +38,9 @@ SRC = Path(panelcast.__file__).resolve().parent
 # scripts/ is where the idiom is most likely to reappear -- written fast, from
 # another script rather than from the resolver module. Absent under a wheel
 # install, where there is nothing to scan.
-SCAN_ROOTS = [SRC] + [p for p in (SRC.parents[1] / "scripts",) if p.is_dir()]
+SCAN_ROOTS = [("panelcast", SRC)] + [
+    ("scripts", p) for p in (SRC.parents[1] / "scripts",) if p.is_dir()
+]
 
 GUARDED_KEYS = ("logit_offset", "target_transform")
 
@@ -48,13 +50,13 @@ GUARDED_KEYS = ("logit_offset", "target_transform")
 # that started reading a recorded logit_offset is still a defect.
 EXEMPT_READS = frozenset(
     {
-        ("pipelines/training_summary.py", "logit_offset"),
-        ("pipelines/training_summary.py", "target_transform"),
-        ("select/prior_screen.py", "target_transform"),
-        ("select/runner.py", "target_transform"),
-        ("select/space.py", "target_transform"),
+        ("panelcast/pipelines/training_summary.py", "logit_offset"),
+        ("panelcast/pipelines/training_summary.py", "target_transform"),
+        ("panelcast/select/prior_screen.py", "target_transform"),
+        ("panelcast/select/runner.py", "target_transform"),
+        ("panelcast/select/space.py", "target_transform"),
         # A validation-ladder variant spec, not a recorded summary.
-        ("experiment_preflight_validation.py", "target_transform"),
+        ("scripts/experiment_preflight_validation.py", "target_transform"),
     }
 )
 
@@ -249,9 +251,11 @@ class TestSingleResolver:
         offenders: dict[str, list[tuple[int, str]]] = {}
         exercised: set[tuple[str, str]] = set()
         scanned_modules: set[str] = set()
-        for root in SCAN_ROOTS:
+        for label, root in SCAN_ROOTS:
             for path in sorted(root.rglob("*.py")):
-                module = path.relative_to(root).as_posix()
+                # Root-qualified: an exemption for scripts/foo.py must not also
+                # exempt a package module that happens to share its basename.
+                module = f"{label}/{path.relative_to(root).as_posix()}"
                 scanned_modules.add(module)
                 found = []
                 for read in self._inline_reads(path):
@@ -263,16 +267,23 @@ class TestSingleResolver:
                     offenders[module] = found
         # A source-stripped install would scan nothing and pass vacuously.
         assert scanned_modules >= {
-            "pipelines/evaluate.py",
-            "pipelines/predict_next.py",
-            "pipelines/sensitivity.py",
-            "pipelines/training_summary.py",
+            "panelcast/pipelines/evaluate.py",
+            "panelcast/pipelines/predict_next.py",
+            "panelcast/pipelines/sensitivity.py",
+            "panelcast/pipelines/training_summary.py",
         }, f"the guard did not reach the consumer modules; it scanned {sorted(scanned_modules)}"
         assert offenders == {}, (
             f"inline reads of {GUARDED_KEYS} outside the resolvers: {offenders}; "
             "use logit_offset_from_summary / target_transform_from_summary."
         )
-        stale = EXEMPT_READS - exercised
+        # Only roots that were actually scanned can retire an exemption: under a
+        # wheel install scripts/ is absent, and its entries are not stale.
+        scanned_labels = {label for label, _ in SCAN_ROOTS}
+        stale = {
+            entry
+            for entry in EXEMPT_READS - exercised
+            if entry[0].split("/", 1)[0] in scanned_labels
+        }
         assert stale == set(), (
             f"exemptions no longer matched by any read: {sorted(stale)}; "
             "drop them rather than pre-blessing a future violation."
@@ -364,6 +375,29 @@ class TestConfigValidation:
         manifest = SimpleNamespace(flags={"logit_offset": -1.0})
         with pytest.raises(ValueError, match="logit_offset"):
             _reproduce_config(tmp_path / "missing", manifest)
+
+    def test_a_recorded_list_is_restored_as_the_tuple_the_field_declares(self, tmp_path):
+        """JSON has no tuples, so the coercion is what keeps a restored config
+        the same type as every other construction path."""
+        from types import SimpleNamespace
+
+        from panelcast.cli.runs_cmd import _reproduce_config
+
+        manifest = SimpleNamespace(flags={"calibration_intervals": [0.5, 0.9]})
+        config, _ = _reproduce_config(tmp_path / "missing", manifest)
+        assert config.calibration_intervals == (0.5, 0.9)
+
+    def test_a_flag_whose_companion_gate_was_never_recorded_still_restores(self, tmp_path):
+        """The fallback rebuilds a deliberately partial config: a knob recorded
+        without the YAML-only gate it pairs with keeps the current default for
+        that gate rather than failing the reproduction."""
+        from types import SimpleNamespace
+
+        from panelcast.cli.runs_cmd import _reproduce_config
+
+        manifest = SimpleNamespace(flags={"sigma_obs_loc": 1.5, "seed": 11})
+        config, _ = _reproduce_config(tmp_path / "missing", manifest)
+        assert config.seed == 11
 
     def test_unrecorded_flags_keep_their_defaults(self, tmp_path):
         from types import SimpleNamespace
