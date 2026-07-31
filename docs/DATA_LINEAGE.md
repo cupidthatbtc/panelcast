@@ -1459,13 +1459,15 @@ output that is missing, unreadable, or modified, a key recorded on only one of
 all block the skip and rerun the stage.
 
 Severity is sorted by what is *known*, not by which way the check failed. A
-hash mismatch or a root escape is a warning: disk contradicts the manifest.
-An artifact that is missing or unreadable is a warning only when a declared
-path stands behind its key — for a dynamic key nothing said this run still
-owned that file, so its absence and its unreadability are equally unproven
-rather than corrupt. Anything with no evidence either way — a legacy manifest
-with no hashes, a key recorded on only one side — is informational, an upgrade
-path rather than an alarm. Verified hashes are
+hash mismatch, a root escape, or a recorded path that disagrees with the one
+its key names are warnings: in each, disk contradicts the manifest. An artifact
+that is missing or unreadable is a warning only when a declared path stands
+behind its key — for a dynamic key nothing said this run still owned that file,
+so its absence and its unreadability are equally unproven rather than corrupt.
+Anything with no evidence either way — a legacy manifest with no hashes, a key
+recorded on only one side, a *declared* path the workspace cannot resolve — is
+informational, an upgrade path or a local problem rather than an alarm.
+Verified hashes are
 carried into the new manifest so consecutive runs remain skippable. This check
 fully reads each candidate artifact (including directory trees), so
 `--skip-existing` trades additional startup I/O for corruption detection.

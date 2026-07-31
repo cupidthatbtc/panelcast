@@ -205,18 +205,30 @@ def verify_output_records(
             continue
         path = Path(path_str)
         if key in declared:
+            # Resolved separately so the verdict names the side that failed.
+            # The recorded path is the manifest's claim; the declared one is
+            # the stage's own configuration, and a workspace problem there
+            # says nothing about the manifest.
             try:
-                if path.resolve() != declared[key].resolve():
-                    yield OutputVerdict(
-                        key,
-                        UNBOUND,
-                        "recorded output path disagrees with its manifest key",
-                        untrusted=True,
-                    )
-                    continue
+                recorded_at = path.resolve()
             except (OSError, ValueError, RuntimeError):
                 yield OutputVerdict(
                     key, UNBOUND, "recorded output path is unreadable", untrusted=True
+                )
+                continue
+            try:
+                declared_at = declared[key].resolve()
+            except (OSError, ValueError, RuntimeError) as exc:
+                yield OutputVerdict(
+                    key, UNVERIFIABLE, f"the stage's declared path is unreadable: {exc}"
+                )
+                continue
+            if recorded_at != declared_at:
+                yield OutputVerdict(
+                    key,
+                    UNBOUND,
+                    "recorded output path disagrees with its manifest key",
+                    untrusted=True,
                 )
                 continue
         if reroot is not None:

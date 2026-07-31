@@ -261,6 +261,79 @@ class TestBothCallersAgree:
         assert fx.verify_accepts() is False
 
 
+class TestSeverity:
+    """`untrusted` is the last caller-dependent value, so pin both branches."""
+
+    def _verdict(self, fx, key, *, declared):
+        from panelcast.pipelines.output_integrity import verify_output_records
+
+        (verdict,) = verify_output_records(
+            {key: fx.outputs[key]},
+            {key: fx.output_hashes[key]},
+            roots=[fx.run_dir],
+            declared={key: Path(fx.outputs[key])} if declared else None,
+        )
+        return verdict
+
+    @pytest.mark.parametrize("declared", [True, False])
+    def test_a_missing_output_is_untrusted_only_when_declared(self, fx, declared):
+        fx.artifact.unlink()
+        assert self._verdict(fx, fx.key, declared=declared).untrusted is declared
+
+    @pytest.mark.parametrize("declared", [True, False])
+    def test_an_unreadable_output_is_untrusted_only_when_declared(
+        self, fx, declared, monkeypatch
+    ):
+        # The round-20 change: an unreadable *dynamic* output is unproven, not
+        # corrupt, for the same reason a missing one is.
+        def refuse(path, *args, **kwargs):
+            raise OSError("permission denied")
+
+        monkeypatch.setattr("panelcast.pipelines.output_integrity.sha256_path", refuse)
+
+        verdict = self._verdict(fx, fx.key, declared=declared)
+
+        assert verdict.reason.startswith("recorded output unreadable")
+        assert verdict.untrusted is declared
+
+    def test_a_redirect_is_untrusted_whether_or_not_it_exists(self, fx):
+        from panelcast.pipelines.output_integrity import UNBOUND, verify_output_records
+
+        decoy = fx.run_dir / "evaluation" / "decoy.json"
+        decoy.write_text(json.dumps({"mae": 9.9}), encoding="utf-8")
+
+        (verdict,) = verify_output_records(
+            {fx.key: str(decoy)},
+            {fx.key: sha256_path(decoy)},
+            roots=[fx.run_dir],
+            declared={fx.key: fx.artifact},
+        )
+
+        assert verdict.label == UNBOUND
+        assert verdict.untrusted is True
+
+    def test_a_workspace_that_cannot_resolve_the_declared_path_is_not_tampering(self, fx):
+        from panelcast.pipelines.output_integrity import UNVERIFIABLE, verify_output_records
+
+        class Unresolvable(type(fx.artifact)):
+            def resolve(self, strict=False):
+                raise OSError("symlink loop")
+
+        (verdict,) = verify_output_records(
+            {fx.key: str(fx.artifact)},
+            {fx.key: fx.output_hashes[fx.key]},
+            roots=[fx.run_dir],
+            declared={fx.key: Unresolvable(fx.artifact)},
+        )
+
+        # The stage's own configuration, not the manifest's claim — so the
+        # operator gets "cannot prove this", not the severity reserved for
+        # substitution and root escape.
+        assert verdict.label == UNVERIFIABLE
+        assert verdict.untrusted is False
+        assert "declared path" in verdict.reason
+
+
 class TestContainment:
     """The root check has to survive a workspace an operator has bent."""
 
