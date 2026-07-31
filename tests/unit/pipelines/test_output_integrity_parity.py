@@ -299,6 +299,35 @@ class TestContainment:
         assert declared <= set(orchestrator._output_verification_roots())
         assert declared <= set(_output_roots(tmp_path / "run_a"))
 
+    def test_a_dynamic_key_may_not_reach_a_sibling_run(self, fx, tmp_path):
+        # A dynamic key has no declared binding, so containment is the only
+        # thing behind it. If the skip path's roots covered the output *base*
+        # rather than the one run it is reading, a rewritten manifest could
+        # point it at any sibling run and be believed — and the parity cases
+        # above cannot see it, because they only reach containment in the
+        # accepting direction and only for declared keys.
+        sibling = fx.output_base / "run_b" / "evaluation" / "metrics.json"
+        sibling.parent.mkdir(parents=True)
+        sibling.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
+        key = f"{STAGE}:dataset_hash"
+        fx.outputs[key] = str(sibling)
+        fx.output_hashes[key] = sha256_path(sibling)
+
+        assert fx.skip_accepts(allowed_roots=[fx.run_dir]) is False
+        assert fx.verify_accepts() is False
+        # The base as a root is what would admit it — the very substitution
+        # `_output_verification_roots` names the run for.
+        assert fx.skip_accepts(allowed_roots=[fx.output_base]) is True
+
+    def test_the_orchestrator_names_the_run_not_the_base(self, tmp_path):
+        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+
+        base = tmp_path / "outputs"
+        orchestrator = PipelineOrchestrator(PipelineConfig(dry_run=True), output_base=base)
+
+        assert base / "prev" in orchestrator._output_verification_roots("prev")
+        assert base not in orchestrator._output_verification_roots("prev")
+
     def test_the_stages_default_roots_are_deliberately_narrower(self, fx):
         # Not part of the shared definition and not a gap: with no caller-named
         # roots a stage vouches only for the parents of the outputs it declares

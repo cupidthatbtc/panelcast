@@ -691,16 +691,23 @@ class PipelineOrchestrator:
         """Build command string representation for manifest."""
         return build_command_string(self.config, self.descriptor)
 
-    def _output_verification_roots(self) -> tuple[Path, ...]:
+    def _output_verification_roots(self, run_id: str | None = None) -> tuple[Path, ...]:
         """Roots a recorded output may legitimately live under (#367).
 
-        Every declared artifact root is accepted, plus the output base that
-        contains earlier run-scoped products. The whole working tree is not a
-        root, so a rewritten manifest cannot substitute an unrelated file.
+        Every declared artifact root is accepted, plus the run-scoped products
+        of the run whose manifest is being verified. The whole working tree is
+        not a root, so a rewritten manifest cannot substitute an unrelated file.
+
+        Named by run rather than by output base (#385): the base contains
+        *every* run, and a key with no declared binding has nothing but
+        containment standing behind it, so admitting the base would let a
+        rewritten manifest point a dynamic output at any sibling run and be
+        believed. Falling back to the base keeps pre-run-id callers working.
         """
         paths = self._artifact_paths()
         roots = tuple(getattr(paths, item.name) for item in dataclass_fields(paths))
-        return (*roots, self.output_base)
+        previous = safe_run_dir(self.output_base, run_id) if run_id else self.output_base
+        return (*roots, previous)
 
     def _carry_skipped_stage_provenance(
         self,
@@ -808,7 +815,9 @@ class PipelineOrchestrator:
                     decision = stage.skip_decision(
                         previous_manifest,
                         force=False,
-                        allowed_roots=self._output_verification_roots(),
+                        allowed_roots=self._output_verification_roots(
+                            previous_manifest.run_id if previous_manifest else None
+                        ),
                     )
                     if decision.skip:
                         log.info(

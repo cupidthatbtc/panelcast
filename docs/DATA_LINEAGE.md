@@ -1465,7 +1465,11 @@ fully reads each candidate artifact (including directory trees), so
 
 The per-key work lives in `pipelines/output_integrity.py` and is shared with
 `panelcast runs verify` (§10), so the two callers cannot drift apart in what
-they accept as proof. Their one deliberate difference is parameterized rather
+they accept as proof. Each names the run directory of the manifest it is
+reading, never the output base that contains every run: a key the manifest
+recorded but the stage does not declare has no path binding behind it, so
+containment is the only thing refusing a rewritten manifest that points it at
+a sibling run. Their one deliberate difference is parameterized rather
 than implied: `runs verify` re-roots a quarantined run's recorded paths onto
 `outputs/failed/<id>/`, while the skip path follows the active `latest` pointer
 and never looks under `failed/` — a quarantined run is not a source of truth

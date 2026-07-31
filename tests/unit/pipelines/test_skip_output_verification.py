@@ -229,7 +229,11 @@ class TestUnverifiableManifestsFailClosed:
         assert not decision.skip
         assert not decision.outputs_untrusted
         assert decision.outputs_unverifiable
-        assert "0.9.0" in decision.reason
+        # Per key rather than per manifest, so the log names which output was
+        # unprovable — and so `runs verify` describes the same manifest the
+        # same way instead of substituting a whole-map message.
+        assert decision.reason == "recorded output has no hash"
+        assert decision.key in parquet_fixture.manifest.outputs
 
     def test_one_recorded_output_missing_its_hash(self, tmp_path):
         fx = _Fixture(
