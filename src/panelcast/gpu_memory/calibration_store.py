@@ -213,6 +213,14 @@ def _linear_terms(inputs: dict[str, Any]) -> tuple[float, float] | None:
         )
         if any(name in inputs and not isinstance(inputs[name], bool) for name in gate_names):
             return None
+        # The skew gates are names, not flags; records that predate them read
+        # as gate-off exactly like the boolean gates do.
+        type_gates = ("rw_innovation_type", "entity_effect_prior_type")
+        if any(
+            name in inputs and inputs[name] is not None and not isinstance(inputs[name], str)
+            for name in type_gates
+        ):
+            return None
         n_groups = inputs.get("n_groups", 0)
         if isinstance(n_groups, bool) or not isinstance(n_groups, int) or n_groups < 0:
             return None
@@ -226,6 +234,8 @@ def _linear_terms(inputs: dict[str, Any]) -> tuple[float, float] | None:
             heteroscedastic_entity_obs=inputs.get("heteroscedastic_entity_obs", False),
             entity_group_pooling=inputs.get("entity_group_pooling", False),
             n_groups=n_groups,
+            rw_innovation_type=inputs.get("rw_innovation_type"),
+            entity_effect_prior_type=inputs.get("entity_effect_prior_type"),
         )
         gib = 1024**3
         live_chains = num_chains if chain_method == "vectorized" else 1

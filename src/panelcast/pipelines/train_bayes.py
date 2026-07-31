@@ -1184,6 +1184,11 @@ def _build_resource_usage(
         getattr(priors, "heteroscedastic_entity_obs", False)
     )
     estimate_inputs["entity_group_pooling"] = bool(getattr(priors, "entity_group_pooling", False))
+    # Skew gates (#412): a skew fit allocates rw_raw_abs alongside rw_raw and
+    # its own entity latents, so its record must not collide with a normal
+    # fit of the same shape in the calibration store.
+    estimate_inputs["rw_innovation_type"] = getattr(priors, "rw_innovation_type", None)
+    estimate_inputs["entity_effect_prior_type"] = getattr(priors, "entity_effect_prior_type", None)
     if estimate_inputs["entity_group_pooling"]:
         estimate_inputs["n_groups"] = int(model_args["n_groups"])
     peak = fit_result.peak_gpu_memory_bytes
