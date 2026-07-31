@@ -153,24 +153,33 @@ def _append_predictive_snapshot(
     np.savez_compressed(path, **arrays)
 
 
-def _json_safe(value: Any, *, path: str = "", nulled: list[str] | None = None) -> Any:
+def _json_path(path: tuple[str, ...]) -> str:
+    """Dotted JSON path for one recorded substitution; list indices inline."""
+    if not path:
+        return "<root>"
+    rendered = path[0]
+    for segment in path[1:]:
+        rendered += segment if segment.startswith("[") else f".{segment}"
+    return rendered
+
+
+def _json_safe(value: Any, *, path: tuple[str, ...] = (), nulled: list[str] | None = None) -> Any:
     """Convert payloads to strict-JSON-safe primitives.
 
     Non-finite floats become null because strict JSON has no other spelling for
     them, but each one is recorded in ``nulled`` so the caller can say which
     fields were nulled -- an absent key means "not computed", a nulled one means
     the value was NaN or infinite, and the two are otherwise indistinguishable
-    in the artifact.
+    in the artifact. The path is carried as segments and rendered only where a
+    substitution is recorded, so the clean payload every shipped run writes --
+    including its per-row arrays -- formats no strings at all.
     """
     if isinstance(value, dict):
         return {
-            str(k): _json_safe(v, path=f"{path}.{k}" if path else str(k), nulled=nulled)
-            for k, v in value.items()
+            str(k): _json_safe(v, path=(*path, str(k)), nulled=nulled) for k, v in value.items()
         }
     if isinstance(value, (list, tuple, set)):
-        return [
-            _json_safe(v, path=f"{path}[{i}]", nulled=nulled) for i, v in enumerate(value)
-        ]
+        return [_json_safe(v, path=(*path, f"[{i}]"), nulled=nulled) for i, v in enumerate(value)]
     if isinstance(value, np.ndarray):
         return _json_safe(value.tolist(), path=path, nulled=nulled)
     if isinstance(value, np.generic):
@@ -179,7 +188,7 @@ def _json_safe(value: Any, *, path: str = "", nulled: list[str] | None = None) -
         if np.isfinite(value):
             return value
         if nulled is not None:
-            nulled.append(path or "<root>")
+            nulled.append(_json_path(path))
         return None
     if hasattr(value, "tolist") and not isinstance(value, (str, bytes, bytearray)):
         try:

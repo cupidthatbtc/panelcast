@@ -70,6 +70,9 @@ def compute_ranking_metrics(
     frame (entity, y_true, pred_mean, expected_rank, realized_rank, and one
     p_top{K} column per usable K) sorted by predicted rank. Ks >= n rows are
     reported as null rather than crashing small domains.
+
+    Raises:
+        NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """
     y_true = np.asarray(y_true, dtype=float)
     y_samples = np.asarray(y_samples, dtype=float)

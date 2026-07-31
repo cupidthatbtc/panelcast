@@ -51,18 +51,32 @@ def require_finite(values: np.ndarray, name: str) -> np.ndarray:
     Infinity is as fatal as NaN here: an infinite prediction propagates into
     infinite MAE/RMSE/bias, which strict JSON cannot represent, so it would be
     written as a null and read as a metric that simply was not computed.
+
+    The clean path -- every shipped run -- pays one reduction and allocates
+    nothing: NaN and infinity both propagate through a sum, so only a sum that
+    is already non-finite materializes the elementwise mask the report needs.
+    A sum that overflows on genuinely finite input costs one extra scan, never
+    a wrong answer.
+
+    Raises:
+        NonFinitePredictionError: if any entry is NaN or an infinity.
     """
-    array = np.asarray(values)
+    array = np.asarray(values, dtype=float)
+    if array.size == 0 or np.isfinite(array.sum()):
+        return array
     finite = np.isfinite(array)
     if finite.all():
         return array
-    detail = f"{int(np.count_nonzero(~finite))} of {array.size} values"
+    n_bad = int(np.count_nonzero(~finite))
+    detail = f"{n_bad} of {array.size} values"
     if array.ndim == 2:
         bad_draws = int(np.count_nonzero(~finite.all(axis=1)))
         bad_rows = int(np.count_nonzero(~finite.all(axis=0)))
         detail += f" ({bad_draws} of {array.shape[0]} draws, {bad_rows} of {array.shape[1]} rows)"
     else:
-        detail += f" (rows {np.flatnonzero(~finite)[:5].tolist()})"
+        shown = np.flatnonzero(~finite)[:5].tolist()
+        more = f" (+{n_bad - len(shown)} more)" if n_bad > len(shown) else ""
+        detail += f" (rows {shown}{more})"
     raise NonFinitePredictionError(
         f"{name} contains non-finite values (NaN or infinity): {detail}. "
         "Predictive overflow is a numerical failure, not a missing metric; "
@@ -222,6 +236,9 @@ def compute_crps(
     directly interpretable. A CRPS of 5 points means the model's probabilistic
     predictions are, on average, 5 points away from the true values
     (accounting for both location and spread).
+
+    Raises:
+        NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """
     y_true = np.asarray(y_true)
     y_samples = np.asarray(y_samples)
@@ -303,6 +320,9 @@ def compute_point_metrics(
     where SS_res is the residual sum of squares and SS_tot is the total
     sum of squares. R2 can be negative if the model is worse than
     predicting the mean.
+
+    Raises:
+        NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """
     y_true = np.asarray(y_true)
     y_pred_mean = np.asarray(y_pred_mean)

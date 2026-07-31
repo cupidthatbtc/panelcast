@@ -157,6 +157,9 @@ def compute_ppc_statistics(
     -------
     PPCResult
         Container with per-statistic results and overall metadata.
+
+    Raises:
+        NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """
     y_obs = np.asarray(y_obs)
     y_rep = np.asarray(y_rep)
