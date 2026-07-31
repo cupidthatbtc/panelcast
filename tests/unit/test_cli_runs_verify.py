@@ -81,6 +81,27 @@ def _write_run(
     return output_base
 
 
+def _symlinked_product_run(tmp_path: Path, target: str = "shared") -> tuple[Path, Path]:
+    """A run whose `models/` points outside it, recorded as input and output."""
+    run_dir = _write_run(tmp_path) / "run_a"
+    shared = tmp_path / target
+    shared.mkdir(exist_ok=True)
+    product = shared / "manifest.json"
+    product.write_text("{}", encoding="utf-8")
+    try:
+        (run_dir / "models").symlink_to(shared, target_is_directory=True)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable, giving up the parity claim: {exc}")
+    recorded = run_dir / "models" / "manifest.json"
+    manifest_path = run_dir / "manifest.json"
+    payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    payload["outputs"]["train:models"] = str(recorded)
+    payload["output_hashes"]["train:models"] = sha256_path(product)
+    payload["input_hashes"] = {str(recorded): sha256_path(product)}
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+    return run_dir, recorded
+
+
 def _quarantine(output_base: Path, run_id: str = "run_a") -> Path:
     """Move a run under `outputs/failed/`, leaving its manifest as written."""
     failed = output_base / "failed"
@@ -486,26 +507,6 @@ class TestWhatUnownedStillReads:
         assert f"OK       input {recorded}" in result.output
         assert "recorded as" not in result.output
 
-    def _symlinked_product_run(self, tmp_path, target: str = "shared"):
-        """A run whose `models/` points outside it, recorded as input and output."""
-        run_dir = _write_run(tmp_path) / "run_a"
-        shared = tmp_path / target
-        shared.mkdir()
-        product = shared / "manifest.json"
-        product.write_text("{}", encoding="utf-8")
-        try:
-            (run_dir / "models").symlink_to(shared, target_is_directory=True)
-        except (OSError, NotImplementedError) as exc:
-            pytest.skip(f"symlinks unavailable, giving up the parity claim: {exc}")
-        recorded = run_dir / "models" / "manifest.json"
-        manifest_path = run_dir / "manifest.json"
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        payload["outputs"]["train:models"] = str(recorded)
-        payload["output_hashes"]["train:models"] = sha256_path(product)
-        payload["input_hashes"] = {str(recorded): sha256_path(product)}
-        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
-        return run_dir, recorded
-
     def test_a_symlinked_out_product_is_unowned_but_still_read(self, tmp_path):
         # Resolved containment, deliberately — but stated for what it does.
         # Ownership is symmetric with the output side; the *consequence* is
@@ -516,7 +517,7 @@ class TestWhatUnownedStillReads:
         # compares two things of the same kind against the roots that ship.
         from panelcast.pipelines.output_integrity import run_owned_path
 
-        run_dir, recorded = self._symlinked_product_run(tmp_path)
+        run_dir, recorded = _symlinked_product_run(tmp_path)
 
         assert run_owned_path(recorded, run_dir) is None
 
@@ -536,7 +537,7 @@ class TestWhatUnownedStillReads:
         # reads MISSING. That is #420's own failure surviving for this layout
         # — on a run whose outputs are UNBOUND regardless, which is why the
         # trade is worth the callers agreeing about ownership.
-        run_dir, recorded = self._symlinked_product_run(tmp_path)
+        run_dir, recorded = _symlinked_product_run(tmp_path)
         base = run_dir.parent
         _quarantine(base)
 
@@ -556,7 +557,7 @@ class TestWhatUnownedStillReads:
         # rather than argued away, since the case the other tests pick (a
         # target outside every root) is the one where the sides agree.
         monkeypatch.chdir(tmp_path)
-        run_dir, recorded = self._symlinked_product_run(tmp_path, target="models")
+        run_dir, recorded = _symlinked_product_run(tmp_path, target="models")
         base = run_dir.parent
         _quarantine(base)
 
@@ -753,7 +754,10 @@ class TestReproduceOnAQuarantinedRun:
         manifest_path = base / "run_a" / "manifest.json"
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         recorded = Path("models") / "manifest.json"
-        payload["input_hashes"] = {str(recorded): sha256_path(product)}
+        # Added to the run-owned entries rather than replacing them: this is
+        # the one case where both kinds are in the map at once, so it is what
+        # shows the skip is per-input rather than a mode the loop is in.
+        payload["input_hashes"][str(recorded)] = sha256_path(product)
         manifest_path.write_text(json.dumps(payload), encoding="utf-8")
         _quarantine(base)
         monkeypatch.setattr(orchestrator, "run_pipeline", lambda config, **kw: 0)
@@ -762,7 +766,30 @@ class TestReproduceOnAQuarantinedRun:
         result = runner.invoke(app, ["runs", "reproduce", "run_a", "--output-base", str(base)])
 
         assert result.exit_code == 1
+        # The run-owned entries sort first and are gone from their recorded
+        # locations, so an abort on them would come first and say something
+        # else — which is what makes this line evidence that they were skipped.
         assert f"ABORT: raw input changed since the run: {recorded}" in result.output
+
+    def test_a_symlinked_out_product_aborts_on_the_quarantine_alone(
+        self, tmp_path, monkeypatch
+    ):
+        # The sharper form of the same limit, and the one the prune/overwrite
+        # wording does not cover: here the recorded path is *inside* the run
+        # directory, so quarantine by itself removes it and nothing an operator
+        # does is needed. #420's headline failure, surviving for this layout.
+        from panelcast.pipelines import orchestrator
+
+        run_dir, recorded = _symlinked_product_run(tmp_path)
+        monkeypatch.setattr(orchestrator, "run_pipeline", lambda config, **kw: 0)
+        _quarantine(run_dir.parent)
+
+        result = runner.invoke(
+            app, ["runs", "reproduce", "run_a", "--output-base", str(run_dir.parent)]
+        )
+
+        assert result.exit_code == 1
+        assert f"ABORT: recorded input missing: {recorded}" in result.output
 
     def test_raw_data_that_cannot_be_read_aborts_legibly(self, tmp_path, monkeypatch):
         # The gate's whole job is turning a late failure into an early legible

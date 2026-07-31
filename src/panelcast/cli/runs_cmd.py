@@ -509,8 +509,10 @@ def runs_reproduce(
     # containment, so this reaches a product the run directory holds and no
     # other: a flat-layout product at the project root, or one behind a symlink
     # out of the run, is external as far as containment can tell and stays
-    # gated. What the gate is for — raw data drifting underneath the
-    # comparison — is what is left wherever it does reach.
+    # gated — and for the symlinked case the recorded path is inside the run,
+    # so quarantine alone takes it away and the #420 abort survives there. What
+    # the gate is for — raw data drifting underneath the comparison — is what
+    # is left wherever it does reach.
     for path_str, recorded in sorted((manifest.input_hashes or {}).items()):
         path = Path(path_str)
         if run_owned_path(path, run_dir) is not None:

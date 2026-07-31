@@ -1526,14 +1526,15 @@ refuse. `runs verify` re-hashes run-owned inputs at the location
 `run_owned_path` returns; `runs reproduce`'s pre-flight gate uses the `None` to
 check only external inputs, since a reproduction regenerates the run's own
 products — which also means a product the run directory does not hold, flat or
-symlinked out, stays gated there. Name-matching cannot separate a relocated
-workspace from another checkout of the same project — both spell the base
-`outputs` — so what bounds it is that the mapping only aims *into* the run
-directory: containment and the recorded hash decide the rest. The
-declared-path binding is the second, and the
-first of the two places `runs verify` is the weaker side — both of them
-consequences of the same missing list: only the stage caller holds the paths a
-stage declares, so only it refuses a manifest that redirects a static output at
+symlinked out, stays gated there, and for the symlinked case quarantine alone
+aborts the reproduction. Name-matching cannot separate a relocated workspace
+from another checkout of the same project — both spell the base `outputs` — so
+what bounds it is that the mapping only aims *into* the run directory:
+containment and the recorded hash decide the rest. The declared-path binding is
+the second, and the first of the two places `runs verify` is the weaker side —
+both of them consequences of the same missing list: only the stage caller holds
+the paths a stage declares, so only it refuses a manifest that redirects a
+static output at
 another file inside the run's own directory, where containment has nothing to
 say. The manifest does not record which outputs were declared, so there is
 nothing for `runs verify` to read it from — tracked in #439, which makes that

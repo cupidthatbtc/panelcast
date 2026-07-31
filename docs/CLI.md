@@ -843,13 +843,15 @@ failed in. Ownership is containment, so this reaches a product the run
 directory holds and no other. Under the flat layout a stage's model inputs are
 recorded relative to the project root, and under a run-scoped layout whose
 `models/` is a symlink out they resolve outside the run — either way nothing
-distinguishes them from data the run did not produce, so they stay gated, and
-pruning `models/`, or simply running again and overwriting it, still aborts an
-earlier run's reproduction. The environment fingerprint frames the expectation
-up front — bit-exact outputs within a matching fingerprint, statistical
-reproduction otherwise — and the post-run comparison follows suit (exact
-output-hash match vs headline-metric deltas). A reproduction always runs fresh:
-never resumes, never skips.
+distinguishes them from data the run did not produce, so they stay gated.
+Pruning `models/`, or simply running again and overwriting it, still aborts an
+earlier flat-layout run's reproduction; and for the symlinked case no operator
+action is needed at all, since the recorded path is inside the run directory
+and quarantine alone takes it away. The environment fingerprint frames the
+expectation up front — bit-exact outputs within a matching fingerprint,
+statistical reproduction otherwise — and the post-run comparison follows suit
+(exact output-hash match vs headline-metric deltas). A reproduction always runs
+fresh: never resumes, never skips.
 
 ```bash
 panelcast runs reproduce RUN_ID [OPTIONS]
