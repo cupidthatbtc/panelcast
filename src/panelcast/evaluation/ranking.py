@@ -18,6 +18,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from panelcast.evaluation.metrics import require_finite
+
 # Ties in scores are broken by row order (stable sort), so ranks are
 # deterministic for discrete/rounded scores across runs.
 TIE_BREAK_RULE = "stable sort: ties broken by row order (entity/date-sorted upstream)"
@@ -68,12 +70,17 @@ def compute_ranking_metrics(
     frame (entity, y_true, pred_mean, expected_rank, realized_rank, and one
     p_top{K} column per usable K) sorted by predicted rank. Ks >= n rows are
     reported as null rather than crashing small domains.
+
+    Raises:
+        NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """
     y_true = np.asarray(y_true, dtype=float)
     y_samples = np.asarray(y_samples, dtype=float)
     n = len(y_true)
     if n == 0:
         raise ValueError("empty slate: no rows to rank")
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
     pred_mean = y_samples.mean(axis=0)
 
     spearman = stats.spearmanr(pred_mean, y_true)

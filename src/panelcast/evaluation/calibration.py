@@ -24,6 +24,8 @@ from decimal import ROUND_CEILING, Decimal
 
 import numpy as np
 
+from panelcast.evaluation.metrics import require_finite
+
 __all__ = [
     "PIT_DEFAULT_SEED",
     "PIT_METHOD",
@@ -274,6 +276,9 @@ def compute_coverage(
     computed per observation using a sliding-window scan on sorted samples;
     the closed interval spans exactly ``ceil(prob * n_samples)`` draws, the
     fewest whose empirical mass reaches ``prob``.
+
+    Raises:
+        NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """
     y_true = np.asarray(y_true)
     y_samples = np.asarray(y_samples)
@@ -291,6 +296,8 @@ def compute_coverage(
         raise ValueError(f"interval_type must be 'equal_tailed' or 'hdi', got '{interval_type}'")
     if y_samples.shape[0] < 1:
         raise ValueError("y_samples must include at least one posterior sample.")
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
 
     # Compute credible interval bounds
     if interval_type == "hdi":
@@ -388,6 +395,9 @@ def compute_reliability_data(
     >>> # plt.plot(data.predicted_probs, data.observed_freq, 'o-')
     >>> # plt.plot([0, 1], [0, 1], 'k--')  # Diagonal for perfect calibration
 
+
+    Raises:
+        NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """
     y_true = np.asarray(y_true)
     y_samples = np.asarray(y_samples)
@@ -403,6 +413,8 @@ def compute_reliability_data(
 
     if n_bins < 1:
         raise ValueError(f"n_bins must be >= 1, got {n_bins}")
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
 
     # Nominal levels avoid exact 0/1 tails where finite-sample quantiles are unstable.
     if n_bins == 1:
@@ -464,6 +476,9 @@ def compute_interval_score(
     >>> y_samples = y_true + np.random.normal(0, 10, (1000, n_obs))
     >>> result = compute_interval_score(y_true, y_samples, prob=0.95)
     >>> print(f"IS: {result.mean_score:.2f}")
+
+    Raises:
+        NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """
     y_true = np.asarray(y_true)
     y_samples = np.asarray(y_samples)
@@ -479,6 +494,8 @@ def compute_interval_score(
     _validate_probability(prob)
     if y_samples.shape[0] < 1:
         raise ValueError("y_samples must include at least one posterior sample.")
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
 
     alpha = 1 - prob
     lower = np.percentile(y_samples, 100 * alpha / 2, axis=0)
@@ -544,6 +561,9 @@ def compute_weighted_interval_score(
     >>> y_samples = y_true + np.random.normal(0, 10, (1000, n_obs))
     >>> result = compute_weighted_interval_score(y_true, y_samples)
     >>> print(f"WIS: {result.wis:.2f}")
+
+    Raises:
+        NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """
     y_true = np.asarray(y_true)
     y_samples = np.asarray(y_samples)
@@ -562,6 +582,8 @@ def compute_weighted_interval_score(
         raise ValueError("probs must include at least one probability level.")
     for prob in probs:
         _validate_probability(prob)
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
 
     n_obs = len(y_true)
     K = len(probs)
@@ -635,6 +657,9 @@ def compute_pit_per_row(
 
     Returns:
         PIT values in [0, 1), shape (n_obs,).
+
+    Raises:
+        NonFinitePredictionError: if any observation or draw is NaN or infinite.
     """
     y_true = np.asarray(y_true, dtype=float)
     y_samples = np.asarray(y_samples, dtype=float)
@@ -647,6 +672,8 @@ def compute_pit_per_row(
     n_draws = y_samples.shape[0]
     if n_draws < 1:
         raise ValueError("y_samples must include at least one predictive draw.")
+    require_finite(y_true, "y_true")
+    require_finite(y_samples, "y_samples")
     below = (y_samples < y_true[None, :]).sum(axis=0)
     equal = (y_samples == y_true[None, :]).sum(axis=0)
     rng_seed = int(seed) & 0xFFFF_FFFF_FFFF_FFFF

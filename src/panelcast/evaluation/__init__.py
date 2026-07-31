@@ -33,10 +33,12 @@ from .cv import (
 )
 from .metrics import (
     CRPSResult,
+    NonFinitePredictionError,
     PointMetrics,
     compute_crps,
     compute_point_metrics,
     posterior_mean,
+    require_finite,
 )
 
 __all__ = [
@@ -55,6 +57,8 @@ __all__ = [
     "generate_prior_predictive",
     # metrics
     "CRPSResult",
+    "NonFinitePredictionError",
+    "require_finite",
     "compute_crps",
     "PointMetrics",
     "compute_point_metrics",

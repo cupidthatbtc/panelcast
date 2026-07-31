@@ -19,6 +19,8 @@ from dataclasses import dataclass, field
 import numpy as np
 import scipy.stats
 
+from panelcast.evaluation.metrics import require_finite
+
 __all__ = [
     "PPCStatistic",
     "PPCResult",
@@ -155,6 +157,11 @@ def compute_ppc_statistics(
     -------
     PPCResult
         Container with per-statistic results and overall metadata.
+
+    Raises
+    ------
+    NonFinitePredictionError
+        If any observation or draw is NaN or infinite.
     """
     y_obs = np.asarray(y_obs)
     y_rep = np.asarray(y_rep)
@@ -165,6 +172,8 @@ def compute_ppc_statistics(
         raise ValueError(f"y_rep must be 2D, got shape {y_rep.shape}")
     if y_rep.shape[1] != len(y_obs):
         raise ValueError(f"y_rep has {y_rep.shape[1]} observations, but y_obs has {len(y_obs)}")
+    require_finite(y_obs, "y_obs")
+    require_finite(y_rep, "y_rep")
 
     if statistics is None:
         statistics = DEFAULT_PPC_STATISTICS

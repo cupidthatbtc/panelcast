@@ -155,30 +155,80 @@ def _append_predictive_snapshot(
     np.savez_compressed(path, **arrays)
 
 
-def _json_safe(value: Any) -> Any:
-    """Convert payloads to strict-JSON-safe primitives."""
+def _json_path(path: tuple[str | int, ...]) -> str:
+    """Dotted JSON path for one recorded substitution; list indices inline.
+
+    Segments stay as keys and integer indices until a substitution is actually
+    recorded, so descending a per-row array formats nothing.
+    """
+    if not path:
+        return "<root>"
+    rendered = str(path[0])
+    for segment in path[1:]:
+        rendered += f"[{segment}]" if isinstance(segment, int) else f".{segment}"
+    return rendered
+
+
+def _json_safe(
+    value: Any, *, path: tuple[str | int, ...] = (), nulled: list[str] | None = None
+) -> Any:
+    """Convert payloads to strict-JSON-safe primitives.
+
+    Non-finite floats become null because strict JSON has no other spelling for
+    them, but each one is recorded in ``nulled`` so the caller can say which
+    fields were nulled -- an absent key means "not computed", a nulled one means
+    the value was NaN or infinite, and the two are otherwise indistinguishable
+    in the artifact. The path is carried as segments and rendered only where a
+    substitution is recorded, so the clean payload every shipped run writes --
+    including its per-row arrays -- formats no strings at all.
+    """
     if isinstance(value, dict):
-        return {str(k): _json_safe(v) for k, v in value.items()}
+        return {
+            str(k): _json_safe(v, path=(*path, str(k)), nulled=nulled) for k, v in value.items()
+        }
     if isinstance(value, (list, tuple, set)):
-        return [_json_safe(v) for v in value]
+        return [_json_safe(v, path=(*path, i), nulled=nulled) for i, v in enumerate(value)]
     if isinstance(value, np.ndarray):
-        return _json_safe(value.tolist())
+        return _json_safe(value.tolist(), path=path, nulled=nulled)
     if isinstance(value, np.generic):
-        return _json_safe(value.item())
+        return _json_safe(value.item(), path=path, nulled=nulled)
     if isinstance(value, float):
-        return value if np.isfinite(value) else None
+        if np.isfinite(value):
+            return value
+        if nulled is not None:
+            nulled.append(_json_path(path))
+        return None
     if hasattr(value, "tolist") and not isinstance(value, (str, bytes, bytearray)):
         try:
-            return _json_safe(value.tolist())
+            return _json_safe(value.tolist(), path=path, nulled=nulled)
         except TypeError:
             pass
     return value
 
 
 def _write_json(path: Path, payload: Any, *, indent: int | None = None) -> None:
-    """Write strict JSON, replacing NaN/inf values with null."""
+    """Write strict JSON, replacing NaN/inf values with null.
+
+    Every substitution is logged with its JSON path: a null that came from a
+    non-finite value is a different fact from a metric that was never computed,
+    and silently collapsing the two is how a predictive overflow reads as an
+    ordinary gap in the artifact.
+    """
+    nulled: list[str] = []
+    encoded = _json_safe(payload, nulled=nulled)
+    if nulled:
+        log.warning(
+            "non_finite_json_value_nulled",
+            artifact=path.name,
+            n_nulled=len(nulled),
+            fields=nulled[:20],
+            message=(
+                "Non-finite values were written as null; they were computed and "
+                "overflowed, not skipped."
+            ),
+        )
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(_json_safe(payload), f, indent=indent, allow_nan=False)
+        json.dump(encoded, f, indent=indent, allow_nan=False)
 
 
 def _extract_posterior_samples(idata: object) -> dict[str, jnp.ndarray]:
