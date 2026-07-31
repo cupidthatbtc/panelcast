@@ -40,7 +40,8 @@ SRC = Path(panelcast.__file__).resolve().parent
 # this file, not on the installed package: scripts are not installed, so a
 # non-editable install would otherwise skip the root and narrow the guard back
 # to the package with nothing to signal it.
-SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
+REPO = Path(__file__).resolve().parents[3]
+SCRIPTS = REPO / "scripts"
 SCAN_ROOTS = [("panelcast", SRC)] + [("scripts", p) for p in (SCRIPTS,) if p.is_dir()]
 
 GUARDED_KEYS = ("logit_offset", "target_transform")
@@ -275,7 +276,7 @@ class TestSingleResolver:
         }, f"the guard did not reach the consumer modules; it scanned {sorted(scanned_modules)}"
         # Gated on the repo, not on the root the assertion is checking: the
         # is_dir() skip must not be able to switch the scan off silently.
-        if (SCRIPTS.parent / "pyproject.toml").exists():
+        if (REPO / "pyproject.toml").exists():
             assert "scripts/predict_entity.py" in scanned_modules
         assert offenders == {}, (
             f"inline reads of {GUARDED_KEYS} outside the resolvers: {offenders}; "
@@ -389,7 +390,6 @@ class TestConfigValidation:
         from types import SimpleNamespace
 
         from panelcast.cli.runs_cmd import _reproduce_config
-
         from panelcast.paths import RunPathError
 
         manifest = SimpleNamespace(flags={"run_id": "../escape"})

@@ -407,12 +407,12 @@ def _reproduce_config(run_dir: Path, manifest) -> tuple["object", str]:
         f.name: getattr(template, f.name) for f in dataclass_fields(PipelineConfig) if f.init
     }
     kwargs: dict = {}
-    for key, value in (manifest.flags or {}).items():
+    for key, recorded in (manifest.flags or {}).items():
         if key in ("resume", "dataset_descriptor_hash") or key not in defaults:
             continue
-        if isinstance(defaults[key], tuple) and isinstance(value, list):
-            value = tuple(value)
-        kwargs[key] = value
+        if isinstance(defaults[key], tuple) and isinstance(recorded, list):
+            recorded = tuple(recorded)
+        kwargs[key] = recorded
     return PipelineConfig(**kwargs), "manifest flags (pre-0.9.0 run; YAML-only gates may be lost)"
 
 
