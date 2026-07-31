@@ -1470,7 +1470,11 @@ comparison, such as a path the stage itself declares that the workspace cannot
 resolve. Which path failed is what separates the two when the physical failure
 is identical. An artifact that is missing or unreadable falls on whichever side
 its key sits: with a declared path behind it, disk is contradicting the
-manifest; without one, nothing said this run still owned that file. Verified
+manifest; without one, nothing said this run still owned that file. The one
+skip-blocker that is not a verdict — a declared output the manifest never
+recorded — is **informational** under the same predicate, and for the reason
+the predicate gives rather than by exception: with no record there is nothing
+to compare, so the manifest is incomplete rather than contradicted. Verified
 hashes are
 carried into the new manifest so consecutive runs remain skippable. This check
 fully reads each candidate artifact (including directory trees), so

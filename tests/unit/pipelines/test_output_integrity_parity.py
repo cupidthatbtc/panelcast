@@ -769,3 +769,14 @@ class TestTheDeclaredCallerDifference:
         (moved / "models" / "manifest.json").write_text("{}", encoding="utf-8")
 
         assert reroot_under(recorded_input, moved) == moved / "models" / "manifest.json"
+
+    def test_the_quarantine_name_has_one_definition(self):
+        # `reroot_under` recognizes a moved run by matching `<base>/failed/<id>`.
+        # A second copy of that name here could drift from the one the
+        # quarantine is written under, and every intact quarantined run would
+        # then map somewhere else and be reported tampered rather than moved.
+        from panelcast import paths
+        from panelcast.pipelines import output_integrity
+
+        assert output_integrity.QUARANTINE_DIR is paths.QUARANTINE_DIR
+        assert paths.QUARANTINE_DIR in paths._RESERVED_RUN_IDS

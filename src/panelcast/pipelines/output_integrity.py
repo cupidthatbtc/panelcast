@@ -16,10 +16,8 @@ from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
+from panelcast.paths import QUARANTINE_DIR
 from panelcast.utils.hashing import sha256_path
-
-# Where the orchestrator moves a failed run; `paths.py` reserves the name.
-QUARANTINE_DIR = "failed"
 
 # Verdict labels, doubling as the `runs verify` status column.
 OK = "OK"
@@ -54,8 +52,35 @@ class OutputVerdict:
         return self.label == OK
 
 
+def _resolved_roots(roots: Sequence[Path]) -> tuple[Path, ...]:
+    """The roots, resolved once, with the ones that will not resolve dropped.
+
+    Hoisted out of the per-key check because the roots do not change while a
+    manifest is being walked: resolving them inside it made the number of
+    ``realpath`` walks the product of roots and recorded outputs, on the path
+    whose whole claim is that checking is cheaper than recomputing.
+
+    A root that will not resolve is skipped rather than fatal. The roots are a
+    shared workspace an operator may have symlinked, and one bad entry among
+    eight must not turn every output in every run into an apparent escape.
+    Dropping it here rather than at the comparison keeps that decision in one
+    place; an empty result then means nothing is contained, which is the
+    refusal the callers already treat as "not contained".
+    """
+    resolved: list[Path] = []
+    for root in roots:
+        try:
+            resolved.append(root.resolve())
+        except (OSError, ValueError, RuntimeError):
+            continue
+    return tuple(resolved)
+
+
 def _is_contained(resolved: Path, roots: Sequence[Path]) -> bool:
     """Whether ``resolved`` — an already-resolved path — lands inside a root.
+
+    ``roots`` must already be resolved too; ``_resolved_roots`` does that once
+    per manifest walk.
 
     Module-private, because the precondition is load-bearing and unenforceable:
     handed an *unresolved* path, this answers about the literal join, so
@@ -72,18 +97,10 @@ def _is_contained(resolved: Path, roots: Sequence[Path]) -> bool:
     resolved path this answered about rather than walking the same symlink a
     second time and possibly landing elsewhere.
 
-    A root that will not resolve is skipped rather than fatal. The roots are a
-    shared workspace an operator may have symlinked, and one bad entry among
-    eight must not turn every output in every run into an apparent escape.
     """
-    for root in roots:
-        try:
-            resolved_root = root.resolve()
-        except (OSError, ValueError, RuntimeError):
-            continue
-        if resolved == resolved_root or resolved_root in resolved.parents:
-            return True
-    return False
+    return any(
+        resolved == root or root in resolved.parents for root in roots
+    )
 
 
 def reroot_under(path: Path, run_dir: Path) -> Path:
@@ -201,6 +218,7 @@ def verify_output_records(
     recorded = {k: v for k, v in (outputs or {}).items() if k.startswith(prefix)}
     hashes = {k: v for k, v in (output_hashes or {}).items() if k.startswith(prefix)}
     declared = declared or {}
+    contain_roots = _resolved_roots(roots)
 
     for key in sorted(set(recorded) | set(hashes)):
         expected = hashes.get(key)
@@ -258,7 +276,7 @@ def verify_output_records(
                     key, UNBOUND, "recorded output path is unreadable", untrusted=True
                 )
                 continue
-        if not _is_contained(resolved, roots):
+        if not _is_contained(resolved, contain_roots):
             yield OutputVerdict(
                 key, UNBOUND, "recorded output path escapes the run roots", untrusted=True
             )
