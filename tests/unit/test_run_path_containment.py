@@ -7,6 +7,7 @@ Every lookup, move, and delete keyed by a run identifier goes through
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -224,17 +225,18 @@ class TestPathIsWithin:
         monkeypatch.setattr(Path, "resolve", fail)
         assert not path_is_within(tmp_path / "a", tmp_path)
 
-    def test_a_real_symlink_loop_never_raises(self, tmp_path):
-        # Version-dependent verdict, single invariant: 3.11/3.12 raise
-        # RuntimeError and refuse, 3.13+ resolve the loop to itself and contain
-        # it. Either way nothing escapes to the caller.
+    def test_a_real_symlink_loop_gets_the_documented_verdict(self, tmp_path):
+        # The verdict itself, not just the absence of an exception: 3.11/3.12
+        # raise RuntimeError from resolve() and fail closed, 3.13+ resolve the
+        # loop to itself and contain it. `path_is_within`'s docstring states
+        # this, and both callers branch on the answer, so pin it per version.
         loop = tmp_path / "loop"
         try:
             loop.symlink_to(loop, target_is_directory=True)
         except (OSError, NotImplementedError) as exc:
             pytest.skip(f"directory symlinks unavailable: {exc}")
 
-        assert path_is_within(loop, tmp_path) in (True, False)
+        assert path_is_within(loop, tmp_path) is (sys.version_info >= (3, 13))
 
 
 class TestMaliciousLatestPointer:

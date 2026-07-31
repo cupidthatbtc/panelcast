@@ -1521,7 +1521,8 @@ resolves *to the output root itself* is refused because containment demands a
 strict descendant: nothing left the root, but anything a fit wrote through such
 a name landed in the root itself, where the walkers below read run-scoped
 directories as siblings of real runs — so that refusal says so rather than
-reporting an escape.
+reporting an escape (and, refused before launching, says nothing ran through
+the name at all).
 
 Containment is also a property of an id *lookup*, not of enumeration: `runs
 list`, the dashboard, and the orchestrator's newest-run scan walk the output
