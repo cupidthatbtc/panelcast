@@ -708,10 +708,9 @@ after quarantine reads `MISSING`. Ownership asks about the run directory alone
 while output verification also accepts the artifact roots, so a symlink target
 outside every root is `UNBOUND` as an output too and nothing is lost on a run
 that was not going to verify anyway, while a target inside one verifies as an
-output and still reads `MISSING` as a quarantined input. Each
-line names the recorded spelling, preceded by the location actually checked
-when the artifact moved — or only that location, when the two cannot be
-compared at all.
+output and still reads `MISSING` as a quarantined input. Each line names the
+recorded spelling, preceded by the location actually checked when the artifact
+moved — or only that location, when the two cannot be compared at all.
 
 **Run it from the project root.** A flat-layout run records its data, model and
 report artifacts as paths relative to the project root, so `runs verify`

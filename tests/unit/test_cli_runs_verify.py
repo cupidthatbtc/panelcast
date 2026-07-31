@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import json
 import shutil
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -103,17 +104,33 @@ def _symlinked_product_run(tmp_path: Path, target: str = "shared") -> tuple[Path
     return run_dir, recorded
 
 
+_MUTATORS = frozenset({"update", "setdefault", "pop", "popitem", "clear"})
+
+
+def _parsed(module: Path) -> ast.AST:
+    """A module's tree, failing with the file named rather than a bare error."""
+    try:
+        return ast.parse(module.read_text(encoding="utf-8"))
+    except (SyntaxError, UnicodeDecodeError) as exc:  # pragma: no cover - guard
+        pytest.fail(f"cannot read {module} to check for input_hashes writers: {exc}")
+
+
 def _input_hashes_writes(tree: ast.AST):
     """Every way a module records into a manifest's `input_hashes`.
 
     Walks the tree rather than matching text: a comment naming the field would
     otherwise read as a writer, and a reformat of a real one as its removal.
+    Method calls are filtered to the mutating ones, so reading the map — which
+    both `runs verify` and `runs reproduce` do — is not reported as writing it.
+    Handing the map to a call *is*, whether that call builds a manifest or
+    merely receives it: either way the callee can put entries in.
     """
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             func = node.func
             if (
                 isinstance(func, ast.Attribute)
+                and func.attr in _MUTATORS
                 and isinstance(func.value, ast.Attribute)
                 and func.value.attr == "input_hashes"
             ):
@@ -770,16 +787,25 @@ class TestReproduceOnAQuarantinedRun:
         # skipped by containment and goes unchecked. That is the lenient
         # direction, and the same weaker-provenance caveat the pre-0.9.0 config
         # tier carries.
-        capture = inspect.getsource(PipelineOrchestrator._capture_stage_input_hashes)
-        assert "for path in stage.input_paths:" in capture
+        # Every source it draws from, not merely that it draws from the right
+        # one: a second loop appended below the first satisfies "such a loop
+        # exists" while feeding the same local dict, which the package sweep
+        # cannot see either — the entries never touch a `.input_hashes` node.
+        capture = textwrap.dedent(
+            inspect.getsource(PipelineOrchestrator._capture_stage_input_hashes)
+        )
+        iterated = [
+            ast.unparse(node.iter)
+            for node in ast.walk(ast.parse(capture))
+            if isinstance(node, ast.For | ast.comprehension)
+        ]
+        assert iterated == ["stage.input_paths"]
 
         package = Path(inspect.getfile(PipelineOrchestrator)).parents[1]
         writes = sorted(
             f"{module.relative_to(package).as_posix()}: {kind}"
             for module in package.rglob("*.py")
-            for kind in _input_hashes_writes(
-                ast.parse(module.read_text(encoding="utf-8"))
-            )
+            for kind in _input_hashes_writes(_parsed(module))
         )
 
         assert writes == [
