@@ -185,6 +185,8 @@ PIPELINE_YAML_MAPPING: dict[str, YamlKeySpec] = {
     ),
     # Split configuration
     "val_events": _spec("val_events", "val_events"),
+    # Held-out test events per entity (#429; no CLI flag, derived from eval_horizon).
+    "test_events": _spec("test_events", None),
     "origin_offset": _spec("origin_offset", "origin_offset"),
     # Conformal wrapper gate (#156; no CLI flag).
     "conformal_calibration": _spec("conformal_calibration", None),
