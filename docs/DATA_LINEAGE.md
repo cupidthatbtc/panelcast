@@ -1512,9 +1512,12 @@ and hash, so they have no containment step of their own to refuse it
 afterwards, and an unowned path is then checked wherever the manifest recorded
 it. Ownership is decided on the *resolved* location, so a product reached
 through a symlink that leaves the run directory is not owned either — the same
-bound `verify_output_records` applies to an output in that place, which reports
-it `UNBOUND`. `runs verify` re-hashes run-owned inputs at
-the location it returns; `runs reproduce`'s pre-flight gate uses the `None` to
+bound `verify_output_records` applies to an output in that place, and such a
+run's outputs under that directory are `UNBOUND` already, so the layout is not
+verifiable either way. It costs the re-rooting rather than the read: an active
+run still verifies that input through the link, while a quarantined one reports
+it `MISSING`. `runs verify` re-hashes run-owned inputs at the location
+`run_owned_path` returns; `runs reproduce`'s pre-flight gate uses the `None` to
 check only external inputs, since a reproduction regenerates the run's own
 products. Name-matching cannot separate a relocated workspace from another
 checkout of the same project — both spell the base `outputs` — so what bounds

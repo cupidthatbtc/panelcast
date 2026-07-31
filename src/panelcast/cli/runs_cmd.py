@@ -138,6 +138,8 @@ def _input_label(path: Path, path_str: str) -> str:
     a path nothing had stat'd, and that must not come back through an error
     path.
     """
+    if path == Path(path_str):  # unowned: nothing was mapped, so nothing moved
+        return path_str
     try:
         if path.resolve() == Path(path_str).resolve():
             return path_str
@@ -175,7 +177,16 @@ def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
             typer.echo(f"MISSING  input {label}")
             problems.append(path_str)
             continue
-        if sha256_path(path) != recorded:
+        try:
+            actual = sha256_path(path)
+        except (OSError, ValueError, RuntimeError) as exc:
+            # The triple the output pass catches at its own hash site. Raising
+            # here would abandon the remaining inputs, the stamps and the
+            # lockfile over one unreadable file.
+            typer.echo(f"MISSING  input {label} (unreadable: {exc})")
+            problems.append(path_str)
+            continue
+        if actual != recorded:
             # Not "raw data" any more: this pass also covers the run's own
             # products, where the likely cause is an edited run directory.
             typer.echo(f"MODIFIED input {label} (contents changed since this run)")

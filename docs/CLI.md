@@ -699,11 +699,15 @@ hashes are captured before the stage body runs, so a run that failed at or
 after `evaluate` has already recorded `outputs/<id>/models/manifest.json` as an
 input; after quarantine that file is under `outputs/failed/<id>/`, and it is
 checked there rather than reported missing on the run someone is debugging.
-Inputs the run does not own — the shared data roots, external files — have no
-mapping to make and are checked where the manifest recorded them, and so is a
-run-owned path whose recorded tail climbs back out of the run directory. Each
-line names the recorded spelling, preceded by the location actually checked
-when the artifact moved.
+Inputs the run does not own are checked where the manifest recorded them: the
+shared data roots and external files, but also a path whose recorded tail
+climbs back out of the run directory, and one reached through a symlink that
+leaves it. That last case is the mapping's cost — a run whose `models/` points
+at shared storage verifies its inputs through the link while it is active, and
+after quarantine reads `MISSING`, on a run whose outputs are already `UNBOUND`
+for the same reason. Each line names the recorded spelling, preceded by the
+location actually checked when the artifact moved — or only that location,
+when the two cannot be compared at all.
 
 **Run it from the project root.** A flat-layout run records its data, model and
 report artifacts as paths relative to the project root, so `runs verify`

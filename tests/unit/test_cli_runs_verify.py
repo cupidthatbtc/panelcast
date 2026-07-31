@@ -119,7 +119,9 @@ class TestRunsVerify:
         self, tmp_path, monkeypatch
     ):
         # `Path("./raw.csv") == Path("raw.csv")` but the strings differ, so
-        # comparing them would announce a re-rooting that never happened.
+        # comparing them would announce a re-rooting that never happened. The
+        # unowned branch — nothing was mapped, so nothing can have moved, and
+        # the line is the manifest's own string.
         base = _write_run(tmp_path)
         manifest_path = base / "run_a" / "manifest.json"
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -132,6 +134,25 @@ class TestRunsVerify:
         assert result.exit_code == 0, result.output
         assert "OK       input ./raw.csv" in result.output
         assert "recorded as" not in result.output
+
+    def test_an_unreadable_input_is_a_verdict_not_a_traceback(self, tmp_path, monkeypatch):
+        # The output pass catches the same triple at its hash site. Raising
+        # here would abandon the remaining inputs, the stamps and the lockfile
+        # over one unreadable file, and the pass reads more paths than it did.
+        base = _write_run(tmp_path)
+
+        def refuse(path, *args, **kwargs):
+            raise OSError("permission denied")
+
+        monkeypatch.setattr("panelcast.utils.hashing.sha256_path", refuse)
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 1
+        assert "unreadable: permission denied" in result.output
+        # The summary only prints once the whole chain has run, so it is what
+        # separates a verdict from a traceback that took the rest with it.
+        assert "FAILED: 1 mismatch(es)" in result.output
 
     def test_a_manifest_with_no_hashes_is_unverifiable_not_excused(self, tmp_path):
         # Shape cannot tell a pre-0.9.0 run from a modern one someone emptied
@@ -378,10 +399,9 @@ class TestTheInputMappingIsBounded:
             return real(self, strict)
 
         monkeypatch.setattr(Path, "resolve", refuse)
+        recorded = Path("outputs") / "run_a" / "models" / "manifest.json"
 
-        assert run_owned_path(Path("outputs") / "run_a" / "models" / "manifest.json", run_dir) is (
-            None
-        )
+        assert run_owned_path(recorded, run_dir) is None
 
     def test_a_path_the_run_does_not_own_has_no_location(self, tmp_path):
         from panelcast.pipelines.output_integrity import run_owned_path
@@ -447,17 +467,8 @@ class TestTheInputMappingIsBounded:
         assert f"OK       input {recorded}" in result.output
         assert "recorded as" not in result.output
 
-    def test_an_artifact_symlinked_out_of_the_run_is_not_owned(self, tmp_path):
-        # Resolved containment, deliberately. A symlink inside the run that
-        # leaves it is declined here for the reason `runs verify` reports the
-        # *output* at the same path UNBOUND: a layout storing products outside
-        # the run directory is unverifiable on both sides rather than lenient
-        # on one, and the two callers agreeing about which paths a run owns is
-        # worth more than reaching such a product. The output half goes through
-        # the CLI so the parity claim is made against the roots that ship, not
-        # against the strictest set this could have passed.
-        from panelcast.pipelines.output_integrity import run_owned_path
-
+    def _symlinked_product_run(self, tmp_path):
+        """A run whose `models/` points outside it, recorded as input and output."""
         base = _write_run(tmp_path)
         run_dir = base / "run_a"
         shared = tmp_path / "shared"
@@ -473,9 +484,23 @@ class TestTheInputMappingIsBounded:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         payload["outputs"]["train:models"] = str(recorded)
         payload["output_hashes"]["train:models"] = sha256_path(product)
+        payload["input_hashes"] = {str(recorded): sha256_path(product)}
         manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        return base, recorded
 
-        assert run_owned_path(recorded, run_dir) is None
+    def test_a_symlinked_out_product_is_unowned_but_still_read(self, tmp_path):
+        # Resolved containment, deliberately — but stated for what it does.
+        # Ownership is symmetric with the output side; the *consequence* is
+        # not, because an unowned path is checked where the manifest recorded
+        # it, and on an active run that reads straight through the link. So
+        # the same file is OK as an input and UNBOUND as an output, and the
+        # run fails on the output. Both verdicts through the CLI, so the claim
+        # compares two things of the same kind against the roots that ship.
+        from panelcast.pipelines.output_integrity import run_owned_path
+
+        base, recorded = self._symlinked_product_run(tmp_path)
+
+        assert run_owned_path(recorded, base / "run_a") is None
 
         result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
 
@@ -483,6 +508,21 @@ class TestTheInputMappingIsBounded:
         assert "UNBOUND      train:models (recorded output path escapes the run roots)" in (
             result.output
         )
+        assert f"OK       input {recorded}" in result.output
+
+    def test_what_the_symlinked_out_product_gives_up_is_the_re_rooting(self, tmp_path):
+        # The cost, asserted rather than described: quarantine and the
+        # recorded location is gone, so the input the active run verified now
+        # reads MISSING. That is #420's own failure surviving for this layout
+        # — on a run whose outputs are UNBOUND regardless, which is why the
+        # trade is worth the callers agreeing about ownership.
+        base, recorded = self._symlinked_product_run(tmp_path)
+        _quarantine(base)
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 1
+        assert f"MISSING  input {recorded}" in result.output
 
     def test_an_escaping_recorded_input_is_checked_where_it_was_recorded(self, tmp_path):
         # What unowned means, stated so the guard is not read as a refusal to
