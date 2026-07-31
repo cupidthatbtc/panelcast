@@ -7,6 +7,7 @@ from pathlib import Path
 
 import arviz as az
 import numpy as np
+import pytest
 import xarray as xr
 
 from panelcast.select.confirmation import (
@@ -35,8 +36,14 @@ def _write_ll(path: Path, ll: np.ndarray) -> None:
     az.InferenceData(log_likelihood=xr.Dataset({"y": da})).to_netcdf(str(path))
 
 
-def _fake_env(tmp_path, monkeypatch, winner_ll_for_seed=None, winner_passed_for_seed=None):
-    """Fake launcher that writes per-run log-lik snapshots into the named run dir."""
+def _fake_env(
+    tmp_path, monkeypatch, winner_ll_for_seed=None, winner_passed_for_seed=None, dataset=None
+):
+    """Fake launcher that writes per-run log-lik snapshots into the named run dir.
+
+    It also writes the manifest the orchestrator would: the cache identity is
+    only reusable when each run can prove which experiment it belongs to.
+    """
     import yaml as _yaml
 
     winner_ll_for_seed = winner_ll_for_seed or (lambda seed: _WINNER_GOOD_LL)
@@ -50,6 +57,7 @@ def _fake_env(tmp_path, monkeypatch, winner_ll_for_seed=None, winner_passed_for_
         run_dir = tmp_path / "outputs" / payload["run_id"]
         ll = winner_ll_for_seed(seed) if label == "winner" else _REF_LL
         _write_ll(run_dir / "evaluation" / "log_likelihood.nc", ll)
+        _write_manifest(run_dir, payload, dataset)
         if label == "winner":
             (run_dir / "evaluation" / "diagnostics.json").write_text(
                 json.dumps({"passed": winner_passed_for_seed(seed)}), encoding="utf-8"
@@ -58,11 +66,35 @@ def _fake_env(tmp_path, monkeypatch, winner_ll_for_seed=None, winner_passed_for_
 
     cfg = SweepConfig(
         sweep_id="c",
+        dataset=dataset,
         output_root=tmp_path / "select",
         panelcast_bin="pc",
         pipeline_output_base=tmp_path / "outputs",
     )
     return cfg, launch
+
+
+def _write_manifest(run_dir: Path, config_payload: dict, dataset) -> None:
+    """The manifest fields the confirmation cache checks a reused run against."""
+    from panelcast.config.descriptor import load_descriptor
+
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "success": True,
+                "experiment_identity": {
+                    "descriptor_hash": load_descriptor(dataset).descriptor_hash(),
+                    # run_id is execution mechanics, excluded from the recorded
+                    # identity exactly as the orchestrator excludes it.
+                    "config_payload": {
+                        k: v for k, v in config_payload.items() if k != "run_id"
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 class TestRunConfirmation:
@@ -374,6 +406,90 @@ class TestConfirmationResume:
         )
         assert calls["n"] == 2  # only the failed seed refits
         assert result.confirmed
+
+    def test_a_different_dataset_is_a_different_confirmation(self, tmp_path, monkeypatch):
+        """Same sweep id, same winner knobs, other domain: nothing is reused."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        calls, counting = self._counting(launch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2
+
+        other_cfg, other_launch = _fake_env(tmp_path, monkeypatch, dataset="aero")
+        assert other_cfg.sweep_dir == cfg.sweep_dir
+        calls, counting = self._counting(other_launch)
+        result = run_confirmation(
+            {"latent_process": "ar1"}, other_cfg, seeds=(42,), launch=counting
+        )
+        assert calls["n"] == 2
+        assert result.dataset_descriptor_hash != cfg.sweep_id  # sanity: a real hash
+        assert [
+            p
+            for p in cfg.sweep_dir.iterdir()
+            if p.name.startswith("confirmation_") and p.suffix == ".json"
+        ]
+
+    @pytest.mark.parametrize(
+        ("tamper", "mismatch"),
+        [
+            (None, "no readable manifest"),
+            (lambda m: m.update(success=False), "manifest does not record a successful run"),
+            (lambda m: m.update(experiment_identity={}), "manifest records no experiment identity"),
+            (
+                lambda m: m["experiment_identity"].update(config_payload=None),
+                "manifest records no config payload",
+            ),
+            (
+                lambda m: m["experiment_identity"].update(descriptor_hash="0" * 64),
+                "dataset_descriptor_hash",
+            ),
+            (
+                lambda m: m["experiment_identity"]["config_payload"].update(stages=["train"]),
+                "stages",
+            ),
+        ],
+    )
+    def test_a_cached_run_that_cannot_prove_itself_refits(
+        self, tmp_path, monkeypatch, tamper, mismatch
+    ):
+        """The identity file matching is not enough — each run's manifest must too."""
+        import structlog
+
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        path = Path(result.seeds[0].winner_run) / "manifest.json"
+        if tamper is None:
+            path.unlink()
+        else:
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            tamper(manifest)
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+
+        calls, counting = self._counting(launch)
+        with structlog.testing.capture_logs() as logs:
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2  # both sides of the seed refit
+        assert [
+            e["mismatch"] for e in logs if e["event"] == "confirmation_cached_run_rejected"
+        ] == [mismatch]
+
+    def test_an_option_the_manifest_never_recorded_still_reuses(self, tmp_path, monkeypatch):
+        """A key with no recorded value has nothing to disagree with."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        for run in (result.seeds[0].reference_run, result.seeds[0].winner_run):
+            path = Path(run) / "manifest.json"
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            manifest["experiment_identity"]["config_payload"].pop("stages")
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+        calls, counting = self._counting(launch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 0
+
+    def test_an_unloadable_dataset_records_no_descriptor_hash(self, tmp_path):
+        from panelcast.select.confirmation import _descriptor_hash
+
+        cfg = SweepConfig(sweep_id="c", dataset="not-a-dataset", output_root=tmp_path / "select")
+        assert _descriptor_hash(cfg) is None
 
     def test_reused_seed_rechecks_convergence(self, tmp_path, monkeypatch):
         cfg, launch = _fake_env(tmp_path, monkeypatch)
