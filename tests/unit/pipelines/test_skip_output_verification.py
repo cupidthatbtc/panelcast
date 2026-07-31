@@ -393,7 +393,7 @@ class TestRecordedPathContainment:
         from panelcast.paths import ArtifactPaths
 
         orchestrator = PipelineOrchestrator(PipelineConfig(dry_run=True), output_base=tmp_path)
-        roots = set(orchestrator._output_verification_roots())
+        roots = set(orchestrator._output_verification_roots("prev"))
         paths = ArtifactPaths.flat()
 
         assert {

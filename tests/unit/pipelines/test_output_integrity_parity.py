@@ -296,7 +296,7 @@ class TestContainment:
         declared = set(ArtifactPaths.flat().roots())
         orchestrator = PipelineOrchestrator(PipelineConfig(dry_run=True), output_base=tmp_path)
 
-        assert declared <= set(orchestrator._output_verification_roots())
+        assert declared <= set(orchestrator._output_verification_roots("run_a"))
         assert declared <= set(_output_roots(tmp_path / "run_a"))
 
     def test_a_dynamic_key_may_not_reach_a_sibling_run(self, fx, tmp_path):
@@ -319,14 +319,23 @@ class TestContainment:
         # `_output_verification_roots` names the run for.
         assert fx.skip_accepts(allowed_roots=[fx.output_base]) is True
 
-    def test_the_orchestrator_names_the_run_not_the_base(self, tmp_path):
+    def test_the_orchestrator_names_only_the_run_it_verifies(self, tmp_path):
+        # Neither the base that holds every run, nor the run-scoped products
+        # the *current* run is writing into as it goes — a rewritten previous
+        # manifest must not be able to point a dynamic key at either.
+        from panelcast.paths import ArtifactPaths
         from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
 
         base = tmp_path / "outputs"
         orchestrator = PipelineOrchestrator(PipelineConfig(dry_run=True), output_base=base)
+        orchestrator.run_dir = base / "current"
+        orchestrator._resolved_paths = ArtifactPaths.for_run(orchestrator.run_dir)
 
-        assert base / "prev" in orchestrator._output_verification_roots("prev")
-        assert base not in orchestrator._output_verification_roots("prev")
+        roots = set(orchestrator._output_verification_roots("prev"))
+
+        assert base / "prev" in roots
+        assert base not in roots
+        assert not any(str(r).startswith(str(base / "current")) for r in roots)
 
     def test_the_stages_default_roots_are_deliberately_narrower(self, fx):
         # Not part of the shared definition and not a gap: with no caller-named

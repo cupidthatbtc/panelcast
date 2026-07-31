@@ -691,23 +691,26 @@ class PipelineOrchestrator:
         """Build command string representation for manifest."""
         return build_command_string(self.config, self.descriptor)
 
-    def _output_verification_roots(self, run_id: str | None = None) -> tuple[Path, ...]:
-        """Roots a recorded output may legitimately live under (#367).
+    def _output_verification_roots(self, run_id: str) -> tuple[Path, ...]:
+        """Roots an output recorded by run ``run_id`` may live under (#367).
 
-        Every declared artifact root is accepted, plus the run-scoped products
-        of the run whose manifest is being verified. The whole working tree is
-        not a root, so a rewritten manifest cannot substitute an unrelated file.
+        The cross-run artifact roots, plus that one run's own directory. The
+        whole working tree is not a root, so a rewritten manifest cannot
+        substitute an unrelated file.
 
-        Named by run rather than by output base (#385): the base contains
-        *every* run, and a key with no declared binding has nothing but
-        containment standing behind it, so admitting the base would let a
-        rewritten manifest point a dynamic output at any sibling run and be
-        believed. Falling back to the base keeps pre-run-id callers working.
+        Both halves are named by what they are, not by what contains them
+        (#385). The output base would admit every sibling run, and *this* run's
+        run-scoped products would admit the directories the current run is
+        writing into as it goes — either lets a rewritten previous manifest
+        point a key with no declared binding at something this pipeline
+        produced and have it believed. ``run_id`` is required for the same
+        reason: there is no defensible default here.
+
+        The shared roots come from the flat layout because that is where
+        cross-run artifacts are recorded; a run-scoped product of the run being
+        verified is covered by its run directory instead.
         """
-        paths = self._artifact_paths()
-        roots = tuple(getattr(paths, item.name) for item in dataclass_fields(paths))
-        previous = safe_run_dir(self.output_base, run_id) if run_id else self.output_base
-        return (*roots, previous)
+        return (*ArtifactPaths.flat().roots(), safe_run_dir(self.output_base, run_id))
 
     def _carry_skipped_stage_provenance(
         self,
@@ -815,8 +818,12 @@ class PipelineOrchestrator:
                     decision = stage.skip_decision(
                         previous_manifest,
                         force=False,
-                        allowed_roots=self._output_verification_roots(
-                            previous_manifest.run_id if previous_manifest else None
+                        # No previous manifest means no skip either way, so
+                        # there is no run to name and nothing to allow.
+                        allowed_roots=(
+                            self._output_verification_roots(previous_manifest.run_id)
+                            if previous_manifest
+                            else ()
                         ),
                     )
                     if decision.skip:
