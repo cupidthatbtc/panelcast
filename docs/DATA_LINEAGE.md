@@ -1453,20 +1453,23 @@ For each stage in topological order:
 **Output verification** (`stages.py:PipelineStage.verify_recorded_outputs`):
 existence is not integrity, so a skip is only granted when the bytes on disk
 still hash to what the manifest recorded. Recorded paths are resolved inside
-the run roots first. A manifest with no output hashes (pre-0.9.0), a recorded
-output that is missing, unreadable, or modified, a key recorded on only one of
-`outputs`/`output_hashes`, and a declared output the manifest never recorded
-all block the skip and rerun the stage.
+the run roots first. Anything the shared verifier does not return `OK` for
+blocks the skip and reruns the stage — stated that way rather than as a list of
+cases, for the same reason the severity below is: the cases keep growing, and
+the list had already drifted twice. A declared output the manifest never
+recorded blocks it too, which the verifier cannot see because it has no key.
 
 Severity is sorted by what is *known*, not by which way the check failed, and
 is stated as a predicate rather than a list so it cannot drift as cases are
-added. A verdict is a **warning** when the manifest's own claim fails: the
-bytes differ, or the path it recorded cannot be tied to this run — not the one
-its key names, not somewhere this run could have written, or not locatable at
-all. It is **informational** when nothing can be proven either way: no hash to
-compare against, no path to compare at, or a local obstacle between the tool
-and the answer. An artifact that is missing or unreadable falls on whichever
-side its key sits: with a declared path behind it, disk is contradicting the
+added. A verdict is a **warning** when the *recorded* claim fails: the bytes
+differ, or the path the manifest recorded cannot be tied to this run — not the
+one its key names, not somewhere this run could have written, or not locatable
+at all. It is **informational** when nothing can be proven either way: no hash
+to compare against, no path to compare at, or an obstacle on *this* side of the
+comparison, such as a path the stage itself declares that the workspace cannot
+resolve. Which path failed is what separates the two when the physical failure
+is identical. An artifact that is missing or unreadable falls on whichever side
+its key sits: with a declared path behind it, disk is contradicting the
 manifest; without one, nothing said this run still owned that file. Verified
 hashes are
 carried into the new manifest so consecutive runs remain skippable. This check

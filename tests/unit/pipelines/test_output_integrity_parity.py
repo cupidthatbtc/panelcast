@@ -374,7 +374,7 @@ class TestContainment:
     """The root check has to survive a workspace an operator has bent."""
 
     def test_one_unresolvable_root_does_not_condemn_every_output(self, tmp_path, monkeypatch):
-        from panelcast.pipelines.output_integrity import contained_path
+        from panelcast.pipelines.output_integrity import _contained_path
 
         good = tmp_path / "models"
         good.mkdir()
@@ -394,7 +394,7 @@ class TestContainment:
         # A bad root ahead of the good one must be skipped, not fatal: the
         # roots are a shared workspace, and one bent entry out of eight cannot
         # turn every output in every run into an apparent escape.
-        assert contained_path(resolved, [bad, good]) is not None
+        assert _contained_path(resolved, [bad, good]) is not None
 
     @pytest.mark.parametrize("layout", ["flat", "run"])
     def test_the_root_enumeration_is_the_dataclass(self, tmp_path, layout):
@@ -500,7 +500,7 @@ class TestContainment:
         # `test_a_manifest_never_arrives_without_the_run_that_named_its_roots`.
 
     def test_the_contained_path_is_the_one_that_gets_hashed(self, tmp_path):
-        from panelcast.pipelines.output_integrity import contained_path
+        from panelcast.pipelines.output_integrity import _contained_path
 
         root = tmp_path / "models"
         root.mkdir()
@@ -514,11 +514,11 @@ class TestContainment:
 
         # Returning the resolved form is what keeps the read from walking the
         # same symlink a second time and landing somewhere else. Asserted on
-        # the verdict, not on `contained_path` alone: now that the caller
+        # the verdict, not on `_contained_path` alone: now that the caller
         # resolves, passing it an already-resolved path proves nothing.
         from panelcast.pipelines.output_integrity import OK, verify_output_records
 
-        assert contained_path(link.resolve(), [root]) == real.resolve()
+        assert _contained_path(link.resolve(), [root]) == real.resolve()
 
         key = "train:trace"
         (verdict,) = verify_output_records(
