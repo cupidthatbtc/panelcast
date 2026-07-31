@@ -535,6 +535,24 @@ class TestConfirmationResume:
         run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=counting)
         assert calls["n"] == 2  # seed 43 still reuses; only the crossed seed refits
 
+    def test_a_changed_base_option_is_a_different_confirmation(self, tmp_path, monkeypatch):
+        """The identity's other half: an option the run gate would never see."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        calls, counting = self._counting(launch)
+        first = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2
+        cfg.extra_config = {"max_events": 500}
+        calls, counting = self._counting(launch)
+        second = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2
+        assert first.base_config_hash is not None
+        assert second.base_config_hash != first.base_config_hash
+        assert [
+            p
+            for p in cfg.sweep_dir.iterdir()
+            if p.name.startswith("confirmation_") and p.suffix == ".json"
+        ]
+
     def test_a_knob_the_winner_overrides_still_reuses(self, tmp_path, monkeypatch):
         """An extra_config value an arm overrides is compared as the arm's, not the base's."""
         cfg, launch = _fake_env(tmp_path, monkeypatch)
@@ -591,6 +609,8 @@ class TestConfirmationResume:
         self, tmp_path, monkeypatch
     ):
         """The whole path, not its helpers: a descriptor that will not load."""
+        import structlog
+
         cfg, launch = _fake_env(tmp_path, monkeypatch)
         run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
 
@@ -599,8 +619,16 @@ class TestConfirmationResume:
 
         monkeypatch.setattr("panelcast.select.confirmation.load_descriptor", unloadable)
         calls, counting = self._counting(launch)
-        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        with structlog.testing.capture_logs() as logs:
+            result = run_confirmation(
+                {"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting
+            )
         assert calls["n"] == 2
+        # Not "the dataset changed", which is what a stale mount must never be
+        # reported as — and the only thing distinguishing the two guard orders.
+        assert [
+            (e["reason"], e["changed"]) for e in logs if e["event"] == "confirmation_cache_archived"
+        ] == [("unresolved dataset descriptor", None)]
         assert result.dataset_descriptor_hash is None
         persisted = json.loads(
             (cfg.sweep_dir / "confirmation.json").read_text(encoding="utf-8")

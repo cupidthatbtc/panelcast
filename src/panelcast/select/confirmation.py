@@ -261,6 +261,12 @@ def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> lis
     exempted, because it buys nothing: reuse is refused per run while the hash
     is unresolved, so the seeds refit and the per-seed checkpoint overwrites
     the ledger either way. Archiving at least keeps a copy of what it replaced.
+
+    The exemption cannot tell a recorded ``null`` from an absent key, so a
+    ledger written before this field existed reads as blind on it. What still
+    archives such a file is ``base_config_hash``, absent from it for the same
+    reason and not exempted — retiring that key would quietly make pre-#418
+    ledgers reusable.
     """
     return sorted(
         key
@@ -270,11 +276,20 @@ def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> lis
     )
 
 
-def _archive(out_path: Path, *, reason: str) -> None:
-    """Move the prior ledger aside; evidence is never mixed across protocols."""
-    archived = out_path.with_name(f"confirmation_{time.strftime('%Y%m%dT%H%M%S')}.json")
+def _archive(out_path: Path, *, reason: str, changed: list[str] | None = None) -> None:
+    """Move the prior ledger aside; evidence is never mixed across protocols.
+
+    Microseconds in the name because the blind path archives on every re-entry:
+    at second granularity two archives in one run would replace each other, and
+    the copy exists precisely so nothing is lost. ``changed`` stays its own
+    field rather than being folded into ``reason``, so a reader never has to
+    split prose to learn which key moved.
+    """
+    archived = out_path.with_name(f"confirmation_{datetime.now():%Y%m%dT%H%M%S%f}.json")
     out_path.replace(archived)
-    log.warning("confirmation_cache_archived", archived=str(archived), reason=reason)
+    log.warning(
+        "confirmation_cache_archived", archived=str(archived), reason=reason, changed=changed
+    )
 
 
 def _reusable_prior_seeds(
@@ -312,7 +327,7 @@ def _reusable_prior_seeds(
         return {}
     changed = _identity_changes(payload, identity)
     if changed:
-        _archive(out_path, reason=f"protocol changed: {', '.join(changed)}")
+        _archive(out_path, reason="protocol changed", changed=changed)
         return {}
     reusable: dict[int, SeedResult] = {}
     for entry in payload.get("seeds", []):
