@@ -88,9 +88,11 @@ class Fixture:
     def skip_accepts(self, allowed_roots: list[Path] | None = None) -> bool:
         """Whether the incremental skip path trusts the recorded outputs.
 
-        ``allowed_roots`` defaults to the run dir so the parity cases isolate
-        the per-key rules; pass None explicitly to exercise the stage's own
-        root derivation instead.
+        The default is the run dir, so the parity cases isolate the per-key
+        rules; `skip_accepts_on_production_roots` runs the same manifest
+        through the roots the orchestrator passes. The stage's own
+        `_default_roots()` fallback is not reachable from here — that path is
+        covered directly in `test_skip_output_verification.py`.
         """
         roots = [self.run_dir] if allowed_roots is None else allowed_roots
         return self.stage.skip_decision(self._manifest(), allowed_roots=roots).skip

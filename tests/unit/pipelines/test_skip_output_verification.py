@@ -559,26 +559,26 @@ class TestOrchestratorSkipVerification:
         raw.write_text("a,b\n1,2\n", encoding="utf-8")
         return tmp_path / "outputs"
 
-    def test_every_skip_check_with_a_previous_run_names_its_roots(self, workspace):
-        # The orchestrator's `allowed_roots=None` fallback is for the case with
-        # no previous manifest, where `skip_decision` returns before reading
-        # roots. Asserted rather than commented: with a previous run in place,
-        # every skip check that could reach the roots is handed real ones.
-        assert _run_pipeline(workspace, "runA", []) == 0
-
-        seen: list[object] = []
+    def test_a_manifest_never_arrives_without_the_run_that_named_its_roots(self, workspace):
+        # The premise behind passing `allowed_roots=None` only where there is
+        # no previous *run*, while the safety argument is about there being no
+        # previous *manifest*. Nothing in the code ties the two, so tie them
+        # here: across a first run and a skipping second, the manifest and the
+        # roots are present or absent together, never one without the other.
+        seen: list[tuple[bool, bool]] = []
         real = PipelineStage.skip_decision
 
         def capture(self, manifest, force=False, allowed_roots=None):
-            if manifest is not None:
-                seen.append(allowed_roots)
+            seen.append((manifest is None, allowed_roots is None))
             return real(self, manifest, force=force, allowed_roots=allowed_roots)
 
         with patch.object(PipelineStage, "skip_decision", capture):
+            assert _run_pipeline(workspace, "runA", [], skip_existing=True) == 0
             assert _run_pipeline(workspace, "runB", [], skip_existing=True) == 0
 
-        assert seen, "no skip check saw a previous manifest"
-        assert all(roots for roots in seen)
+        assert (True, True) in seen, "the no-previous-run case never ran"
+        assert (False, False) in seen, "the previous-run case never ran"
+        assert all(no_manifest == no_roots for no_manifest, no_roots in seen)
 
     def test_the_containment_root_follows_the_directory_not_the_manifest(self, workspace):
         # The manifest is the document under verification, so it must not be

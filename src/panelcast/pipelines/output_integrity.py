@@ -182,8 +182,10 @@ def verify_output_records(
     missing (disk contradicts the manifest) from a dynamic one (nothing said
     this run still owned it). A caller without stage objects passes nothing and
     gets neither; the manifest does not record which keys were declared, so
-    there is nothing to read it from, and inferring it from key shape would be
-    a guess about every run_fn label ever written (#439). The binding is
+    there is nothing to read it from. A declared key already encodes its path —
+    what is missing is a way to tell a *label* apart from one, and inferring
+    that from key shape would be a standing claim about every run_fn label ever
+    written (#439). The binding is
     compared in *recorded* coordinates, before ``reroot`` is applied, so a
     caller passing both must give the pre-move spelling the manifest uses
     rather than the moved run's — otherwise every key reads as unbound.
