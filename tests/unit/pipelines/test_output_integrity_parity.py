@@ -327,6 +327,27 @@ class TestSeverity:
         assert verdict.label == UNBOUND
         assert verdict.reason == "recorded output path disagrees with its manifest key"
 
+    @pytest.mark.parametrize("declared", [True, False])
+    def test_an_unlocatable_path_is_untrusted_either_way(self, fx, declared, monkeypatch):
+        # `UNBOUND` is a fact about the manifest's *claim* — it named a path
+        # that cannot be tied to this run — so unlike `MISSING` it does not
+        # depend on whether a declared path stands behind the key.
+        from panelcast.pipelines.output_integrity import UNBOUND
+
+        real = Path.resolve
+
+        def refuse(self, strict=False):
+            if self == fx.artifact:
+                raise OSError("symlink loop")
+            return real(self)
+
+        monkeypatch.setattr(Path, "resolve", refuse)
+        verdict = self._verdict(fx, fx.key, declared=declared)
+
+        assert verdict.label == UNBOUND
+        assert verdict.reason == "recorded output path is unreadable"
+        assert verdict.untrusted is True
+
     def test_a_workspace_that_cannot_resolve_the_declared_path_is_not_tampering(self, fx):
         from panelcast.pipelines.output_integrity import UNVERIFIABLE, verify_output_records
 
@@ -491,8 +512,20 @@ class TestContainment:
             pytest.skip(f"symlinks unavailable: {exc}")
 
         # Returning the resolved form is what keeps the read from walking the
-        # same symlink a second time and landing somewhere else.
+        # same symlink a second time and landing somewhere else. Asserted on
+        # the verdict, not on `contained_path` alone: now that the caller
+        # resolves, passing it an already-resolved path proves nothing.
+        from panelcast.pipelines.output_integrity import OK, verify_output_records
+
         assert contained_path(link.resolve(), [root]) == real.resolve()
+
+        key = "train:trace"
+        (verdict,) = verify_output_records(
+            {key: str(link)}, {key: sha256_path(link)}, roots=[root]
+        )
+
+        assert verdict.label == OK
+        assert verdict.path == real.resolve()
 
     def test_an_unlocatable_dynamic_path_is_not_reported_as_an_escape(self, fx, monkeypatch):
         # One `None` for two facts would say a path the tool never located had

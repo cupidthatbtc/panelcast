@@ -34,9 +34,13 @@ class OutputVerdict:
     """What one manifest output key proves, and what it does not.
 
     ``untrusted`` means disk actively contradicts the manifest; a not-ok
-    verdict that is not untrusted is merely unproven — a legacy manifest, a
-    half-recorded key, a dynamic output that is gone. A caller that consumes
-    artifacts must refuse both; only the wording differs.
+    verdict that is not untrusted is merely unproven. Stated as a rule rather
+    than a list of cases, since the cases keep growing: an ``UNBOUND`` verdict
+    is always untrusted — the manifest named a path that cannot be tied to this
+    run, which is a fact about its claim — while ``MISSING`` takes it from
+    whether a declared path stands behind the key, and ``UNVERIFIABLE`` never
+    does, because nothing was shown either way. A caller that consumes
+    artifacts must refuse all of them; only the wording differs.
     """
 
     key: str
@@ -202,13 +206,14 @@ def verify_output_records(
             yield OutputVerdict(key, UNVERIFIABLE, "hashed output has no recorded path")
             continue
         path = Path(path_str)
+        resolved: Path | None = None
         if key in declared:
             # Resolved separately so the verdict names the side that failed.
             # The recorded path is the manifest's claim; the declared one is
             # the stage's own configuration, and a workspace problem there
             # says nothing about the manifest.
             try:
-                recorded_at = path.resolve()
+                resolved = path.resolve()
             except (OSError, ValueError, RuntimeError):
                 yield OutputVerdict(
                     key, UNBOUND, "recorded output path is unreadable", untrusted=True
@@ -221,7 +226,7 @@ def verify_output_records(
                     key, UNVERIFIABLE, f"the stage's declared path is unreadable: {exc}"
                 )
                 continue
-            if recorded_at != declared_at:
+            if resolved != declared_at:
                 yield OutputVerdict(
                     key,
                     UNBOUND,
@@ -230,18 +235,23 @@ def verify_output_records(
                 )
                 continue
         if reroot is not None:
-            path = reroot_under(path, reroot)
+            rerooted = reroot_under(path, reroot)
+            if rerooted != path:
+                resolved = None  # a different path, so the walk above is stale
+            path = rerooted
         # Resolved here, not inside `contained_path`, so a path the tool could
         # not locate is never reported as one that escaped: it may be sitting
-        # squarely inside the run root. A declared key already got this verdict
-        # from the binding above; this is the same fact for a dynamic one.
-        try:
-            resolved = path.resolve()
-        except (OSError, ValueError, RuntimeError):
-            yield OutputVerdict(
-                key, UNBOUND, "recorded output path is unreadable", untrusted=True
-            )
-            continue
+        # squarely inside the run root. Reused from the binding when that ran
+        # on this same path, so a declared key walks its symlink chain once and
+        # containment proves the target the read will use.
+        if resolved is None:
+            try:
+                resolved = path.resolve()
+            except (OSError, ValueError, RuntimeError):
+                yield OutputVerdict(
+                    key, UNBOUND, "recorded output path is unreadable", untrusted=True
+                )
+                continue
         contained = contained_path(resolved, roots)
         if contained is None:
             yield OutputVerdict(
