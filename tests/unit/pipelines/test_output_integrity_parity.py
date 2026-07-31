@@ -266,10 +266,29 @@ class TestContainment:
         # turn every output in every run into an apparent escape.
         assert contained_path(artifact, [bad, good]) is not None
 
-    def test_both_callers_draw_their_roots_from_one_definition(self, tmp_path):
+    @pytest.mark.parametrize("layout", ["flat", "run"])
+    def test_the_root_enumeration_is_the_dataclass(self, tmp_path, layout):
+        # Set equality, not a length check: the flat layout shares roots
+        # between products, so `roots()` deduplicates and counting alone would
+        # let an added field hide behind a collision. The run-scoped layout has
+        # no collisions by construction, so it catches every added field.
+        from panelcast.paths import ArtifactPaths
+
+        paths = ArtifactPaths.flat() if layout == "flat" else ArtifactPaths.for_run(tmp_path)
+        every = {
+            value
+            for f in fields(ArtifactPaths)
+            if isinstance(value := getattr(paths, f.name), Path)
+        }
+
+        assert set(paths.roots()) == every
+
+    def test_both_callers_cover_the_shared_root_definition(self, tmp_path):
         # *Which* roots is part of what a caller accepts as proof, so it is the
-        # last place the two could still drift apart. Adding a field to
-        # `ArtifactPaths` must widen both, not one.
+        # last place the two could drift. Containment is `⊆`, not `=`, on
+        # purpose: each adds what only it knows about — the orchestrator its
+        # output base, `runs verify` the resolved run dir — but neither may
+        # narrow the shared set.
         from panelcast.cli.runs_cmd import _output_roots
         from panelcast.paths import ArtifactPaths
         from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
@@ -279,10 +298,13 @@ class TestContainment:
 
         assert declared <= set(orchestrator._output_verification_roots())
         assert declared <= set(_output_roots(tmp_path / "run_a"))
-        # And the enumeration is the dataclass, not a hand-kept copy of it.
-        assert len(declared) == len(
-            {getattr(ArtifactPaths.flat(), f.name) for f in fields(ArtifactPaths)}
-        )
+
+    def test_the_stages_default_roots_are_deliberately_narrower(self, fx):
+        # Not part of the shared definition and not a gap: with no caller-named
+        # roots a stage vouches only for the parents of the outputs it declares
+        # itself. `runs verify` has no stages, which is why it needs the
+        # workspace enumeration instead.
+        assert fx.stage._default_roots() == (fx.artifact.parent,)
 
     def test_the_contained_path_is_the_one_that_gets_hashed(self, tmp_path):
         from panelcast.pipelines.output_integrity import contained_path

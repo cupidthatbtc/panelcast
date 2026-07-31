@@ -61,9 +61,13 @@ def _output_roots(run_dir: Path) -> tuple[Path, ...]:
 
     Those roots are relative exactly where ``ArtifactPaths.flat()`` is, matching
     how the orchestrator records flat-layout outputs, so path and root resolve
-    against the same working directory and move together. That does mean
-    `runs verify` reads a flat-layout run relative to where it is invoked; run
-    it from the project root, as `panelcast run` was.
+    against the same working directory and move together — which also means
+    they move together into the *wrong* tree. Run from another checkout of the
+    same project, a flat-layout output and its root both land in that
+    checkout: containment passes, the hash is taken there, and a reproducible
+    pipeline reports ``OK`` against a workspace that is not the one being
+    verified. Run this from the project root; elsewhere a green result is not
+    evidence about the run you asked for.
     """
     from panelcast.paths import ArtifactPaths
 

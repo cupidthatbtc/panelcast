@@ -695,8 +695,13 @@ that recorded no outputs in the first place has nothing to check and passes.
 **Run it from the project root.** A flat-layout run records its data, model and
 report artifacts as paths relative to the project root, so `runs verify`
 resolves them — and the roots it checks them against — against the working
-directory. Invoked from elsewhere, those outputs read as `MISSING`. Run-scoped
-artifacts are unaffected: they resolve against `--output-base`.
+directory. From an unrelated directory those outputs read as `MISSING`, which
+is loud; from **another checkout of the same project** the path and its root
+land in that tree together, containment passes, and a reproducible pipeline
+reports `OK` against a workspace that is not the one you asked about. A green
+result is only evidence about the intended run when the command runs where the
+run did. Run-scoped artifacts are unaffected: they resolve against
+`--output-base`.
 
 Output verification is the same primitive the incremental `--skip-existing`
 path uses (`pipelines/output_integrity.py`), so what one caller accepts as

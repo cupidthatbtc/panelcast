@@ -1478,6 +1478,10 @@ correctly, including another run's run-scoped copy of the same artifact. Under
 the flat layout those roots are shared across runs by construction, so
 containment cannot separate one run's copy from another's there; the
 declared-path binding is what does that, and only the stage caller has it.
+Those roots are also relative, matching how flat-layout outputs are recorded,
+so `runs verify` must run where the run did: from another checkout of the same
+project the recorded path and its root move into *that* tree together and a
+reproducible pipeline verifies clean against the wrong workspace.
 
 **Hash computation** (`stages.py:PipelineStage.compute_input_hash`):
 1. For each `input_path` (sorted), compute `sha256_file(path)`
