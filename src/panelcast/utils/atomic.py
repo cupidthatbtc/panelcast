@@ -178,13 +178,15 @@ def _commit(tmp: Path, path: Path) -> None:
             time.sleep(delay)
     try:
         os.replace(tmp, path)
-    except PermissionError:
-        # Both causes, because the retry is deliberately not platform-gated:
-        # naming only the Windows one sends a Linux operator hunting for a
-        # process that does not exist.
+    except OSError:
+        # Any failure here, not just another denial: the backoff was spent
+        # either way, and time nobody can account for is the thing the logging
+        # exists to prevent. Both causes named, because the retry is
+        # deliberately not platform-gated and pointing a Linux operator at a
+        # holding process sends them after something that cannot be there.
         logger.warning(
-            "Rename of %s still denied after %.2fs: another process is holding it open, "
-            "or this directory does not permit the rename",
+            "Rename of %s failed after %.2fs of retries: another process may be holding "
+            "it open, or this directory may not permit the rename",
             path,
             time.monotonic() - started,
         )

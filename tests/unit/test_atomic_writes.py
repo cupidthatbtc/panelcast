@@ -12,6 +12,7 @@ import logging
 import os
 import stat
 import uuid
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -113,7 +114,7 @@ def _deny_replace(
     monkeypatch,
     target: Path,
     until: int | None,
-    error: type[OSError] | OSError = PermissionError("the file is in use by another process"),
+    error: Callable[[], OSError] | None = None,
 ) -> dict[str, int]:
     """Refuse renames onto ``target`` the way Windows refuses a held file.
 
@@ -123,9 +124,11 @@ def _deny_replace(
     renaming in-process during the test, pytest's own bytecode commits
     included, must not see a denial that was meant for one path.
 
-    ``error`` is a parameter so the *width* of the retry can be tested and not
-    just its depth: only a denial is transient.
+    ``error`` is a factory, not an instance, so the *width* of the retry can be
+    tested and not just its depth — and so each raise gets a fresh traceback
+    instead of prepending to one shared across every test in the file.
     """
+    make_error = error or (lambda: PermissionError("the file is in use by another process"))
     real = os.replace
     attempts = {"n": 0}
 
@@ -138,7 +141,7 @@ def _deny_replace(
             return real(*args, **kwargs)
         attempts["n"] += 1
         if until is None or attempts["n"] < until:
-            raise error
+            raise make_error()
         return real(*args, **kwargs)
 
     monkeypatch.setattr(atomic_module.os, "replace", busy)
@@ -146,12 +149,25 @@ def _deny_replace(
 
 
 def _capture_logs(caplog):
-    """Everything `atomic` logs, at every level."""
+    """Open the capture down to DEBUG; `_records` narrows it back to this module.
+
+    `caplog`'s handler is on the root logger, so the window catches everything
+    in the process that propagates — the filtering has to happen on the way
+    out, not here.
+    """
     return caplog.at_level(logging.DEBUG, logger=atomic_module.logger.name)
 
 
+def _records(caplog, level: int = logging.DEBUG) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == atomic_module.logger.name and r.levelno >= level
+    ]
+
+
 def _warnings(caplog) -> list[str]:
-    return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
+    return _records(caplog, logging.WARNING)
 
 
 def _temps(directory: Path) -> list[Path]:
@@ -328,6 +344,11 @@ class TestAtomicWrite:
         assert attempts["n"] == 3
         assert target.read_text(encoding="utf-8") == "{}"
         assert _warnings(caplog) == []  # recovering inside the loop is unremarkable
+        # But not silent: this is the steady-state case the logging exists for,
+        # and the debug lines are the only place the lost time is accounted.
+        retries = _records(caplog)
+        assert len(retries) == 2
+        assert all(str(target) in line for line in retries)
 
     def test_a_holder_that_lets_go_on_the_last_attempt_still_commits(
         self, tmp_path: Path, monkeypatch, caplog
@@ -363,23 +384,24 @@ class TestAtomicWrite:
         assert "holding" in _warnings(caplog)[0]
         assert "directory" in _warnings(caplog)[0]
 
+    @pytest.mark.parametrize("code", [errno.EXDEV, errno.ENOSPC, errno.EROFS])
     def test_a_rename_that_can_never_succeed_is_not_retried(
-        self, tmp_path: Path, monkeypatch, caplog
+        self, tmp_path: Path, monkeypatch, caplog, code: int
     ):
-        # Only a denial is transient: ENOSPC, EXDEV and EROFS will still be
-        # true in three quarters of a second, and the checkpoint store commits
-        # once per sampling block.
+        # Only a denial is transient: a cross-device link, a full disk and a
+        # read-only mount will all still be true in three quarters of a
+        # second, and the checkpoint store commits once per sampling block.
         target = tmp_path / "manifest.json"
         attempts = _deny_replace(
-            monkeypatch, target, until=None, error=OSError(errno.EXDEV, "cross-device link")
+            monkeypatch, target, until=None, error=lambda: OSError(code, "no way through")
         )
         _no_backoff(monkeypatch)
 
-        with _capture_logs(caplog), pytest.raises(OSError, match="cross-device"):
+        with _capture_logs(caplog), pytest.raises(OSError, match="no way through"):
             atomic_write_text(target, "{}")
 
         assert attempts["n"] == 1
-        assert caplog.records == []
+        assert _records(caplog) == []
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
     def test_an_interrupt_while_setting_the_mode_leaves_nothing_behind(
