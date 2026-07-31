@@ -908,6 +908,23 @@ class TestTheDeclaredCallerDifference:
             f"{module_name} must import QUARANTINE_DIR from panelcast.paths; "
             "spelling it inline or re-exporting it restores the indirection"
         )
+        # The import is per-module but the name is used at several sites —
+        # `runs_cmd` has three — so an import that stays while one use site
+        # reverts to a literal would satisfy everything above. Sweeping the
+        # constants is the check that follows the defect to where it lives.
+        # Exact equality on purpose: `"outputs/failed/"` in help text and the
+        # `f"…/{output_base}/failed/"` fragments are prose about the layout,
+        # not readers of it.
+        literals = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and node.value == "failed"
+        ]
+        assert not literals, (
+            f"{module_name} spells the quarantine directory as a literal at "
+            f"line(s) {sorted(n.lineno for n in literals)}; use QUARANTINE_DIR "
+            "so the readers cannot drift from the layout"
+        )
         # Not `QUARANTINE_DIR in _RESERVED_RUN_IDS` — the set is built from the
         # constant, so that holds by construction. The reserved id is a
         # separate fact about the layout, so assert the value it must have.
