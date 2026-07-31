@@ -94,20 +94,32 @@ def _open_temp(tmp: Path, mode: int | None) -> BinaryIO:
     that window keeps reading everything written afterwards.
 
     ``O_EXCL`` makes the name collision the pid-and-uuid suffix guards against
-    an error rather than a silent share. With no previous target the create
-    asks for ``0o666`` and the umask trims it to exactly what ``write_text``
-    would have produced; with one, the umask would *narrow* the bits being
-    inherited, so ``fchmod`` restores them — after a create that was never
-    wider than the target, so there is still no window.
+    an error rather than a silent share, and ``O_BINARY`` (nothing on POSIX)
+    keeps the descriptor out of the Windows CRT's text mode, which would turn
+    every ``\\n`` in a payload — including a checkpoint's — into ``\\r\\n``.
+
+    With no previous target the create asks for ``0o666`` and the umask trims
+    it to exactly what ``write_text`` would have produced; with one, the umask
+    would *narrow* the bits being inherited, so ``fchmod`` restores them —
+    after a create that was never wider than the target, so there is still no
+    window. A filesystem that refuses ``chmod`` at all (CIFS without the unix
+    extensions, exfat, some FUSE mounts) leaves the create's bits, which are
+    never wider than the target's; refusing to write the manifest over that
+    would be a worse answer than a file the umask narrowed.
     """
     fchmod = getattr(os, "fchmod", None)  # POSIX only; modes are advisory on Windows
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666 if mode is None else mode)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    fd = os.open(tmp, flags, 0o666 if mode is None else mode)
     try:
         if mode is not None and fchmod is not None:
-            fchmod(fd, mode)
+            try:
+                fchmod(fd, mode)
+            except OSError:
+                pass
         return os.fdopen(fd, "wb")
     except BaseException:  # pragma: no cover - a freshly created descriptor rarely refuses
         os.close(fd)
+        tmp.unlink(missing_ok=True)
         raise
 
 
@@ -123,9 +135,12 @@ def atomic_write(path: Path) -> Iterator[BinaryIO]:
     path = Path(path)
     tmp = path.with_name(f"{path.name}{TMP_MARKER}{os.getpid()}-{uuid4().hex[:8]}")
     mode = _target_mode(path)
+    # Outside the try: a name collision means the file belongs to another
+    # writer, and the cleanup below must never delete one we did not create.
+    handle = _open_temp(tmp, mode)
     committed = False
     try:
-        with _open_temp(tmp, mode) as handle:
+        with handle:
             yield handle
             handle.flush()
             os.fsync(handle.fileno())

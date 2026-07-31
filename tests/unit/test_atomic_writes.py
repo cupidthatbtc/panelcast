@@ -9,6 +9,7 @@ property that makes that safe: a failed write leaves the previous file, whole.
 import json
 import os
 import stat
+import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -183,6 +184,42 @@ class TestAtomicWrite:
             os.umask(previous)
 
         assert stat.S_IMODE(target.stat().st_mode) == 0o664
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_a_filesystem_that_refuses_chmod_still_gets_its_write(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # CIFS without the unix extensions, exfat, some FUSE mounts. Losing
+        # the exact bits is survivable; losing the manifest write is not.
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+        target.chmod(0o664)
+
+        def refuse(_fd, _mode):
+            raise OSError("operation not supported")
+
+        monkeypatch.setattr(os, "fchmod", refuse)
+        atomic_write_text(target, '{"rewritten": true}')
+
+        assert target.read_text(encoding="utf-8") == '{"rewritten": true}'
+        # Whatever survived, the create can only have narrowed it.
+        assert stat.S_IMODE(target.stat().st_mode) & ~0o664 == 0
+
+    def test_a_name_collision_never_deletes_the_other_writers_temporary(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Forced: in practice it needs the same pid and the same uuid prefix.
+        monkeypatch.setattr(atomic_module, "uuid4", lambda: uuid.UUID(int=0))
+        target = tmp_path / "payload.bin"
+
+        with atomic_write(target) as first:
+            first.write(b"mine")
+            with pytest.raises(FileExistsError):
+                with atomic_write(target):
+                    pass
+            assert len(_temps(tmp_path)) == 1
+
+        assert target.read_bytes() == b"mine"
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
     def test_a_missing_target_is_the_only_stat_failure_treated_as_absent(self, tmp_path: Path):
