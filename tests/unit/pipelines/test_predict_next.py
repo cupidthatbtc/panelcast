@@ -801,6 +801,21 @@ class TestPredictNewEntities:
             assert call.kwargs["likelihood_family"] == "studentt"
             assert call.kwargs["discretize_observation"] is False
 
+    def test_cold_start_uses_a_recorded_zero_logit_offset(
+        self, mock_posterior_samples, mock_summary
+    ):
+        """A recorded 0.0 is the plain logit, not a missing value (#427)."""
+        summary = dict(mock_summary)
+        summary["target_transform"] = "offset_logit"
+        summary["logit_offset"] = 0.0
+
+        _, mock_predict = self._run(mock_posterior_samples, summary)
+
+        assert mock_predict.call_args_list
+        for call in mock_predict.call_args_list:
+            assert call.kwargs["logit_offset"] == 0.0
+            assert call.kwargs["target_transform"] == "offset_logit"
+
 
 class TestStandalonePredictEntity:
     def test_homoscedastic_beta_binomial_passes_median_count(

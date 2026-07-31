@@ -1043,6 +1043,7 @@ def run_split_seed_sensitivity(
     from panelcast.pipelines.training_summary import (
         ar_center_on_model_scale,
         logit_offset_from_summary,
+        target_transform_from_summary,
     )
 
     ds = summary.get("dataset", {})
@@ -1050,7 +1051,7 @@ def run_split_seed_sensitivity(
     target_col = ds.get("target_col", "User_Score")
     prefix = ds.get("model_prefix", "user")
     bounds = tuple(ds.get("target_bounds", (0.0, 100.0)))
-    target_transform = summary.get("target_transform", "identity")
+    target_transform = target_transform_from_summary(summary)
     logit_offset = logit_offset_from_summary(summary)
     n_features = int(np.asarray(posterior_samples[f"{prefix}_beta"]).shape[-1])
     n_reviews_median = float(summary.get("n_reviews_stats", {}).get("median", 100.0))
@@ -1203,6 +1204,7 @@ def run_sensitivity_suite(ctx) -> dict:
     from panelcast.pipelines.training_summary import (
         load_training_summary,
         logit_offset_from_summary,
+        target_transform_from_summary,
     )
 
     descriptor = ctx.descriptor
@@ -1222,7 +1224,7 @@ def run_sensitivity_suite(ctx) -> dict:
         min_albums_filter=getattr(ctx, "min_events_filter", 2),
         descriptor=descriptor,
         debut_prev_score_source=summary.get("debut_prev_score_source", "train_mean"),
-        target_transform=summary.get("target_transform", "identity"),
+        target_transform=target_transform_from_summary(summary),
         logit_offset=logit_offset_from_summary(summary),
         ar_center=(summary.get("priors") or {}).get("ar_center", "global"),
         entity_group_pooling=entity_group_pooling,
@@ -1275,7 +1277,7 @@ def run_sensitivity_suite(ctx) -> dict:
         return locate_level_prior(
             replace(config, entity_group_pooling=entity_group_pooling),
             ar_center_value=ar_center_value,
-            target_transform=summary.get("target_transform", "identity"),
+            target_transform=target_transform_from_summary(summary),
             logit_offset=logit_offset_from_summary(summary),
             target_bounds=tuple(descriptor.target_bounds),
         )

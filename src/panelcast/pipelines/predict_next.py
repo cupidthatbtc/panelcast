@@ -34,6 +34,7 @@ from panelcast.pipelines.training_summary import (
     ar_center_on_model_scale,
     load_training_summary,
     logit_offset_from_summary,
+    target_transform_from_summary,
 )
 
 if TYPE_CHECKING:
@@ -270,7 +271,7 @@ def _predict_known_entities(
     prefix = ds_block.get("model_prefix", "user")
     target_bounds = tuple(ds_block.get("target_bounds", (0.0, 100.0)))
     transform = get_transform(
-        summary.get("target_transform") or "identity",
+        target_transform_from_summary(summary),
         target_bounds=target_bounds,
         offset=logit_offset_from_summary(summary),
     )
@@ -493,7 +494,7 @@ def _predict_new_entities(
     ds_block = summary.get("dataset") or {}
     prefix = ds_block.get("model_prefix", "user")
     target_bounds = tuple(ds_block.get("target_bounds", (0.0, 100.0)))
-    target_transform = summary.get("target_transform") or "identity"
+    target_transform = target_transform_from_summary(summary)
     logit_offset = logit_offset_from_summary(summary)
     if target_transform != "identity":
         transform = get_transform(target_transform, target_bounds, logit_offset)

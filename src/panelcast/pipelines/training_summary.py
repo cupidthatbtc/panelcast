@@ -17,6 +17,7 @@ an explicit, versioned schema:
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -182,6 +183,7 @@ def upgrade_training_summary(raw: dict[str, Any], source: str = "<dict>") -> Tra
 
 
 DEFAULT_LOGIT_OFFSET = 0.5
+DEFAULT_TARGET_TRANSFORM = "identity"
 
 
 def logit_offset_from_summary(summary: dict[str, Any]) -> float:
@@ -193,11 +195,33 @@ def logit_offset_from_summary(summary: dict[str, Any]) -> float:
     inside the bounds -- and is propagated as zero, so evaluation, prediction
     and rollout apply the same forward transform, inverse and Jacobian the
     fit used.
+
+    An out-of-range recorded offset is rejected here rather than downstream:
+    every summary written before the config-side guard existed is unvalidated,
+    and a negative or non-finite offset reaches the offset-logit map as a
+    silent NaN log-likelihood instead of an error.
     """
     value = summary.get("logit_offset")
     if value is None:
         return DEFAULT_LOGIT_OFFSET
-    return float(value)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"Recorded logit_offset must be a number, got {value!r}.")
+    offset = float(value)
+    if not math.isfinite(offset) or offset < 0.0:
+        raise ValueError(f"Recorded logit_offset must be finite and >= 0, got {offset}.")
+    return offset
+
+
+def target_transform_from_summary(summary: dict[str, Any]) -> str:
+    """Target-transform name the model was actually fit under.
+
+    Same null-versus-default confusion as the offset: the field is declared
+    ``str | None`` and serializes as ``null`` on legacy summaries, so
+    ``.get("target_transform", "identity")`` hands ``None`` to
+    ``get_transform`` while ``.get(...) or "identity"`` resolves correctly.
+    One resolver, so the two idioms cannot disagree.
+    """
+    return summary.get("target_transform") or DEFAULT_TARGET_TRANSFORM
 
 
 def ar_center_on_model_scale(summary: dict[str, Any]) -> float:
@@ -220,7 +244,7 @@ def ar_center_on_model_scale(summary: dict[str, Any]) -> float:
 
     block = summary.get("dataset") or {}
     transform = get_transform(
-        summary.get("target_transform") or "identity",
+        target_transform_from_summary(summary),
         target_bounds=tuple(block.get("target_bounds", (0.0, 100.0))),
         offset=logit_offset_from_summary(summary),
     )

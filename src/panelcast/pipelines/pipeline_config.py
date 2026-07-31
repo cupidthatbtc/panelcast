@@ -24,6 +24,7 @@ from panelcast.config.gates import (
     SigmaObsPriorType,
 )
 from panelcast.paths import validate_run_id
+from panelcast.pipelines.training_summary import DEFAULT_LOGIT_OFFSET
 
 # Module-level reference for default config values (used to detect non-default flags)
 _DEFAULT_CONFIG: PipelineConfig | None = None
@@ -170,7 +171,7 @@ class PipelineConfig:
     # None resolves to the descriptor's target_transform, else "offset_logit"
     # (the default since 0.5.0 — promoted on the corrected #63 ledger).
     target_transform: str | None = None
-    logit_offset: float = 0.5
+    logit_offset: float = DEFAULT_LOGIT_OFFSET
     # AR(1) centering gate: "global" | "none" (legacy) | "artist_running"
     ar_center: ArCenter = "global"
     # Latent artist-effect process gate: "rw" (legacy) | "ar1" (experimental)
@@ -343,13 +344,7 @@ class PipelineConfig:
                 f"Invalid target_transform: '{self.target_transform}'. "
                 "Must be 'identity' or 'offset_logit'."
             )
-        # Zero is a supported offset (the plain logit) and is propagated as
-        # recorded; a negative or non-finite one puts the offset-logit argument
-        # outside (0, 1) and yields NaN log-likelihoods instead of an error.
-        if not math.isfinite(self.logit_offset) or self.logit_offset < 0.0:
-            raise ValueError(
-                f"Invalid logit_offset: {self.logit_offset}. Must be finite and >= 0."
-            )
+        self._validate_logit_offset()
         self._validate_likelihood()
         if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
             raise ValueError(
@@ -535,6 +530,19 @@ class PipelineConfig:
                 f"auto_priors=True derives {', '.join(explicit)} from the "
                 "training data; remove the explicit value(s) or turn auto off."
             )
+
+    def _validate_logit_offset(self) -> None:
+        """Zero is a supported offset (the plain logit) and is propagated as
+        recorded; a negative or non-finite one puts the offset-logit argument
+        outside (0, 1) and yields NaN log-likelihoods instead of an error."""
+        try:
+            offset = float(self.logit_offset)
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Invalid logit_offset: {self.logit_offset!r}. Must be a number."
+            ) from None
+        if not math.isfinite(offset) or offset < 0.0:
+            raise ValueError(f"Invalid logit_offset: {offset}. Must be finite and >= 0.")
 
     def _validate_likelihood(self) -> None:
         """Validate the likelihood family and its structural constraints."""
