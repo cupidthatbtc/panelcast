@@ -28,6 +28,7 @@ from panelcast.pipelines.evaluate import _transform_from_summary
 from panelcast.pipelines.pipeline_config import PipelineConfig, resolve_model_facts
 from panelcast.pipelines.training_summary import (
     DEFAULT_LOGIT_OFFSET,
+    TARGET_TRANSFORMS,
     ar_center_on_model_scale,
     logit_offset_from_summary,
     target_transform_from_summary,
@@ -140,11 +141,13 @@ class TestTargetTransformResolver:
 
     def test_the_write_path_records_a_resolved_name(self):
         """The identity fallback is only correct because a null never reaches
-        the summary from a post-gate run: resolve_model_facts fills it in."""
+        the summary from a post-gate run: resolve_model_facts fills it in, and
+        re-validates, so a descriptor-supplied name is coerced like any other."""
         config = PipelineConfig(run_id="transform-unset")
         assert config.target_transform is None
         resolve_model_facts(config, DEFAULT_DESCRIPTOR)
-        assert config.target_transform is not None
+        assert config.target_transform in TARGET_TRANSFORMS
+        assert isinstance(config.logit_offset, float)
 
 
 class TestConsumersUseTheRecordedOffset:
@@ -208,16 +211,29 @@ class TestSingleResolver:
 
     def test_the_resolvers_are_the_only_readers(self):
         offenders: dict[str, list[tuple[int, str]]] = {}
+        exercised: set[tuple[str, str]] = set()
+        scanned = 0
         for path in sorted(SRC.rglob("*.py")):
+            scanned += 1
             module = path.relative_to(SRC).as_posix()
-            found = [
-                read for read in self._inline_reads(path) if (module, read[1]) not in EXEMPT_READS
-            ]
+            found = []
+            for read in self._inline_reads(path):
+                if (module, read[1]) in EXEMPT_READS:
+                    exercised.add((module, read[1]))
+                else:
+                    found.append(read)
             if found:
                 offenders[module] = found
+        # A source-stripped install would scan nothing and pass vacuously.
+        assert scanned > 50, f"only {scanned} modules scanned; the guard saw no source"
         assert offenders == {}, (
             f"inline reads of {GUARDED_KEYS} outside the resolvers: {offenders}; "
             "use logit_offset_from_summary / target_transform_from_summary."
+        )
+        stale = EXEMPT_READS - exercised
+        assert stale == set(), (
+            f"exemptions no longer matched by any read: {sorted(stale)}; "
+            "drop them rather than pre-blessing a future violation."
         )
 
     def test_the_guard_sees_both_access_forms_and_any_receiver(self, tmp_path):
@@ -245,7 +261,7 @@ class TestConfigValidation:
         config = PipelineConfig(run_id="offset-zero", logit_offset=0.0)
         assert config.logit_offset == 0.0
 
-    @pytest.mark.parametrize("value", [-0.5, math.nan, math.inf])
+    @pytest.mark.parametrize("value", [-0.5, math.nan, math.inf, -math.inf])
     def test_out_of_range_offsets_are_rejected(self, value):
         with pytest.raises(ValueError, match="logit_offset"):
             PipelineConfig(run_id="offset-bad", logit_offset=value)

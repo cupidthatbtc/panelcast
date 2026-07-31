@@ -220,7 +220,7 @@ def coerce_target_transform(value: Any, *, context: str) -> str:
     if value not in TARGET_TRANSFORMS:
         raise ValueError(
             f"Invalid target_transform in {context}: {value!r}. "
-            f"Must be one of {TARGET_TRANSFORMS}."
+            f"Must be one of {', '.join(TARGET_TRANSFORMS)}."
         )
     return str(value)
 

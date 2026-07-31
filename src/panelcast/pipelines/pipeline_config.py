@@ -345,7 +345,9 @@ class PipelineConfig:
             if not 0.0 < prob < 1.0:
                 raise ValueError(f"Invalid calibration interval {prob}. Must be in (0, 1).")
         if self.target_transform is not None:
-            coerce_target_transform(self.target_transform, context="the run config")
+            self.target_transform = coerce_target_transform(
+                self.target_transform, context="the run config"
+            )
         self._validate_logit_offset()
         self._validate_likelihood()
         if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
@@ -543,7 +545,9 @@ class PipelineConfig:
         read-side resolver would then reject after training has already run.
         ``None`` is the unset sentinel on both ends -- ``logit_offset: null``
         in a config resolves to the default here exactly as a recorded null
-        does in the resolver."""
+        does in the resolver. The field stays annotated ``float`` because that
+        is what every reader gets: YAML reaches the dataclass through an
+        untyped mapping, and this is where that boundary is normalized."""
         if self.logit_offset is None:
             self.logit_offset = DEFAULT_LOGIT_OFFSET
             return
