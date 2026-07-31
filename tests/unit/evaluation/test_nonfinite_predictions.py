@@ -74,6 +74,38 @@ class TestRequireFinite:
     def test_is_a_value_error_so_existing_handlers_still_catch_it(self):
         assert issubclass(NonFinitePredictionError, ValueError)
 
+    @pytest.mark.parametrize("name", ["y_true", "y_obs"])
+    def test_observed_data_gets_the_upstream_remedy(self, name):
+        """Half the call sites pass observations, where nothing overflowed and
+        the fix is in data assembly rather than the fit."""
+        with pytest.raises(NonFinitePredictionError, match="Filter invalid observations"):
+            require_finite(np.array([1.0, np.nan]), name)
+
+    @pytest.mark.parametrize("name", ["y_pred_mean", "y_samples", "y_rep"])
+    def test_predicted_data_gets_the_overflow_remedy(self, name):
+        with pytest.raises(NonFinitePredictionError, match="inspect the fit"):
+            require_finite(np.array([1.0, np.inf]), name)
+
+    def test_an_integer_array_needs_no_conversion(self):
+        """It cannot hold NaN or an infinity, so the check is a no-op."""
+        values = np.array([1, 2, 3])
+        assert require_finite(values, "y_true") is values
+
+    def test_a_float32_matrix_is_checked_without_a_copy(self):
+        values = np.ones((4, 3), dtype=np.float32)
+        assert require_finite(values, "y_samples").dtype == np.float32
+
+    @pytest.mark.parametrize("values", [[np.inf, -np.inf], [np.float32(3e38)] * 4])
+    def test_a_reduction_that_is_not_a_number_still_reports_correctly(self, values):
+        """Mixed infinities sum to NaN and a float32 sum can overflow: both
+        reach the elementwise mask, which computes the real answer."""
+        array = np.asarray(values, dtype=np.float32)
+        if np.isfinite(array).all():
+            np.testing.assert_array_equal(require_finite(array, "y_samples"), array)
+        else:
+            with pytest.raises(NonFinitePredictionError):
+                require_finite(array, "y_samples")
+
 
 class TestPointMetrics:
     @pytest.mark.parametrize("value", BAD_VALUES)

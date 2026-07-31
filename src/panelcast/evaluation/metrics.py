@@ -62,16 +62,17 @@ def require_finite(values: np.ndarray, name: str) -> np.ndarray:
         NonFinitePredictionError: if any entry is NaN or an infinity.
     """
     array = np.asarray(values)
+    if array.dtype.kind in "iu":
+        return array  # An integer array cannot hold NaN or an infinity.
     if array.dtype.kind not in "fc":
-        # Object or integer input: converting is the only way to ask numpy
-        # whether it is finite, and an integer array always is.
+        # Object or datetime input: converting is the only way to ask numpy.
         array = np.asarray(values, dtype=float)
     if array.size == 0:
         return array
     with np.errstate(invalid="ignore", over="ignore"):
         # inf + -inf is NaN and an overflowing sum is inf: both land on the
         # slow path, which is where the real answer is computed.
-        if np.isfinite(array.sum()):
+        if np.isfinite(array.sum(dtype=np.float64)):
             return array
     finite = np.isfinite(array)
     if finite.all():
