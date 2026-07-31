@@ -700,7 +700,7 @@ def _refused_run_name(output_base: Path, run_id: str) -> str:
         refused = joined.absolute()
         if refused.is_symlink():
             return f"{refused} -> {refused.parent / refused.readlink()}"
-    except OSError:
+    except (OSError, RuntimeError):  # same pair the resolution guards catch
         pass
     return str(refused)
 
@@ -822,7 +822,7 @@ def refusal_detail(
         # itself what failed.
         try:
             unresolved = unresolved.absolute()
-        except OSError:
+        except (OSError, RuntimeError):  # same pair the resolution guards catch
             pass
         return (
             f"(containment could not be decided — {unresolved} could not be resolved: "

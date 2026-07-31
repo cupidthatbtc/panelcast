@@ -726,9 +726,31 @@ class TestSelectRunLookupContainment:
         assert "artifacts may exist" not in problem
         assert "arm run_id" in problem
         assert "cwd is gone" in problem  # the errno the arm has no traceback for
-        # This base is absolute, so the message must not blame a relative one.
-        assert "is relative" not in problem
+        # One sentence for both triggers: the path that failed and the errno,
+        # with no inference about which shape of failure produced it.
         assert "could not be resolved" in problem
+
+    def test_a_looping_run_name_takes_the_versions_documented_path(self, tmp_path):
+        # 3.11/3.12: resolve() raises, containment refuses, the message is the
+        # undecidable one. 3.13+: the loop resolves to itself, containment
+        # passes, and the miss falls out of Path.exists() instead — which is
+        # what §9.3 documents and what only this test executes.
+        from panelcast.select.runner import _claim_named_run
+
+        base = tmp_path / "outputs"
+        base.mkdir()
+        run_id = "sel_s1_loop_20260730T120000123456"
+        _symlink_dir(base / run_id, base / run_id)
+
+        run_dir, problem = _claim_named_run(run_id, base, {}, datetime.now(), set())
+
+        assert run_dir is None
+        assert problem is not None
+        if sys.version_info >= (3, 13):
+            assert "was never created" in problem
+            assert "could not be decided" not in problem
+        else:
+            assert "could not be decided" in problem
 
     def test_a_confirmation_refused_before_launching_reports_the_real_cause(
         self, tmp_path, monkeypatch
