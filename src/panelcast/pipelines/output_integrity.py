@@ -110,9 +110,10 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
 
     A quarantined run keeps the manifest it was written with, so its recorded
     paths still name ``outputs/<id>/...`` while the artifacts now live under
-    ``outputs/failed/<id>/...``. Deliberately generic over what the path is —
-    the same mapping applies to run-owned *inputs* (#420), which this module
-    does not verify but must not stand in the way of.
+    ``outputs/failed/<id>/...``. Deliberately generic over what the path is: the
+    same mapping applies to run-owned *inputs*, which this module does not
+    verify but does map for the callers that do, through ``reroot_contained``
+    (#420).
 
     "Run-owned" means recorded as ``<output base>/<run id>/<rest>``: the run
     id alone is not enough, since a bare-name match would launder
@@ -188,6 +189,33 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
         if parts[index : index + 2] == marker:
             return run_dir.joinpath(*parts[index + 2 :])
     return path
+
+
+def reroot_contained(path: Path, run_dir: Path) -> Path:
+    """``reroot_under``, applied only where the result stays under ``run_dir``.
+
+    ``verify_output_records`` maps first and judges the result by containment
+    afterwards, so a recorded path whose run-relative tail climbs back out —
+    ``outputs/<id>/../../etc/shadow`` — is refused before anything reads it.
+    Callers that only stat and hash a run-owned path have no second step to
+    catch that, and `runs verify`'s input pass and `runs reproduce`'s input
+    gate are both of those (#420), so for them the guard travels with the
+    mapping: a tail that leaves the run directory is left at its recorded
+    location, which is where it was checked before any re-rooting existed.
+
+    Not folded into ``reroot_under`` itself, because for an *output* the
+    escaping tail is worth reporting rather than quietly declining — the
+    manifest is claiming something about a path outside the run — and only a
+    caller that produces verdicts can say so.
+    """
+    mapped = reroot_under(path, run_dir)
+    if mapped == path:
+        return path
+    try:
+        resolved = mapped.resolve()
+    except (OSError, ValueError, RuntimeError):
+        return path
+    return mapped if _is_contained(resolved, _resolved_roots((run_dir,))) else path
 
 
 def _output_base_name(run_dir: Path) -> str:
@@ -352,6 +380,7 @@ __all__ = [
     "UNBOUND",
     "UNVERIFIABLE",
     "OutputVerdict",
+    "reroot_contained",
     "reroot_under",
     "verify_output_records",
 ]

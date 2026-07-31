@@ -124,20 +124,42 @@ def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:
         problems.append(verdict.key)
 
 
-def _verify_inputs(manifest, problems: list[str]) -> None:
+def _input_label(path: Path, path_str: str) -> str:
+    """Where the input was checked, naming the recorded spelling when it moved."""
+    return str(path) if str(path) == path_str else f"{path} (recorded as {path_str})"
+
+
+def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
+    """Re-hash every recorded input, re-rooting the ones the run owns.
+
+    A stage's declared inputs include earlier stages' run-scoped products —
+    `evaluate` reads `<run>/models/manifest.json` — and the hashes are captured
+    before the stage body, so a run that failed at or after `evaluate` has
+    already recorded them at the location it had while it was live. Quarantine
+    moves the run without rewriting its manifest, so checking those where the
+    manifest says would report every one of them missing on exactly the runs
+    someone is debugging.
+
+    Inputs the run does not own — the shared data roots, external files — have
+    no such mapping and are checked where they were recorded. The problem is
+    keyed on the recorded spelling either way, since that is what the manifest
+    records and what a second `runs verify` will name again.
+    """
+    from panelcast.pipelines.output_integrity import reroot_contained
     from panelcast.utils.hashing import sha256_path
 
     for path_str, recorded in sorted(manifest.input_hashes.items()):
-        path = Path(path_str)
+        path = reroot_contained(Path(path_str), run_dir)
+        label = _input_label(path, path_str)
         if not path.exists():
-            typer.echo(f"MISSING  input {path_str}")
+            typer.echo(f"MISSING  input {label}")
             problems.append(path_str)
             continue
         if sha256_path(path) != recorded:
-            typer.echo(f"MODIFIED input {path_str} (raw data changed since this run)")
+            typer.echo(f"MODIFIED input {label} (raw data changed since this run)")
             problems.append(path_str)
         else:
-            typer.echo(f"OK       input {path_str}")
+            typer.echo(f"OK       input {label}")
 
 
 def _verify_stamps(manifest, problems: list[str]) -> None:
@@ -190,7 +212,7 @@ def runs_verify(
 
     problems: list[str] = []
     _verify_outputs(manifest, run_dir, problems)
-    _verify_inputs(manifest, problems)
+    _verify_inputs(manifest, run_dir, problems)
     _verify_stamps(manifest, problems)
     _verify_lockfile(manifest, problems)
 
@@ -420,6 +442,7 @@ def runs_reproduce(
     """
     from panelcast.config.descriptor import load_descriptor
     from panelcast.pipelines.manifest import capture_environment, load_run_manifest
+    from panelcast.pipelines.output_integrity import reroot_contained
     from panelcast.utils.hashing import sha256_path
 
     run_dir = resolve_run_dir(run_id, output_base)
@@ -437,13 +460,18 @@ def runs_reproduce(
             )
             raise typer.Exit(code=1)
 
+    # Re-rooted for the same reason `runs verify` does it: a run quarantined
+    # after `evaluate` recorded its own `models/` products as inputs, and
+    # aborting on those would make a failed run unreproducible precisely
+    # because it failed.
     for path_str, recorded in sorted((manifest.input_hashes or {}).items()):
-        path = Path(path_str)
+        path = reroot_contained(Path(path_str), run_dir)
+        label = _input_label(path, path_str)
         if not path.exists():
-            typer.echo(f"ABORT: recorded input missing: {path_str}")
+            typer.echo(f"ABORT: recorded input missing: {label}")
             raise typer.Exit(code=1)
         if sha256_path(path) != recorded:
-            typer.echo(f"ABORT: raw input changed since the run: {path_str}")
+            typer.echo(f"ABORT: raw input changed since the run: {label}")
             raise typer.Exit(code=1)
 
     old_fingerprint = manifest.environment.fingerprint

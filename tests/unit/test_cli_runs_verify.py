@@ -19,7 +19,13 @@ from panelcast.utils.hashing import sha256_path
 runner = CliRunner()
 
 
-def _write_run(tmp_path: Path, run_id: str = "run_a", tamper: str | None = None) -> Path:
+def _write_run(
+    tmp_path: Path,
+    run_id: str = "run_a",
+    tamper: str | None = None,
+    *,
+    run_owned_input: bool = False,
+) -> Path:
     output_base = tmp_path / "outputs"
     run_dir = output_base / run_id
     artifact = run_dir / "evaluation" / "metrics.json"
@@ -28,6 +34,16 @@ def _write_run(tmp_path: Path, run_id: str = "run_a", tamper: str | None = None)
 
     raw = tmp_path / "raw.csv"
     raw.write_text("a,b\n1,2\n", encoding="utf-8")
+
+    input_hashes = {str(raw): sha256_path(raw)}
+    if run_owned_input:
+        # What a run that failed at `evaluate` records: the train stage's
+        # run-scoped products, hashed before the stage body ran.
+        for name in ("manifest.json", "training_summary.json"):
+            product = run_dir / "models" / name
+            product.parent.mkdir(parents=True, exist_ok=True)
+            product.write_text(json.dumps({"stage": "train"}), encoding="utf-8")
+            input_hashes[str(product)] = sha256_path(product)
 
     manifest = RunManifest(
         run_id=run_id,
@@ -44,7 +60,7 @@ def _write_run(tmp_path: Path, run_id: str = "run_a", tamper: str | None = None)
             platform="Linux",
             pixi_lock_hash=None,
         ),
-        input_hashes={str(raw): sha256_path(raw)},
+        input_hashes=input_hashes,
         stage_hashes={},
         stages_completed=["evaluate"],
         stages_skipped=[],
@@ -61,6 +77,14 @@ def _write_run(tmp_path: Path, run_id: str = "run_a", tamper: str | None = None)
     elif tamper == "input":
         raw.write_text("a,b\n9,9\n", encoding="utf-8")
     return output_base
+
+
+def _quarantine(output_base: Path, run_id: str = "run_a") -> Path:
+    """Move a run under `outputs/failed/`, leaving its manifest as written."""
+    failed = output_base / "failed"
+    failed.mkdir(exist_ok=True)
+    (output_base / run_id).rename(failed / run_id)
+    return failed / run_id
 
 
 class TestRunsVerify:
@@ -205,6 +229,65 @@ class TestRunsVerify:
         assert result.exit_code == 0, result.output
         assert "OK           evaluate:metrics" in result.output
 
+    def test_failed_runs_verify_their_own_products_where_they_moved(self, tmp_path):
+        # The #420 regression, end to end: a run that failed at `evaluate` has
+        # already recorded the train stage's run-scoped products as *inputs*,
+        # so quarantine moves them out from under their recorded paths. Before
+        # the re-rooting they came back MISSING on every such run — a false
+        # integrity alarm on exactly the run someone is debugging.
+        base = _write_run(tmp_path, run_owned_input=True)
+        moved = _quarantine(base)
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 0, result.output
+        assert "MISSING  input" not in result.output
+        recorded = base / "run_a" / "models" / "manifest.json"
+        checked = moved / "models" / "manifest.json"
+        # The line names where it looked, not only what the manifest said.
+        assert f"OK       input {checked} (recorded as {recorded})" in result.output
+
+    def test_a_shared_input_is_checked_where_the_manifest_recorded_it(self, tmp_path):
+        # The other half of run-ownership: the raw data root did not move with
+        # the run, so nothing may map it — and a change to it is still caught.
+        base = _write_run(tmp_path, run_owned_input=True)
+        _quarantine(base)
+        raw = tmp_path / "raw.csv"
+        raw.write_text("a,b\n9,9\n", encoding="utf-8")
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 1
+        assert f"MODIFIED input {raw} (raw data changed since this run)" in result.output
+
+    def test_a_deleted_run_owned_input_still_reads_as_missing(self, tmp_path):
+        # Mapping unconditionally reports where the artifact *should* be; it
+        # must not turn a deletion into a pass by pointing somewhere it can
+        # find something else.
+        base = _write_run(tmp_path, run_owned_input=True)
+        moved = _quarantine(base)
+        (moved / "models" / "manifest.json").unlink()
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 1
+        assert f"MISSING  input {moved / 'models' / 'manifest.json'} (recorded as" in result.output
+
+    def test_the_evaluate_stage_really_declares_inputs_inside_the_run(self, tmp_path):
+        # The premise the fixture stands on, asserted rather than assumed: if
+        # the run-scoped layout stopped putting `evaluate`'s inputs under the
+        # run directory, the cases above would keep passing while testing a
+        # manifest shape production no longer writes.
+        from panelcast.paths import ArtifactPaths
+        from panelcast.pipelines.stages import make_stage_evaluate
+
+        run_dir = tmp_path / "outputs" / "run_a"
+        stage = make_stage_evaluate(paths=ArtifactPaths.for_run(run_dir))
+
+        run_owned = [p for p in stage.input_paths if run_dir in p.parents]
+
+        assert [p.name for p in run_owned] == ["manifest.json", "training_summary.json"]
+
     def test_another_runs_copy_of_the_same_artifact_is_refused(self, tmp_path):
         # The substitution containment exists for: identical bytes, so the
         # hash matches, but the artifact belongs to a different run.
@@ -221,3 +304,66 @@ class TestRunsVerify:
 
         assert result.exit_code == 1
         assert "UNBOUND      evaluate:metrics" in result.output
+
+
+class TestTheInputMappingIsBounded:
+    """What re-rooting an input may not do, since nothing judges it afterwards."""
+
+    def test_a_tail_that_climbs_out_of_the_run_is_not_mapped(self, tmp_path):
+        # `verify_output_records` maps first and refuses the result by
+        # containment; the input pass only stats and hashes, so the guard has
+        # to sit in the mapping. Left at the recorded spelling, which is where
+        # it was checked before any re-rooting existed.
+        from panelcast.pipelines.output_integrity import reroot_contained, reroot_under
+
+        moved = tmp_path / "outputs" / "failed" / "run_a"
+        escaping = Path("outputs") / "run_a" / ".." / ".." / "secret.txt"
+
+        # The premise: the pair still matches, so it is containment declining
+        # the result rather than the mapping never firing.
+        assert reroot_under(escaping, moved) != escaping
+        assert reroot_contained(escaping, moved) == escaping
+
+        # ...and a tail that stays inside still maps, or the guard would be
+        # refusing everything and the assertion above would prove nothing.
+        inside = Path("outputs") / "run_a" / "models" / "manifest.json"
+        assert reroot_contained(inside, moved) == moved / "models" / "manifest.json"
+
+    def test_a_path_the_run_does_not_own_is_returned_untouched(self, tmp_path):
+        from panelcast.pipelines.output_integrity import reroot_contained
+
+        moved = tmp_path / "outputs" / "failed" / "run_a"
+        shared = Path("data") / "raw" / "albums.csv"
+
+        assert reroot_contained(shared, moved) == shared
+
+
+class TestReproduceOnAQuarantinedRun:
+    """`runs reproduce` reads the same recorded inputs, and aborts on them (#420)."""
+
+    def _reproduce(self, tmp_path, monkeypatch, *, delete: bool = False):
+        from panelcast.pipelines import orchestrator
+
+        base = _write_run(tmp_path, run_owned_input=True)
+        moved = _quarantine(base)
+        if delete:
+            (moved / "models" / "manifest.json").unlink()
+        monkeypatch.setattr(orchestrator, "run_pipeline", lambda *a, **k: 0)
+        return runner.invoke(app, ["runs", "reproduce", "run_a", "--output-base", str(base)])
+
+    def test_a_moved_input_does_not_abort_the_reproduction(self, tmp_path, monkeypatch):
+        # The hard-abort half of #420: unmapped, a run that failed at
+        # `evaluate` could never be reproduced, because the very products it
+        # failed while reading were reported gone.
+        result = self._reproduce(tmp_path, monkeypatch)
+
+        assert "ABORT" not in result.output, result.output
+        assert result.exit_code == 0, result.output
+
+    def test_an_input_that_really_is_gone_still_aborts(self, tmp_path, monkeypatch):
+        # Tolerance, not permissiveness: the gate exists to refuse a
+        # reproduction whose inputs no longer stand behind it.
+        result = self._reproduce(tmp_path, monkeypatch, delete=True)
+
+        assert result.exit_code == 1
+        assert "ABORT: recorded input missing" in result.output

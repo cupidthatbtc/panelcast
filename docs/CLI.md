@@ -693,6 +693,17 @@ hash map was emptied) is reported as such and every recorded output comes back
 `UNVERIFIABLE`: shape cannot tell the two apart, so neither is excused. A run
 that recorded no outputs in the first place has nothing to check and passes.
 
+Recorded **inputs** are re-rooted the same way, and for a sharper reason. A
+stage's declared inputs include earlier stages' run-scoped products, and the
+hashes are captured before the stage body runs, so a run that failed at or
+after `evaluate` has already recorded `outputs/<id>/models/manifest.json` as an
+input; after quarantine that file is under `outputs/failed/<id>/`, and it is
+checked there rather than reported missing on the run someone is debugging.
+Inputs the run does not own — the shared data roots, external files — have no
+mapping to make and are checked where the manifest recorded them. A line names
+the path actually checked, with the recorded spelling after it when the two
+differ.
+
 **Run it from the project root.** A flat-layout run records its data, model and
 report artifacts as paths relative to the project root, so `runs verify`
 resolves them — and the roots it checks them against — against the working
@@ -814,7 +825,9 @@ Re-execute a recorded run from its run directory alone, then compare. The config
 is rebuilt from the run's `resolved_config.yaml` (falling back to the manifest
 flags for pre-0.9.0 runs — weaker provenance). Two guards run before any compute:
 the dataset descriptor must still hash-match the recorded one, and the recorded
-raw inputs must be unchanged on disk, or it aborts (exit `1`). The environment
+raw inputs must be unchanged on disk, or it aborts (exit `1`). That gate re-roots
+run-owned inputs exactly as `runs verify` does, so a quarantined run is
+reproducible rather than aborting on its own moved artifacts. The environment
 fingerprint frames the expectation up front — bit-exact outputs within a matching
 fingerprint, statistical reproduction otherwise — and the post-run comparison
 follows suit (exact output-hash match vs headline-metric deltas). A reproduction
