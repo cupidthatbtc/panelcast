@@ -133,15 +133,19 @@ def _input_label(path: Path, path_str: str) -> str:
     run that never moved. So the two are compared resolved, and the manifest's
     own string is what gets printed — verbatim when nothing moved, since that
     is both accurate and the string someone greps the manifest for, and after
-    the checked location when something did.
+    the checked location when something did. When neither can be established,
+    only the checked location is named: the pre-#420 failure was a line naming
+    a path nothing had stat'd, and that must not come back through an error
+    path.
     """
     try:
-        moved = path.resolve() != Path(path_str).resolve()
+        if path.resolve() == Path(path_str).resolve():
+            return path_str
     except (OSError, ValueError, RuntimeError):
-        # The suffix is the part that asserts something, so with no evidence
-        # either way the label says less rather than something untrue.
-        moved = False
-    return f"{path} (recorded as {path_str})" if moved else path_str
+        # No evidence the two name one file, so name the one that was checked
+        # rather than asserting a move or a stillness neither is known.
+        return str(path)
+    return f"{path} (recorded as {path_str})"
 
 
 def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:

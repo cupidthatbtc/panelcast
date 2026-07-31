@@ -362,6 +362,27 @@ class TestTheInputMappingIsBounded:
         inside = Path("outputs") / "run_a" / "models" / "manifest.json"
         assert run_owned_path(inside, moved) == moved / "models" / "manifest.json"
 
+    def test_a_mapped_location_that_will_not_resolve_is_not_owned(self, tmp_path, monkeypatch):
+        # Fail closed: with the mapped location unreadable there is no evidence
+        # it is inside the run, so the caller falls back to the recorded path
+        # rather than reading one it could not confirm.
+        from panelcast.pipelines.output_integrity import run_owned_path
+
+        run_dir = tmp_path / "outputs" / "run_a"
+        mapped = run_dir / "models" / "manifest.json"
+        real = Path.resolve
+
+        def refuse(self, strict=False):
+            if self == mapped:
+                raise OSError("symlink loop")
+            return real(self, strict)
+
+        monkeypatch.setattr(Path, "resolve", refuse)
+
+        assert run_owned_path(Path("outputs") / "run_a" / "models" / "manifest.json", run_dir) is (
+            None
+        )
+
     def test_a_path_the_run_does_not_own_has_no_location(self, tmp_path):
         from panelcast.pipelines.output_integrity import run_owned_path
 
@@ -380,6 +401,30 @@ class TestTheInputMappingIsBounded:
         recorded = Path("outputs") / "run_a" / "models" / "manifest.json"
 
         assert run_owned_path(recorded, active) == active / "models" / "manifest.json"
+
+    def test_an_unresolvable_recorded_spelling_names_what_was_checked(
+        self, tmp_path, monkeypatch
+    ):
+        # The label's error path. With resolution failing there is no evidence
+        # the two spellings name one file, so naming the recorded one alone
+        # would put the pre-#420 false alarm back on the screen through the
+        # branch nothing exercises.
+        base = _write_run(tmp_path, run_owned_input=True)
+        moved = _quarantine(base)
+        recorded = base / "run_a" / "models" / "manifest.json"
+        real = Path.resolve
+
+        def refuse(self, strict=False):
+            if self == recorded:
+                raise OSError("symlink loop")
+            return real(self, strict)
+
+        monkeypatch.setattr(Path, "resolve", refuse)
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 0, result.output
+        assert f"OK       input {moved / 'models' / 'manifest.json'}\n" in result.output
 
     def test_an_active_run_verified_by_an_absolute_base_claims_no_move(
         self, tmp_path, monkeypatch
@@ -420,9 +465,9 @@ class TestTheInputMappingIsBounded:
         product = shared / "manifest.json"
         product.write_text("{}", encoding="utf-8")
         try:
-            (run_dir / "models").symlink_to(shared)
+            (run_dir / "models").symlink_to(shared, target_is_directory=True)
         except (OSError, NotImplementedError) as exc:
-            pytest.skip(f"symlinks unavailable: {exc}")
+            pytest.skip(f"symlinks unavailable, giving up the parity claim: {exc}")
         recorded = run_dir / "models" / "manifest.json"
         manifest_path = run_dir / "manifest.json"
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -498,6 +543,7 @@ class TestReproduceOnAQuarantinedRun:
         *,
         prune: bool = False,
         drift: bool = False,
+        vanish: bool = False,
         resolved_config: bool = False,
     ):
         from panelcast.pipelines import orchestrator
@@ -505,11 +551,18 @@ class TestReproduceOnAQuarantinedRun:
         base = _write_run(tmp_path, run_owned_input=True)
         moved = _quarantine(base)
         if resolved_config:
-            (moved / "resolved_config.yaml").write_text("skip_existing: true\n", encoding="utf-8")
+            # `seed` is the discriminator: a second mapped field reproduce does
+            # not clear, so its arrival proves this tier was used rather than
+            # a partial file being rejected for the manifest fallback.
+            (moved / "resolved_config.yaml").write_text(
+                "seed: 4242\nskip_existing: true\n", encoding="utf-8"
+            )
         if prune:
             shutil.rmtree(moved / "models")
         if drift:
             (tmp_path / "raw.csv").write_text("a,b\n9,9\n", encoding="utf-8")
+        if vanish:
+            (tmp_path / "raw.csv").unlink()
         # Captured rather than discarded: the skip below rests on what this
         # call is made with, so a stub that threw it away would leave the
         # premise untested.
@@ -547,23 +600,28 @@ class TestReproduceOnAQuarantinedRun:
 
         assert result.exit_code == 0, result.output
         (config, kwargs) = self.launched[0]
+        if resolved_config:
+            # ...and this tier was the one that answered, or the assertions
+            # below would hold because the file went unread.
+            assert config.seed == 4242
         assert config.resume is None
         assert config.skip_existing is False
         # Both argument channels: a keyword taking precedence over the config
         # would leave the assertions above reading defaults nothing acts on.
         assert set(kwargs) == {"output_base"}
 
-    def test_the_resolved_config_tier_is_the_one_that_could_inherit_it(self, tmp_path):
-        # The premise of the parametrization above: `skip_existing: true` in a
-        # resolved config really does reach `PipelineConfig`, so the True case
-        # is asserting that `runs reproduce` clears it rather than that the
-        # file was ignored.
-        from panelcast.config.pipeline_yaml import load_resolved_config
+    def test_the_planted_flag_is_one_a_resolved_config_can_carry(self, tmp_path):
+        # The other half of the True case's premise: `skip_existing` is a
+        # mapped key, so it is inheritable at all and clearing it is a thing
+        # `runs reproduce` has to do rather than get for free. `resume` is not
+        # mapped, which is why the case plants this flag and not that one.
+        from panelcast.config.pipeline_yaml import PIPELINE_YAML_MAPPING, load_resolved_config
 
         resolved = tmp_path / "resolved_config.yaml"
         resolved.write_text("skip_existing: true\n", encoding="utf-8")
 
         assert load_resolved_config(resolved)["skip_existing"] is True
+        assert "resume" not in PIPELINE_YAML_MAPPING
 
     def test_pruning_the_failed_runs_models_does_not_abort_it_either(
         self, tmp_path, monkeypatch
@@ -583,3 +641,11 @@ class TestReproduceOnAQuarantinedRun:
 
         assert result.exit_code == 1
         assert "ABORT: raw input changed since the run" in result.output
+
+    def test_raw_data_that_vanished_still_aborts(self, tmp_path, monkeypatch):
+        # The other half of the same gate, and the one whose message the
+        # run-owned skip took over: what is left of it is external data only.
+        result = self._reproduce(tmp_path, monkeypatch, vanish=True)
+
+        assert result.exit_code == 1
+        assert f"ABORT: recorded input missing: {tmp_path / 'raw.csv'}" in result.output
