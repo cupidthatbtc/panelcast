@@ -96,11 +96,19 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     ``--output-base`` was spelled as — usually the relative default ``outputs``
     — while the run directory now in hand may be absolute, relocated, or both,
     and comparing them as paths would resolve the recorded one against whatever
-    directory the command happens to run in. Comparing names keeps a moved
-    workspace verifiable and still refuses a sibling tree, which is the
-    distinction that matters; anything it lets through is judged by containment
-    afterwards. The name comes from the run's parent, or its grandparent when
-    the run sits under the quarantine directory.
+    directory the command happens to run in, so a relocated workspace would
+    read as tampering. The name comes from the run's parent, or its grandparent
+    when the run sits under the quarantine directory.
+
+    Be precise about what that admits: it refuses a tree whose base is spelled
+    differently, not every foreign one. Another checkout of the *same* project
+    also spells its base ``outputs``, so a recorded path from it maps here —
+    and with a relative recorded base there is nothing left to tell relocation
+    and impersonation apart, since they are the same string. What stands behind
+    it is that the mapping only ever aims *into* this run's directory: the
+    result is judged by containment and then by the recorded hash, so a foreign
+    manifest passes only where the run id, the run-relative path and the bytes
+    all already agree.
 
     A run-owned path maps whether or not the target survived the move: where a
     deleted artifact *should* be is the useful answer, and reporting the

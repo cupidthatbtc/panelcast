@@ -469,17 +469,35 @@ class TestTheDeclaredCallerDifference:
         assert reroot_under(tmp_path / "run_a" / "x.json", active) == tmp_path / "run_a" / "x.json"
 
     def test_a_foreign_workspace_manifest_does_not_verify_clean(self, fx):
-        # End to end: the same shape through `runs verify`, which is where a
-        # laundered path would turn "this manifest is not about this
-        # workspace" into exit 0.
+        # End to end through `runs verify`, which is where a laundered path
+        # would turn "this manifest is not about this workspace" into exit 0.
+        # The recorded path must *not* exist, or `reroot_under` returns before
+        # the ownership check and the case proves nothing.
         foreign = fx.tmp_path / "elsewhere" / "run_a" / "evaluation" / "metrics.json"
-        foreign.parent.mkdir(parents=True)
-        foreign.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
         fx.outputs[fx.key] = str(foreign)
-        fx.output_hashes[fx.key] = sha256_path(foreign)
         fx.quarantine()
 
+        assert not foreign.exists()
         assert fx.verify_accepts() is False
+
+    def test_a_same_named_base_elsewhere_is_indistinguishable_from_relocation(self, fx):
+        # The residue, stated rather than implied: another checkout of the same
+        # project spells its base `outputs` too, so with a relative recorded
+        # base relocation and impersonation are the same string. The mapping
+        # still only aims into this run's directory, so what it can produce is
+        # bounded by containment and the recorded hash — it passes here only
+        # because the run id, the run-relative path and the bytes all agree.
+        from panelcast.pipelines.output_integrity import reroot_under
+
+        fx.quarantine()
+        moved = fx.output_base / "failed" / "run_a"
+        sibling = fx.tmp_path / "other" / "outputs" / "run_a" / "evaluation" / "metrics.json"
+
+        assert reroot_under(sibling, moved) == moved / "evaluation" / "metrics.json"
+        # ...and a base spelled differently is refused, which is the half the
+        # ownership check can actually decide.
+        elsewhere = fx.tmp_path / "other" / "elsewhere" / "run_a" / "evaluation" / "metrics.json"
+        assert reroot_under(elsewhere, moved) == elsewhere
 
     def test_the_reroot_mapping_is_generic_over_what_it_moves(self, fx):
         # Not output-specific on purpose: run-owned *inputs* need the same
