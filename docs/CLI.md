@@ -671,12 +671,86 @@ panelcast runs history [OPTIONS]
 
 ### `runs verify` — Check a Run Against Its Manifest
 
-Re-hash a recorded run's entire provenance chain and exit `1` on any mismatch,
-in order: every recorded output hash (`OK` / `MODIFIED` / `MISSING`), every
-recorded raw-input hash, the shared data-root stamps, and the `pixi.lock` hash.
-Data-root stamps protect the shared roots *during* a run; `runs verify` protects
-the whole run directory *after* it, indefinitely. Pre-0.9.0 manifests carried no
-output hashes and are reported as such.
+Re-hash a recorded run's entire provenance chain and exit `1` on anything it
+cannot prove about what the manifest records, in order: every recorded output,
+every recorded raw-input hash,
+the shared data-root stamps, and the `pixi.lock` hash. Data-root stamps protect
+the shared roots *during* a run; `runs verify` protects the whole run directory
+*after* it, indefinitely.
+
+Each output gets one line, with the reason after the status:
+
+| Status | Meaning |
+|--------|---------|
+| `OK` | Present and hashing to the recorded digest |
+| `MODIFIED` | Present and hashing to something else |
+| `MISSING` | Recorded but not there, or unreadable |
+| `UNBOUND` | The recorded path cannot be tied to this run — outside the run directory and the artifact roots, or not locatable at all |
+| `UNVERIFIABLE` | Nothing to check it against — a path with no hash, a hash with no path, or an empty hash |
+
+A manifest carrying no output hashes at all (pre-0.9.0, or a modern one whose
+hash map was emptied) is reported as such and every recorded output comes back
+`UNVERIFIABLE`: shape cannot tell the two apart, so neither is excused. A run
+that recorded no outputs in the first place has nothing to check and passes.
+
+**Run it from the project root.** A flat-layout run records its data, model and
+report artifacts as paths relative to the project root, so `runs verify`
+resolves them — and the roots it checks them against — against the working
+directory. From an unrelated directory those outputs read as `MISSING`, which
+is loud; from **another checkout of the same project** the path and its root
+land in that tree together, containment passes, and a reproducible pipeline
+reports `OK` against a workspace that is not the one you asked about. A green
+result is only evidence about the intended run when the command runs where the
+run did. Run-scoped artifacts are unaffected *as long as the output base keeps
+its name*: they re-root onto `--output-base` whether or not a copy also sits
+under the working directory, so `--output-base` alone decides which artifact is
+verified. Moving `outputs/` elsewhere keeps working; renaming it does not, and
+a run whose base was renamed reports `UNBOUND` on intact artifacts.
+
+Output verification is the same primitive the incremental `--skip-existing`
+path uses (`pipelines/output_integrity.py`), so the per-key rules and the
+containment roots are one implementation. The two are scoped differently — a
+stage checks only the keys carrying its own `<stage>:` prefix, `runs verify`
+checks the whole manifest — which divides *which* keys each is responsible for
+rather than what either accepts as proof. Three things differ in that second
+sense, for different reasons:
+
+- **Re-rooting.** `runs verify` resolves active and quarantined runs alike and
+  cannot know which it has until it looks, so it maps a run-owned recorded
+  path onto the run's current directory and a run under `outputs/failed/<id>/`
+  still verifies. The skip path only ever follows the active `latest` pointer,
+  so it has nothing to map and never looks under `failed/`.
+  Run-owned is decided by the output base's *name*, so that a relocated
+  workspace still verifies — which also means a manifest from another checkout
+  of the same project re-roots here, and for a reproducible pipeline the
+  hashes will agree. A green result says the bytes match, not that this
+  manifest was written about this workspace.
+- **The declared-path binding.** This one *is* about the missing stage
+  objects. The skip path knows which paths a stage said it would write, so it
+  refuses a manifest that redirects a static output at another file *inside
+  the same run directory* — where containment has nothing to say. `runs
+  verify` cannot, and such a redirect is reported `OK` here.
+- **Completeness, for declared outputs.** For the same reason, the skip path
+  notices a *declared* output the manifest never recorded and `runs verify`
+  cannot.
+
+Both of those come from the same asymmetry: the skip path's list of declared
+paths comes from **code** — the stage objects it holds — while `runs verify`
+has only the document it is checking. Recording the list in the manifest (#439)
+makes it *available*, which closes both against a manifest that is merely
+incomplete — the binding by passing the list to the shared verifier, the
+missing record by a loop over it that the verifier does not do, since it walks
+only the keys the manifest recorded. It does not make the list *trustworthy*,
+because a list inside the document can be shortened along with the records it
+describes.
+
+That is also the shape of the blind spot both callers share, worth knowing
+next to the exit code: for a *dynamic* output nothing outside the document says
+the key ever existed, so a record deleted from both `outputs` and
+`output_hashes` leaves nothing to check and both callers accept. A green result
+proves the outputs the manifest *lists* are intact, not that it lists
+everything the run produced. Closing that against deliberate shortening needs
+evidence the manifest cannot carry — a signature over it, or the descriptor.
 
 ```bash
 panelcast runs verify [RUN_ID] [OPTIONS]

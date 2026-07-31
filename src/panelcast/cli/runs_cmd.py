@@ -18,7 +18,13 @@ from panelcast.cli import runs_app
 
 def resolve_run_dir(run_id: str, output_base: Path = Path("outputs")) -> Path:
     """Resolve a run id against outputs/, outputs/failed/, or 'latest'."""
-    from panelcast.paths import RunPathError, resolve_latest, safe_run_dir, validate_run_id
+    from panelcast.paths import (
+        QUARANTINE_DIR,
+        RunPathError,
+        resolve_latest,
+        safe_run_dir,
+        validate_run_id,
+    )
 
     if run_id == "latest":
         run_dir = resolve_latest(output_base)
@@ -29,7 +35,7 @@ def resolve_run_dir(run_id: str, output_base: Path = Path("outputs")) -> Path:
         validate_run_id(run_id)
     except RunPathError as exc:
         raise typer.BadParameter(str(exc), param_hint="RUN_ID") from exc
-    for subdir in (None, "failed"):
+    for subdir in (None, QUARANTINE_DIR):
         try:
             candidate = safe_run_dir(output_base, run_id, subdir=subdir)
         except RunPathError:
@@ -42,43 +48,80 @@ def resolve_run_dir(run_id: str, output_base: Path = Path("outputs")) -> Path:
     )
 
 
-def _resolve_recorded(path_str: str, run_dir: Path) -> Path:
-    """Recorded path, re-rooted at the run dir when the run was moved (failed/)."""
-    path = Path(path_str)
-    if path.exists():
-        return path
-    parts = path.parts
-    if run_dir.name in parts:
-        rerooted = run_dir.joinpath(*parts[parts.index(run_dir.name) + 1 :])
-        if rerooted.exists():
-            return rerooted
-    return path
+def _output_roots(run_dir: Path) -> tuple[Path, ...]:
+    """Where a run's outputs may live: its own directory and the artifact roots.
+
+    Not the whole working tree — that would admit any file whose bytes happen
+    to hash correctly, including another run's *run-scoped* copy of the same
+    artifact, which is the substitution containment can refuse. A run-scoped
+    layout keeps everything under ``run_dir``; a flat one spreads products
+    across the roots ``ArtifactPaths`` declares, so both are named. Under the
+    flat layout those roots are shared by every run by construction, so
+    containment alone cannot tell one run's copy from another's there; the
+    declared-path binding is what does that, and only the stage caller has it.
+
+    The artifact roots come from ``ArtifactPaths.roots()``, the same definition
+    the orchestrator's ``_output_verification_roots`` draws on, so *which*
+    roots — part of what a caller accepts as proof — cannot drift between the
+    two any more than the per-key rules can.
+
+    Those roots are relative exactly where ``ArtifactPaths.flat()`` is, matching
+    how the orchestrator records flat-layout outputs, so path and root resolve
+    against the same working directory and move together — which also means
+    they move together into the *wrong* tree. Run from another checkout of the
+    same project, a flat-layout output and its root both land in that
+    checkout: containment passes, the hash is taken there, and a reproducible
+    pipeline reports ``OK`` against a workspace that is not the one being
+    verified. Run this from the project root; elsewhere a green result is not
+    evidence about the run you asked for.
+    """
+    from panelcast.paths import ArtifactPaths
+
+    return (run_dir, *ArtifactPaths.flat().roots())
 
 
 def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:
-    from panelcast.utils.hashing import sha256_path
+    """Report every recorded output, one line each; any non-OK is a problem.
 
-    if not manifest.output_hashes:
-        typer.echo("outputs: no hashes recorded for this run (pre-0.9.0 manifest)")
-        return
-    for key, recorded in sorted(manifest.output_hashes.items()):
-        path_str = manifest.outputs.get(key)
-        path = _resolve_recorded(path_str, run_dir) if path_str else None
-        if path is None or not path.exists():
-            typer.echo(f"MISSING  {key}")
-            problems.append(key)
+    The verdicts come from ``output_integrity.verify_output_records``, shared
+    with the incremental skip path, so the two cannot disagree about what
+    counts as proof. One argument is this caller's own: ``reroot``, because a
+    quarantined run's manifest still names its pre-move location.
+
+    No ``declared`` map — there are no stage objects here, and the manifest
+    does not record which outputs were declared. That costs the severity split
+    between a declared output going missing and a dynamic one; the path
+    binding, so a manifest redirecting a static output at another file inside
+    the same run directory is reported clean here while the skip path refuses
+    it; and noticing an output a stage declares that the manifest never
+    recorded. #439 would make the list available — the last of those needs a
+    loop over it as well, since the verifier walks only recorded keys — but a
+    list inside the document can be shortened with it, so it closes these
+    against an incomplete manifest rather than a tampered one. The skip path is
+    strong
+    here because its list comes from code, which is not something this caller
+    can import.
+
+    A manifest with no output hashes is *not* short-circuited: shape alone
+    cannot tell a pre-0.9.0 run from a modern one someone emptied the map on,
+    so every recorded key is reported unverifiable, exactly as the skip path
+    treats it. The legacy note explains the likely cause without excusing it.
+    """
+    from panelcast.pipelines.output_integrity import OK, verify_output_records
+
+    if manifest.outputs and not manifest.output_hashes:
+        typer.echo("outputs: no hashes recorded for this run (pre-0.9.0 manifest?)")
+    for verdict in verify_output_records(
+        manifest.outputs,
+        manifest.output_hashes,
+        roots=_output_roots(run_dir),
+        reroot=run_dir,
+    ):
+        if verdict.label == OK:
+            typer.echo(f"{OK:<12} {verdict.key}")
             continue
-        try:
-            current = sha256_path(path)
-        except OSError as exc:
-            typer.echo(f"MISSING  {key} ({exc})")
-            problems.append(key)
-            continue
-        if current != recorded:
-            typer.echo(f"MODIFIED {key}")
-            problems.append(key)
-        else:
-            typer.echo(f"OK       {key}")
+        typer.echo(f"{verdict.label:<12} {verdict.key} ({verdict.reason})")
+        problems.append(verdict.key)
 
 
 def _verify_inputs(manifest, problems: list[str]) -> None:
@@ -464,13 +507,13 @@ def _compare_reproduction(old_manifest, output_base: Path, bit_exact: bool) -> N
 
 
 def _load_metrics_from_manifest_dir(manifest, output_base: Path) -> dict:
-    from panelcast.paths import RunPathError, safe_run_dir, validate_run_id
+    from panelcast.paths import QUARANTINE_DIR, RunPathError, safe_run_dir, validate_run_id
 
     try:
         validate_run_id(manifest.run_id)
     except RunPathError:
         return {}
-    for subdir in (None, "failed"):
+    for subdir in (None, QUARANTINE_DIR):
         try:
             candidate = safe_run_dir(output_base, manifest.run_id, subdir=subdir)
         except RunPathError:
@@ -493,9 +536,9 @@ def runs_why(
     import json
 
     if run_id is None:
-        from panelcast.paths import path_is_within
+        from panelcast.paths import QUARANTINE_DIR, path_is_within
 
-        failed_root = output_base / "failed"
+        failed_root = output_base / QUARANTINE_DIR
         candidates = sorted(
             (
                 p

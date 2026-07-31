@@ -1453,14 +1453,87 @@ For each stage in topological order:
 **Output verification** (`stages.py:PipelineStage.verify_recorded_outputs`):
 existence is not integrity, so a skip is only granted when the bytes on disk
 still hash to what the manifest recorded. Recorded paths are resolved inside
-the run roots first. A manifest with no output hashes (pre-0.9.0), a recorded
-output that is missing, unreadable, or modified, and a declared output the
-manifest never recorded all block the skip and rerun the stage. Missing legacy
-hash evidence is logged as an informational upgrade path; an actual mismatch,
-missing artifact, substitution, or root escape is a warning. Verified hashes are
+the run roots first. Anything the shared verifier does not return `OK` for
+blocks the skip and reruns the stage — stated that way rather than as a list of
+cases, for the same reason the severity below is: the cases keep growing, and
+the list had already drifted twice. A declared output the manifest never
+recorded blocks it too, which the verifier cannot see because it has no key.
+
+Severity is sorted by what is *known*, not by which way the check failed, and
+is stated as a predicate rather than a list so it cannot drift as cases are
+added. A verdict is a **warning** when the *recorded* claim fails: the bytes
+differ, or the path the manifest recorded cannot be tied to this run — not the
+one its key names, not somewhere this run could have written, or not locatable
+at all. It is **informational** when nothing can be proven either way: no hash
+to compare against, no path to compare at, or an obstacle on *this* side of the
+comparison, such as a path the stage itself declares that the workspace cannot
+resolve. Which path failed is what separates the two when the physical failure
+is identical. An artifact that is missing or unreadable falls on whichever side
+its key sits: with a declared path behind it, disk is contradicting the
+manifest; without one, nothing said this run still owned that file. The one
+skip-blocker that is not a verdict — a declared output the manifest never
+recorded — is **informational** under the same predicate, and for the reason
+the predicate gives rather than by exception: with no record there is nothing
+to compare, so the manifest is incomplete rather than contradicted. Verified
+hashes are
 carried into the new manifest so consecutive runs remain skippable. This check
 fully reads each candidate artifact (including directory trees), so
 `--skip-existing` trades additional startup I/O for corruption detection.
+
+The per-key work lives in `pipelines/output_integrity.py` and is shared with
+`panelcast runs verify` (§10), so the two callers cannot drift apart in what
+they accept as proof. Each names the run directory of the manifest it is
+reading, never the output base that contains every run: a key the manifest
+recorded but the stage does not declare has no path binding behind it, so
+containment is the only thing refusing a rewritten manifest that points it at
+a sibling run. Each caller also scopes itself: a stage drains only the keys
+carrying its own `<stage>:` prefix, while `runs verify` has no stage to be and
+drains the whole manifest — a division of which keys each is responsible for,
+not a difference in what either accepts as proof. Three things differ in the
+latter sense, the first two parameterized rather than implied — the third is
+not the primitive's at all, which is why reading a declared list would not on
+its own close it.
+`runs verify` re-roots a *run-owned* recorded path onto the run's current
+directory, so a run quarantined under `outputs/failed/<id>/` still verifies,
+while the skip path follows the active `latest` pointer and never looks under
+`failed/` — a quarantined run is not a source of truth for a new one. Run-owned
+means recorded as `<output base>/<run id>/…`, with the base matched by name, so
+a relocated `--output-base` still verifies as long as the base directory's own
+name is preserved — `mv proj/outputs /archive/outputs` keeps working, renaming
+it to `runs/` does not; a path that
+merely contains a directory with the run's name is left where the manifest put
+it and refused by containment. Name-matching cannot separate a relocated
+workspace from another checkout of the same project — both spell the base
+`outputs` — so what bounds it is that the mapping only aims *into* the run
+directory: containment and the recorded hash decide the rest. The declared-path
+binding is the second, and the first
+of the two places `runs verify` is the weaker side — both of them consequences
+of the same missing list: only the stage caller holds the paths a
+stage declares, so only it refuses a manifest that redirects a static output at
+another file inside the run's own directory, where containment has nothing to
+say. The manifest does not record which outputs were declared, so there is
+nothing for `runs verify` to read it from — tracked in #439, which makes that
+list *available* without making it *trustworthy*: a list inside the document
+can be shortened along with the records it describes, and the skip path is
+strong here precisely because its list comes from code instead. The third is
+the same asymmetry applied to completeness — only the skip path notices an
+output a stage declares that the manifest never recorded — and beneath it sits
+a blind spot they *share*: for a dynamic key nothing outside the document says
+it ever existed, so an erased record is indistinguishable from one never
+written, both callers accept, and the skip path is the side that then reuses
+artifacts on that basis.
+
+Both callers' containment roots are the run directory plus the `ArtifactPaths`
+roots — not the working tree, which would admit any file whose bytes happen to
+hash correctly, including another run's run-scoped copy of the same artifact.
+Under
+the flat layout those roots are shared across runs by construction, so
+containment cannot separate one run's copy from another's there; the
+declared-path binding is what does that, and only the stage caller has it.
+Those roots are also relative, matching how flat-layout outputs are recorded,
+so `runs verify` must run where the run did: from another checkout of the same
+project the recorded path and its root move into *that* tree together and a
+reproducible pipeline verifies clean against the wrong workspace.
 
 **Hash computation** (`stages.py:PipelineStage.compute_input_hash`):
 1. For each `input_path` (sorted), compute `sha256_file(path)`

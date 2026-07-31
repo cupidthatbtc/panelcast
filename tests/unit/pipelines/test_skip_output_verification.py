@@ -229,7 +229,11 @@ class TestUnverifiableManifestsFailClosed:
         assert not decision.skip
         assert not decision.outputs_untrusted
         assert decision.outputs_unverifiable
-        assert "0.9.0" in decision.reason
+        # Per key rather than per manifest, so the log names which output was
+        # unprovable — and so `runs verify` describes the same manifest the
+        # same way instead of substituting a whole-map message.
+        assert decision.reason == "recorded output has no hash"
+        assert decision.key in parquet_fixture.manifest.outputs
 
     def test_one_recorded_output_missing_its_hash(self, tmp_path):
         fx = _Fixture(
@@ -389,7 +393,7 @@ class TestRecordedPathContainment:
         from panelcast.paths import ArtifactPaths
 
         orchestrator = PipelineOrchestrator(PipelineConfig(dry_run=True), output_base=tmp_path)
-        roots = set(orchestrator._output_verification_roots())
+        roots = set(orchestrator._output_verification_roots(tmp_path / "prev"))
         paths = ArtifactPaths.flat()
 
         assert {
@@ -554,6 +558,52 @@ class TestOrchestratorSkipVerification:
         raw.parent.mkdir(parents=True)
         raw.write_text("a,b\n1,2\n", encoding="utf-8")
         return tmp_path / "outputs"
+
+    def test_a_manifest_never_arrives_without_the_run_that_named_its_roots(self, workspace):
+        # The premise behind passing `allowed_roots=None` only where there is
+        # no previous *run*, while the safety argument is about there being no
+        # previous *manifest*. Nothing in the code ties the two, so tie them
+        # here: across a first run and a skipping second, the manifest and the
+        # roots are present or absent together, never one without the other.
+        seen: list[tuple[bool, bool]] = []
+        real = PipelineStage.skip_decision
+
+        def capture(self, manifest, force=False, allowed_roots=None):
+            seen.append((manifest is None, allowed_roots is None))
+            return real(self, manifest, force=force, allowed_roots=allowed_roots)
+
+        with patch.object(PipelineStage, "skip_decision", capture):
+            assert _run_pipeline(workspace, "runA", [], skip_existing=True) == 0
+            assert _run_pipeline(workspace, "runB", [], skip_existing=True) == 0
+
+        assert (True, True) in seen, "the no-previous-run case never ran"
+        assert (False, False) in seen, "the previous-run case never ran"
+        assert all(no_manifest == no_roots for no_manifest, no_roots in seen)
+
+    def test_the_containment_root_follows_the_directory_not_the_manifest(self, workspace):
+        # The manifest is the document under verification, so it must not be
+        # able to choose which run it is checked against. Point its `run_id` at
+        # a sibling and the root still has to be where it was read from.
+        from panelcast.pipelines.orchestrator import PipelineOrchestrator
+
+        assert _run_pipeline(workspace, "runA", []) == 0
+        (workspace / "decoy").mkdir()
+        manifest_path = workspace / "runA" / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["run_id"] = "decoy"
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        seen: list[Path] = []
+        real = PipelineOrchestrator._output_verification_roots
+
+        def capture(self, previous_run):
+            seen.append(previous_run)
+            return real(self, previous_run)
+
+        with patch.object(PipelineOrchestrator, "_output_verification_roots", capture):
+            assert _run_pipeline(workspace, "runB", [], skip_existing=True) == 0
+
+        assert seen and all(p == workspace / "runA" for p in seen)
 
     def test_unchanged_shared_output_is_skipped(self, workspace):
         assert _run_pipeline(workspace, "runA", []) == 0
