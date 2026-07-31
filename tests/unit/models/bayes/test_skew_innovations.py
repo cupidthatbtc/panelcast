@@ -16,6 +16,7 @@ from numpyro import handlers
 
 from panelcast.models.bayes.model import make_score_model, standardized_skew_innovation
 from panelcast.models.bayes.priors import (
+    ENTITY_PRIOR_TYPES,
     RW_INNOVATION_TYPES,
     PriorConfig,
     entity_skew_sites,
@@ -112,6 +113,38 @@ def test_entity_skew_site_names_follow_the_resolved_prior_type():
         "user_entity_skew_sym",
     )
     assert entity_skew_sites("user", "normal").present() == ()
+    assert entity_skew_sites("user", None).present() == ()
+
+
+def test_an_unknown_entity_prior_is_rejected_rather_than_read_as_normal():
+    """The fail-open direction its random-walk twin already closed: reporting
+    "no skew sites" for a prior with its own latent would leave that latent out
+    of every exclusion built from the helper, which is #410 in reverse."""
+    with pytest.raises(ValueError, match="entity_effect_prior_type"):
+        entity_skew_sites("user", "student_t")
+
+
+def test_the_model_accepts_exactly_the_entity_prior_types_the_helper_knows():
+    for prior_type in ENTITY_PRIOR_TYPES:
+        _seeded_trace(_model_args(PriorConfig(entity_effect_prior_type=prior_type)))
+
+    unknown = _model_args(PriorConfig(entity_effect_prior_type="student_t"))
+    with pytest.raises(ValueError, match="entity_effect_prior_type"):
+        _seeded_trace(unknown)
+
+
+@pytest.mark.parametrize("prior_type", ENTITY_PRIOR_TYPES)
+def test_every_named_entity_skew_site_is_one_the_model_samples(prior_type):
+    """Mirrors the random-walk trace test: a name the model does not sample is
+    a KeyError when the exclusion hands it to NumPyro."""
+    trace = _seeded_trace(_model_args(PriorConfig(entity_effect_prior_type=prior_type)))
+    sampled = {name for name, site in trace.items() if site["type"] == "sample"}
+
+    named = set(entity_skew_sites("user", prior_type).present())
+    assert named <= sampled
+    assert bool(named) is (prior_type == "skew_normal")
+    if prior_type != "skew_normal":
+        assert not sampled & {"user_entity_skew_abs", "user_entity_skew_sym"}
 
 
 class TestNormalParity:
