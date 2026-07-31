@@ -124,16 +124,18 @@ def path_is_within(candidate: Path, root: Path) -> bool:
     Both sides are resolved, so a symlinked component that leaves the root is
     caught even when the literal join looks contained.
 
-    ``RuntimeError`` is caught alongside ``OSError`` because on Python 3.11 and
-    3.12 non-strict ``resolve()`` converts ``ELOOP`` into one; a planted
-    symlink loop must fail closed here rather than raise through every caller
-    that documents a refusal instead. On 3.13+ that conversion is gone and a
-    loop resolves to itself, so it stays contained and is not refused — the
-    catch is about never raising, not about a uniform verdict on loops. It also
-    covers ``RecursionError``, which a long enough symlink chain can raise from
-    the recursive join on the same versions — 3.13 rewrote ``realpath`` with an
-    explicit stack, and the Windows implementation never recursed in Python at
-    all. Every caller treats False as "not contained", so
+    The catch is deliberately broad — any resolution failure, of which these
+    are the known ones. ``RuntimeError`` joins ``OSError`` because on Python
+    3.11 and 3.12 non-strict ``resolve()`` converts ``ELOOP`` into one; a
+    planted symlink loop must fail closed here rather than raise through every
+    caller that documents a refusal instead. On 3.13+ that conversion is gone
+    and a loop resolves to itself, so it stays contained and is not refused —
+    the catch is about never raising, not about a uniform verdict on loops.
+    ``RecursionError`` is a ``RuntimeError`` on every version, whether from the
+    recursive join a long symlink chain trips on 3.11/3.12 (3.13 rewrote
+    ``realpath`` with an explicit stack, and Windows never recursed in Python)
+    or from a caller already near the limit. Every caller treats False as
+    "not contained", so
     widening can only make an answer more conservative, never more permissive —
     but a caller that renders False as "escaped" now says that for any
     resolution failure, not only a genuine escape. Select splits those apart in
