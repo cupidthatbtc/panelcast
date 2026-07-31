@@ -176,10 +176,15 @@ class TestHorizonPanelClock:
         assert panel["n_train_events"].tolist() == [3, 2]
         assert panel["dynamic_mask"].tolist() == [False, False]
 
-    def test_the_clock_is_capped_at_the_trained_horizon(self, summary, frames):
+    def test_the_cap_applies_to_training_history_only(self, summary, frames):
+        """Training collapsed events past max_seq onto position 1, so the
+        fitted walk is that long -- but a validation transition happened after
+        the fit, so capping the total would put the terminal state one
+        innovation behind the score y_last conditions on."""
         train_df, val_df, test_df, test_features = frames
-        summary["max_seq"] = 2
+        summary["max_seq"] = 1
         panel = _build_horizon_panel(
             test_df, test_features, summary, 1, train_df=train_df, val_df=val_df
         )
-        assert panel["n_train_events"].tolist() == [2, 2]
+        assert panel["y_last"].tolist() == [72.0, 61.0]
+        assert panel["n_train_events"].tolist() == [2, 1]

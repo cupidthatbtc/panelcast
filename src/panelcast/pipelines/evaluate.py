@@ -279,6 +279,7 @@ def _preceding_event_counts(
     val_df: pd.DataFrame | None,
     *,
     entity_col: str,
+    cap_train_at: int | None = None,
 ) -> pd.Series:
     """Per-entity count of events that chronologically precede the test era.
 
@@ -294,10 +295,16 @@ def _preceding_event_counts(
     purpose so test events keep the frame training assigned them (#247).
     """
     counts = pd.Series(dtype=int)
-    for frame in (train_df, val_df):
+    for frame, cap in ((train_df, cap_train_at), (val_df, None)):
         if frame is None or frame.empty or entity_col not in frame.columns:
             continue
         sizes = frame.groupby(entity_col).size()
+        if cap is not None:
+            # Training collapsed events past the trajectory length onto
+            # position 1, so the fitted walk really is that many steps long --
+            # but a validation transition happened after the fit and adds to
+            # it, which is why the cap applies to the train part alone.
+            sizes = sizes.clip(upper=cap)
         counts = sizes if counts.empty else counts.add(sizes, fill_value=0)
     return counts.astype(int)
 
@@ -499,12 +506,14 @@ def _build_horizon_panel(
     # too, or the rollout forecasts horizon 1 from a state one innovation short
     # of the score it conditions on. Eligibility stays on train counts: it
     # mirrors the training-time dynamic-effects filter, not the clock.
-    preceding = _preceding_event_counts(train_df, val_df, entity_col=entity_col)
+    max_seq_train = int(summary["max_seq"])
+    preceding = _preceding_event_counts(
+        train_df, val_df, entity_col=entity_col, cap_train_at=max_seq_train
+    )
     history_counts = pd.Series(entity_ids).map(preceding).fillna(0)
     train_counts = pd.Series(entity_ids).map(train_df.groupby(entity_col).size()).fillna(0)
-    max_seq_train = int(summary["max_seq"])
     min_albums_filter = int(summary.get("min_albums_filter", 2))
-    n_train_events = np.minimum(history_counts.to_numpy(dtype=int), max_seq_train)
+    n_train_events = history_counts.to_numpy(dtype=int)
     dynamic_mask = (train_counts >= min_albums_filter).to_numpy()
 
     return {
