@@ -109,6 +109,24 @@ class TestAtomicWrite:
         assert target.read_bytes() == b"original"
         assert not _temps(tmp_path)
 
+    def test_a_cleanup_failure_never_replaces_the_original_error(self, tmp_path: Path, monkeypatch):
+        target = tmp_path / "payload.bin"
+        target.write_bytes(b"original")
+
+        def refuse(_self, missing_ok: bool = False):
+            raise OSError("read-only directory")
+
+        monkeypatch.setattr(Path, "unlink", refuse)
+
+        # The write failure is the diagnostic; failing to tidy up must not
+        # stand in front of it.
+        with pytest.raises(ValueError, match="mid-write"):
+            with atomic_write(target) as handle:
+                handle.write(b"partial")
+                raise ValueError("mid-write")
+
+        assert target.read_bytes() == b"original"
+
     def test_two_writers_on_one_target_do_not_share_a_temporary(self, tmp_path: Path):
         target = tmp_path / "payload.bin"
         with atomic_write(target) as first, atomic_write(target) as second:
@@ -148,6 +166,16 @@ class TestAtomicWrite:
             handle.write(b"{}")
 
         assert seen == [0o600]
+
+    def test_a_platform_without_fchmod_still_writes(self, tmp_path: Path, monkeypatch):
+        """Windows has no handle-level chmod; the write proceeds regardless."""
+        monkeypatch.delattr(os, "fchmod", raising=False)
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+
+        atomic_write_text(target, '{"rewritten": true}')
+
+        assert target.read_text(encoding="utf-8") == '{"rewritten": true}'
 
 
 class TestAtomicWriteText:
@@ -200,6 +228,15 @@ class TestSweepOrphanTemps:
 
     def test_a_missing_directory_is_not_an_error(self, tmp_path: Path):
         assert sweep_orphan_temps(tmp_path / "nowhere") == []
+
+    def test_something_that_will_not_delete_is_skipped_rather_than_fatal(self, tmp_path: Path):
+        # Nothing legitimate creates a directory under the temp marker; the
+        # point is that tidying up never fails the run that triggered it.
+        stubborn = tmp_path / f"record.json{TMP_MARKER}999-notafile"
+        stubborn.mkdir()
+
+        assert sweep_orphan_temps(tmp_path) == []
+        assert stubborn.exists()
 
     def test_debris_does_not_stop_the_next_write(self, tmp_path: Path):
         (tmp_path / f"record.json{TMP_MARKER}999-deadbeef").write_text("junk", encoding="utf-8")

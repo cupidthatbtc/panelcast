@@ -46,7 +46,7 @@ TMP_MARKER = ".tmp-"
 
 def fsync_dir(directory: Path) -> None:
     """Persist a rename in the directory entry itself (POSIX only)."""
-    if os.name == "nt":  # no directory handles to fsync on Windows
+    if os.name == "nt":  # pragma: no cover - no directory handles to fsync on Windows
         return
     try:
         fd = os.open(directory, os.O_RDONLY)
@@ -75,15 +75,12 @@ def sweep_orphan_temps(directory: Path) -> list[Path]:
     ownership of the directory is already established — the orchestrator takes
     a quarantined run directory back for a resume, and sweeps it there.
 
-    Best-effort: a temporary that will not delete is skipped, since failing to
-    tidy is never worth failing the run over.
+    Best-effort throughout: ``glob`` swallows its own directory-listing errors
+    and yields nothing, and a temporary that will not delete is skipped, since
+    failing to tidy is never worth failing the run over.
     """
     removed: list[Path] = []
-    try:
-        leftovers = sorted(Path(directory).glob(f"*{TMP_MARKER}*"))
-    except OSError:
-        return removed
-    for path in leftovers:
+    for path in sorted(Path(directory).glob(f"*{TMP_MARKER}*")):
         try:
             path.unlink()
         except OSError:
