@@ -89,7 +89,7 @@ from panelcast.pipelines.stamps import (
     verify_stamps,
     write_stamp,
 )
-from panelcast.utils.atomic import atomic_write_text, sweep_orphan_temps
+from panelcast.utils.atomic import atomic_write_text
 from panelcast.utils.environment import ensure_environment_locked, verify_environment
 from panelcast.utils.git_state import capture_git_state
 from panelcast.utils.hashing import sha256_path
@@ -489,13 +489,6 @@ class PipelineOrchestrator:
             # Move back from failed for retry
             self.run_dir = run_dir
             shutil.move(str(failed_dir), str(run_dir))
-
-        # A killed run leaves its manifest temporaries behind, and the manifest
-        # is rewritten at every stage boundary, so this is where they pile up.
-        # Safe here: the resume just took sole ownership of the directory.
-        removed = sweep_orphan_temps(self.run_dir)
-        if removed:
-            log.debug("removed_orphan_temps", n=len(removed), run_dir=str(self.run_dir))
 
         # Load existing manifest
         manifest_path = self.run_dir / "manifest.json"

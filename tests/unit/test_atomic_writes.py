@@ -23,12 +23,7 @@ from panelcast.pipelines.manifest import (
 )
 from panelcast.pipelines.stamps import read_stamp, write_stamp
 from panelcast.utils import atomic as atomic_module
-from panelcast.utils.atomic import (
-    TMP_MARKER,
-    atomic_write,
-    atomic_write_text,
-    sweep_orphan_temps,
-)
+from panelcast.utils.atomic import TMP_MARKER, atomic_write, atomic_write_text
 
 
 def _manifest(**overrides) -> RunManifest:
@@ -167,15 +162,15 @@ class TestAtomicWrite:
 
         assert seen == [0o600]
 
-    def test_a_platform_without_fchmod_still_writes(self, tmp_path: Path, monkeypatch):
-        """Windows has no handle-level chmod; the write proceeds regardless."""
-        monkeypatch.delattr(os, "fchmod", raising=False)
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_a_brand_new_file_gets_the_umask_default(self, tmp_path: Path):
+        reference = tmp_path / "reference.json"
+        reference.write_text("{}", encoding="utf-8")  # what write_text would have given
         target = tmp_path / "manifest.json"
+
         atomic_write_text(target, "{}")
 
-        atomic_write_text(target, '{"rewritten": true}')
-
-        assert target.read_text(encoding="utf-8") == '{"rewritten": true}'
+        assert stat.S_IMODE(target.stat().st_mode) == stat.S_IMODE(reference.stat().st_mode)
 
 
 class TestAtomicWriteText:
@@ -214,31 +209,9 @@ class TestAtomicWriteText:
 
         assert target.read_bytes() == b'{\n  "a": 1\n}'
 
-
-class TestSweepOrphanTemps:
-    def test_removes_what_a_killed_writer_left_and_nothing_else(self, tmp_path: Path):
-        orphan = tmp_path / f"manifest.json{TMP_MARKER}999-deadbeef"
-        orphan.write_text("half a manifest", encoding="utf-8")
-        keeper = tmp_path / "manifest.json"
-        keeper.write_text("{}", encoding="utf-8")
-
-        assert sweep_orphan_temps(tmp_path) == [orphan]
-        assert not orphan.exists()
-        assert keeper.exists()
-
-    def test_a_missing_directory_is_not_an_error(self, tmp_path: Path):
-        assert sweep_orphan_temps(tmp_path / "nowhere") == []
-
-    def test_something_that_will_not_delete_is_skipped_rather_than_fatal(self, tmp_path: Path):
-        # Nothing legitimate creates a directory under the temp marker; the
-        # point is that tidying up never fails the run that triggered it.
-        stubborn = tmp_path / f"record.json{TMP_MARKER}999-notafile"
-        stubborn.mkdir()
-
-        assert sweep_orphan_temps(tmp_path) == []
-        assert stubborn.exists()
-
-    def test_debris_does_not_stop_the_next_write(self, tmp_path: Path):
+    def test_debris_from_a_killed_writer_does_not_stop_the_next_write(self, tmp_path: Path):
+        # Reclaiming what a killed process left is #445; what this pins is
+        # that it never stands in the way of the write that follows.
         (tmp_path / f"record.json{TMP_MARKER}999-deadbeef").write_text("junk", encoding="utf-8")
 
         atomic_write_text(tmp_path / "record.json", "fresh")
@@ -315,10 +288,10 @@ class TestLatestPointerIsAtomic:
         assert not _temps(tmp_path)
 
 
-class TestResumeReclaimsRunDirTemps:
-    """The crash-resume-crash cycle #424 is about, driven end to end."""
+class TestResumeReadsWhatSurvived:
+    """The crash-resume path #424 exists for, driven end to end."""
 
-    def test_resuming_a_quarantined_run_clears_a_killed_attempts_debris(self, tmp_path: Path):
+    def test_a_quarantined_run_resumes_past_a_killed_attempts_debris(self, tmp_path: Path):
         from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
 
         failed_dir = tmp_path / "failed" / "run-one"
@@ -331,7 +304,5 @@ class TestResumeReclaimsRunDirTemps:
         orchestrator = PipelineOrchestrator(PipelineConfig(resume="run-one"), output_base=tmp_path)
         orchestrator._setup_resume()
 
-        run_dir = tmp_path / "run-one"
-        assert not _temps(run_dir)
         assert orchestrator.manifest is not None
-        assert orchestrator.manifest.run_id == "run-one"
+        assert orchestrator.manifest.stages_completed == ["data"]
