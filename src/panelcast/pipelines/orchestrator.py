@@ -823,11 +823,12 @@ class PipelineOrchestrator:
 
                 # Check if stage should be skipped
                 if self.config.skip_existing and not self.config.dry_run:
-                    # Roots are only consulted once a previous manifest exists,
-                    # and no previous run means no previous manifest. `None`
-                    # says "nothing to name" by falling back to the stage's own
-                    # roots; an empty list would say every recorded output
-                    # escapes them, which is a tampering verdict this is not.
+                    # `skip_decision` returns before reading roots when there is
+                    # no previous manifest, and no previous run means no
+                    # previous manifest — so this argument is unread in that
+                    # case rather than meaning anything. `None` is the shape
+                    # that says so; an empty list would instead say every
+                    # recorded output escapes, a tampering verdict this is not.
                     decision = stage.skip_decision(
                         previous_manifest,
                         force=False,

@@ -366,12 +366,21 @@ class TestContainment:
         assert parameter.annotation == "Path"
         assert parameter.default is inspect.Parameter.empty
 
-    def test_the_stages_default_roots_are_a_fallback_nothing_takes(self, fx):
-        # With no caller-named roots a stage vouches only for the parents of
-        # the outputs it declares itself. The orchestrator always names roots,
-        # so this is the shape of the fallback rather than a production path —
-        # pinned so that stays true by choice rather than by accident.
-        assert fx.stage._default_roots() == (fx.artifact.parent,)
+    def test_the_default_roots_are_never_consulted_without_a_manifest(self, fx, monkeypatch):
+        # The orchestrator passes `None` only where there is no previous run,
+        # and `skip_decision` returns before roots are read there. Asserted by
+        # making the fallback fatal: reaching it at all fails this.
+        def explode(self):
+            raise AssertionError("_default_roots was consulted")
+
+        monkeypatch.setattr(PipelineStage, "_default_roots", explode)
+
+        assert fx.stage.skip_decision(None).skip is False
+
+        # The other half — that a skip check with a previous manifest always
+        # names its roots — needs a real pipeline, so it lives beside the
+        # orchestrator harness as
+        # `test_every_skip_check_with_a_previous_run_names_its_roots`.
 
     def test_the_contained_path_is_the_one_that_gets_hashed(self, tmp_path):
         from panelcast.pipelines.output_integrity import contained_path
