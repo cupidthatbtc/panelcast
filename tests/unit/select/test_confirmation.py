@@ -549,19 +549,11 @@ class TestConfirmationResume:
         run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 0
 
-    def test_an_unresolved_descriptor_refuses_every_cached_run(self, tmp_path, monkeypatch):
+    def test_an_unloadable_descriptor_resolves_to_no_hash(self, tmp_path):
         """An unloadable descriptor is an absence, not a value another absence matches."""
-        cfg, launch = _fake_env(tmp_path, monkeypatch)
-        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
         assert _descriptor_hash(
             SweepConfig(sweep_id="c", dataset="not-a-dataset", output_root=tmp_path / "s")
         ) is None
-        # A manifest that recorded no hash must not be admitted by a call that
-        # could not compute one either.
-        assert _cached_run_mismatch(Path(result.seeds[0].winner_run), None, {}) == (
-            "this call could not resolve its own dataset descriptor",
-            None,
-        )
 
     def test_a_ledger_written_blind_survives_the_healthy_call(self):
         """A stale mount must not cost the refit twice — once now, once when it heals."""
@@ -595,11 +587,25 @@ class TestConfirmationResume:
             (cfg.sweep_dir / "confirmation.json").read_text(encoding="utf-8")
         )
         assert persisted["dataset_descriptor_hash"] is None
-        assert [
+        archived = [
             p
             for p in cfg.sweep_dir.iterdir()
             if p.name.startswith("confirmation_") and p.suffix == ".json"
         ]
+        assert archived
+
+        # The blink costs one refit, not two: the ledger it wrote is not
+        # archived again when the descriptor comes back.
+        monkeypatch.undo()
+        calls, counting = self._counting(launch)
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 0
+        assert result.confirmed
+        assert [
+            p
+            for p in cfg.sweep_dir.iterdir()
+            if p.name.startswith("confirmation_") and p.suffix == ".json"
+        ] == archived
 
     def test_reused_seed_rechecks_convergence(self, tmp_path, monkeypatch):
         cfg, launch = _fake_env(tmp_path, monkeypatch)
@@ -651,8 +657,12 @@ class TestManifestContract:
         written = _yaml.safe_load(config_path.read_text(encoding="utf-8"))
         config = PipelineConfig(**apply_yaml_overrides({}, written))
         recorded = experiment_config_payload(config)
-        # Not vacuous: the keys below are the ones the comparison turns on.
-        assert {"stages", "latent_process", "num_samples", "seed"} <= set(recorded)
+        # Not vacuous, and not only the knobs this arm happens to set: every
+        # knob a winner can differ on has to survive the round trip, or the
+        # presence floor would reject a real run forever. A knob whose value is
+        # None is the exception the floor already makes — the recorder omits it.
+        assert {k for k, v in default_arm().items() if v is not None} <= set(recorded)
+        assert {"stages", "num_samples", "seed"} <= set(recorded)
         assert ("dataset" in recorded) == (dataset is not None)
         run_dir = tmp_path / "outputs" / "sel_c_confirm_winner_seed42_x"
         save_run_manifest(
@@ -685,10 +695,18 @@ class TestManifestContract:
             run_dir,
         )
 
+        # With the floor engaged: every key that tells this fit from the other
+        # side of its pair, or from another seed or domain.
+        reference = _fit_config_payload(cfg, default_arm(), None, 42)
+        fit_config = _fit_config_payload(cfg, arm, None, 42)
+        discriminating = frozenset(
+            {"seed"}
+            | {k for k in set(reference) | set(fit_config) if reference.get(k) != fit_config.get(k)}
+            | ({"dataset"} if dataset is not None else set())
+        )
+        assert "latent_process" in discriminating
         assert (
-            _cached_run_mismatch(
-                run_dir, _descriptor_hash(cfg), _fit_config_payload(cfg, arm, None, 42)
-            )
+            _cached_run_mismatch(run_dir, _descriptor_hash(cfg), fit_config, discriminating)
             is None
         )
 

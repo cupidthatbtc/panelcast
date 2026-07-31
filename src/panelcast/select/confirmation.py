@@ -157,11 +157,23 @@ def _canonical_hash(payload: dict[str, Any]) -> str:
     ).hexdigest()
 
 
+def _as_recorded(value: Any) -> Any:
+    """``value`` as it comes back out of a JSON file.
+
+    Both maps this module compares against were written as JSON, where a tuple
+    is a list and a non-string dict key is a string. Round-tripping this side
+    the same way keeps a comparison from being decided by that rather than by
+    the values, at any nesting depth — otherwise a tuple-valued knob makes the
+    identity never match, refitting on every call.
+    """
+    return json.loads(json.dumps(value, default=str))
+
+
 def _cached_run_mismatch(
     run_dir: Path,
-    descriptor_hash: str | None,
+    descriptor_hash: str,
     fit_config: dict[str, Any],
-    discriminating: frozenset[str] = frozenset(),
+    discriminating: frozenset[str],
 ) -> tuple[str, str | None] | None:
     """Why this run's manifest is not the fit it stands for; None = it is.
 
@@ -185,11 +197,9 @@ def _cached_run_mismatch(
     or a manifest that records none of the keys telling the two runs apart
     passes with zero comparisons — removing a key would defeat the gate more
     cheaply than forging one. ``discriminating`` is the set that must be
-    *present*: the seed, the knobs the winner differs from the reference by,
-    and the dataset when one is set.
+    *present*: the seed, the keys the two payloads differ on, and the dataset
+    when one is set.
     """
-    if descriptor_hash is None:
-        return "this call could not resolve its own dataset descriptor", None
     try:
         manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -207,15 +217,18 @@ def _cached_run_mismatch(
     recorded = identity.get("config_payload")
     if not isinstance(recorded, dict):
         return "manifest records no config payload", None
-    missing = sorted(discriminating - set(recorded))
+    # A key whose value here is None has nothing to be recorded: the recorder
+    # omits None. What separates the two runs on such a key is the *other*
+    # side's value, which is recorded and compared below.
+    missing = sorted(
+        key
+        for key in discriminating
+        if key not in recorded and fit_config.get(key) is not None
+    )
     if missing:
         return "manifest does not record the key that identifies this fit", missing[0]
     for key, value in fit_config.items():
-        if key not in recorded:
-            continue
-        # The recorded value is JSON, so a tuple this call holds is a list there.
-        expected = list(value) if isinstance(value, tuple) else value
-        if recorded[key] != expected:
+        if key in recorded and recorded[key] != _as_recorded(value):
             return "the run was fit with another value", key
     return None
 
@@ -234,7 +247,7 @@ def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> lis
     return sorted(
         key
         for key, value in identity.items()
-        if recorded.get(key) != value
+        if recorded.get(key) != _as_recorded(value)
         and not (key == "dataset_descriptor_hash" and recorded.get(key) is None)
     )
 
@@ -250,10 +263,12 @@ def _reusable_prior_seeds(
 
     Any identity mismatch (knobs, z bar, sampler scale, seeds tuple, version,
     dataset, base config) archives the old ledger and starts fresh — evidence is
-    never mixed across protocols. Old-format files without the echo fields
-    mismatch by construction. A seed whose runs survive the identity file still
-    has both its run dirs checked against their own manifests, each against the
-    arm and seed it stands for.
+    never mixed across protocols, with the one exemption ``_identity_changes``
+    documents. Old-format files without the echo fields mismatch by
+    construction. A seed whose runs survive the identity file still has both
+    its run dirs checked against their own manifests, each against the arm and
+    seed it stands for; a call that cannot resolve its own descriptor hash has
+    nothing to check them against and reuses none of them.
     """
     if not out_path.exists():
         return {}
@@ -266,6 +281,11 @@ def _reusable_prior_seeds(
         archived = out_path.with_name(f"confirmation_{time.strftime('%Y%m%dT%H%M%S')}.json")
         out_path.replace(archived)
         log.warning("confirmation_protocol_changed", archived=str(archived), changed=changed)
+        return {}
+    if descriptor_hash is None:
+        # Once, rather than the same sentence twice per seed: no run can be
+        # tied to a domain this call could not name.
+        log.warning("confirmation_cache_unusable", reason="unresolved dataset descriptor")
         return {}
     reusable: dict[int, SeedResult] = {}
     for entry in payload.get("seeds", []):
@@ -462,17 +482,26 @@ def run_confirmation(
     # runs are checked against it, so the two cannot drift into a cache that
     # rejects every run it built.
     arms = {"reference": dict(base), "winner": {**base, **winner_knobs}}
-    # What a manifest has to record before it can be believed to be this fit
-    # rather than the other side of the pair, or another seed, or another domain.
-    discriminating = frozenset(
-        {"seed"}
-        | {k for k, v in arms["winner"].items() if arms["reference"].get(k) != v}
-        | ({"dataset"} if cfg.dataset is not None else set())
-    )
 
-    def fit_config(label: str, seed: int) -> dict[str, Any]:
+    def fit_config(label: str, seed: int | None = None) -> dict[str, Any]:
         """What the run behind ``label`` on ``seed`` must say it was fit with."""
         return _fit_config_payload(cfg, arms[label], sampler_overrides, seed)
+
+    # What a manifest has to record before it can be believed to be this fit
+    # rather than the other side of the pair, or another seed, or another
+    # domain. Diffed on the payloads rather than on the arms, because a knob a
+    # base option later overwrites is the same in both payloads and separates
+    # nothing — the arms would still call it a difference.
+    reference_payload, winner_payload = fit_config("reference"), fit_config("winner")
+    discriminating = frozenset(
+        {"seed"}
+        | {
+            key
+            for key in set(reference_payload) | set(winner_payload)
+            if reference_payload.get(key) != winner_payload.get(key)
+        }
+        | ({"dataset"} if cfg.dataset is not None else set())
+    )
 
     prior = _reusable_prior_seeds(
         out_path, identity, descriptor_hash, fit_config, discriminating
