@@ -559,6 +559,31 @@ class TestOrchestratorSkipVerification:
         raw.write_text("a,b\n1,2\n", encoding="utf-8")
         return tmp_path / "outputs"
 
+    def test_the_containment_root_follows_the_directory_not_the_manifest(self, workspace):
+        # The manifest is the document under verification, so it must not be
+        # able to choose which run it is checked against. Point its `run_id` at
+        # a sibling and the root still has to be where it was read from.
+        from panelcast.pipelines.orchestrator import PipelineOrchestrator
+
+        assert _run_pipeline(workspace, "runA", []) == 0
+        (workspace / "decoy").mkdir()
+        manifest_path = workspace / "runA" / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        payload["run_id"] = "decoy"
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+        seen: list[Path] = []
+        real = PipelineOrchestrator._output_verification_roots
+
+        def capture(self, previous_run):
+            seen.append(previous_run)
+            return real(self, previous_run)
+
+        with patch.object(PipelineOrchestrator, "_output_verification_roots", capture):
+            assert _run_pipeline(workspace, "runB", [], skip_existing=True) == 0
+
+        assert seen and all(p == workspace / "runA" for p in seen)
+
     def test_unchanged_shared_output_is_skipped(self, workspace):
         assert _run_pipeline(workspace, "runA", []) == 0
         executed: list[str] = []

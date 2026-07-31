@@ -103,6 +103,23 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     return path
 
 
+def _key_encoded_path(key: str) -> Path | None:
+    """The declared path a manifest key encodes, or None for a dynamic key.
+
+    A stage records its declared outputs as ``<stage>:<path.as_posix()>``, so
+    the key carries the path the stage said it would write and a recorded value
+    that disagrees with its own key is a redirect. Reading it from the key
+    means both callers can refuse that, not only the one holding stage objects.
+
+    Dynamic keys are ``<stage>:<name>`` — a run_fn result label, not a path —
+    and are left unbound, which is what makes containment the only thing behind
+    them. The separator is the discriminator: a declared output always has one,
+    since every artifact root is a directory.
+    """
+    _, _, suffix = key.partition(":")
+    return Path(suffix) if "/" in suffix else None
+
+
 def verify_output_records(
     outputs: Mapping[str, str] | None,
     output_hashes: Mapping[str, str] | None,
@@ -120,13 +137,18 @@ def verify_output_records(
     The key set is the union of ``outputs`` and ``output_hashes`` (filtered by
     ``prefix``): a key present on only one side proves nothing, so it is
     unverifiable rather than silently skipped by whichever map the caller
-    happened to iterate. ``declared`` binds a key to the path the stage says it
-    writes, so a manifest cannot redirect a static output at another file that
-    happens to hash correctly; keys outside it are dynamic outputs, whose
-    absence is unproven rather than corrupt. That binding is compared in
-    *recorded* coordinates, before ``reroot`` is applied, so a caller passing
-    both must give ``declared`` in the same pre-move spelling the manifest
-    uses rather than the moved run's — otherwise every key reads as unbound.
+    happened to iterate.
+
+    A recorded path is bound to the path its key encodes, so a manifest cannot
+    redirect a static output at another file that happens to hash correctly —
+    including one inside its own run directory, where containment has nothing
+    to say. ``declared`` lets a caller holding stage objects state that binding
+    directly, and is also what separates a *declared* output going missing
+    (disk contradicts the manifest) from a dynamic one (nothing said this run
+    still owned it). Both are compared in *recorded* coordinates, before
+    ``reroot`` is applied, so a caller passing ``declared`` and ``reroot``
+    together must give the pre-move spelling the manifest uses rather than the
+    moved run's — otherwise every key reads as unbound.
     """
     recorded = {k: v for k, v in (outputs or {}).items() if k.startswith(prefix)}
     hashes = {k: v for k, v in (output_hashes or {}).items() if k.startswith(prefix)}
@@ -142,9 +164,10 @@ def verify_output_records(
             yield OutputVerdict(key, UNVERIFIABLE, "hashed output has no recorded path")
             continue
         path = Path(path_str)
-        if key in declared:
+        bound = declared.get(key) or _key_encoded_path(key)
+        if bound is not None:
             try:
-                if path.resolve() != declared[key].resolve():
+                if path.resolve() != bound.resolve():
                     yield OutputVerdict(
                         key,
                         UNBOUND,

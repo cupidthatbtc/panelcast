@@ -1473,9 +1473,13 @@ a sibling run. Their one deliberate difference is parameterized rather
 than implied: `runs verify` re-roots a quarantined run's recorded paths onto
 `outputs/failed/<id>/`, while the skip path follows the active `latest` pointer
 and never looks under `failed/` — a quarantined run is not a source of truth
-for a new one. The stage caller also passes the declared output paths, which
-bind a key to the path the stage says it writes; `runs verify` has no stage
-objects and treats every key as dynamic, which only ever softens a verdict. Its
+for a new one. The declared-path binding is *not* a second difference: a
+manifest key encodes the path its stage declared, so both callers refuse a
+recorded value that disagrees with its own key — including a redirect within
+the run's own directory, where containment has nothing to say. What the stage
+caller adds by passing its declared paths is severity, not detection: a
+declared output going missing means disk contradicts the manifest, while a
+dynamic one going missing only means nothing said this run still owned it. Its
 containment roots are the run directory plus the `ArtifactPaths` roots — not
 the working tree, which would admit any file whose bytes happen to hash
 correctly, including another run's run-scoped copy of the same artifact. Under

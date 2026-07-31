@@ -217,6 +217,28 @@ class TestBothCallersAgree:
         assert fx.skip_accepts() is False
         assert fx.verify_accepts() is False
 
+    def test_a_redirect_inside_the_run_dir_is_refused_by_both(self, fx):
+        # Containment has nothing to say here — both files are in the run
+        # directory — so the binding is the only thing refusing it. The key
+        # carries the path the stage declared, which is in the manifest rather
+        # than in the caller, so `runs verify` can enforce it without stage
+        # objects instead of reporting a redirected static output clean.
+        decoy = fx.run_dir / "evaluation" / "decoy.json"
+        decoy.write_text(json.dumps({"mae": 9.9}), encoding="utf-8")
+        fx.outputs[fx.key] = str(decoy)
+        fx.output_hashes[fx.key] = sha256_path(decoy)
+
+        assert fx.skip_accepts() is False
+        assert fx.verify_accepts() is False
+
+    def test_a_dynamic_key_carries_no_binding_for_either(self, fx):
+        # The other half: a run_fn result label is not a path, so nothing binds
+        # it and containment is all there is — which is why the roots matter.
+        from panelcast.pipelines.output_integrity import _key_encoded_path
+
+        assert _key_encoded_path(f"{STAGE}:dataset_hash") is None
+        assert _key_encoded_path(fx.key) == Path(fx.artifact.as_posix())
+
     def test_an_escaping_path_is_refused_by_both(self, fx):
         outside = fx.tmp_path / "outside.json"
         outside.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
