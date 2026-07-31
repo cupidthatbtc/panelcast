@@ -708,8 +708,11 @@ a run whose base was renamed reports `UNBOUND` on intact artifacts.
 
 Output verification is the same primitive the incremental `--skip-existing`
 path uses (`pipelines/output_integrity.py`), so the per-key rules and the
-containment roots are one implementation. Two things still differ, for
-different reasons:
+containment roots are one implementation. The two are scoped differently — a
+stage checks only the keys carrying its own `<stage>:` prefix, `runs verify`
+checks the whole manifest — which divides *which* keys each is responsible for
+rather than what either accepts as proof. Two things differ in that second
+sense, for different reasons:
 
 - **Re-rooting.** `runs verify` resolves active and quarantined runs alike and
   cannot know which it has until it looks, so it maps a run-owned recorded

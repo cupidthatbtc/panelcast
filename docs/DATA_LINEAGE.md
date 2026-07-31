@@ -1456,9 +1456,16 @@ still hash to what the manifest recorded. Recorded paths are resolved inside
 the run roots first. A manifest with no output hashes (pre-0.9.0), a recorded
 output that is missing, unreadable, or modified, a key recorded on only one of
 `outputs`/`output_hashes`, and a declared output the manifest never recorded
-all block the skip and rerun the stage. Missing legacy
-hash evidence is logged as an informational upgrade path; an actual mismatch,
-missing artifact, substitution, or root escape is a warning. Verified hashes are
+all block the skip and rerun the stage.
+
+Severity is sorted by what is *known*, not by which way the check failed. A
+hash mismatch or a root escape is a warning: disk contradicts the manifest.
+An artifact that is missing or unreadable is a warning only when a declared
+path stands behind its key — for a dynamic key nothing said this run still
+owned that file, so its absence and its unreadability are equally unproven
+rather than corrupt. Anything with no evidence either way — a legacy manifest
+with no hashes, a key recorded on only one side — is informational, an upgrade
+path rather than an alarm. Verified hashes are
 carried into the new manifest so consecutive runs remain skippable. This check
 fully reads each candidate artifact (including directory trees), so
 `--skip-existing` trades additional startup I/O for corruption detection.
@@ -1469,7 +1476,11 @@ they accept as proof. Each names the run directory of the manifest it is
 reading, never the output base that contains every run: a key the manifest
 recorded but the stage does not declare has no path binding behind it, so
 containment is the only thing refusing a rewritten manifest that points it at
-a sibling run. Two things still differ, both parameterized rather than implied.
+a sibling run. Each caller also scopes itself: a stage drains only the keys
+carrying its own `<stage>:` prefix, while `runs verify` has no stage to be and
+drains the whole manifest — a division of which keys each is responsible for,
+not a difference in what either accepts as proof. Two things differ in the
+latter sense, both parameterized rather than implied.
 `runs verify` re-roots a *run-owned* recorded path onto the run's current
 directory, so a run quarantined under `outputs/failed/<id>/` still verifies,
 while the skip path follows the active `latest` pointer and never looks under
