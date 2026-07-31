@@ -267,6 +267,14 @@ def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> lis
     )
 
 
+def _holds_a_paired_seed(payload: dict[str, Any]) -> bool:
+    """Whether a stored ledger records a seed a healthy call could have reused."""
+    return any(
+        entry.get("reference_run") and entry.get("winner_run") and not entry.get("error")
+        for entry in payload.get("seeds", [])
+    )
+
+
 def _archive(out_path: Path, *, reason: str, changed: list[str] | None = None) -> None:
     """Move the prior ledger aside; evidence is never mixed across protocols.
 
@@ -311,19 +319,18 @@ def _reusable_prior_seeds(
         # Ahead of the identity comparison, which would otherwise report the
         # unresolved hash as a changed dataset — the one conclusion a stale
         # mount must not lead to. Said once, rather than once per run: no
-        # snapshot can be tied to a domain this call could not name. The ledger
-        # moves aside because the per-seed checkpoint is about to overwrite it,
-        # but only while there is something to preserve: a descriptor that is
-        # gone rather than briefly unreachable would otherwise leave one more
-        # copy of the same blind ledger behind every retry. "Nothing to
-        # preserve" is the same question the identity comparison answers — a
-        # ledger of another protocol is not a copy of what replaces it, whether
-        # or not it was also written blind.
-        # Minus the descriptor hash itself, which differs here because this
-        # call is blind — the reason already says that, and listing it would
-        # read as the changed dataset a stale mount must not be reported as.
+        # snapshot can be tied to a domain this call could not name.
+        log.warning("confirmation_cache_unusable", reason="unresolved dataset descriptor")
+        # The ledger moves aside because the per-seed checkpoint is about to
+        # overwrite it — but only while it holds something a healthy call would
+        # have reused. A descriptor that is *gone* also fails every fit, so its
+        # retries leave ledgers with no paired seed in them and stop piling up
+        # copies; one that merely could not be read leaves a complete verdict
+        # whose run dirs nothing else indexes. The changed keys come with the
+        # descriptor hash removed: it differs because this call is blind, the
+        # reason says so, and listing it would read as the changed dataset.
         changed = [k for k in _identity_changes(payload, identity) if k != _DESCRIPTOR_KEY]
-        if payload.get(_DESCRIPTOR_KEY) is not None or changed:
+        if changed or _holds_a_paired_seed(payload):
             _archive(
                 out_path, reason="unresolved dataset descriptor", changed=changed or None
             )

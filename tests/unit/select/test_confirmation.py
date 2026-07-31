@@ -744,12 +744,16 @@ class TestConfirmationResume:
             archived = _archives()
             assert archived
 
-            # A descriptor that is gone, not blinking: the retry refits, but it
-            # is replacing a ledger of its own protocol, so no copy piles up.
+            # A retry is still blind, still reuses nothing, and still says so —
+            # and the complete verdict it displaces is kept, since nothing else
+            # indexes those run dirs.
             calls, counting = self._counting(launch)
-            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+            with structlog.testing.capture_logs() as retry_logs:
+                run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
             assert calls["n"] == 2
-            assert _archives() == archived
+            assert [e["reason"] for e in retry_logs if e["event"] == "confirmation_cache_unusable"]
+            assert len(_archives()) == len(archived) + 1
+            archived = _archives()
 
         assert result.dataset_descriptor_hash is None
         persisted = json.loads(
@@ -775,6 +779,8 @@ class TestConfirmationResume:
         self, tmp_path, monkeypatch
     ):
         """Blind is not a licence to overwrite evidence from a different call."""
+        import structlog
+
         cfg, launch = _fake_env(tmp_path, monkeypatch)
 
         def unloadable(_ref):
@@ -791,8 +797,39 @@ class TestConfirmationResume:
             blind.setattr("panelcast.select.confirmation.load_descriptor", unloadable)
             run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
             first = archives()
-            run_confirmation({"latent_process": "gp"}, cfg, seeds=(42,), launch=launch)
+            with structlog.testing.capture_logs() as logs:
+                run_confirmation({"latent_process": "gp"}, cfg, seeds=(42,), launch=launch)
         assert len(archives()) == len(first) + 1
+        assert [
+            e["changed"] for e in logs if e["event"] == "confirmation_cache_archived"
+        ] == [["fit_config_hash", "winner_knobs"]]
+
+    def test_retries_on_a_dataset_that_is_gone_do_not_pile_up_copies(
+        self, tmp_path, monkeypatch
+    ):
+        """A ledger with no paired seed is not evidence worth a copy per retry."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+
+        def unloadable(_ref):
+            raise OSError("no such descriptor")
+
+        def failing(config_path, panelcast_bin, timeout_seconds=None):
+            return 1, "no such dataset"  # a descriptor that is gone fails the fits too
+
+        def archives():
+            return sorted(
+                p.name
+                for p in cfg.sweep_dir.iterdir()
+                if p.name.startswith("confirmation_") and p.suffix == ".json"
+            )
+
+        with monkeypatch.context() as blind:
+            blind.setattr("panelcast.select.confirmation.load_descriptor", unloadable)
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=failing)
+            after_first = archives()
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=failing)
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=failing)
+        assert archives() == after_first
 
     def test_reused_seed_rechecks_convergence(self, tmp_path, monkeypatch):
         cfg, launch = _fake_env(tmp_path, monkeypatch)
@@ -810,7 +847,7 @@ class TestManifestContract:
     """The gate reads a real manifest, not the shape the fixture happens to write."""
 
     @staticmethod
-    def _record_run(cfg, arm, seed, run_dir):
+    def _record_run(cfg, arm, seed, run_dir, sampler_overrides=None):
         """A run dir carrying the manifest the orchestrator would have written."""
         import yaml as _yaml
         from panelcast.config.descriptor import load_descriptor
@@ -828,7 +865,7 @@ class TestManifestContract:
         from panelcast.select.confirmation import _write_config
 
         config_path = cfg.sweep_dir / f"{run_dir.name}.yaml"
-        _write_config(cfg, arm, seed, config_path, run_id=run_dir.name)
+        _write_config(cfg, arm, seed, config_path, sampler_overrides, run_id=run_dir.name)
         # The layering a real fit goes through: the YAML select wrote, mapped
         # onto PipelineConfig, recorded by the orchestrator's own recorder.
         written = _yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -892,17 +929,22 @@ class TestManifestContract:
             extra_config={"max_events": 500},
         )
         cfg.sweep_dir.mkdir(parents=True)
+        # What the confirmation stage exists to apply, and what lands last in
+        # the payload: the one compared input production always supplies.
+        overrides = {"num_samples": 5000, "num_warmup": 5000}
         arms = {"reference": dict(default_arm()), "winner": {**default_arm(), **winner_knobs}}
         payloads = {
-            label: _fit_config_payload(cfg, arm, None, 42) for label, arm in arms.items()
+            label: _fit_config_payload(cfg, arm, overrides, 42) for label, arm in arms.items()
         }
         runs = {
             label: tmp_path / "outputs" / f"sel_c_confirm_{label}_seed42_x"
             for label in arms
         }
         recorded = {
-            label: self._record_run(cfg, arms[label], 42, runs[label]) for label in arms
+            label: self._record_run(cfg, arms[label], 42, runs[label], overrides)
+            for label in arms
         }
+        assert {k: recorded["winner"][k] for k in overrides} == overrides
 
         # Not vacuous, and not only the knobs this arm happens to set: every
         # knob a winner can differ on has to survive the round trip, or the
