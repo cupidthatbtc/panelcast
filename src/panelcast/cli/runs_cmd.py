@@ -180,7 +180,8 @@ def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
 
     for path_str, recorded in sorted((manifest.input_hashes or {}).items()):
         recorded_at = Path(path_str)
-        path = run_owned_path(recorded_at, run_dir) or recorded_at
+        owned = run_owned_path(recorded_at, run_dir)
+        path = recorded_at if owned is None else owned
         label = _input_label(path, path_str)
         if not path.exists():
             typer.echo(f"MISSING  input {label}")

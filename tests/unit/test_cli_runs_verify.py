@@ -711,8 +711,13 @@ class TestReproduceOnAQuarantinedRun:
 
         run_dir = (tmp_path / "outputs" / "run_a").resolve()
         paths = ArtifactPaths.for_run(run_dir)
-        stages = [*build_pipeline_stages(paths=paths), *build_optional_stages(paths=paths)]
-        written = {p.resolve() for stage in stages for p in stage.output_paths}
+        default = build_pipeline_stages(paths=paths)
+        stages = [*default, *build_optional_stages(paths=paths)]
+        # Written by a *default* stage, not by any stage: a reproduction runs
+        # the list its rebuilt config produces, so an input regenerated only by
+        # an optional stage would be skipped for every config that leaves that
+        # stage out.
+        written = {p.resolve() for stage in default for p in stage.output_paths}
 
         inside = {
             p.resolve()
@@ -724,18 +729,26 @@ class TestReproduceOnAQuarantinedRun:
         assert inside, "no stage reads from the run directory; the skip has nothing to bound"
         assert inside <= written
 
-        # ...and the assertion is about the set the gate walks, because the
-        # manifest's inputs come from `stage.input_paths` and nowhere else.
-        # Read from the source rather than from a run, since it is a property
-        # of the writers: anything else appending to `input_hashes` would be
-        # skipped by containment and not regenerated.
+        # ...and the assertion is about the set the gate walks, as far as the
+        # writers can say: `_capture_stage_input_hashes` iterates
+        # `stage.input_paths`, and nothing else in the orchestrator touches
+        # `input_hashes`. Read from source because it is a property of the
+        # code. It bounds what *this* version records, not what the commands
+        # read — both take `input_hashes` from the run's own `manifest.json`,
+        # so an older release's or a hand-edited entry inside the run directory
+        # is still skipped by containment and not regenerated. That is the
+        # lenient direction rather than the crash one, and it is the same
+        # weaker-provenance caveat the pre-0.9.0 config tier carries.
         capture = inspect.getsource(PipelineOrchestrator._capture_stage_input_hashes)
         assert "for path in stage.input_paths:" in capture
         orchestrator_src = Path(inspect.getfile(PipelineOrchestrator)).read_text(encoding="utf-8")
         writes = [
             line.strip()
             for line in orchestrator_src.splitlines()
-            if "input_hashes" in line and ("=" in line or ".update(" in line)
+            # `.setdefault(` as well as `=` and `.update(`: it is the one way
+            # of adding to a mapping that carries neither of the others.
+            if "input_hashes" in line
+            and any(t in line for t in ("=", ".update(", ".setdefault("))
         ]
         assert writes == [
             "input_hashes={},",
