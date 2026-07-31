@@ -703,10 +703,13 @@ class TestReproduceOnAQuarantinedRun:
         # a config or an operator-supplied file staged there would be skipped
         # by containment and not recreated, turning an early abort into the
         # mid-run crash the skip exists to avoid.
+        import inspect
+
         from panelcast.paths import ArtifactPaths
+        from panelcast.pipelines.orchestrator import PipelineOrchestrator
         from panelcast.pipelines.stages import build_optional_stages, build_pipeline_stages
 
-        run_dir = tmp_path / "outputs" / "run_a"
+        run_dir = (tmp_path / "outputs" / "run_a").resolve()
         paths = ArtifactPaths.for_run(run_dir)
         stages = [*build_pipeline_stages(paths=paths), *build_optional_stages(paths=paths)]
         written = {p.resolve() for stage in stages for p in stage.output_paths}
@@ -720,6 +723,24 @@ class TestReproduceOnAQuarantinedRun:
 
         assert inside, "no stage reads from the run directory; the skip has nothing to bound"
         assert inside <= written
+
+        # ...and the assertion is about the set the gate walks, because the
+        # manifest's inputs come from `stage.input_paths` and nowhere else.
+        # Read from the source rather than from a run, since it is a property
+        # of the writers: anything else appending to `input_hashes` would be
+        # skipped by containment and not regenerated.
+        capture = inspect.getsource(PipelineOrchestrator._capture_stage_input_hashes)
+        assert "for path in stage.input_paths:" in capture
+        orchestrator_src = Path(inspect.getfile(PipelineOrchestrator)).read_text(encoding="utf-8")
+        writes = [
+            line.strip()
+            for line in orchestrator_src.splitlines()
+            if "input_hashes" in line and ("=" in line or ".update(" in line)
+        ]
+        assert writes == [
+            "input_hashes={},",
+            "self.manifest.input_hashes.update(self._capture_stage_input_hashes(stage))",
+        ]
 
     def test_the_planted_flag_is_one_a_resolved_config_can_carry(self, tmp_path):
         # The other half of the True case's premise: `skip_existing` is a
@@ -751,7 +772,7 @@ class TestReproduceOnAQuarantinedRun:
         result = self._reproduce(tmp_path, monkeypatch, drift=True)
 
         assert result.exit_code == 1
-        assert "ABORT: raw input changed since the run" in result.output
+        assert "ABORT: recorded input changed since the run" in result.output
 
     def test_raw_data_that_vanished_still_aborts(self, tmp_path, monkeypatch):
         # The other half of the same gate, and the one whose message the
@@ -786,6 +807,8 @@ class TestReproduceOnAQuarantinedRun:
         payload["input_hashes"][str(recorded)] = sha256_path(product)
         manifest_path.write_text(json.dumps(payload), encoding="utf-8")
         _quarantine(base)
+        # Not captured like `_reproduce`'s stub: the gate stops before the
+        # launch here, so nothing about the call is under test.
         monkeypatch.setattr(orchestrator, "run_pipeline", lambda config, **kw: 0)
         product.write_text('{"run": "a later one"}', encoding="utf-8")
 
@@ -795,7 +818,7 @@ class TestReproduceOnAQuarantinedRun:
         # The run-owned entries sort first and are gone from their recorded
         # locations, so an abort on them would come first and say something
         # else — which is what makes this line evidence that they were skipped.
-        assert f"ABORT: raw input changed since the run: {recorded}" in result.output
+        assert f"ABORT: recorded input changed since the run: {recorded}" in result.output
 
     def test_a_symlinked_out_product_aborts_on_the_quarantine_alone(
         self, tmp_path, monkeypatch

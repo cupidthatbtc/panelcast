@@ -834,23 +834,23 @@ Re-execute a recorded run from its run directory alone, then compare. The config
 is rebuilt from the run's `resolved_config.yaml` (falling back to the manifest
 flags for pre-0.9.0 runs — weaker provenance). Two guards run before any compute:
 the dataset descriptor must still hash-match the recorded one, and the recorded
-raw inputs must be unchanged on disk, or it aborts (exit `1`). That second gate
-covers only the inputs the run does **not** own: a stage records earlier stages'
-run-scoped products as inputs, and a reproduction regenerates all of them, so
-gating on them would abandon a quarantined run to its recorded paths and would
-make a run unreproducible for the ordinary cleanup of pruning the directory it
-failed in. Ownership is containment, so this reaches a product the run
-directory holds and no other. Under the flat layout a stage's model inputs are
-recorded relative to the project root, and under a run-scoped layout whose
-`models/` is a symlink out they resolve outside the run — either way nothing
-distinguishes them from data the run did not produce, so they stay gated.
-Pruning `models/`, or simply running again and overwriting it, still aborts an
-earlier run's reproduction under either. The symlinked case has a third trigger
-needing no operator action at all: its recorded path is inside the run
-directory, so quarantine alone takes it away. The environment fingerprint
-frames the expectation up front — bit-exact outputs within a matching
-fingerprint, statistical reproduction otherwise — and the post-run comparison
-follows suit (exact output-hash match vs headline-metric deltas). A
+inputs it still checks must be unchanged on disk, or it aborts (exit `1`). That
+second gate covers only the inputs the run does **not** own: a stage records
+earlier stages' run-scoped products as inputs, and a reproduction regenerates
+all of them, so gating on them would abandon a quarantined run to its recorded
+paths and would make a run unreproducible for the ordinary cleanup of pruning
+the directory it failed in. Ownership is containment, so this reaches a product
+the run directory holds and no other. Under the flat layout a stage's model
+inputs are recorded relative to the project root, and under a run-scoped layout
+whose `models/` is a symlink out they resolve outside the run — either way
+nothing distinguishes them from data the run did not produce, so they stay
+gated. Pruning `models/`, or simply running again and overwriting it, still
+aborts an earlier run's reproduction under either. The symlinked case has a
+third trigger needing no operator action at all: its recorded path is inside
+the run directory, so quarantine alone takes it away. The environment
+fingerprint frames the expectation up front — bit-exact outputs within a
+matching fingerprint, statistical reproduction otherwise — and the post-run
+comparison follows suit (exact output-hash match vs headline-metric deltas). A
 reproduction always runs fresh: never resumes, never skips.
 
 ```bash

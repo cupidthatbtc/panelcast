@@ -161,10 +161,14 @@ def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
     manifest says would report every one of them missing on exactly the runs
     someone is debugging.
 
-    Inputs the run does not own — the shared data roots, external files — have
-    no such mapping and are checked where they were recorded. The problem is
-    keyed on the recorded spelling either way, since that is what the manifest
-    holds and what a second `runs verify` will name again.
+    Inputs the run does not own are checked where the manifest recorded them:
+    the shared data roots and external files, which the mapping never touches,
+    but equally a run-relative tail that climbs back out and a product behind a
+    symlink that leaves the run — for those two ``reroot_under`` does map and
+    containment declines the result, which is not the same thing as declining
+    to read them. The problem is keyed on the recorded spelling in every case,
+    since that is what the manifest holds and what a second `runs verify` will
+    name again.
 
     An unreadable input reports `MISSING`, which is the word the output pass
     uses for the same physical failure. It overstates on its own — the file is
@@ -475,7 +479,8 @@ def runs_reproduce(
     """Re-execute a recorded run from its run directory alone, then compare.
 
     Guards before any compute: the dataset descriptor must hash-match the
-    recorded one, and recorded raw inputs must be unchanged on disk. The
+    recorded one, and the recorded inputs the gate still checks — the ones the
+    run directory does not hold — must be unchanged on disk. The
     environment fingerprint frames the expectation up front — bit-exact within
     a matching fingerprint, statistical otherwise — and the post-run
     comparison follows suit (exact output hashes vs headline-metric deltas).
@@ -529,7 +534,7 @@ def runs_reproduce(
             typer.echo(f"ABORT: recorded input unreadable: {path_str} ({exc})")
             raise typer.Exit(code=1) from exc
         if actual != recorded:
-            typer.echo(f"ABORT: raw input changed since the run: {path_str}")
+            typer.echo(f"ABORT: recorded input changed since the run: {path_str}")
             raise typer.Exit(code=1)
 
     old_fingerprint = manifest.environment.fingerprint
