@@ -159,6 +159,10 @@ class TestBothCallersAgree:
 
         assert fx.skip_accepts_on_production_roots() is False
         assert fx.skip_accepts() is False
+        # ...and the class contract: same manifest in, same verdict out. This
+        # is the one production-roots refusal, so it is the one place the CLI
+        # side could have diverged unnoticed.
+        assert fx.verify_accepts() is False
 
     def test_a_modified_output_is_refused_by_both(self, fx):
         fx.artifact.write_text(json.dumps({"mae": 1.0}), encoding="utf-8")

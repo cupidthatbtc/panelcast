@@ -228,20 +228,27 @@ def verify_output_records(
             )
             continue
         path = contained
+        # Both ways of failing to read it are the same kind of fact, so they
+        # take the severity from the same place: with a declared path behind
+        # the key, disk is *contradicting* the manifest; without one, nothing
+        # says this run still owns the file, so it is unproven rather than
+        # corrupt — and that is as true of an unreadable file as a missing one.
         if not path.exists():
-            # Same reason either way; the difference is whether disk is
-            # *contradicting* the manifest. Without a declared path behind the
-            # key nothing says this run still owns it, so its absence is
-            # unproven rather than corrupt.
             yield OutputVerdict(
                 key, MISSING, "recorded output is missing", path, untrusted=key in declared
             )
             continue
         try:
             actual = sha256_path(path)
-        except OSError as exc:
+        except (OSError, ValueError, RuntimeError) as exc:
+            # The same triple the resolve sites catch: this is the call that
+            # walks directory trees, so it is the most exposed of the three.
             yield OutputVerdict(
-                key, MISSING, f"recorded output unreadable: {exc}", path, untrusted=True
+                key,
+                MISSING,
+                f"recorded output unreadable: {exc}",
+                path,
+                untrusted=key in declared,
             )
             continue
         if actual != expected:
