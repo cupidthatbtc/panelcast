@@ -219,8 +219,12 @@ class TestBothCallersAgree:
         assert fx.skip_accepts() is False
         assert fx.verify_accepts() is False
 
-    def test_a_run_that_recorded_nothing_is_accepted_by_both(self, fx):
+    def test_an_empty_manifest_is_accepted_by_both(self, fx):
         # ...and nothing recorded is not the same as recorded-and-unprovable.
+        # Named for the manifest, not the run: the fixture's artifact is still
+        # on disk, so this is a run whose records are gone, which is
+        # indistinguishable from one that produced nothing — see
+        # `test_an_erased_dynamic_record_is_invisible_to_both`.
         fx.outputs.clear()
         fx.output_hashes.clear()
         fx.stage.output_paths.clear()

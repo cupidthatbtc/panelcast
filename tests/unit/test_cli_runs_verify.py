@@ -103,8 +103,12 @@ class TestRunsVerify:
         assert "no hashes recorded" in result.output
         assert "UNVERIFIABLE evaluate:metrics (recorded output has no hash)" in result.output
 
-    def test_a_run_that_recorded_nothing_still_passes(self, tmp_path):
-        # Nothing recorded is not the same as recorded-and-unprovable.
+    def test_a_manifest_recording_nothing_still_passes(self, tmp_path):
+        # Nothing recorded is not the same as recorded-and-unprovable. Named
+        # for the manifest: the artifact is still on disk here, so this is
+        # also the shape of a manifest whose records were erased, which
+        # `runs verify` cannot tell apart — see the completeness note in
+        # docs/CLI.md.
         base = _write_run(tmp_path)
         manifest_path = base / "run_a" / "manifest.json"
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))

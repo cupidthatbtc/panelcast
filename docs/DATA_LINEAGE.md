@@ -1485,8 +1485,8 @@ containment is the only thing refusing a rewritten manifest that points it at
 a sibling run. Each caller also scopes itself: a stage drains only the keys
 carrying its own `<stage>:` prefix, while `runs verify` has no stage to be and
 drains the whole manifest — a division of which keys each is responsible for,
-not a difference in what either accepts as proof. Two things differ in the
-latter sense, both parameterized rather than implied.
+not a difference in what either accepts as proof. Three things differ in the
+latter sense, the first parameterized rather than implied.
 `runs verify` re-roots a *run-owned* recorded path onto the run's current
 directory, so a run quarantined under `outputs/failed/<id>/` still verifies,
 while the skip path follows the active `latest` pointer and never looks under
@@ -1505,7 +1505,16 @@ place `runs verify` is the weaker side: only the stage caller holds the paths a
 stage declares, so only it refuses a manifest that redirects a static output at
 another file inside the run's own directory, where containment has nothing to
 say. The manifest does not record which outputs were declared, so there is
-nothing for `runs verify` to read it from — tracked in #439. Its
+nothing for `runs verify` to read it from — tracked in #439, which makes that
+list *available* without making it *trustworthy*: a list inside the document
+can be shortened along with the records it describes, and the skip path is
+strong here precisely because its list comes from code instead. The third is
+the same asymmetry applied to completeness — only the skip path notices an
+output a stage declares that the manifest never recorded — and beneath it sits
+a blind spot they *share*: for a dynamic key nothing outside the document says
+it ever existed, so an erased record is indistinguishable from one never
+written, both callers accept, and the skip path is the side that then reuses
+artifacts on that basis. Its
 containment roots are the run directory plus the `ArtifactPaths` roots — not
 the working tree, which would admit any file whose bytes happen to hash
 correctly, including another run's run-scoped copy of the same artifact. Under

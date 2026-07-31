@@ -729,20 +729,25 @@ sense, for different reasons:
   objects. The skip path knows which paths a stage said it would write, so it
   refuses a manifest that redirects a static output at another file *inside
   the same run directory* — where containment has nothing to say. `runs
-  verify` cannot: the manifest does not record which outputs were declared.
-  Such a redirect is reported `OK` here (#439).
+  verify` cannot, and such a redirect is reported `OK` here.
 - **Completeness, for declared outputs.** For the same reason, the skip path
   notices a *declared* output the manifest never recorded and `runs verify`
-  cannot. #439 closes this half along with the binding.
+  cannot.
 
-Beyond those, both callers share a blind spot worth knowing about next to the
-exit code: neither can tell an incomplete manifest from a complete one for a
-*dynamic* output, because nothing outside the document says such a key ever
-existed — a record deleted from both `outputs` and `output_hashes` leaves
-nothing to check. So a green result proves the outputs the manifest *lists* are
-intact, not that it lists everything the run produced. #439 does not reach
-this; a `declared_outputs` field is part of the same document and can be
-shortened with it, so closing it needs evidence the manifest cannot carry.
+Both of those come from the same asymmetry: the skip path's list of declared
+paths comes from **code** — the stage objects it holds — while `runs verify`
+has only the document it is checking. Recording the list in the manifest (#439)
+makes it *available*, which closes both against a manifest that is merely
+incomplete; it does not make it *trustworthy*, because a list inside the
+document can be shortened along with the records it describes.
+
+That is also the shape of the blind spot both callers share, worth knowing
+next to the exit code: for a *dynamic* output nothing outside the document says
+the key ever existed, so a record deleted from both `outputs` and
+`output_hashes` leaves nothing to check and both callers accept. A green result
+proves the outputs the manifest *lists* are intact, not that it lists
+everything the run produced. Closing that against deliberate shortening needs
+evidence the manifest cannot carry — a signature over it, or the descriptor.
 
 ```bash
 panelcast runs verify [RUN_ID] [OPTIONS]
