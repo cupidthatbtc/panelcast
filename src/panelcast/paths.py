@@ -131,7 +131,9 @@ def path_is_within(candidate: Path, root: Path) -> bool:
     loop resolves to itself, so it stays contained and is not refused — the
     catch is about never raising, not about a uniform verdict on loops. It also
     covers ``RecursionError``, which a long enough symlink chain can raise from
-    the recursive join. Every caller treats False as "not contained", so
+    the recursive join on the same versions — 3.13 rewrote ``realpath`` with an
+    explicit stack, and the Windows implementation never recursed in Python at
+    all. Every caller treats False as "not contained", so
     widening can only make an answer more conservative, never more permissive —
     but a caller that renders False as "escaped" now says that for any
     resolution failure, not only a genuine escape. Select splits those apart in
