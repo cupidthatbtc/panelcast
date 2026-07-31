@@ -88,10 +88,13 @@ def _write_manifest(run_dir: Path, config_payload: dict, dataset) -> None:
                 "success": True,
                 "experiment_identity": {
                     "descriptor_hash": load_descriptor(dataset).descriptor_hash(),
-                    # run_id is execution mechanics, excluded from the recorded
-                    # identity exactly as the orchestrator excludes it.
+                    # run_id is execution mechanics and a None value is unset:
+                    # both are excluded exactly as the orchestrator's recorder
+                    # excludes them.
                     "config_payload": {
-                        k: v for k, v in config_payload.items() if k != "run_id"
+                        k: v
+                        for k, v in config_payload.items()
+                        if k != "run_id" and v is not None
                     },
                 },
             }
@@ -452,6 +455,11 @@ class TestConfirmationResume:
                 None,
             ),
             (
+                lambda m: m["experiment_identity"].pop("descriptor_hash"),
+                "manifest records no dataset descriptor hash",
+                None,
+            ),
+            (
                 lambda m: m["experiment_identity"].update(descriptor_hash="0" * 64),
                 "the run was fit on another dataset",
                 "dataset_descriptor_hash",
@@ -555,6 +563,17 @@ class TestConfirmationResume:
             SweepConfig(sweep_id="c", dataset="not-a-dataset", output_root=tmp_path / "s")
         ) is None
 
+    def test_a_seed_override_is_refused(self, tmp_path, monkeypatch):
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        with pytest.raises(ValueError, match="must not set seed"):
+            run_confirmation(
+                {"latent_process": "ar1"},
+                cfg,
+                seeds=(42,),
+                sampler_overrides={"seed": 7},
+                launch=launch,
+            )
+
     def test_a_ledger_written_blind_survives_the_healthy_call(self):
         """A stale mount must not cost the refit twice — once now, once when it heals."""
         healthy = {"promote_z": 2.0, "dataset_descriptor_hash": "abc"}
@@ -622,8 +641,9 @@ class TestConfirmationResume:
 class TestManifestContract:
     """The gate reads a real manifest, not the shape the fixture happens to write."""
 
-    @pytest.mark.parametrize("dataset", [None, "aero"])
-    def test_a_manifest_written_the_orchestrators_way_verifies(self, tmp_path, dataset):
+    @staticmethod
+    def _record_run(cfg, arm, seed, run_dir):
+        """A run dir carrying the manifest the orchestrator would have written."""
         import yaml as _yaml
         from panelcast.config.descriptor import load_descriptor
         from panelcast.config.pipeline_yaml import (
@@ -637,34 +657,15 @@ class TestManifestContract:
             save_run_manifest,
         )
         from panelcast.pipelines.orchestrator import PipelineConfig
-        from panelcast.select.confirmation import _fit_config_payload, _write_config
-        from panelcast.select.space import default_arm
+        from panelcast.select.confirmation import _write_config
 
-        cfg = SweepConfig(
-            sweep_id="c",
-            dataset=dataset,
-            output_root=tmp_path / "select",
-            num_samples=200,
-            num_warmup=100,
-        )
-        cfg.sweep_dir.mkdir(parents=True)
-        arm = {**default_arm(), "latent_process": "ar1"}
-        config_path = cfg.sweep_dir / "confirm_winner_seed42.yaml"
-        _write_config(cfg, arm, 42, config_path, run_id="sel_c_confirm_winner_seed42_x")
-
+        config_path = cfg.sweep_dir / f"{run_dir.name}.yaml"
+        _write_config(cfg, arm, seed, config_path, run_id=run_dir.name)
         # The layering a real fit goes through: the YAML select wrote, mapped
         # onto PipelineConfig, recorded by the orchestrator's own recorder.
         written = _yaml.safe_load(config_path.read_text(encoding="utf-8"))
         config = PipelineConfig(**apply_yaml_overrides({}, written))
         recorded = experiment_config_payload(config)
-        # Not vacuous, and not only the knobs this arm happens to set: every
-        # knob a winner can differ on has to survive the round trip, or the
-        # presence floor would reject a real run forever. A knob whose value is
-        # None is the exception the floor already makes — the recorder omits it.
-        assert {k for k, v in default_arm().items() if v is not None} <= set(recorded)
-        assert {"stages", "num_samples", "seed"} <= set(recorded)
-        assert ("dataset" in recorded) == (dataset is not None)
-        run_dir = tmp_path / "outputs" / "sel_c_confirm_winner_seed42_x"
         save_run_manifest(
             RunManifest(
                 run_id=config.run_id,
@@ -694,21 +695,63 @@ class TestManifestContract:
             ),
             run_dir,
         )
+        return recorded
 
-        # With the floor engaged: every key that tells this fit from the other
-        # side of its pair, or from another seed or domain.
-        reference = _fit_config_payload(cfg, default_arm(), None, 42)
-        fit_config = _fit_config_payload(cfg, arm, None, 42)
-        discriminating = frozenset(
-            {"seed"}
-            | {k for k in set(reference) | set(fit_config) if reference.get(k) != fit_config.get(k)}
-            | ({"dataset"} if dataset is not None else set())
+    @pytest.mark.parametrize("dataset", [None, "aero"])
+    # entity_group_pooling is the tri-state knob whose default is None: the
+    # recorder omits an unset value, so the reference's manifest cannot carry
+    # the key the winner differs on.
+    @pytest.mark.parametrize(
+        "winner_knobs", [{"latent_process": "ar1"}, {"entity_group_pooling": True}]
+    )
+    def test_a_manifest_written_the_orchestrators_way_verifies(
+        self, tmp_path, dataset, winner_knobs
+    ):
+        from panelcast.select.confirmation import _discriminating_keys, _fit_config_payload
+        from panelcast.select.space import default_arm
+
+        cfg = SweepConfig(
+            sweep_id="c",
+            dataset=dataset,
+            output_root=tmp_path / "select",
+            num_samples=200,
+            num_warmup=100,
         )
-        assert "latent_process" in discriminating
-        assert (
-            _cached_run_mismatch(run_dir, _descriptor_hash(cfg), fit_config, discriminating)
-            is None
+        cfg.sweep_dir.mkdir(parents=True)
+        arms = {"reference": dict(default_arm()), "winner": {**default_arm(), **winner_knobs}}
+        payloads = {
+            label: _fit_config_payload(cfg, arm, None, 42) for label, arm in arms.items()
+        }
+        runs = {
+            label: tmp_path / "outputs" / f"sel_c_confirm_{label}_seed42_x"
+            for label in arms
+        }
+        recorded = {
+            label: self._record_run(cfg, arms[label], 42, runs[label]) for label in arms
+        }
+
+        # Not vacuous, and not only the knobs this arm happens to set: every
+        # knob a winner can differ on has to survive the round trip, or the
+        # presence floor would reject a real run forever.
+        assert {k for k, v in default_arm().items() if v is not None} <= set(recorded["winner"])
+        assert {"stages", "num_samples", "seed"} <= set(recorded["winner"])
+        assert ("dataset" in recorded["winner"]) == (dataset is not None)
+
+        discriminating = _discriminating_keys(
+            payloads["reference"], payloads["winner"], cfg.dataset
         )
+        assert set(winner_knobs) <= discriminating
+        descriptor_hash = _descriptor_hash(cfg)
+        assert descriptor_hash is not None
+        for label, run_dir in runs.items():
+            assert (
+                _cached_run_mismatch(run_dir, descriptor_hash, payloads[label], discriminating)
+                is None
+            )
+        # The pair is not interchangeable: the other side's payload disagrees.
+        assert _cached_run_mismatch(
+            runs["reference"], descriptor_hash, payloads["winner"], discriminating
+        ) is not None
 
 
 class TestConfirmationAlwaysCold:

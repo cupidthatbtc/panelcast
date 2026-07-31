@@ -119,8 +119,9 @@ def _descriptor_hash(cfg: SweepConfig) -> str | None:
     the domain the fits actually run against. An unset dataset resolves the
     same default the fits will, so the identity holds the hash their manifests
     record either way. A descriptor that cannot be loaded is not a value: None
-    would equal the None a manifest that recorded no hash produces, so it
-    refuses reuse in ``_cached_run_mismatch`` rather than matching there.
+    would equal the None a manifest that recorded no hash produces, so
+    ``_reusable_prior_seeds`` refuses every cached run while it is unresolved
+    rather than letting the two absences match.
     """
     try:
         return load_descriptor(cfg.dataset).descriptor_hash()
@@ -143,20 +144,6 @@ def _base_config_payload(
     return _fit_config_payload(cfg, {}, sampler_overrides)
 
 
-def _canonical_hash(payload: dict[str, Any]) -> str:
-    """SHA-256 of a payload's canonical JSON.
-
-    ``default=str`` is a backstop rather than a coercion that matters:
-    ``_write_config`` hands the same payload to ``yaml.safe_dump``, which
-    refuses anything that is not a YAML scalar, so a value that can reach a fit
-    at all is already JSON-shaped. It only keeps the identity from raising
-    *before* that clearer failure.
-    """
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
-    ).hexdigest()
-
-
 def _as_recorded(value: Any) -> Any:
     """``value`` as it comes back out of a JSON file.
 
@@ -165,8 +152,39 @@ def _as_recorded(value: Any) -> Any:
     the same way keeps a comparison from being decided by that rather than by
     the values, at any nesting depth — otherwise a tuple-valued knob makes the
     identity never match, refitting on every call.
+
+    ``default=str`` is a backstop rather than a coercion that matters:
+    ``_write_config`` hands the same payload to ``yaml.safe_dump``, which
+    refuses anything that is not a YAML scalar, so a value that can reach a fit
+    at all is already JSON-shaped. It only keeps this from raising *before*
+    that clearer failure.
     """
     return json.loads(json.dumps(value, default=str))
+
+
+def _canonical_hash(payload: dict[str, Any]) -> str:
+    """SHA-256 of a payload's canonical JSON, normalized the way both gates are."""
+    return hashlib.sha256(
+        json.dumps(_as_recorded(payload), sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _discriminating_keys(
+    reference: dict[str, Any], winner: dict[str, Any], dataset: str | None
+) -> frozenset[str]:
+    """Keys a manifest must record before it can be believed to be one of these fits.
+
+    Not "this is the same experiment" — that is the identity file's job — but
+    "this run is *this* side of the pair, on *this* seed, in *this* domain".
+    Diffed on the payloads rather than on the arms behind them, because a knob
+    a later base assignment overwrites is the same in both payloads and
+    separates nothing.
+    """
+    return frozenset(
+        {"seed"}
+        | {k for k in set(reference) | set(winner) if reference.get(k) != winner.get(k)}
+        | ({"dataset"} if dataset is not None else set())
+    )
 
 
 def _cached_run_mismatch(
@@ -252,6 +270,13 @@ def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> lis
     )
 
 
+def _archive(out_path: Path, *, reason: str) -> None:
+    """Move the prior ledger aside; evidence is never mixed across protocols."""
+    archived = out_path.with_name(f"confirmation_{time.strftime('%Y%m%dT%H%M%S')}.json")
+    out_path.replace(archived)
+    log.warning("confirmation_cache_archived", archived=str(archived), reason=reason)
+
+
 def _reusable_prior_seeds(
     out_path: Path,
     identity: dict[str, Any],
@@ -276,16 +301,18 @@ def _reusable_prior_seeds(
         payload = json.loads(out_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
+    if descriptor_hash is None:
+        # Ahead of the identity comparison, which would otherwise report the
+        # unresolved hash as a changed dataset — the one conclusion a stale
+        # mount must not lead to. Said once, rather than once per run: no
+        # snapshot can be tied to a domain this call could not name. The ledger
+        # still moves aside, since the per-seed checkpoint is about to
+        # overwrite it with the refits.
+        _archive(out_path, reason="unresolved dataset descriptor")
+        return {}
     changed = _identity_changes(payload, identity)
     if changed:
-        archived = out_path.with_name(f"confirmation_{time.strftime('%Y%m%dT%H%M%S')}.json")
-        out_path.replace(archived)
-        log.warning("confirmation_protocol_changed", archived=str(archived), changed=changed)
-        return {}
-    if descriptor_hash is None:
-        # Once, rather than the same sentence twice per seed: no run can be
-        # tied to a domain this call could not name.
-        log.warning("confirmation_cache_unusable", reason="unresolved dataset descriptor")
+        _archive(out_path, reason=f"protocol changed: {', '.join(changed)}")
         return {}
     reusable: dict[int, SeedResult] = {}
     for entry in payload.get("seeds", []):
@@ -450,6 +477,12 @@ def run_confirmation(
     """
     from panelcast import __version__
 
+    if "seed" in (sampler_overrides or {}):
+        raise ValueError(
+            "sampler_overrides must not set seed: it wins over the per-seed value, so "
+            "every fit would run the same seed and the across-seed consistency the "
+            "verdict rests on would be one draw repeated."
+        )
     launch = launch or launch_arm
     panelcast_bin = cfg.panelcast_bin or _default_panelcast_bin()
     out_path = cfg.sweep_dir / "confirmation.json"
@@ -487,20 +520,8 @@ def run_confirmation(
         """What the run behind ``label`` on ``seed`` must say it was fit with."""
         return _fit_config_payload(cfg, arms[label], sampler_overrides, seed)
 
-    # What a manifest has to record before it can be believed to be this fit
-    # rather than the other side of the pair, or another seed, or another
-    # domain. Diffed on the payloads rather than on the arms, because a knob a
-    # base option later overwrites is the same in both payloads and separates
-    # nothing — the arms would still call it a difference.
-    reference_payload, winner_payload = fit_config("reference"), fit_config("winner")
-    discriminating = frozenset(
-        {"seed"}
-        | {
-            key
-            for key in set(reference_payload) | set(winner_payload)
-            if reference_payload.get(key) != winner_payload.get(key)
-        }
-        | ({"dataset"} if cfg.dataset is not None else set())
+    discriminating = _discriminating_keys(
+        fit_config("reference"), fit_config("winner"), cfg.dataset
     )
 
     prior = _reusable_prior_seeds(
