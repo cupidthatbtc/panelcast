@@ -385,6 +385,8 @@ def runs_diff(
 
 def _reproduce_config(run_dir: Path, manifest) -> tuple["object", str]:
     """(PipelineConfig, provenance tier) for re-executing a recorded run."""
+    from dataclasses import fields as dataclass_fields
+
     from panelcast.config.pipeline_yaml import load_resolved_config
     from panelcast.pipelines.orchestrator import PipelineConfig
 
@@ -393,14 +395,25 @@ def _reproduce_config(run_dir: Path, manifest) -> tuple["object", str]:
         return PipelineConfig(**load_resolved_config(resolved)), "resolved_config.yaml"
     # Pre-0.9.0 fallback: rebuild from the manifest's flags dict. Anything the
     # flags never recorded stays at the current default — weaker provenance.
-    config = PipelineConfig()
-    for key, value in (manifest.flags or {}).items():
-        if key in ("resume", "dataset_descriptor_hash") or not hasattr(config, key):
+    # Constructed rather than setattr-ed onto a live instance: bulk assignment
+    # skips __post_init__, so a recorded value reached the re-executed run
+    # neither validated nor normalized, while the resolved_config branch above
+    # has always been validated by construction.
+    # Types come off a constructed default, so a field __post_init__
+    # normalizes reads as the type it actually holds; the init filter keeps
+    # methods, dunders and non-init fields out of the constructor call.
+    template = PipelineConfig()
+    defaults = {
+        f.name: getattr(template, f.name) for f in dataclass_fields(PipelineConfig) if f.init
+    }
+    kwargs: dict = {}
+    for key, recorded in (manifest.flags or {}).items():
+        if key in ("resume", "dataset_descriptor_hash") or key not in defaults:
             continue
-        if isinstance(getattr(config, key), tuple) and isinstance(value, list):
-            value = tuple(value)
-        setattr(config, key, value)
-    return config, "manifest flags (pre-0.9.0 run; YAML-only gates may be lost)"
+        if isinstance(defaults[key], tuple) and isinstance(recorded, list):
+            recorded = tuple(recorded)
+        kwargs[key] = recorded
+    return PipelineConfig(**kwargs), "manifest flags (pre-0.9.0 run; YAML-only gates may be lost)"
 
 
 @runs_app.command("reproduce")

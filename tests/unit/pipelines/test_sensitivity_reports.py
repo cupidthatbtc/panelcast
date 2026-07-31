@@ -32,6 +32,7 @@ from panelcast.pipelines.sensitivity import (
     run_split_seed_sensitivity,
     run_threshold_sensitivity,
 )
+from panelcast.pipelines.training_summary import DEFAULT_LOGIT_OFFSET
 
 # ============================================================================
 # Shared fixtures (mirrors test_sensitivity_coverage.py)
@@ -450,6 +451,54 @@ class TestRunSplitSeedSensitivity:
         assert call["skew_tailweight"] == pytest.approx(1.7)
         assert call["discretize_observation"] is True
         assert call["fixed_n_exponent"] == pytest.approx(0.5)
+
+    def _predict_kwargs(self, monkeypatch, *, seeds=(42, 43), **summary_overrides) -> list[dict]:
+        """Kwargs from every predict_new_entity call for a summary with these keys.
+
+        Every seed, not just the first: a loop that threaded the offset
+        correctly on one iteration and wrongly afterwards would pass otherwise.
+        """
+        summary = {**self._make_summary(), **summary_overrides}
+        captured: list[dict] = []
+
+        def _capture(*a, **kw):
+            captured.append(kw)
+            return {"y": np.full((200, 1), 75.0)}
+
+        monkeypatch.setattr(
+            "panelcast.data.split.entity_disjoint_split",
+            lambda df, **kw: (df, df, pd.DataFrame({"Artist": ["A1"], "Score": [70.0]})),
+        )
+        monkeypatch.setattr("panelcast.models.bayes.predict.predict_new_entity", _capture)
+        monkeypatch.setattr(
+            "panelcast.pipelines.training_summary.ar_center_on_model_scale",
+            lambda s: 0.0,
+        )
+
+        run_split_seed_sensitivity(
+            self._make_source_df(), self._make_posterior_samples(), summary, seeds=seeds
+        )
+        assert captured
+        return captured
+
+    def test_threads_a_recorded_zero_logit_offset(self, monkeypatch):
+        """A recorded 0.0 is the plain logit, not a missing value (#427)."""
+        calls = self._predict_kwargs(monkeypatch, target_transform="offset_logit", logit_offset=0.0)
+        assert all(call["logit_offset"] == 0.0 for call in calls)
+        assert all(call["target_transform"] == "offset_logit" for call in calls)
+
+    def test_a_null_logit_offset_resolves_to_the_default(self, monkeypatch):
+        """The behavior this file's idiom actually got wrong: `.get(key, 0.5)`
+        returns None for a recorded null, and float(None) raised TypeError."""
+        calls = self._predict_kwargs(
+            monkeypatch, target_transform="offset_logit", logit_offset=None
+        )
+        assert all(call["logit_offset"] == DEFAULT_LOGIT_OFFSET for call in calls)
+
+    def test_a_null_target_transform_resolves_to_identity(self, monkeypatch):
+        """The old .get(..., "identity") idiom handed None to get_transform."""
+        calls = self._predict_kwargs(monkeypatch, target_transform=None)
+        assert all(call["target_transform"] == "identity" for call in calls)
 
 
 # ============================================================================

@@ -1040,15 +1040,19 @@ def run_split_seed_sensitivity(
 
     from panelcast.data.split import entity_disjoint_split
     from panelcast.models.bayes.predict import predict_new_entity
-    from panelcast.pipelines.training_summary import ar_center_on_model_scale
+    from panelcast.pipelines.training_summary import (
+        ar_center_on_model_scale,
+        logit_offset_from_summary,
+        target_transform_from_summary,
+    )
 
     ds = summary.get("dataset", {})
     entity_col = ds.get("entity_col", "Artist")
     target_col = ds.get("target_col", "User_Score")
     prefix = ds.get("model_prefix", "user")
     bounds = tuple(ds.get("target_bounds", (0.0, 100.0)))
-    target_transform = summary.get("target_transform", "identity")
-    logit_offset = float(summary.get("logit_offset", 0.5))
+    target_transform = target_transform_from_summary(summary)
+    logit_offset = logit_offset_from_summary(summary)
     n_features = int(np.asarray(posterior_samples[f"{prefix}_beta"]).shape[-1])
     n_reviews_median = float(summary.get("n_reviews_stats", {}).get("median", 100.0))
     global_mean = float(summary.get("global_mean_score", (bounds[0] + bounds[1]) / 2))
@@ -1197,7 +1201,11 @@ def run_sensitivity_suite(ctx) -> dict:
         load_training_data,
         locate_level_prior,
     )
-    from panelcast.pipelines.training_summary import load_training_summary
+    from panelcast.pipelines.training_summary import (
+        load_training_summary,
+        logit_offset_from_summary,
+        target_transform_from_summary,
+    )
 
     descriptor = ctx.descriptor
     prefix = descriptor.model_prefix
@@ -1216,8 +1224,8 @@ def run_sensitivity_suite(ctx) -> dict:
         min_albums_filter=getattr(ctx, "min_events_filter", 2),
         descriptor=descriptor,
         debut_prev_score_source=summary.get("debut_prev_score_source", "train_mean"),
-        target_transform=summary.get("target_transform", "identity"),
-        logit_offset=float(summary.get("logit_offset", 0.5)),
+        target_transform=target_transform_from_summary(summary),
+        logit_offset=logit_offset_from_summary(summary),
         ar_center=(summary.get("priors") or {}).get("ar_center", "global"),
         entity_group_pooling=entity_group_pooling,
         # Replay the fitted model's recorded imputation — never a re-fit
@@ -1269,8 +1277,8 @@ def run_sensitivity_suite(ctx) -> dict:
         return locate_level_prior(
             replace(config, entity_group_pooling=entity_group_pooling),
             ar_center_value=ar_center_value,
-            target_transform=summary.get("target_transform", "identity"),
-            logit_offset=float(summary.get("logit_offset", 0.5)),
+            target_transform=target_transform_from_summary(summary),
+            logit_offset=logit_offset_from_summary(summary),
             target_bounds=tuple(descriptor.target_bounds),
         )
 

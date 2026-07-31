@@ -25,6 +25,15 @@ from panelcast.config.gates import (
 )
 from panelcast.paths import validate_run_id
 
+# One-directional by design: training_summary owns the recorded-artifact
+# contract and must never import config, so the write and read paths can share
+# the offset domain without a cycle.
+from panelcast.pipelines.training_summary import (
+    DEFAULT_LOGIT_OFFSET,
+    coerce_logit_offset,
+    coerce_target_transform,
+)
+
 # Module-level reference for default config values (used to detect non-default flags)
 _DEFAULT_CONFIG: PipelineConfig | None = None
 
@@ -170,7 +179,7 @@ class PipelineConfig:
     # None resolves to the descriptor's target_transform, else "offset_logit"
     # (the default since 0.5.0 — promoted on the corrected #63 ledger).
     target_transform: str | None = None
-    logit_offset: float = 0.5
+    logit_offset: float = DEFAULT_LOGIT_OFFSET
     # AR(1) centering gate: "global" | "none" (legacy) | "artist_running"
     ar_center: ArCenter = "global"
     # Latent artist-effect process gate: "rw" (legacy) | "ar1" (experimental)
@@ -335,14 +344,11 @@ class PipelineConfig:
         for prob in self.calibration_intervals:
             if not 0.0 < prob < 1.0:
                 raise ValueError(f"Invalid calibration interval {prob}. Must be in (0, 1).")
-        if self.target_transform is not None and self.target_transform not in (
-            "identity",
-            "offset_logit",
-        ):
-            raise ValueError(
-                f"Invalid target_transform: '{self.target_transform}'. "
-                "Must be 'identity' or 'offset_logit'."
+        if self.target_transform is not None:
+            self.target_transform = coerce_target_transform(
+                self.target_transform, context="the run config"
             )
+        self._validate_logit_offset()
         self._validate_likelihood()
         if self.debut_prev_score_source not in ("train_mean", "dataset_stats"):
             raise ValueError(
@@ -528,6 +534,24 @@ class PipelineConfig:
                 f"auto_priors=True derives {', '.join(explicit)} from the "
                 "training data; remove the explicit value(s) or turn auto off."
             )
+
+    def _validate_logit_offset(self) -> None:
+        """Zero is a supported offset (the plain logit) and is propagated as
+        recorded; a negative or non-finite one puts the offset-logit argument
+        outside (0, 1) and yields NaN log-likelihoods instead of an error.
+
+        Normalizes rather than only checking: the coerced float is written
+        back, so a YAML string never reaches the summary as a string that the
+        read-side resolver would then reject after training has already run.
+        ``None`` is the unset sentinel on both ends -- ``logit_offset: null``
+        in a config resolves to the default here exactly as a recorded null
+        does in the resolver. The field stays annotated ``float`` because that
+        is what every reader gets: YAML reaches the dataclass through an
+        untyped mapping, and this is where that boundary is normalized."""
+        if self.logit_offset is None:
+            self.logit_offset = DEFAULT_LOGIT_OFFSET
+            return
+        self.logit_offset = coerce_logit_offset(self.logit_offset, context="the run config")
 
     def _validate_likelihood(self) -> None:
         """Validate the likelihood family and its structural constraints."""

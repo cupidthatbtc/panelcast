@@ -31,7 +31,11 @@ from panelcast.models.bayes.model import make_score_model
 from panelcast.models.bayes.predict import extract_posterior_samples, predict_new_entity
 from panelcast.models.bayes.priors import PriorConfig
 from panelcast.models.bayes.transforms import get_transform
-from panelcast.pipelines.training_summary import ar_center_on_model_scale
+from panelcast.pipelines.training_summary import (
+    ar_center_on_model_scale,
+    logit_offset_from_summary,
+    target_transform_from_summary,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -142,9 +146,9 @@ def predict_known_entity(
     target_bounds = tuple(ds.get("target_bounds", (0.0, 100.0)))
     ar_center = ar_center_on_model_scale(summary)
     transform = get_transform(
-        summary.get("target_transform") or "identity",
+        target_transform_from_summary(summary),
         target_bounds=target_bounds,
-        offset=float(summary.get("logit_offset") or 0.5),
+        offset=logit_offset_from_summary(summary),
     )
     scaler = summary["feature_scaler"]
     X_mean = np.array(scaler["mean"], dtype=np.float32)
@@ -214,8 +218,8 @@ def predict_new_entity_score(
     cols = descriptor_cols(summary)
     ds = summary.get("dataset") or {}
     target_bounds = tuple(ds.get("target_bounds", (0.0, 100.0)))
-    target_transform = summary.get("target_transform") or "identity"
-    logit_offset = float(summary.get("logit_offset") or 0.5)
+    target_transform = target_transform_from_summary(summary)
+    logit_offset = logit_offset_from_summary(summary)
     n_features = len(summary["feature_cols"])
     X_new = jnp.zeros(n_features)
 

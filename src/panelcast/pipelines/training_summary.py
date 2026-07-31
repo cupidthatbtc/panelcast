@@ -17,6 +17,7 @@ an explicit, versioned schema:
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -181,6 +182,117 @@ def upgrade_training_summary(raw: dict[str, Any], source: str = "<dict>") -> Tra
     return TrainingSummary(**raw)
 
 
+DEFAULT_LOGIT_OFFSET = 0.5
+
+# The pre-gate behavior a legacy summary with no recorded name means -- NOT
+# the shipped config default, which resolves to offset_logit. Named apart from
+# DEFAULT_LOGIT_OFFSET (which is the config default) so the two cannot be used
+# interchangeably.
+LEGACY_TARGET_TRANSFORM = "identity"
+TARGET_TRANSFORMS = ("identity", "offset_logit")
+
+
+def coerce_logit_offset(value: Any, *, context: str) -> float:
+    """Validate one logit_offset and normalize it to a plain float.
+
+    Shared by config validation and the summary resolver so the write path and
+    the read path accept exactly the same domain: anything float-able except
+    ``bool``, finite and non-negative. Zero is legal -- the plain logit, valid
+    when observations sit strictly inside the bounds. Duck-typing through
+    ``float`` also accepts numpy scalars, which an in-process summary can carry
+    -- unwrapped first so a ``np.bool_`` is rejected like a ``bool`` instead of
+    resolving to an offset of 1.0.
+
+    Deliberately unbounded above: a huge offset flattens the target toward the
+    middle of the bounds rather than leaving the transform's domain, so it is a
+    modeling choice to be judged by the fit, not a malformed value.
+    """
+    try:
+        scalar = value.item() if hasattr(value, "item") and not isinstance(value, str) else value
+        if isinstance(scalar, bool):
+            raise TypeError
+        offset = float(scalar)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"Invalid logit_offset in {context}: {value!r}. Must be a number."
+        ) from None
+    if not math.isfinite(offset) or offset < 0.0:
+        raise ValueError(f"Invalid logit_offset in {context}: {offset}. Must be finite and >= 0.")
+    return offset
+
+
+def coerce_target_transform(value: Any, *, context: str) -> str:
+    """Validate a configured target_transform against the shipped names.
+
+    The config side is deliberately narrower than the read side (see
+    :func:`target_transform_from_summary`, which defers name checking to the
+    live registry): a plugin transform is not registered until the model
+    package imports, so a registry check at config-parse time would pass
+    vacuously and fail later anyway. Widening the *configurable* set to the
+    registry is the plugin work (#172), not a property of this contract.
+    Both sides strip and return the bare name, so a padded one cannot be
+    accepted by one end and rejected by the other.
+    """
+    name = value.strip() if isinstance(value, str) else value
+    if name not in TARGET_TRANSFORMS:
+        raise ValueError(
+            f"Invalid target_transform in {context}: {value!r}. "
+            f"Must be one of {', '.join(repr(t) for t in TARGET_TRANSFORMS)}."
+        )
+    return str(name)
+
+
+def logit_offset_from_summary(summary: dict[str, Any]) -> float:
+    """Offset-logit continuity offset the model was actually fit under.
+
+    Only a missing key or an explicit ``null`` (legacy / pre-gate summaries)
+    falls back to :data:`DEFAULT_LOGIT_OFFSET`. A recorded ``0.0`` is a real
+    configuration and is propagated as zero, so evaluation, prediction and
+    rollout apply the same forward transform, inverse and Jacobian the fit used.
+
+    An out-of-range recorded offset is rejected here rather than downstream:
+    every summary written before the config-side guard existed is unvalidated,
+    and a negative or non-finite offset reaches the offset-logit map as a
+    silent NaN log-likelihood instead of an error.
+    """
+    value = summary.get("logit_offset")
+    if value is None:
+        return DEFAULT_LOGIT_OFFSET
+    return coerce_logit_offset(
+        value, context="the training summary (re-run the train stage to rewrite it)"
+    )
+
+
+def target_transform_from_summary(summary: dict[str, Any]) -> str:
+    """Target-transform name the model was actually fit under.
+
+    Same null-versus-default confusion as the offset: the field is declared
+    ``str | None`` and serializes as ``null`` on legacy summaries, so
+    ``.get("target_transform", "identity")`` hands ``None`` to
+    ``get_transform``, while ``.get(...) or "identity"`` gets the null right and
+    the empty string wrong. One resolver, so neither idiom decides it.
+
+    ``identity`` is the right fallback because the write path records a
+    RESOLVED name: ``resolve_model_facts`` fills a null config value from the
+    descriptor (else ``offset_logit``) before the stage context exists, so a
+    null in a summary means the summary predates the transform gate, when
+    identity was the only behavior. Only a null gets that fallback: an empty
+    string is a recorded value, and rewriting it to a default is the same shape
+    of bug as substituting a zero offset. Names themselves are checked by
+    ``get_transform`` against the live registry, which stays extensible and
+    already raises with the registered set.
+    """
+    value = summary.get("target_transform")
+    if value is None:
+        return LEGACY_TARGET_TRANSFORM
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            "Invalid target_transform in the training summary "
+            f"(re-run the train stage to rewrite it): {value!r}. Must be a transform name."
+        )
+    return value.strip()
+
+
 def ar_center_on_model_scale(summary: dict[str, Any]) -> float:
     """Model-scale AR(1) centering value recorded in a training summary.
 
@@ -201,8 +313,8 @@ def ar_center_on_model_scale(summary: dict[str, Any]) -> float:
 
     block = summary.get("dataset") or {}
     transform = get_transform(
-        summary.get("target_transform") or "identity",
+        target_transform_from_summary(summary),
         target_bounds=tuple(block.get("target_bounds", (0.0, 100.0))),
-        offset=float(summary.get("logit_offset") or 0.5),
+        offset=logit_offset_from_summary(summary),
     )
     return float(transform.forward(float(value)))
