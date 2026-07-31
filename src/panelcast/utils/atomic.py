@@ -31,6 +31,7 @@ Four consequences of committing by rename, all deliberate:
 
 from __future__ import annotations
 
+import logging
 import os
 import stat
 import time
@@ -40,11 +41,12 @@ from pathlib import Path
 from typing import BinaryIO
 from uuid import uuid4
 
-import structlog
-
 __all__ = ["TMP_MARKER", "atomic_write", "atomic_write_text", "fsync_dir"]
 
-log = structlog.get_logger()
+# Stdlib logging, matching the checkpoint store rather than the pipeline: this
+# module is reachable as a library, without the CLI having configured
+# anything, and an unconfigured structlog prints unfiltered to stdout.
+logger = logging.getLogger(__name__)
 
 # In the temporary's name so a killed writer's leftovers are identifiable, and
 # so two writers racing on one target cannot end up sharing a scratch file.
@@ -162,22 +164,35 @@ def _commit(tmp: Path, path: Path) -> None:
     machine rather than a one-off, and the checkpoint store commits once per
     sampling block: a fit that pays the backoff on every block is a fit that
     got mysteriously slower. Silently slow is worse to diagnose than loudly
-    failed.
+    failed — and the outcome of the last attempt is logged, not just the fact
+    that it was reached, so a write that recovered and one that did not do not
+    read the same.
     """
     for attempt, delay in enumerate(_COMMIT_RETRY_DELAYS, start=1):
         try:
             os.replace(tmp, path)
             return
         except PermissionError:
-            log.debug("atomic_commit_denied", path=str(path), attempt=attempt)
+            logger.debug("Rename of %s denied (attempt %d); retrying", path, attempt)
             time.sleep(delay)
-    log.warning(
-        "atomic_commit_still_denied",
-        path=str(path),
-        attempts=len(_COMMIT_RETRY_DELAYS),
-        message="something is holding the destination open; renaming one last time",
+    try:
+        os.replace(tmp, path)
+    except PermissionError:
+        # Both causes, because the retry is deliberately not platform-gated:
+        # naming only the Windows one sends a Linux operator hunting for a
+        # process that does not exist.
+        logger.warning(
+            "Rename of %s still denied after %d retries: another process is holding it "
+            "open, or this directory does not permit the rename",
+            path,
+            len(_COMMIT_RETRY_DELAYS),
+        )
+        raise
+    logger.warning(
+        "Rename of %s succeeded only on the final retry, after %.2fs of waiting",
+        path,
+        sum(_COMMIT_RETRY_DELAYS),
     )
-    os.replace(tmp, path)
 
 
 @contextmanager

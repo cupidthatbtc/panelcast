@@ -115,13 +115,17 @@ def _deny_replace(monkeypatch, target: Path, until: int | None) -> dict[str, int
     real = os.replace
     attempts = {"n": 0}
 
-    def busy(src, dst):
-        if Path(dst) != target:
-            return real(src, dst)
+    def busy(*args, **kwargs):
+        try:
+            mine = Path(args[1]) == target
+        except (IndexError, TypeError):
+            mine = False  # bytes paths, dir-fd keywords: not a shape we judge
+        if not mine:
+            return real(*args, **kwargs)
         attempts["n"] += 1
         if until is None or attempts["n"] < until:
             raise PermissionError("the file is in use by another process")
-        return real(src, dst)
+        return real(*args, **kwargs)
 
     monkeypatch.setattr(atomic_module.os, "replace", busy)
     return attempts
@@ -300,6 +304,20 @@ class TestAtomicWrite:
         assert attempts["n"] == 3
         assert target.read_text(encoding="utf-8") == "{}"
 
+    def test_a_holder_that_lets_go_on_the_last_attempt_still_commits(
+        self, tmp_path: Path, monkeypatch
+    ):
+        target = tmp_path / "manifest.json"
+        attempts = _deny_replace(
+            monkeypatch, target, until=len(atomic_module._COMMIT_RETRY_DELAYS) + 1
+        )
+        _no_backoff(monkeypatch)
+
+        atomic_write_text(target, "{}")
+
+        assert attempts["n"] == len(atomic_module._COMMIT_RETRY_DELAYS) + 1
+        assert target.read_text(encoding="utf-8") == "{}"
+
     def test_a_holder_that_never_lets_go_still_raises(self, tmp_path: Path, monkeypatch):
         target = tmp_path / "manifest.json"
         attempts = _deny_replace(monkeypatch, target, until=None)
@@ -440,6 +458,14 @@ class TestManifestWritesAreAtomic:
             save_run_manifest(manifest, tmp_path)
 
         assert load_run_manifest(tmp_path / "manifest.json").run_id == manifest.run_id
+
+        # Serializing before anything on disk is touched is the property, not
+        # just that the old file survived: a run directory that did not exist
+        # must not exist afterwards either.
+        fresh = tmp_path / "unborn-run"
+        with pytest.raises(ValueError):
+            save_run_manifest(manifest, fresh)
+        assert not fresh.exists()
 
     def test_a_completed_write_replaces_the_manifest_whole(self, tmp_path: Path):
         manifest = _manifest()
