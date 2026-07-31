@@ -9,7 +9,7 @@ over it. A reader sees the previous file or the new one, never a partial one.
 This lives here, rather than beside any one caller, because the alternative is
 each caller re-deriving it and getting a different subset right (#424).
 
-Three consequences of committing by rename, all deliberate:
+Four consequences of committing by rename, all deliberate:
 
 - The target gets a new inode on every write. Anything holding the *file*
   rather than the path — a hard link, a file-granular bind mount, ``tail -f``
@@ -35,7 +35,7 @@ import os
 import stat
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import BinaryIO
 from uuid import uuid4
@@ -114,19 +114,25 @@ def _open_temp(tmp: Path, mode: int | None) -> BinaryIO:
     fchmod = getattr(os, "fchmod", None)  # POSIX only; modes are advisory on Windows
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     fd = os.open(tmp, flags, 0o666 if mode is None else mode)
-    if mode is not None and fchmod is not None:
-        try:
-            fchmod(fd, mode)
-        except OSError:
-            pass
+    ours = True
     try:
+        if mode is not None and fchmod is not None:
+            try:
+                fchmod(fd, mode)
+            except OSError:
+                pass
+        # From here the descriptor belongs to ``fdopen``, which closes it on
+        # its own error path. Closing it again could land on one the runtime
+        # has since handed to something else.
+        ours = False
         return os.fdopen(fd, "wb")
     except BaseException:
-        # ``fdopen`` closes the descriptor itself when it fails, so there is
-        # nothing here to close: doing it anyway could land on a descriptor
-        # the runtime has already handed to something else. Only the file it
-        # created is ours to take back.
-        tmp.unlink(missing_ok=True)
+        if ours:
+            with suppress(OSError):
+                os.close(fd)
+        with suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        # Neither cleanup may stand in front of the failure that got us here.
         raise
 
 

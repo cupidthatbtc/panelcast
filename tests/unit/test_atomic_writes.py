@@ -78,6 +78,16 @@ def _fail_the_commit(monkeypatch) -> None:
     monkeypatch.setattr(atomic_module, "atomic_write", guarded)
 
 
+def _no_backoff(monkeypatch) -> None:
+    """Drop the commit retry delays without patching the shared `time` module.
+
+    `_commit` reads the tuple from module globals on every call, so this is a
+    module-local seam; replacing `time.sleep` would slow or break anything
+    else in the process that sleeps during the test.
+    """
+    monkeypatch.setattr(atomic_module, "_COMMIT_RETRY_DELAYS", (0.0, 0.0, 0.0, 0.0))
+
+
 def _temps(directory: Path) -> list[Path]:
     return sorted(p for p in directory.iterdir() if TMP_MARKER in p.name)
 
@@ -230,7 +240,7 @@ class TestAtomicWrite:
         self, tmp_path: Path, monkeypatch
     ):
         # Windows denies the rename while another process has the target open.
-        # Simulated here because POSIX has no equivalent to reproduce.
+        # Simulated, because POSIX has no equivalent to reproduce.
         real = os.replace
         attempts = {"n": 0}
 
@@ -240,25 +250,46 @@ class TestAtomicWrite:
                 raise PermissionError("the file is in use by another process")
             real(src, dst)
 
+        _no_backoff(monkeypatch)
         monkeypatch.setattr(atomic_module.os, "replace", busy)
-        monkeypatch.setattr(atomic_module.time, "sleep", lambda _: None)
 
         atomic_write_text(tmp_path / "manifest.json", "{}")
 
-        assert attempts["n"] == 3
+        # `>=`, not `==`: patching the shared `os` also counts any rename
+        # something else in-process makes inside the window — pytest's
+        # assertion rewriter commits bytecode this way.
+        assert attempts["n"] >= 3
         assert (tmp_path / "manifest.json").read_text(encoding="utf-8") == "{}"
 
     def test_a_holder_that_never_lets_go_still_raises(self, tmp_path: Path, monkeypatch):
         def busy(_src, _dst):
             raise PermissionError("the file is in use by another process")
 
+        _no_backoff(monkeypatch)
         monkeypatch.setattr(atomic_module.os, "replace", busy)
-        monkeypatch.setattr(atomic_module.time, "sleep", lambda _: None)
 
         with pytest.raises(PermissionError):
             atomic_write_text(tmp_path / "manifest.json", "{}")
 
         assert not _temps(tmp_path)
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_an_interrupt_while_setting_the_mode_leaves_nothing_behind(
+        self, tmp_path: Path, monkeypatch
+    ):
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+
+        def interrupt(_fd, _mode):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(os, "fchmod", interrupt)
+
+        with pytest.raises(KeyboardInterrupt):
+            atomic_write_text(target, '{"rewritten": true}')
+
+        assert target.read_text(encoding="utf-8") == "{}"
+        assert [p.name for p in tmp_path.iterdir()] == ["manifest.json"]
 
     def test_a_name_collision_never_deletes_the_other_writers_temporary(
         self, tmp_path: Path, monkeypatch
