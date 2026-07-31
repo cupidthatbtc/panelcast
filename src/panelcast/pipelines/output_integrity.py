@@ -218,21 +218,24 @@ def run_owned_path(path: Path, run_dir: Path) -> Path | None:
     Ownership is decided on the *resolved* location, so it also declines an
     artifact reached through a symlink inside the run directory that leaves it
     — a run whose ``models/`` points at shared storage, say. That is the bound
-    on purpose, not an oversight about the recorded tail: it is the same bound
-    ``verify_output_records`` applies to a path in the same place.
+    on purpose, not an oversight about the recorded tail, and what it costs is
+    the re-rooting rather than the read: an unowned path is still checked where
+    the manifest recorded it, so an active run verifies a symlinked-out product
+    through the link, while quarantine leaves the recorded location gone and
+    the input reads ``MISSING``.
 
-    Be exact about what that costs, since unowned does not mean unread. An
-    unowned path is checked where the manifest recorded it, so on an active run
-    a symlinked-out product still verifies through the link — the same file the
-    output side refuses, which is an asymmetry in the *consequence* even though
-    ownership is symmetric. What is given up is the re-rooting: quarantine that
-    run and the recorded location is gone, so the input reads ``MISSING`` and
-    the reproduce gate treats the product as external. That is #420's own
-    failure surviving for one layout, and what makes the trade worth taking is
-    that such a run already fails `runs verify` on its *outputs* under the same
-    directory, which are ``UNBOUND`` — so the price is paid on runs that were
-    not going to verify anyway, and it buys the two callers never disagreeing
-    about which paths a run owns.
+    Be exact about how that lines up with the output side, because the two
+    contain against different sets. This asks only about ``run_dir`` — that is
+    what "the run holds it" means — while ``verify_output_records`` is handed
+    the artifact roots as well. So for a target outside every root the two
+    agree, the run's outputs there are ``UNBOUND``, and the price is paid on a
+    run that was not going to verify anyway. For a target *inside* an artifact
+    root — ``models/`` symlinked at the project-level ``models/``, which is a
+    reasonable place to keep large artifacts — they do not: the output
+    verifies and the quarantined input reads ``MISSING`` on the same file. That
+    is the real cost of deciding ownership on the run directory alone, and the
+    alternative buys agreement by making a run "own" whatever the shared roots
+    hold, which is the substitution containment exists to refuse.
 
     Not folded into ``reroot_under`` itself, because for an *output* an
     escaping tail is worth reporting rather than quietly declining: the

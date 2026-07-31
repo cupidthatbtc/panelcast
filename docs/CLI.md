@@ -704,10 +704,13 @@ shared data roots and external files, but also a path whose recorded tail
 climbs back out of the run directory, and one reached through a symlink that
 leaves it. That last case is the mapping's cost — a run whose `models/` points
 at shared storage verifies its inputs through the link while it is active, and
-after quarantine reads `MISSING`, on a run whose outputs are already `UNBOUND`
-for the same reason. Each line names the recorded spelling, preceded by the
-location actually checked when the artifact moved — or only that location,
-when the two cannot be compared at all.
+after quarantine reads `MISSING`. Ownership asks about the run directory alone,
+while output verification also accepts the artifact roots, so a symlink target
+outside every root is `UNBOUND` as an output too and nothing is lost, while a
+target inside one verifies as an output and reads `MISSING` as a quarantined
+input. Each line names the recorded spelling, preceded by the location actually
+checked when the artifact moved — or only that location, when the two cannot be
+compared at all.
 
 **Run it from the project root.** A flat-layout run records its data, model and
 report artifacts as paths relative to the project root, so `runs verify`
@@ -840,9 +843,9 @@ run-scoped layout. Under the flat layout a stage's model inputs are recorded
 relative to the project root, where nothing distinguishes them from data the
 run did not produce — so they are still gated, and pruning `models/`, or simply
 running again and overwriting it, still aborts an earlier run's reproduction.
-The environment fingerprint frames the expectation up
-front — bit-exact outputs within a matching fingerprint, statistical
-reproduction otherwise — and the post-run comparison follows suit (exact
+The environment fingerprint frames the expectation up front — bit-exact outputs
+within a matching fingerprint, statistical reproduction otherwise — and the
+post-run comparison follows suit (exact
 output-hash match vs headline-metric deltas). A reproduction always runs fresh:
 never resumes, never skips.
 

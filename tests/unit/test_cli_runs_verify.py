@@ -486,10 +486,10 @@ class TestWhatUnownedStillReads:
         assert f"OK       input {recorded}" in result.output
         assert "recorded as" not in result.output
 
-    def _symlinked_product_run(self, tmp_path):
+    def _symlinked_product_run(self, tmp_path, target: str = "shared"):
         """A run whose `models/` points outside it, recorded as input and output."""
         run_dir = _write_run(tmp_path) / "run_a"
-        shared = tmp_path / "shared"
+        shared = tmp_path / target
         shared.mkdir()
         product = shared / "manifest.json"
         product.write_text("{}", encoding="utf-8")
@@ -544,6 +544,27 @@ class TestWhatUnownedStillReads:
 
         assert result.exit_code == 1
         assert f"MISSING  input {recorded}" in result.output
+
+    def test_a_symlink_into_an_artifact_root_is_where_the_two_sides_part(
+        self, tmp_path, monkeypatch
+    ):
+        # The other target, and the one the parity argument does not cover.
+        # Ownership asks about the run directory alone; output verification
+        # also accepts the artifact roots, so a link into the project-level
+        # `models/` verifies as an output while the quarantined input reads
+        # MISSING — on the same file, on a run that otherwise passes. Asserted
+        # rather than argued away, since the case the other tests pick (a
+        # target outside every root) is the one where the sides agree.
+        monkeypatch.chdir(tmp_path)
+        run_dir, recorded = self._symlinked_product_run(tmp_path, target="models")
+        base = run_dir.parent
+        _quarantine(base)
+
+        result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
+
+        assert "OK           train:models" in result.output
+        assert f"MISSING  input {recorded}" in result.output
+        assert result.exit_code == 1
 
     def test_an_escaping_recorded_input_is_checked_where_it_was_recorded(self, tmp_path):
         # What unowned means, stated so the guard is not read as a refusal to

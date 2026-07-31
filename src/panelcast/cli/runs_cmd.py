@@ -165,6 +165,11 @@ def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
     no such mapping and are checked where they were recorded. The problem is
     keyed on the recorded spelling either way, since that is what the manifest
     holds and what a second `runs verify` will name again.
+
+    An unreadable input reports `MISSING`, which is the word the output pass
+    uses for the same physical failure. It overstates on its own — the file is
+    there — so the reason carries the correction, and one vocabulary across the
+    two passes is worth more than a verdict word only this one has.
     """
     from panelcast.pipelines.output_integrity import run_owned_path
     from panelcast.utils.hashing import sha256_path
@@ -182,7 +187,9 @@ def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
         except (OSError, ValueError, RuntimeError) as exc:
             # The triple the output pass catches at its own hash site. Raising
             # here would abandon the remaining inputs, the stamps and the
-            # lockfile over one unreadable file.
+            # lockfile over one unreadable file. One call inside the `try` on
+            # purpose: `typer.Exit` is a `RuntimeError`, so widening this would
+            # turn an intended exit into a verdict.
             typer.echo(f"MISSING  input {label} (unreadable: {exc})")
             problems.append(path_str)
             continue
@@ -512,7 +519,8 @@ def runs_reproduce(
             actual = sha256_path(path)
         except (OSError, ValueError, RuntimeError) as exc:
             # The gate exists to turn a late failure into an early legible one,
-            # so it must not be the thing that raises.
+            # so it must not be the thing that raises. One call inside the
+            # `try`, as above: `typer.Exit` is a `RuntimeError`.
             typer.echo(f"ABORT: recorded input unreadable: {path_str} ({exc})")
             raise typer.Exit(code=1) from exc
         if actual != recorded:
