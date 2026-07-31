@@ -31,14 +31,16 @@ UNVERIFIABLE = "UNVERIFIABLE"
 class OutputVerdict:
     """What one manifest output key proves, and what it does not.
 
-    ``untrusted`` means disk actively contradicts the manifest; a not-ok
-    verdict that is not untrusted is merely unproven. Stated as a rule rather
-    than a list of cases, since the cases keep growing: an ``UNBOUND`` verdict
-    is always untrusted — the manifest named a path that cannot be tied to this
-    run, which is a fact about its claim — while ``MISSING`` takes it from
-    whether a declared path stands behind the key, and ``UNVERIFIABLE`` never
-    does, because nothing was shown either way. A caller that consumes
-    artifacts must refuse all of them; only the wording differs.
+    ``untrusted`` separates a verdict that contradicts the manifest from one
+    that merely fails to confirm it — sorted by what is *known*, not by which
+    way the check failed, so the physical failure alone does not decide it.
+    Stated as a rule rather than a list of cases, since the cases keep growing:
+    an ``UNBOUND`` verdict is always untrusted — the manifest named a path that
+    cannot be tied to this run, which is a fact about its claim — while
+    ``MISSING`` takes it from whether a declared path stands behind the key,
+    and ``UNVERIFIABLE`` never does, because nothing was shown either way. A
+    caller that consumes artifacts must refuse all of them; only the wording
+    differs.
     """
 
     key: str

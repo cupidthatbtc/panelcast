@@ -696,6 +696,27 @@ class TestTheDeclaredCallerDifference:
         active = tmp_path / "outputs" / "run_a"
         assert reroot_under(tmp_path / "run_a" / "x.json", active) == tmp_path / "run_a" / "x.json"
 
+    def test_an_output_base_named_failed_widens_what_maps_in(self, tmp_path):
+        # The other direction, and the one the docstring warns about: nothing
+        # reserves the output *base*, so `--output-base <ws>/failed` on an
+        # active run makes `_output_base_name` read the grandparent and the
+        # marker becomes `(<ws>, <id>)`. A foreign path under a directory named
+        # like the workspace then pairs and maps in, where the true base name
+        # would not have matched it. Asserted rather than only described,
+        # because it is the surprising direction — the quarantine gate reads
+        # as narrowing.
+        from panelcast.pipelines.output_integrity import reroot_under
+
+        workspace = tmp_path / "ws"
+        active = workspace / "failed" / "run_a"
+        foreign = tmp_path / "elsewhere" / "ws" / "run_a" / "evaluation" / "metrics.json"
+
+        assert reroot_under(foreign, active) == active / "evaluation" / "metrics.json"
+
+        # Bounded the same way regardless: the mapping only ever aims into the
+        # run directory, so containment and the recorded hash still decide.
+        assert active in reroot_under(foreign, active).parents
+
     def test_a_foreign_workspace_manifest_does_not_verify_clean(self, fx):
         # End to end through `runs verify`, which is where a laundered path
         # would turn "this manifest is not about this workspace" into exit 0.

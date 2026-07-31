@@ -86,8 +86,6 @@ class RunPathError(ValueError):
     """A run identifier is malformed or escapes its output root."""
 
 
-LATEST_LINK = "latest"
-
 # The layout owns this name, so anything that has to *recognize* a quarantined
 # run reads it from here rather than spelling it again. `reroot_under` maps a
 # recorded path back onto the run by matching `<base>/failed/<id>`; a reader
@@ -97,9 +95,12 @@ LATEST_LINK = "latest"
 QUARANTINE_DIR = "failed"
 
 # Reserved by the layout itself: `latest` is the pointer link, `failed` the
-# quarantine root. Device names are rejected on every platform so a run id
-# minted on Linux stays usable on Windows.
-_RESERVED_RUN_IDS = frozenset({LATEST_LINK, QUARANTINE_DIR})
+# quarantine root. Only the latter is a named constant, because only it has a
+# reader that must not guess it — promoting `latest` too would add a public
+# name with nothing importing it, which is how a constant and its literals
+# drift in the first place. Device names are rejected on every platform so a
+# run id minted on Linux stays usable on Windows.
+_RESERVED_RUN_IDS = frozenset({"latest", QUARANTINE_DIR})
 _WINDOWS_DEVICE_NAMES = frozenset(
     {"con", "prn", "aux", "nul", "conin$", "conout$", "clock$"}
     | {f"com{i}" for i in range(1, 10)}
