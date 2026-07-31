@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import ast
 import json
 import shutil
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -102,91 +100,6 @@ def _symlinked_product_run(tmp_path: Path, target: str = "shared") -> tuple[Path
     payload["input_hashes"] = {str(recorded): sha256_path(product)}
     manifest_path.write_text(json.dumps(payload), encoding="utf-8")
     return run_dir, recorded
-
-
-_MUTATORS = frozenset({"update", "setdefault", "pop", "popitem", "clear"})
-_VALIDATORS = frozenset({"model_validate", "model_validate_json", "model_construct"})
-
-
-def _manifest_callee(func: ast.expr) -> str | None:
-    """The name of a call that builds a `RunManifest`, or None.
-
-    That exact class, not any manifest: `replicate/pack.py` builds a
-    `PackManifest` from `**data`, which has no `input_hashes` to set.
-    """
-    if isinstance(func, ast.Name) and func.id == "RunManifest":
-        return func.id
-    if (
-        isinstance(func, ast.Attribute)
-        and func.attr in _VALIDATORS
-        and isinstance(func.value, ast.Name)
-        and func.value.id == "RunManifest"
-    ):
-        return f"{func.value.id}.{func.attr}"
-    return None
-
-
-def _called_names(node: ast.AST) -> set[str]:
-    """Names used as callees inside ``node`` — `str(path)` is not keyed on `str`."""
-    return {
-        call.func.id
-        for call in ast.walk(node)
-        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-    }
-
-
-def _parsed(module: Path) -> ast.AST:
-    """A module's tree, failing with the file named rather than a bare error."""
-    try:
-        return ast.parse(module.read_text(encoding="utf-8"))
-    except (SyntaxError, UnicodeDecodeError) as exc:  # pragma: no cover - guard
-        pytest.fail(f"cannot read {module} to check for input_hashes writers: {exc}")
-
-
-def _input_hashes_writes(tree: ast.AST):
-    """Every way a module records into a manifest's `input_hashes`.
-
-    Walks the tree rather than matching text: a comment naming the field would
-    otherwise read as a writer, and a reformat of a real one as its removal.
-    Method calls are filtered to the mutating ones, so reading the map — which
-    both `runs verify` and `runs reproduce` do — is not reported as writing it.
-    Handing the map to a call *is*, whether that call builds a manifest or
-    merely receives it: either way the callee can put entries in. Two forms
-    name no field and still set it — a `**` unpacking into a manifest
-    constructor, and pydantic's validators, which is how the deserializer both
-    commands read through populates it — so a call reaching a `RunManifest`
-    that way counts whatever it was handed.
-    """
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call):
-            func = node.func
-            if (
-                isinstance(func, ast.Attribute)
-                and func.attr in _MUTATORS
-                and isinstance(func.value, ast.Attribute)
-                and func.value.attr == "input_hashes"
-            ):
-                yield f"input_hashes.{func.attr}()"
-            callee = _manifest_callee(func)
-            for keyword in node.keywords:
-                if keyword.arg == "input_hashes":
-                    yield "input_hashes="
-                elif keyword.arg is None and callee:
-                    yield f"{callee}(**)"
-            if callee and isinstance(func, ast.Attribute):
-                yield f"{callee}()"
-        targets: list[ast.expr] = []
-        if isinstance(node, ast.Assign):
-            targets = list(node.targets)
-        elif isinstance(node, ast.AugAssign | ast.AnnAssign):
-            targets = [node.target]
-        for target in targets:
-            # Tuple targets too: `m.input_hashes, other = ...` binds the field
-            # while looking like an unrelated unpack.
-            for element in getattr(target, "elts", [target]):
-                inner = element.value if isinstance(element, ast.Subscript) else element
-                if isinstance(inner, ast.Attribute) and inner.attr == "input_hashes":
-                    yield "input_hashes ="
 
 
 def _quarantine(output_base: Path, run_id: str = "run_a") -> Path:
@@ -790,10 +703,7 @@ class TestReproduceOnAQuarantinedRun:
         # a config or an operator-supplied file staged there would be skipped
         # by containment and not recreated, turning an early abort into the
         # mid-run crash the skip exists to avoid.
-        import inspect
-
         from panelcast.paths import ArtifactPaths
-        from panelcast.pipelines.orchestrator import PipelineOrchestrator
         from panelcast.pipelines.stages import build_optional_stages, build_pipeline_stages
 
         run_dir = (tmp_path / "outputs" / "run_a").resolve()
@@ -816,75 +726,54 @@ class TestReproduceOnAQuarantinedRun:
         assert inside, "no stage reads from the run directory; the skip has nothing to bound"
         assert inside <= written
 
-        # ...and the assertion is about the set the gate walks, as far as the
-        # writers can say: `_capture_stage_input_hashes` iterates
-        # `stage.input_paths`, and it is the only thing in the package that
-        # records into `input_hashes`. Swept over every module rather than the
-        # orchestrator alone, because a second writer anywhere would record a
-        # run-directory input no stage regenerates — the crash direction, and
-        # what this test exists to exclude.
-        #
-        # It bounds what *this* version records, not what the commands read:
-        # both take `input_hashes` from the run's own `manifest.json`, so an
-        # older release's or a hand-edited entry inside the run directory is
-        # skipped by containment and goes unchecked. That is the lenient
-        # direction, and the same weaker-provenance caveat the pre-0.9.0 config
-        # tier carries.
-        # Every source it draws from, not merely that it draws from the right
-        # one: a second loop appended below the first satisfies "such a loop
-        # exists" while feeding the same local dict, which the package sweep
-        # cannot see either — the entries never touch a `.input_hashes` node.
-        capture = ast.parse(
-            textwrap.dedent(inspect.getsource(PipelineOrchestrator._capture_stage_input_hashes))
+    def test_the_manifest_records_the_stage_inputs_and_nothing_else(self, tmp_path):
+        # The other half of the same premise: that what the gate walks *is*
+        # the set above. Asserted by running the capture and reading its keys,
+        # not by proving from source that nothing else can add one — that is a
+        # negative about future code, and it has one more spelling every time.
+        # An entry from anywhere else lands in the result and fails here.
+        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+        from panelcast.pipelines.stages import PipelineStage
+
+        present = tmp_path / "present.txt"
+        present.write_text("x", encoding="utf-8")
+        absent = tmp_path / "absent.txt"
+        stage = PipelineStage(
+            name="probe",
+            description="fake",
+            run_fn=None,
+            input_paths=[present, absent],
+            output_paths=[],
         )
-        # Containment rather than equality, so wrapping the walk — `sorted(...)`
-        # for a deterministic manifest, `dict.fromkeys(...)` to dedupe — is not
-        # reported as a second source.
-        iterated = [
-            ast.unparse(node.iter)
-            for node in ast.walk(capture)
-            if isinstance(node, ast.For | ast.comprehension)
-        ]
-        assert len(iterated) == 1
-        assert "stage.input_paths" in iterated[0]
+        orchestrator = PipelineOrchestrator(PipelineConfig(dry_run=True), output_base=tmp_path)
 
-        # ...and every key stored into the returned mapping is derived from a
-        # name that walk binds. Iteration alone is the wrong question: one
-        # `hashes[str(self.descriptor_path)] = ...` adds an entry with no new
-        # source, and the package sweep cannot see it either — the local dict
-        # is nobody's `.input_hashes` attribute.
-        bound = {
-            node.target.id
-            for node in ast.walk(capture)
-            if isinstance(node, ast.For) and isinstance(node.target, ast.Name)
-        }
-        keyed_from = {
-            name.id
-            for node in ast.walk(capture)
-            if isinstance(node, ast.Assign)
-            for target in node.targets
-            if isinstance(target, ast.Subscript)
-            for name in ast.walk(target.slice)
-            if isinstance(name, ast.Name) and name.id not in _called_names(target.slice)
-        }
-        assert keyed_from
-        assert keyed_from <= bound
+        captured = orchestrator._capture_stage_input_hashes(stage)
 
-        package = Path(inspect.getfile(PipelineOrchestrator)).parents[1]
-        writes = sorted(
-            f"{module.relative_to(package).as_posix()}: {kind}"
+        # The absent one is what stops the equality holding by accident: it is
+        # declared and not recorded, so the set is the stage's *and* the
+        # existence rule, not merely a copy of the declarations.
+        assert set(captured) == {str(present)}
+
+    def test_only_the_known_modules_reach_the_recorded_inputs(self):
+        # The coarse ratchet the source-shape guards were reaching for, at the
+        # granularity nothing can be spelled around: touching the field at all
+        # requires naming it. A new entry here is a module to read, not a
+        # verdict about it — the deserializer, for instance, legitimately sets
+        # the field from whatever the file says, which is why this bounds what
+        # the package writes rather than what the commands are handed.
+        import panelcast
+
+        package = Path(panelcast.__file__).parent
+        touching = sorted(
+            module.relative_to(package).as_posix()
             for module in package.rglob("*.py")
-            for kind in _input_hashes_writes(_parsed(module))
+            if "input_hashes" in module.read_text(encoding="utf-8")
         )
 
-        assert writes == [
-            # The deserializer both commands read through, named rather than
-            # only carved out in prose: it sets the field from the file, which
-            # is why the sweep bounds what this version records and not what
-            # they are handed.
-            "pipelines/manifest.py: RunManifest.model_validate_json()",
-            "pipelines/orchestrator.py: input_hashes.update()",
-            "pipelines/orchestrator.py: input_hashes=",
+        assert touching == [
+            "cli/runs_cmd.py",  # the two readers
+            "pipelines/manifest.py",  # the field, and the deserializer
+            "pipelines/orchestrator.py",  # the one writer
         ]
 
     def test_the_planted_flag_is_one_a_resolved_config_can_carry(self, tmp_path):
