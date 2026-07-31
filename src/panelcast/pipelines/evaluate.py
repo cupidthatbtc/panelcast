@@ -167,7 +167,9 @@ def _json_path(path: tuple[str | int, ...]) -> str:
     return rendered
 
 
-def _json_safe(value: Any, *, path: tuple[str | int, ...] = (), nulled: list[str] | None = None) -> Any:
+def _json_safe(
+    value: Any, *, path: tuple[str | int, ...] = (), nulled: list[str] | None = None
+) -> Any:
     """Convert payloads to strict-JSON-safe primitives.
 
     Non-finite floats become null because strict JSON has no other spelling for
