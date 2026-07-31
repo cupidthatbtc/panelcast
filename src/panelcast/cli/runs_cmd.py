@@ -82,10 +82,13 @@ def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:
     counts as proof. One argument is this caller's own: ``reroot``, because a
     quarantined run's manifest still names its pre-move location.
 
-    No ``declared`` map — there are no stage objects here. That costs severity,
-    not detection: the binding a static output needs is encoded in its manifest
-    key, so a redirected output is refused either way, and what is lost is only
-    the distinction between a declared output going missing and a dynamic one.
+    No ``declared`` map — there are no stage objects here, and the manifest
+    does not record which outputs were declared. That costs two things: the
+    severity split between a declared output going missing and a dynamic one,
+    and — the real gap — the path binding, so a manifest redirecting a static
+    output at another file inside the same run directory is reported clean
+    here while the skip path refuses it. Closing that needs the manifest to
+    carry the distinction (#439); inferring it from key shape is a guess.
 
     A manifest with no output hashes is *not* short-circuited: shape alone
     cannot tell a pre-0.9.0 run from a modern one someone emptied the map on,
