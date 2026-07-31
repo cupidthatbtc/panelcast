@@ -168,6 +168,7 @@ def _commit(tmp: Path, path: Path) -> None:
     that it was reached, so a write that recovered and one that did not do not
     read the same.
     """
+    started = time.monotonic()
     for attempt, delay in enumerate(_COMMIT_RETRY_DELAYS, start=1):
         try:
             os.replace(tmp, path)
@@ -182,16 +183,18 @@ def _commit(tmp: Path, path: Path) -> None:
         # naming only the Windows one sends a Linux operator hunting for a
         # process that does not exist.
         logger.warning(
-            "Rename of %s still denied after %d retries: another process is holding it "
-            "open, or this directory does not permit the rename",
+            "Rename of %s still denied after %.2fs: another process is holding it open, "
+            "or this directory does not permit the rename",
             path,
-            len(_COMMIT_RETRY_DELAYS),
+            time.monotonic() - started,
         )
         raise
+    # Elapsed, not the configured delays: the point of the line is where the
+    # time went, and a contended rename oversleeps and syscalls besides.
     logger.warning(
         "Rename of %s succeeded only on the final retry, after %.2fs of waiting",
         path,
-        sum(_COMMIT_RETRY_DELAYS),
+        time.monotonic() - started,
     )
 
 

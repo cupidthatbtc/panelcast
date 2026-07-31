@@ -6,7 +6,9 @@ that cannot tell a truncated file from a short one. These tests pin the one
 property that makes that safe: a failed write leaves the previous file, whole.
 """
 
+import errno
 import json
+import logging
 import os
 import stat
 import uuid
@@ -85,7 +87,11 @@ def _no_backoff(monkeypatch) -> None:
     module-local seam; replacing `time.sleep` would slow or break anything
     else in the process that sleeps during the test.
     """
-    monkeypatch.setattr(atomic_module, "_COMMIT_RETRY_DELAYS", (0.0, 0.0, 0.0, 0.0))
+    monkeypatch.setattr(
+        atomic_module,
+        "_COMMIT_RETRY_DELAYS",
+        (0.0,) * len(atomic_module._COMMIT_RETRY_DELAYS),
+    )
 
 
 def _fdopen_that_fails(error: BaseException):
@@ -103,7 +109,12 @@ def _fdopen_that_fails(error: BaseException):
     return boom
 
 
-def _deny_replace(monkeypatch, target: Path, until: int | None) -> dict[str, int]:
+def _deny_replace(
+    monkeypatch,
+    target: Path,
+    until: int | None,
+    error: type[OSError] | OSError = PermissionError("the file is in use by another process"),
+) -> dict[str, int]:
     """Refuse renames onto ``target`` the way Windows refuses a held file.
 
     Simulated, because POSIX has no equivalent to reproduce. `os.replace` has
@@ -111,6 +122,9 @@ def _deny_replace(monkeypatch, target: Path, until: int | None) -> dict[str, int
     and passes every other destination straight through — anything else
     renaming in-process during the test, pytest's own bytecode commits
     included, must not see a denial that was meant for one path.
+
+    ``error`` is a parameter so the *width* of the retry can be tested and not
+    just its depth: only a denial is transient.
     """
     real = os.replace
     attempts = {"n": 0}
@@ -124,11 +138,20 @@ def _deny_replace(monkeypatch, target: Path, until: int | None) -> dict[str, int
             return real(*args, **kwargs)
         attempts["n"] += 1
         if until is None or attempts["n"] < until:
-            raise PermissionError("the file is in use by another process")
+            raise error
         return real(*args, **kwargs)
 
     monkeypatch.setattr(atomic_module.os, "replace", busy)
     return attempts
+
+
+def _capture_logs(caplog):
+    """Everything `atomic` logs, at every level."""
+    return caplog.at_level(logging.DEBUG, logger=atomic_module.logger.name)
+
+
+def _warnings(caplog) -> list[str]:
+    return [r.getMessage() for r in caplog.records if r.levelno >= logging.WARNING]
 
 
 def _temps(directory: Path) -> list[Path]:
@@ -291,7 +314,7 @@ class TestAtomicWrite:
             atomic_write_text(tmp_path / "record.json", "x")
 
     def test_a_holder_on_the_target_is_waited_out_rather_than_fatal(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, monkeypatch, caplog
     ):
         # Windows denies the rename while another process has the target open.
         # Simulated, because POSIX has no equivalent to reproduce.
@@ -299,37 +322,64 @@ class TestAtomicWrite:
         attempts = _deny_replace(monkeypatch, target, until=3)
         _no_backoff(monkeypatch)
 
-        atomic_write_text(target, "{}")
+        with _capture_logs(caplog):
+            atomic_write_text(target, "{}")
 
         assert attempts["n"] == 3
         assert target.read_text(encoding="utf-8") == "{}"
+        assert _warnings(caplog) == []  # recovering inside the loop is unremarkable
 
     def test_a_holder_that_lets_go_on_the_last_attempt_still_commits(
-        self, tmp_path: Path, monkeypatch
+        self, tmp_path: Path, monkeypatch, caplog
     ):
         target = tmp_path / "manifest.json"
-        attempts = _deny_replace(
-            monkeypatch, target, until=len(atomic_module._COMMIT_RETRY_DELAYS) + 1
-        )
+        last = len(atomic_module._COMMIT_RETRY_DELAYS) + 1
+        attempts = _deny_replace(monkeypatch, target, until=last)
         _no_backoff(monkeypatch)
 
-        atomic_write_text(target, "{}")
+        with _capture_logs(caplog):
+            atomic_write_text(target, "{}")
 
-        assert attempts["n"] == len(atomic_module._COMMIT_RETRY_DELAYS) + 1
+        assert attempts["n"] == last
         assert target.read_text(encoding="utf-8") == "{}"
+        assert len(_warnings(caplog)) == 1
+        assert "succeeded" in _warnings(caplog)[0]
 
-    def test_a_holder_that_never_lets_go_still_raises(self, tmp_path: Path, monkeypatch):
+    def test_a_holder_that_never_lets_go_still_raises(self, tmp_path: Path, monkeypatch, caplog):
         target = tmp_path / "manifest.json"
         attempts = _deny_replace(monkeypatch, target, until=None)
         _no_backoff(monkeypatch)
 
-        with pytest.raises(PermissionError):
+        with _capture_logs(caplog), pytest.raises(PermissionError):
             atomic_write_text(target, "{}")
 
-        # Four backoffs and the final unguarded attempt: the loop is bounded
+        # Every backoff plus the final unguarded attempt: the loop is bounded
         # by the delay tuple and the last try is the one that reports.
         assert attempts["n"] == len(atomic_module._COMMIT_RETRY_DELAYS) + 1
         assert not _temps(tmp_path)
+        # Both causes named. Only one of them can exist on POSIX, and a reader
+        # sent hunting for a process that cannot be there pays for the omission.
+        assert len(_warnings(caplog)) == 1
+        assert "holding" in _warnings(caplog)[0]
+        assert "directory" in _warnings(caplog)[0]
+
+    def test_a_rename_that_can_never_succeed_is_not_retried(
+        self, tmp_path: Path, monkeypatch, caplog
+    ):
+        # Only a denial is transient: ENOSPC, EXDEV and EROFS will still be
+        # true in three quarters of a second, and the checkpoint store commits
+        # once per sampling block.
+        target = tmp_path / "manifest.json"
+        attempts = _deny_replace(
+            monkeypatch, target, until=None, error=OSError(errno.EXDEV, "cross-device link")
+        )
+        _no_backoff(monkeypatch)
+
+        with _capture_logs(caplog), pytest.raises(OSError, match="cross-device"):
+            atomic_write_text(target, "{}")
+
+        assert attempts["n"] == 1
+        assert caplog.records == []
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
     def test_an_interrupt_while_setting_the_mode_leaves_nothing_behind(
