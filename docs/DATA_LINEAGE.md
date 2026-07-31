@@ -1516,10 +1516,14 @@ a symlink loop are the known causes, but the refusal does not try to tell them
 apart: it says containment could not be decided, names the path that failed and
 reports the errno, which is the evidence that distinguishes them and which also
 makes a cause nobody anticipated read correctly. What it never does is send
-anyone looking outside a root that nothing left. A loop reaches this answer
-only on the interpreters that raise for one (Python 3.11 and 3.12); on 3.13+ a
-loop resolves to itself, stays contained, and surfaces instead as the ordinary
-"expected run dir was never created" miss, which names no link. Finally, a name that
+anyone looking outside a root that nothing left. Both causes are conditional.
+A removed working directory is only a refusal when the output base is relative
+(the default `outputs`); against an absolute base both resolves succeed and the
+lookup proceeds normally. A loop is only a refusal on the interpreters that
+raise for one (Python 3.11 and 3.12); on 3.13+ it resolves to itself, stays
+contained, and the lookup simply finds no run directory — the arm handshake
+reports that as "expected run dir was never created" and a confirmation fit
+returns no run at all, neither of which names a link. Finally, a name that
 resolves *to the output root itself* is refused because containment demands a
 strict descendant: nothing left the root, but anything a fit wrote through such
 a name landed in the root itself, where the walkers below read run-scoped
