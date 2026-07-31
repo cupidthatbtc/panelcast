@@ -31,7 +31,11 @@ from panelcast.models.bayes.model import user_score_model
 from panelcast.models.bayes.predict import extract_posterior_samples
 from panelcast.models.bayes.priors import PriorConfig
 from panelcast.models.bayes.transforms import get_transform
-from panelcast.pipelines.training_summary import ar_center_on_model_scale
+from panelcast.pipelines.training_summary import (
+    ar_center_on_model_scale,
+    logit_offset_from_summary,
+    target_transform_from_summary,
+)
 
 # ---------------------------------------------------------------------------
 # Style
@@ -183,8 +187,8 @@ def _predict_at(
     # bare clip of logit-scale draws, which made every PI band nonsense.)
     ds = summary.get("dataset") or {}
     target_bounds = tuple(ds.get("target_bounds", (0.0, 100.0)))
-    target_transform = summary.get("target_transform") or "identity"
-    logit_offset = float(summary.get("logit_offset") or 0.5)
+    target_transform = target_transform_from_summary(summary)
+    logit_offset = logit_offset_from_summary(summary)
     transform = get_transform(target_transform, target_bounds, logit_offset)
 
     prev = float(prev_score)

@@ -35,6 +35,10 @@ from panelcast.pipelines.training_summary import (
 )
 
 SRC = Path(panelcast.__file__).resolve().parent
+# scripts/ is where the idiom is most likely to reappear -- written fast, from
+# another script rather than from the resolver module. Absent under a wheel
+# install, where there is nothing to scan.
+SCAN_ROOTS = [SRC] + [p for p in (SRC.parents[1] / "scripts",) if p.is_dir()]
 
 GUARDED_KEYS = ("logit_offset", "target_transform")
 
@@ -49,6 +53,8 @@ EXEMPT_READS = frozenset(
         ("select/prior_screen.py", "target_transform"),
         ("select/runner.py", "target_transform"),
         ("select/space.py", "target_transform"),
+        # A validation-ladder variant spec, not a recorded summary.
+        ("experiment_preflight_validation.py", "target_transform"),
     }
 )
 
@@ -91,8 +97,10 @@ class TestResolver:
         with pytest.raises(ValueError, match="logit_offset"):
             logit_offset_from_summary({"logit_offset": value})
 
-    @pytest.mark.parametrize("value", [True, "wide", [0.5]])
+    @pytest.mark.parametrize("value", [True, np.True_, "wide", [0.5]])
     def test_non_numeric_recorded_offsets_are_rejected(self, value):
+        """np.bool_ is not a bool subclass but floats to 1.0, so it sat in the
+        gap between "numpy scalars are supported" and "booleans are not"."""
         with pytest.raises(ValueError, match="logit_offset"):
             logit_offset_from_summary({"logit_offset": value})
 
@@ -166,6 +174,11 @@ class TestTargetTransformResolver:
         assert config.logit_offset == 0.25
         assert isinstance(config.logit_offset, float)
         assert config.target_transform == "offset_logit"
+        # _validate now mutates, so idempotence is load-bearing for its four
+        # callers rather than incidental.
+        config._validate()
+        assert config.logit_offset == 0.25
+        assert config.target_transform == "offset_logit"
 
 
 class TestConsumersUseTheRecordedOffset:
@@ -236,17 +249,18 @@ class TestSingleResolver:
         offenders: dict[str, list[tuple[int, str]]] = {}
         exercised: set[tuple[str, str]] = set()
         scanned_modules: set[str] = set()
-        for path in sorted(SRC.rglob("*.py")):
-            module = path.relative_to(SRC).as_posix()
-            scanned_modules.add(module)
-            found = []
-            for read in self._inline_reads(path):
-                if (module, read[1]) in EXEMPT_READS:
-                    exercised.add((module, read[1]))
-                else:
-                    found.append(read)
-            if found:
-                offenders[module] = found
+        for root in SCAN_ROOTS:
+            for path in sorted(root.rglob("*.py")):
+                module = path.relative_to(root).as_posix()
+                scanned_modules.add(module)
+                found = []
+                for read in self._inline_reads(path):
+                    if (module, read[1]) in EXEMPT_READS:
+                        exercised.add((module, read[1]))
+                    else:
+                        found.append(read)
+                if found:
+                    offenders[module] = found
         # A source-stripped install would scan nothing and pass vacuously.
         assert scanned_modules >= {
             "pipelines/evaluate.py",
@@ -323,25 +337,40 @@ class TestConfigValidation:
     def test_the_config_default_is_the_resolver_default(self):
         assert PipelineConfig(run_id="offset-default").logit_offset == DEFAULT_LOGIT_OFFSET
 
-    def test_bulk_restoration_from_manifest_flags_re_validates(self):
-        """setattr past the constructor is the one mutation shape a search for
-        `config.logit_offset` cannot find: `runs reproduce` rebuilds a pre-0.9.0
-        config from a flags dict, so it must re-validate like the resume path."""
+    def test_manifest_flag_restoration_goes_through_the_constructor(self, tmp_path):
+        """setattr past the constructor was the one mutation shape a search for
+        `config.logit_offset` cannot find: `runs reproduce` rebuilt a pre-0.9.0
+        config from a flags dict, so a recorded value reached the re-executed
+        run neither validated nor normalized. Now built like the sibling
+        branch, which has always been validated by construction."""
         from types import SimpleNamespace
 
         from panelcast.cli.runs_cmd import _reproduce_config
 
         manifest = SimpleNamespace(flags={"logit_offset": "0.25", "seed": 7})
-        config, provenance = _reproduce_config(Path("does-not-exist"), manifest)
+        config, provenance = _reproduce_config(tmp_path / "missing", manifest)
         assert config.logit_offset == 0.25
         assert isinstance(config.logit_offset, float)
+        assert config.seed == 7
         assert "manifest flags" in provenance
 
-    def test_bulk_restoration_rejects_an_invalid_recorded_flag(self):
+    def test_manifest_flag_restoration_rejects_an_invalid_recorded_flag(self, tmp_path):
+        """Re-executing a recorded run under an invalid config is not
+        best-effort; the resolved_config branch has always refused it."""
         from types import SimpleNamespace
 
         from panelcast.cli.runs_cmd import _reproduce_config
 
         manifest = SimpleNamespace(flags={"logit_offset": -1.0})
         with pytest.raises(ValueError, match="logit_offset"):
-            _reproduce_config(Path("does-not-exist"), manifest)
+            _reproduce_config(tmp_path / "missing", manifest)
+
+    def test_unrecorded_flags_keep_their_defaults(self, tmp_path):
+        from types import SimpleNamespace
+
+        from panelcast.cli.runs_cmd import _reproduce_config
+
+        manifest = SimpleNamespace(flags={"not_a_config_field": 1, "seed": 3})
+        config, _ = _reproduce_config(tmp_path / "missing", manifest)
+        assert config.seed == 3
+        assert config.logit_offset == DEFAULT_LOGIT_OFFSET

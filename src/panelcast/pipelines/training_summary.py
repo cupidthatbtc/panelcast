@@ -198,16 +198,19 @@ def coerce_logit_offset(value: Any, *, context: str) -> float:
     the read path accept exactly the same domain: anything float-able except
     ``bool``, finite and non-negative. Zero is legal -- the plain logit, valid
     when observations sit strictly inside the bounds. Duck-typing through
-    ``float`` also accepts numpy scalars, which an in-process summary can carry.
+    ``float`` also accepts numpy scalars, which an in-process summary can carry
+    -- unwrapped first so a ``np.bool_`` is rejected like a ``bool`` instead of
+    resolving to an offset of 1.0.
 
     Deliberately unbounded above: a huge offset flattens the target toward the
     middle of the bounds rather than leaving the transform's domain, so it is a
     modeling choice to be judged by the fit, not a malformed value.
     """
-    if isinstance(value, bool):
+    scalar = value.item() if hasattr(value, "item") and not isinstance(value, str) else value
+    if isinstance(scalar, bool):
         raise ValueError(f"Invalid logit_offset in {context}: {value!r}. Must be a number.")
     try:
-        offset = float(value)
+        offset = float(scalar)
     except (TypeError, ValueError):
         raise ValueError(
             f"Invalid logit_offset in {context}: {value!r}. Must be a number."
@@ -233,7 +236,7 @@ def coerce_target_transform(value: Any, *, context: str) -> str:
     if name not in TARGET_TRANSFORMS:
         raise ValueError(
             f"Invalid target_transform in {context}: {value!r}. "
-            f"Must be one of {', '.join(TARGET_TRANSFORMS)}."
+            f"Must be one of {', '.join(repr(name) for name in TARGET_TRANSFORMS)}."
         )
     return str(name)
 
@@ -265,8 +268,8 @@ def target_transform_from_summary(summary: dict[str, Any]) -> str:
     Same null-versus-default confusion as the offset: the field is declared
     ``str | None`` and serializes as ``null`` on legacy summaries, so
     ``.get("target_transform", "identity")`` hands ``None`` to
-    ``get_transform`` while ``.get(...) or "identity"`` resolves correctly.
-    One resolver, so the two idioms cannot disagree.
+    ``get_transform``, while ``.get(...) or "identity"`` gets the null right and
+    the empty string wrong. One resolver, so neither idiom decides it.
 
     ``identity`` is the right fallback because the write path records a
     RESOLVED name: ``resolve_model_facts`` fills a null config value from the
