@@ -684,7 +684,7 @@ Each output gets one line, with the reason after the status:
 | `OK` | Present and hashing to the recorded digest |
 | `MODIFIED` | Present and hashing to something else |
 | `MISSING` | Recorded but not there, or unreadable |
-| `UNBOUND` | The recorded path cannot be tied to the run: outside the run directory and the artifact roots, disagreeing with the path its manifest key names, or unreadable |
+| `UNBOUND` | The recorded path cannot be tied to the run: outside the run directory and the artifact roots, or unreadable |
 | `UNVERIFIABLE` | Recorded on only one side — a path with no hash, or a hash with no path — so nothing can be checked |
 
 A manifest carrying no output hashes at all (pre-0.9.0, or a modern one whose
@@ -704,10 +704,18 @@ run did. Run-scoped artifacts are unaffected: they resolve against
 `--output-base`.
 
 Output verification is the same primitive the incremental `--skip-existing`
-path uses (`pipelines/output_integrity.py`), so what one caller accepts as
-proof the other does too. The one deliberate difference is re-rooting: `runs
-verify` maps a quarantined run's recorded paths onto `outputs/failed/<id>/`,
-while skip-existing only ever follows the active `latest` pointer.
+path uses (`pipelines/output_integrity.py`), so the per-key rules and the
+containment roots are one implementation. Two things still differ, both
+because `runs verify` has no stage objects to work from:
+
+- **Re-rooting.** `runs verify` maps a run-owned recorded path onto the run's
+  current directory, so a run quarantined under `outputs/failed/<id>/` still
+  verifies; skip-existing only ever follows the active `latest` pointer.
+- **The declared-path binding.** The skip path knows which paths a stage said
+  it would write, so it refuses a manifest that redirects a static output at
+  another file *inside the same run directory* — where containment has nothing
+  to say. `runs verify` cannot: the manifest does not record which outputs
+  were declared. Such a redirect is reported `OK` here (#439).
 
 ```bash
 panelcast runs verify [RUN_ID] [OPTIONS]

@@ -84,11 +84,19 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     the same mapping applies to run-owned *inputs* (#420), which this module
     does not verify but must not stand in the way of.
 
+    "Run-owned" is recorded *under this workspace's output base*, not merely
+    containing a component of the same name: a bare-name match would launder
+    ``/somewhere/else/<id>/metrics.json`` into the run directory and let a
+    manifest that describes a different workspace verify clean. The base is
+    the run directory's parent for an active run and its grandparent for one
+    under ``failed/``, which is the pre- and post-move spelling of the same
+    place.
+
     A run-owned path maps whether or not the target survived the move: where a
     deleted artifact *should* be is the useful answer, and reporting the
     pre-move location instead turns a plain deletion into an apparent escape
     from the run root. Paths the run does not own — shared data roots, external
-    files — are returned untouched.
+    files — are returned untouched, and containment judges them where they lie.
 
     Passed by callers that may be looking at a moved run — `runs verify`
     resolves active and quarantined runs alike and cannot know which it has
@@ -98,9 +106,21 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     if path.exists():
         return path
     parts = path.parts
-    if run_dir.name in parts:
-        return run_dir.joinpath(*parts[parts.index(run_dir.name) + 1 :])
-    return path
+    if run_dir.name not in parts:
+        return path
+    index = parts.index(run_dir.name)
+    recorded_base = Path(*parts[:index]) if index else Path()
+    if not any(_same_dir(recorded_base, base) for base in (run_dir.parent, run_dir.parent.parent)):
+        return path
+    return run_dir.joinpath(*parts[index + 1 :])
+
+
+def _same_dir(left: Path, right: Path) -> bool:
+    """Whether two spellings name the same directory; unresolvable is not."""
+    try:
+        return left.resolve() == right.resolve()
+    except (OSError, ValueError, RuntimeError):
+        return False
 
 
 def verify_output_records(

@@ -138,11 +138,17 @@ class TestBothCallersAgree:
         assert fx.skip_accepts_on_default_roots() is True
 
     def test_an_escaping_path_is_refused_on_the_stages_own_roots(self, fx):
+        # A *dynamic* key, so nothing but containment is behind it — pointing a
+        # declared key elsewhere is refused by the binding first, which is why
+        # that version of this test never reached `_default_roots()` at all.
         outside = fx.tmp_path / "outside.json"
         outside.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
-        fx.outputs[fx.key] = str(outside)
-        fx.output_hashes[fx.key] = sha256_path(outside)
+        key = f"{STAGE}:dataset_hash"
+        fx.outputs[key] = str(outside)
+        fx.output_hashes[key] = sha256_path(outside)
+
         assert fx.skip_accepts_on_default_roots() is False
+        assert fx.skip_accepts() is False
 
     def test_a_modified_output_is_refused_by_both(self, fx):
         fx.artifact.write_text(json.dumps({"mae": 1.0}), encoding="utf-8")
@@ -422,6 +428,35 @@ class TestTheDeclaredCallerDifference:
         )
 
         assert [v.label for v in verdicts] == [MISSING]
+        assert fx.verify_accepts() is False
+
+    def test_a_same_named_directory_elsewhere_is_not_run_owned(self, fx):
+        # The membership test is "recorded under this workspace's output base",
+        # not "contains a component with this name" — otherwise a manifest
+        # describing a different workspace launders its paths into this run
+        # directory and verifies clean.
+        from panelcast.pipelines.output_integrity import reroot_under
+
+        fx.quarantine()
+        moved = fx.output_base / "failed" / "run_a"
+        foreign = fx.tmp_path / "elsewhere" / "run_a" / "evaluation" / "metrics.json"
+
+        assert reroot_under(foreign, moved) == foreign
+        # ...while the run's own pre-move spelling still maps.
+        recorded = fx.output_base / "run_a" / "evaluation" / "metrics.json"
+        assert reroot_under(recorded, moved) == moved / "evaluation" / "metrics.json"
+
+    def test_a_foreign_workspace_manifest_does_not_verify_clean(self, fx):
+        # End to end: the same shape through `runs verify`, which is where a
+        # laundered path would turn "this manifest is not about this
+        # workspace" into exit 0.
+        foreign = fx.tmp_path / "elsewhere" / "run_a" / "evaluation" / "metrics.json"
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
+        fx.outputs[fx.key] = str(foreign)
+        fx.output_hashes[fx.key] = sha256_path(foreign)
+        fx.quarantine()
+
         assert fx.verify_accepts() is False
 
     def test_the_reroot_mapping_is_generic_over_what_it_moves(self, fx):

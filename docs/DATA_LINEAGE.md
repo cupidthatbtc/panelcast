@@ -1469,11 +1469,14 @@ they accept as proof. Each names the run directory of the manifest it is
 reading, never the output base that contains every run: a key the manifest
 recorded but the stage does not declare has no path binding behind it, so
 containment is the only thing refusing a rewritten manifest that points it at
-a sibling run. Their one deliberate difference is parameterized rather
-than implied: `runs verify` re-roots a quarantined run's recorded paths onto
-`outputs/failed/<id>/`, while the skip path follows the active `latest` pointer
-and never looks under `failed/` — a quarantined run is not a source of truth
-for a new one. The declared-path binding is a second difference, and the one
+a sibling run. Two things still differ, both parameterized rather than implied.
+`runs verify` re-roots a *run-owned* recorded path onto the run's current
+directory, so a run quarantined under `outputs/failed/<id>/` still verifies,
+while the skip path follows the active `latest` pointer and never looks under
+`failed/` — a quarantined run is not a source of truth for a new one. Run-owned
+means recorded under this workspace's output base; a path that merely happens
+to contain a directory of the same name is left where the manifest put it and
+refused by containment. The declared-path binding is the second, and the one
 place `runs verify` is the weaker side: only the stage caller holds the paths a
 stage declares, so only it refuses a manifest that redirects a static output at
 another file inside the run's own directory, where containment has nothing to
