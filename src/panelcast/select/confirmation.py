@@ -183,7 +183,10 @@ def _cached_run_mismatch(
     identity = manifest.get("experiment_identity")
     if not isinstance(identity, dict) or not identity:
         return "manifest records no experiment identity", None
-    if identity.get("descriptor_hash") != descriptor_hash:
+    recorded_hash = identity.get("descriptor_hash")
+    if recorded_hash is None:
+        return "manifest records no dataset descriptor hash", None
+    if recorded_hash != descriptor_hash:
         return "the run was fit on another dataset", "dataset_descriptor_hash"
     recorded = identity.get("config_payload")
     if not isinstance(recorded, dict):
@@ -198,11 +201,29 @@ def _cached_run_mismatch(
     return None
 
 
+def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> list[str]:
+    """Identity keys whose stored value contradicts this call's.
+
+    An unresolved descriptor hash on either side is unknown, not different.
+    Archiving on it would cost a full publication-scale refit for a stale mount
+    — and cost a second one on the next healthy call, which would find the
+    ledger the unresolved call wrote and archive that too. Reuse is refused
+    per run while the hash is unresolved, so nothing is admitted by the
+    silence.
+    """
+    return sorted(
+        key
+        for key, value in identity.items()
+        if recorded.get(key) != value
+        and not (key == "dataset_descriptor_hash" and None in (value, recorded.get(key)))
+    )
+
+
 def _reusable_prior_seeds(
     out_path: Path,
     identity: dict[str, Any],
     descriptor_hash: str | None,
-    fit_configs: dict[str, dict[str, Any]],
+    fit_config: Callable[[str, int], dict[str, Any]],
 ) -> dict[int, SeedResult]:
     """Prior seeds whose snapshots survive, IF the stored protocol matches this call.
 
@@ -210,7 +231,8 @@ def _reusable_prior_seeds(
     dataset, base config) archives the old ledger and starts fresh — evidence is
     never mixed across protocols. Old-format files without the echo fields
     mismatch by construction. A seed whose runs survive the identity file still
-    has both its run dirs checked against their own manifests.
+    has both its run dirs checked against their own manifests, each against the
+    arm and seed it stands for.
     """
     if not out_path.exists():
         return {}
@@ -218,7 +240,7 @@ def _reusable_prior_seeds(
         payload = json.loads(out_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return {}
-    changed = sorted(k for k in identity if payload.get(k) != identity[k])
+    changed = _identity_changes(payload, identity)
     if changed:
         archived = out_path.with_name(f"confirmation_{time.strftime('%Y%m%dT%H%M%S')}.json")
         out_path.replace(archived)
@@ -234,24 +256,27 @@ def _reusable_prior_seeds(
             and (Path(win) / "evaluation" / "log_likelihood.nc").exists()
         ):
             continue
+        seed = int(entry["seed"])
         rejected = [
             (label, mismatch)
             for label, run in (("reference", ref), ("winner", win))
-            if (mismatch := _cached_run_mismatch(Path(run), descriptor_hash, fit_configs[label]))
+            if (
+                mismatch := _cached_run_mismatch(
+                    Path(run), descriptor_hash, fit_config(label, seed)
+                )
+            )
         ]
         if rejected:
             for label, (reason, key) in rejected:
                 log.warning(
                     "confirmation_cached_run_rejected",
-                    seed=entry.get("seed"),
+                    seed=seed,
                     label=label,
                     reason=reason,
                     key=key,
                 )
             continue
-        reusable[int(entry["seed"])] = SeedResult(
-            seed=int(entry["seed"]), reference_run=ref, winner_run=win
-        )
+        reusable[seed] = SeedResult(seed=seed, reference_run=ref, winner_run=win)
     return reusable
 
 
@@ -412,11 +437,13 @@ def run_confirmation(
         "dataset_descriptor_hash": descriptor_hash,
         "base_config_hash": result.base_config_hash,
     }
-    fit_configs = {
-        "reference": _fit_config_payload(cfg, dict(base), sampler_overrides),
-        "winner": _fit_config_payload(cfg, {**base, **winner_knobs}, sampler_overrides),
-    }
-    prior = _reusable_prior_seeds(out_path, identity, descriptor_hash, fit_configs)
+    arms = {"reference": dict(base), "winner": {**base, **winner_knobs}}
+
+    def fit_config(label: str, seed: int) -> dict[str, Any]:
+        """What the run behind ``label`` on ``seed`` must say it was fit with."""
+        return _fit_config_payload(cfg, arms[label], sampler_overrides, seed)
+
+    prior = _reusable_prior_seeds(out_path, identity, descriptor_hash, fit_config)
     timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
     def _resolve(run_id: str, seed: int, label: str, *, after_fit: bool) -> Path:

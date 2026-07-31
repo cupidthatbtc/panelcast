@@ -16,6 +16,7 @@ from panelcast.select.confirmation import (
     _cached_run_mismatch,
     _confirmation_timeout,
     _descriptor_hash,
+    _identity_changes,
     render_confirmation,
     run_confirmation,
 )
@@ -503,6 +504,19 @@ class TestConfirmationResume:
         run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 2
 
+    def test_crossing_a_run_between_seeds_refits(self, tmp_path, monkeypatch):
+        """Pairing is within a seed, so a run dir from another one is not this seed's."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=launch)
+        out = cfg.sweep_dir / "confirmation.json"
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        first, second = payload["seeds"]
+        first["winner_run"] = second["winner_run"]
+        out.write_text(json.dumps(payload), encoding="utf-8")
+        calls, counting = self._counting(launch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42, 43), launch=counting)
+        assert calls["n"] == 2  # seed 43 still reuses; only the crossed seed refits
+
     def test_a_knob_the_winner_overrides_still_reuses(self, tmp_path, monkeypatch):
         """An extra_config value an arm overrides is compared as the arm's, not the base's."""
         cfg, launch = _fake_env(tmp_path, monkeypatch)
@@ -539,6 +553,17 @@ class TestConfirmationResume:
             None,
         )
 
+    def test_an_unresolved_descriptor_leaves_the_ledger_in_place(self):
+        """A stale mount must not cost the refit twice — once now, once when it heals."""
+        healthy = {"promote_z": 2.0, "dataset_descriptor_hash": "abc"}
+        blind = {"promote_z": 2.0, "dataset_descriptor_hash": None}
+        assert _identity_changes(healthy, blind) == []
+        assert _identity_changes(blind, healthy) == []
+        assert _identity_changes({"dataset_descriptor_hash": "xyz"}, healthy) == [
+            "dataset_descriptor_hash",
+            "promote_z",
+        ]
+
     def test_reused_seed_rechecks_convergence(self, tmp_path, monkeypatch):
         cfg, launch = _fake_env(tmp_path, monkeypatch)
         result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
@@ -554,7 +579,8 @@ class TestConfirmationResume:
 class TestManifestContract:
     """The gate reads a real manifest, not the shape the fixture happens to write."""
 
-    def test_a_manifest_written_the_orchestrators_way_verifies(self, tmp_path):
+    @pytest.mark.parametrize("dataset", [None, "aero"])
+    def test_a_manifest_written_the_orchestrators_way_verifies(self, tmp_path, dataset):
         import yaml as _yaml
         from panelcast.config.descriptor import load_descriptor
         from panelcast.config.pipeline_yaml import (
@@ -572,7 +598,11 @@ class TestManifestContract:
         from panelcast.select.space import default_arm
 
         cfg = SweepConfig(
-            sweep_id="c", output_root=tmp_path / "select", num_samples=200, num_warmup=100
+            sweep_id="c",
+            dataset=dataset,
+            output_root=tmp_path / "select",
+            num_samples=200,
+            num_warmup=100,
         )
         cfg.sweep_dir.mkdir(parents=True)
         arm = {**default_arm(), "latent_process": "ar1"}
@@ -585,7 +615,8 @@ class TestManifestContract:
         config = PipelineConfig(**apply_yaml_overrides({}, written))
         recorded = experiment_config_payload(config)
         # Not vacuous: the keys below are the ones the comparison turns on.
-        assert {"stages", "latent_process", "num_samples"} <= set(recorded)
+        assert {"stages", "latent_process", "num_samples", "seed"} <= set(recorded)
+        assert ("dataset" in recorded) == (dataset is not None)
         run_dir = tmp_path / "outputs" / "sel_c_confirm_winner_seed42_x"
         save_run_manifest(
             RunManifest(
@@ -619,7 +650,7 @@ class TestManifestContract:
 
         assert (
             _cached_run_mismatch(
-                run_dir, _descriptor_hash(cfg), _fit_config_payload(cfg, arm, None)
+                run_dir, _descriptor_hash(cfg), _fit_config_payload(cfg, arm, None, 42)
             )
             is None
         )
