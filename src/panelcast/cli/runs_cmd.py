@@ -42,34 +42,60 @@ def resolve_run_dir(run_id: str, output_base: Path = Path("outputs")) -> Path:
     )
 
 
+def _output_roots(run_dir: Path) -> tuple[Path, ...]:
+    """Where a run's outputs may live: its own directory and the artifact roots.
+
+    Not the whole working tree — that would admit any file whose bytes happen
+    to hash correctly, including another run's copy of the same artifact, which
+    is the substitution the containment check exists to refuse. A run-scoped
+    layout keeps everything under ``run_dir``; a flat one spreads products
+    across the roots ``ArtifactPaths`` declares, so both are named.
+    """
+    from panelcast.paths import ArtifactPaths
+
+    flat = ArtifactPaths.flat()
+    return (
+        run_dir,
+        flat.processed,
+        flat.splits,
+        flat.features,
+        flat.models,
+        flat.evaluation,
+        flat.predictions,
+        flat.reports,
+    )
+
+
 def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:
     """Report every recorded output, one line each; any non-OK is a problem.
 
     The verdicts come from ``output_integrity.verify_output_records``, shared
     with the incremental skip path, so the two cannot disagree about what
-    counts as proof. Two arguments are this caller's own: ``reroot``, because a
-    quarantined run's manifest still names its pre-move location, and roots
-    that admit the run dir and the working tree, since a run's outputs span
-    both its own directory and the flat data roots.
+    counts as proof. One argument is this caller's own: ``reroot``, because a
+    quarantined run's manifest still names its pre-move location.
 
     No ``declared`` map — there are no stage objects here, so every key is
     treated as dynamic, which only ever makes a verdict softer.
+
+    A manifest with no output hashes is *not* short-circuited: shape alone
+    cannot tell a pre-0.9.0 run from a modern one someone emptied the map on,
+    so every recorded key is reported unverifiable, exactly as the skip path
+    treats it. The legacy note explains the likely cause without excusing it.
     """
     from panelcast.pipelines.output_integrity import OK, verify_output_records
 
-    if not manifest.output_hashes:
-        typer.echo("outputs: no hashes recorded for this run (pre-0.9.0 manifest)")
-        return
+    if manifest.outputs and not manifest.output_hashes:
+        typer.echo("outputs: no hashes recorded for this run (pre-0.9.0 manifest?)")
     for verdict in verify_output_records(
         manifest.outputs,
         manifest.output_hashes,
-        roots=(run_dir, Path.cwd()),
+        roots=_output_roots(run_dir),
         reroot=run_dir,
     ):
         if verdict.label == OK:
-            typer.echo(f"{OK:<8} {verdict.key}")
+            typer.echo(f"{OK:<12} {verdict.key}")
             continue
-        typer.echo(f"{verdict.label:<8} {verdict.key} ({verdict.reason})")
+        typer.echo(f"{verdict.label:<12} {verdict.key} ({verdict.reason})")
         problems.append(verdict.key)
 
 

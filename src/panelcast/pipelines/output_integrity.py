@@ -75,6 +75,12 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     the same mapping applies to run-owned *inputs* (#420), which this module
     does not verify but must not stand in the way of.
 
+    A run-owned path maps whether or not the target survived the move: where a
+    deleted artifact *should* be is the useful answer, and reporting the
+    pre-move location instead turns a plain deletion into an apparent escape
+    from the run root. Paths the run does not own — shared data roots, external
+    files — are returned untouched.
+
     Only used by callers that expect to be looking at a moved run; the skip
     path follows the active pointer and never re-roots.
     """
@@ -82,9 +88,7 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
         return path
     parts = path.parts
     if run_dir.name in parts:
-        rerooted = run_dir.joinpath(*parts[parts.index(run_dir.name) + 1 :])
-        if rerooted.exists():
-            return rerooted
+        return run_dir.joinpath(*parts[parts.index(run_dir.name) + 1 :])
     return path
 
 
@@ -108,7 +112,10 @@ def verify_output_records(
     happened to iterate. ``declared`` binds a key to the path the stage says it
     writes, so a manifest cannot redirect a static output at another file that
     happens to hash correctly; keys outside it are dynamic outputs, whose
-    absence is unproven rather than corrupt.
+    absence is unproven rather than corrupt. That binding is compared in
+    *recorded* coordinates, before ``reroot`` is applied, so a caller passing
+    both must give ``declared`` in the same pre-move spelling the manifest
+    uses rather than the moved run's — otherwise every key reads as unbound.
     """
     recorded = {k: v for k, v in (outputs or {}).items() if k.startswith(prefix)}
     hashes = {k: v for k, v in (output_hashes or {}).items() if k.startswith(prefix)}
@@ -147,14 +154,13 @@ def verify_output_records(
             )
             continue
         if not path.exists():
-            if key not in declared:
-                # No declared path behind this key, so its absence is unproven
-                # rather than corrupt: nothing says this run still owns it.
-                yield OutputVerdict(
-                    key, MISSING, "recorded output is missing, and undeclared", path
-                )
-                continue
-            yield OutputVerdict(key, MISSING, "recorded output is missing", path, untrusted=True)
+            # Same reason either way; the difference is whether disk is
+            # *contradicting* the manifest. Without a declared path behind the
+            # key nothing says this run still owns it, so its absence is
+            # unproven rather than corrupt.
+            yield OutputVerdict(
+                key, MISSING, "recorded output is missing", path, untrusted=key in declared
+            )
             continue
         try:
             actual = sha256_path(path)

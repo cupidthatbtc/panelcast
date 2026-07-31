@@ -110,7 +110,10 @@ class Fixture:
 
 
 @pytest.fixture
-def fx(tmp_path):
+def fx(tmp_path, monkeypatch):
+    # Pinned so a repo-local `--basetemp` cannot quietly bring `tmp_path`
+    # inside a relative artifact root and flip the containment cases.
+    monkeypatch.chdir(tmp_path)
     return Fixture(tmp_path)
 
 
@@ -168,6 +171,22 @@ class TestBothCallersAgree:
         assert fx.skip_accepts() is False
         assert fx.verify_accepts() is False
 
+    def test_an_empty_hash_map_is_unverifiable_to_both(self, fx):
+        # The whole-map limit of the same rule: shape alone cannot separate a
+        # pre-0.9.0 run from a modern manifest someone emptied, so neither
+        # caller may excuse it.
+        fx.output_hashes.clear()
+        assert fx.skip_accepts() is False
+        assert fx.verify_accepts() is False
+
+    def test_a_run_that_recorded_nothing_is_accepted_by_both(self, fx):
+        # ...and nothing recorded is not the same as recorded-and-unprovable.
+        fx.outputs.clear()
+        fx.output_hashes.clear()
+        fx.stage.output_paths.clear()
+        assert fx.skip_accepts() is True
+        assert fx.verify_accepts() is True
+
     def test_an_escaping_path_is_refused_by_both(self, fx):
         outside = fx.tmp_path / "outside.json"
         outside.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
@@ -204,6 +223,25 @@ class TestTheDeclaredCallerDifference:
         # the run's outputs are simply gone — and it must not go looking under
         # `failed/` for them, since a quarantined run is not a source of truth.
         assert fx.skip_accepts() is False
+
+    def test_a_deleted_artifact_on_a_moved_run_reads_as_missing(self, fx):
+        # The re-root maps a run-owned path whether or not the target survived
+        # the move: reporting the pre-move location instead would turn a plain
+        # deletion into an apparent escape from the run root.
+        from panelcast.pipelines.output_integrity import MISSING, verify_output_records
+
+        fx.quarantine()
+        moved = fx.output_base / "failed" / "run_a"
+        (moved / "evaluation" / "metrics.json").unlink()
+
+        verdicts = list(
+            verify_output_records(
+                fx.outputs, fx.output_hashes, roots=(moved,), reroot=moved
+            )
+        )
+
+        assert [v.label for v in verdicts] == [MISSING]
+        assert fx.verify_accepts() is False
 
     def test_the_reroot_mapping_is_generic_over_what_it_moves(self, fx):
         # Not output-specific on purpose: run-owned *inputs* need the same

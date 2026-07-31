@@ -1471,7 +1471,10 @@ than implied: `runs verify` re-roots a quarantined run's recorded paths onto
 and never looks under `failed/` — a quarantined run is not a source of truth
 for a new one. The stage caller also passes the declared output paths, which
 bind a key to the path the stage says it writes; `runs verify` has no stage
-objects and treats every key as dynamic, which only ever softens a verdict.
+objects and treats every key as dynamic, which only ever softens a verdict. Its
+containment roots are the run directory plus the `ArtifactPaths` roots — not
+the working tree, which would admit any file whose bytes happen to hash
+correctly, including another run's copy of the same artifact.
 
 **Hash computation** (`stages.py:PipelineStage.compute_input_hash`):
 1. For each `input_path` (sorted), compute `sha256_file(path)`
