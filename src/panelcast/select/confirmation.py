@@ -55,9 +55,9 @@ class ConfirmationResult:
     """Per-seed paired verdicts plus the holds-on-every-seed conclusion.
 
     ``sampler``/``version``/``seeds_planned``/``dataset_descriptor_hash``/
-    ``base_config_hash`` echo the protocol so a resumed confirmation can prove
+    ``fit_config_hash`` echo the protocol so a resumed confirmation can prove
     the stored ledger belongs to the same call, on the same data, from the same
-    base configuration.
+    configuration — reference arm included, not only the winner's delta from it.
     """
 
     winner_knobs: dict[str, Any]
@@ -67,7 +67,7 @@ class ConfirmationResult:
     version: str | None = None
     seeds_planned: list[int] = field(default_factory=list)
     dataset_descriptor_hash: str | None = None
-    base_config_hash: str | None = None
+    fit_config_hash: str | None = None
 
     @property
     def confirmed(self) -> bool:
@@ -97,7 +97,7 @@ class ConfirmationResult:
             "version": self.version,
             "seeds_planned": self.seeds_planned,
             "dataset_descriptor_hash": self.dataset_descriptor_hash,
-            "base_config_hash": self.base_config_hash,
+            "fit_config_hash": self.fit_config_hash,
             "seeds": [asdict(s) for s in self.seeds],
         }
 
@@ -129,21 +129,6 @@ def _descriptor_hash(cfg: SweepConfig) -> str | None:
         return None
 
 
-def _base_config_payload(
-    cfg: SweepConfig, sampler_overrides: dict[str, int] | None
-) -> dict[str, Any]:
-    """Every option a confirmation fit is launched with except the per-fit ones.
-
-    Built by the same helper that writes the fit configs, minus what varies
-    inside one confirmation (the arm's knobs, the seed, the run id), so an
-    output-affecting option cannot reach the fits without moving the cache
-    identity with it. This is the identity's half; what each *run* is checked
-    against is its own arm's full payload, which is where an option an arm
-    overrides gets the value that arm's manifest recorded.
-    """
-    return _fit_config_payload(cfg, {}, sampler_overrides)
-
-
 def _as_recorded(value: Any) -> Any:
     """``value`` as it comes back out of a JSON file.
 
@@ -154,10 +139,10 @@ def _as_recorded(value: Any) -> Any:
     identity never match, refitting on every call.
 
     ``default=str`` is a backstop rather than a coercion that matters:
-    ``_write_config`` hands the same payload to ``yaml.safe_dump``, which
-    refuses anything that is not a YAML scalar, so a value that can reach a fit
-    at all is already JSON-shaped. It only keeps this from raising *before*
-    that clearer failure.
+    ``_write_config`` hands the same payload to ``yaml.safe_dump``, whose
+    representers cover the scalars and containers JSON also covers and refuse
+    the rest, so a value that can reach a fit at all round-trips here on its
+    own. It only keeps this from raising *before* that clearer failure.
     """
     return json.loads(json.dumps(value, default=str))
 
@@ -264,7 +249,7 @@ def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> lis
 
     The exemption cannot tell a recorded ``null`` from an absent key, so a
     ledger written before this field existed reads as blind on it. What still
-    archives such a file is ``base_config_hash``, absent from it for the same
+    archives such a file is ``fit_config_hash``, absent from it for the same
     reason and not exempted — retiring that key would quietly make pre-#418
     ledgers reusable.
     """
@@ -504,28 +489,6 @@ def run_confirmation(
     cfg.sweep_dir.mkdir(parents=True, exist_ok=True)
     base = default_arm()
     descriptor_hash = _descriptor_hash(cfg)
-    base_config = _base_config_payload(cfg, sampler_overrides)
-    result = ConfirmationResult(
-        winner_knobs=winner_knobs,
-        promote_z=promote_z,
-        sampler=_sampler_echo(cfg, sampler_overrides),
-        version=__version__,
-        seeds_planned=list(seeds),
-        dataset_descriptor_hash=descriptor_hash,
-        base_config_hash=_canonical_hash(base_config),
-    )
-    identity = {
-        "winner_knobs": winner_knobs,
-        "promote_z": promote_z,
-        "sampler": result.sampler,
-        "version": result.version,
-        "seeds_planned": result.seeds_planned,
-        # The winner knobs say what varies; these say what it varies *from*.
-        # Without them one sweep id could confirm a winner against another
-        # domain's snapshots and report the verdict as this domain's.
-        "dataset_descriptor_hash": descriptor_hash,
-        "base_config_hash": result.base_config_hash,
-    }
     # One source for both sides: the fits are launched from this, and cached
     # runs are checked against it, so the two cannot drift into a cache that
     # rejects every run it built.
@@ -535,9 +498,39 @@ def run_confirmation(
         """What the run behind ``label`` on ``seed`` must say it was fit with."""
         return _fit_config_payload(cfg, arms[label], sampler_overrides, seed)
 
-    discriminating = _discriminating_keys(
-        fit_config("reference"), fit_config("winner"), cfg.dataset
+    # Seed-free, so one hash covers every seed of this call.
+    payloads = {label: fit_config(label) for label in arms}
+    discriminating = _discriminating_keys(payloads["reference"], payloads["winner"], cfg.dataset)
+    if winner_knobs and not discriminating - {"seed", "dataset"}:
+        raise ValueError(
+            "the winner knobs are overwritten by a base option before the fits are "
+            f"written ({sorted(winner_knobs)}): both sides would run the same "
+            "configuration, so the pairing would compare the reference with itself."
+        )
+    result = ConfirmationResult(
+        winner_knobs=winner_knobs,
+        promote_z=promote_z,
+        sampler=_sampler_echo(cfg, sampler_overrides),
+        version=__version__,
+        seeds_planned=list(seeds),
+        dataset_descriptor_hash=descriptor_hash,
+        fit_config_hash=_canonical_hash(payloads),
     )
+    identity = {
+        "winner_knobs": winner_knobs,
+        "promote_z": promote_z,
+        "sampler": result.sampler,
+        "version": result.version,
+        "seeds_planned": result.seeds_planned,
+        # The winner knobs say what varies; these say what it varies *from*.
+        # Hashing the two payloads the fits are launched from — rather than the
+        # options minus the arms — is what puts the reference arm itself under
+        # the identity: a shipped default that moves is otherwise invisible to
+        # both gates, since the recorder omits a None and the run check only
+        # compares keys a manifest already holds.
+        "dataset_descriptor_hash": descriptor_hash,
+        "fit_config_hash": result.fit_config_hash,
+    }
 
     prior = _reusable_prior_seeds(
         out_path, identity, descriptor_hash, fit_config, discriminating

@@ -545,22 +545,52 @@ class TestConfirmationResume:
         calls, counting = self._counting(launch)
         second = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 2
-        assert first.base_config_hash is not None
-        assert second.base_config_hash != first.base_config_hash
+        assert first.fit_config_hash is not None
+        assert second.fit_config_hash != first.fit_config_hash
         assert [
             p
             for p in cfg.sweep_dir.iterdir()
             if p.name.startswith("confirmation_") and p.suffix == ".json"
         ]
 
+    def test_a_changed_reference_arm_is_a_different_confirmation(self, tmp_path, monkeypatch):
+        """The winner knobs are a delta; the identity has to hold what they vary from."""
+        from panelcast.select import confirmation as mod
+        from panelcast.select.space import default_arm
+
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        # A shipped default moving off None is invisible to the run gate: the
+        # recorder omits an unset value, so no manifest contradicts it.
+        monkeypatch.setattr(
+            mod, "default_arm", lambda: {**default_arm(), "entity_group_pooling": True}
+        )
+        calls, counting = self._counting(launch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2
+
     def test_a_knob_the_winner_overrides_still_reuses(self, tmp_path, monkeypatch):
         """An extra_config value an arm overrides is compared as the arm's, not the base's."""
         cfg, launch = _fake_env(tmp_path, monkeypatch)
         cfg.extra_config = {"latent_process": "rw"}
-        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        first = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
         calls, counting = self._counting(launch)
         run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 0
+        # Both arms set it, so the extra_config value reaches no fit: editing it
+        # must not cost a publication-scale refit that rewrites the same configs.
+        cfg.extra_config = {"latent_process": "ar1"}
+        calls, counting = self._counting(launch)
+        second = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 0
+        assert second.fit_config_hash == first.fit_config_hash
+
+    def test_a_winner_knob_a_base_option_overwrites_is_refused(self, tmp_path, monkeypatch):
+        """Both sides would run one configuration; the pairing would self-compare."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.num_samples = 200
+        with pytest.raises(ValueError, match="overwritten by a base option"):
+            run_confirmation({"num_samples": 4000}, cfg, seeds=(42,), launch=launch)
 
     def test_an_option_the_manifest_never_recorded_still_reuses(self, tmp_path, monkeypatch):
         """A key with no recorded value has nothing to disagree with."""
@@ -617,9 +647,11 @@ class TestConfirmationResume:
         def unloadable(_ref):
             raise OSError("stale mount")
 
-        monkeypatch.setattr("panelcast.select.confirmation.load_descriptor", unloadable)
         calls, counting = self._counting(launch)
-        with structlog.testing.capture_logs() as logs:
+        # Scoped, so undoing the blindness cannot revert whatever else the
+        # fixture patched.
+        with monkeypatch.context() as blind, structlog.testing.capture_logs() as logs:
+            blind.setattr("panelcast.select.confirmation.load_descriptor", unloadable)
             result = run_confirmation(
                 {"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting
             )
@@ -643,7 +675,6 @@ class TestConfirmationResume:
 
         # The blink costs one refit, not two: the ledger it wrote is not
         # archived again when the descriptor comes back.
-        monkeypatch.undo()
         calls, counting = self._counting(launch)
         result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 0
@@ -744,6 +775,8 @@ class TestManifestContract:
             output_root=tmp_path / "select",
             num_samples=200,
             num_warmup=100,
+            # The last compared key whose round trip would otherwise be unpinned.
+            extra_config={"max_events": 500},
         )
         cfg.sweep_dir.mkdir(parents=True)
         arms = {"reference": dict(default_arm()), "winner": {**default_arm(), **winner_knobs}}
@@ -762,7 +795,7 @@ class TestManifestContract:
         # knob a winner can differ on has to survive the round trip, or the
         # presence floor would reject a real run forever.
         assert {k for k, v in default_arm().items() if v is not None} <= set(recorded["winner"])
-        assert {"stages", "num_samples", "seed"} <= set(recorded["winner"])
+        assert {"stages", "num_samples", "seed", "max_events"} <= set(recorded["winner"])
         assert ("dataset" in recorded["winner"]) == (dataset is not None)
 
         discriminating = _discriminating_keys(
