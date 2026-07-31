@@ -111,20 +111,21 @@ def _sampler_echo(cfg: SweepConfig, sampler_overrides: dict[str, int] | None) ->
     }
 
 
-def _descriptor_hash(cfg: SweepConfig) -> str | None:
+def _descriptor_hash(dataset: str | None) -> str | None:
     """Hash of the descriptor these fits will resolve, or None if it won't load.
 
-    Resolved from ``cfg.dataset`` rather than taken from the caller, because
-    that is the reference ``_write_config`` puts in every confirmation config —
-    the domain the fits actually run against. An unset dataset resolves the
-    same default the fits will, so the identity holds the hash their manifests
-    record either way. A descriptor that cannot be loaded is not a value: None
-    would equal the None a manifest that recorded no hash produces, so
-    ``_reusable_prior_seeds`` refuses every cached run while it is unresolved
-    rather than letting the two absences match.
+    Takes the reference out of the fit payload rather than out of ``cfg``:
+    ``cfg.dataset`` only overwrites the payload's ``dataset`` when it is set, so
+    an ``extra_config`` entry can send the fits to a domain ``cfg`` never names.
+    Reading what will be written is what makes this the domain the fits actually
+    run against. An unset dataset resolves the same default the fits will, so
+    the identity holds the hash their manifests record either way. A descriptor
+    that cannot be loaded is not a value: None would equal the None a manifest
+    that recorded no hash produces, so ``_reusable_prior_seeds`` refuses every
+    cached run while it is unresolved rather than letting the two absences match.
     """
     try:
-        return load_descriptor(cfg.dataset).descriptor_hash()
+        return load_descriptor(dataset).descriptor_hash()
     except (OSError, ValueError, yaml.YAMLError):
         return None
 
@@ -306,9 +307,12 @@ def _reusable_prior_seeds(
         # unresolved hash as a changed dataset — the one conclusion a stale
         # mount must not lead to. Said once, rather than once per run: no
         # snapshot can be tied to a domain this call could not name. The ledger
-        # still moves aside, since the per-seed checkpoint is about to
-        # overwrite it with the refits.
-        _archive(out_path, reason="unresolved dataset descriptor")
+        # moves aside because the per-seed checkpoint is about to overwrite it,
+        # but only while there is something to preserve: a descriptor that is
+        # gone rather than briefly unreachable would otherwise leave one more
+        # copy of the same blind ledger behind every retry.
+        if payload.get("dataset_descriptor_hash") is not None:
+            _archive(out_path, reason="unresolved dataset descriptor")
         return {}
     changed = _identity_changes(payload, identity)
     if changed:
@@ -488,7 +492,6 @@ def run_confirmation(
     out_path = cfg.sweep_dir / "confirmation.json"
     cfg.sweep_dir.mkdir(parents=True, exist_ok=True)
     base = default_arm()
-    descriptor_hash = _descriptor_hash(cfg)
     # One source for both sides: the fits are launched from this, and cached
     # runs are checked against it, so the two cannot drift into a cache that
     # rejects every run it built.
@@ -500,12 +503,22 @@ def run_confirmation(
 
     # Seed-free, so one hash covers every seed of this call.
     payloads = {label: fit_config(label) for label in arms}
-    discriminating = _discriminating_keys(payloads["reference"], payloads["winner"], cfg.dataset)
-    if winner_knobs and not discriminating - {"seed", "dataset"}:
+    # From the payload, not from cfg: both are only ever one of three writers of
+    # the dataset key, and what the fits run on is what gets written.
+    dataset = payloads["reference"].get("dataset")
+    descriptor_hash = _descriptor_hash(dataset)
+    discriminating = _discriminating_keys(payloads["reference"], payloads["winner"], dataset)
+    if not discriminating - {"seed", "dataset"}:
+        overwritten = sorted(k for k in winner_knobs if k not in discriminating)
         raise ValueError(
-            "the winner knobs are overwritten by a base option before the fits are "
-            f"written ({sorted(winner_knobs)}): both sides would run the same "
-            "configuration, so the pairing would compare the reference with itself."
+            (
+                f"the winner knobs are overwritten by a base option before the fits are "
+                f"written ({overwritten}): "
+                if overwritten
+                else f"the winner knobs do not differ from the reference arm ({winner_knobs}): "
+            )
+            + "both sides would run the same configuration, so the pairing would "
+            "compare the reference with itself."
         )
     result = ConfirmationResult(
         winner_knobs=winner_knobs,

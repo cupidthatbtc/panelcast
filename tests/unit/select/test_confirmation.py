@@ -428,7 +428,7 @@ class TestConfirmationResume:
         )
         assert calls["n"] == 2
         assert result.dataset_descriptor_hash is not None
-        assert result.dataset_descriptor_hash != _descriptor_hash(cfg)
+        assert result.dataset_descriptor_hash != _descriptor_hash(cfg.dataset)
         assert [
             p
             for p in cfg.sweep_dir.iterdir()
@@ -470,7 +470,8 @@ class TestConfirmationResume:
                 "stages",
             ),
             (
-                lambda m: m["experiment_identity"]["config_payload"].update(latent_process="rw"),
+                # A value neither arm holds, so it disagrees with either side.
+                lambda m: m["experiment_identity"]["config_payload"].update(latent_process="ou"),
                 "the run was fit with another value",
                 "latent_process",
             ),
@@ -486,15 +487,16 @@ class TestConfirmationResume:
             ),
         ],
     )
+    @pytest.mark.parametrize("label", ["reference", "winner"])
     def test_a_cached_run_that_cannot_prove_itself_refits(
-        self, tmp_path, monkeypatch, tamper, reason, key
+        self, tmp_path, monkeypatch, tamper, reason, key, label
     ):
         """The identity file matching is not enough — each run's manifest must too."""
         import structlog
 
         cfg, launch = _fake_env(tmp_path, monkeypatch)
         result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
-        path = Path(result.seeds[0].winner_run) / "manifest.json"
+        path = Path(getattr(result.seeds[0], f"{label}_run")) / "manifest.json"
         if tamper is None:
             path.unlink()
         else:
@@ -507,7 +509,7 @@ class TestConfirmationResume:
             run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 2  # both sides of the seed refit
         rejected = [e for e in logs if e["event"] == "confirmation_cached_run_rejected"]
-        assert [(e["reason"], e["key"]) for e in rejected] == [(reason, key)]
+        assert [(e["label"], e["reason"], e["key"]) for e in rejected] == [(label, reason, key)]
 
     def test_swapping_the_paired_runs_refits(self, tmp_path, monkeypatch):
         """Each side is checked against its own arm, so the pair cannot be reversed."""
@@ -555,19 +557,61 @@ class TestConfirmationResume:
 
     def test_a_changed_reference_arm_is_a_different_confirmation(self, tmp_path, monkeypatch):
         """The winner knobs are a delta; the identity has to hold what they vary from."""
+        import structlog
+
         from panelcast.select import confirmation as mod
         from panelcast.select.space import default_arm
 
         cfg, launch = _fake_env(tmp_path, monkeypatch)
         run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        calls, counting = self._counting(launch)
         # A shipped default moving off None is invisible to the run gate: the
         # recorder omits an unset value, so no manifest contradicts it.
-        monkeypatch.setattr(
-            mod, "default_arm", lambda: {**default_arm(), "entity_group_pooling": True}
-        )
-        calls, counting = self._counting(launch)
-        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        with monkeypatch.context() as moved, structlog.testing.capture_logs() as logs:
+            moved.setattr(
+                mod, "default_arm", lambda: {**default_arm(), "entity_group_pooling": True}
+            )
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 2
+        assert [
+            e["changed"] for e in logs if e["event"] == "confirmation_cache_archived"
+        ] == [["fit_config_hash"]]
+
+    def test_a_regenerated_dataset_is_a_different_confirmation(self, tmp_path, monkeypatch):
+        """The descriptor's content, not its name: same `aero`, re-extracted."""
+        import structlog
+
+        from panelcast.config.descriptor import load_descriptor
+
+        cfg, launch = _fake_env(tmp_path, monkeypatch, dataset="aero")
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+
+        class _Regenerated:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def descriptor_hash(self):
+                return "1" * 64
+
+        calls, counting = self._counting(launch)
+        with monkeypatch.context() as moved, structlog.testing.capture_logs() as logs:
+            moved.setattr(
+                "panelcast.select.confirmation.load_descriptor",
+                lambda ref: _Regenerated(load_descriptor(ref)),
+            )
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2
+        assert [
+            e["changed"] for e in logs if e["event"] == "confirmation_cache_archived"
+        ] == [["dataset_descriptor_hash"]]
+
+    def test_a_dataset_only_extra_config_names_is_the_one_resolved(self, tmp_path, monkeypatch):
+        """cfg is one of three writers of the key; what the fits run on is what is written."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.extra_config = {"dataset": "aero"}
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        assert result.dataset_descriptor_hash == _descriptor_hash("aero")
+        assert result.dataset_descriptor_hash != _descriptor_hash(None)
 
     def test_a_knob_the_winner_overrides_still_reuses(self, tmp_path, monkeypatch):
         """An extra_config value an arm overrides is compared as the arm's, not the base's."""
@@ -605,11 +649,9 @@ class TestConfirmationResume:
         run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 0
 
-    def test_an_unloadable_descriptor_resolves_to_no_hash(self, tmp_path):
+    def test_an_unloadable_descriptor_resolves_to_no_hash(self):
         """An unloadable descriptor is an absence, not a value another absence matches."""
-        assert _descriptor_hash(
-            SweepConfig(sweep_id="c", dataset="not-a-dataset", output_root=tmp_path / "s")
-        ) is None
+        assert _descriptor_hash("not-a-dataset") is None
 
     def test_a_seed_override_is_refused(self, tmp_path, monkeypatch):
         cfg, launch = _fake_env(tmp_path, monkeypatch)
@@ -725,6 +767,10 @@ class TestManifestContract:
         written = _yaml.safe_load(config_path.read_text(encoding="utf-8"))
         config = PipelineConfig(**apply_yaml_overrides({}, written))
         recorded = experiment_config_payload(config)
+        # The fixture's own manifest excludes run_id on the claim that the real
+        # recorder does; this is where that claim gets checked.
+        assert config.run_id == run_dir.name
+        assert "run_id" not in recorded
         save_run_manifest(
             RunManifest(
                 run_id=config.run_id,
@@ -802,7 +848,7 @@ class TestManifestContract:
             payloads["reference"], payloads["winner"], cfg.dataset
         )
         assert set(winner_knobs) <= discriminating
-        descriptor_hash = _descriptor_hash(cfg)
+        descriptor_hash = _descriptor_hash(dataset)
         assert descriptor_hash is not None
         for label, run_dir in runs.items():
             assert (
