@@ -36,11 +36,12 @@ from panelcast.pipelines.training_summary import (
 
 SRC = Path(panelcast.__file__).resolve().parent
 # scripts/ is where the idiom is most likely to reappear -- written fast, from
-# another script rather than from the resolver module. Absent under a wheel
-# install, where there is nothing to scan.
-SCAN_ROOTS = [("panelcast", SRC)] + [
-    ("scripts", p) for p in (SRC.parents[1] / "scripts",) if p.is_dir()
-]
+# another script rather than from the resolver module. Anchored on the repo via
+# this file, not on the installed package: scripts are not installed, so a
+# non-editable install would otherwise skip the root and narrow the guard back
+# to the package with nothing to signal it.
+SCRIPTS = Path(__file__).resolve().parents[3] / "scripts"
+SCAN_ROOTS = [("panelcast", SRC)] + [("scripts", p) for p in (SCRIPTS,) if p.is_dir()]
 
 GUARDED_KEYS = ("logit_offset", "target_transform")
 
@@ -272,6 +273,8 @@ class TestSingleResolver:
             "panelcast/pipelines/sensitivity.py",
             "panelcast/pipelines/training_summary.py",
         }, f"the guard did not reach the consumer modules; it scanned {sorted(scanned_modules)}"
+        if any(label == "scripts" for label, _ in SCAN_ROOTS):
+            assert "scripts/predict_entity.py" in scanned_modules
         assert offenders == {}, (
             f"inline reads of {GUARDED_KEYS} outside the resolvers: {offenders}; "
             "use logit_offset_from_summary / target_transform_from_summary."
@@ -376,6 +379,19 @@ class TestConfigValidation:
         with pytest.raises(ValueError, match="logit_offset"):
             _reproduce_config(tmp_path / "missing", manifest)
 
+    def test_a_run_id_that_is_not_a_bare_directory_name_is_refused(self, tmp_path):
+        """The restored run_id now goes through validate_run_id, which is a
+        containment rule rather than a naming convention that narrowed: an id
+        with a path separator was never a directory a run could live in, so
+        reproducing it is refusing an artifact that was already unusable."""
+        from types import SimpleNamespace
+
+        from panelcast.cli.runs_cmd import _reproduce_config
+
+        manifest = SimpleNamespace(flags={"run_id": "../escape"})
+        with pytest.raises(Exception, match="run_id"):
+            _reproduce_config(tmp_path / "missing", manifest)
+
     def test_a_recorded_list_is_restored_as_the_tuple_the_field_declares(self, tmp_path):
         """JSON has no tuples, so the coercion is what keeps a restored config
         the same type as every other construction path."""
@@ -395,9 +411,29 @@ class TestConfigValidation:
 
         from panelcast.cli.runs_cmd import _reproduce_config
 
-        manifest = SimpleNamespace(flags={"sigma_obs_loc": 1.5, "seed": 11})
+        manifest = SimpleNamespace(flags={"sigma_rw_lognormal_loc": -2.5, "seed": 11})
         config, _ = _reproduce_config(tmp_path / "missing", manifest)
+        # Asserting the restored value, not just the unrelated one: without it
+        # a renamed field would be dropped by the defaults filter and the test
+        # would keep passing while covering nothing.
+        assert config.sigma_rw_lognormal_loc == -2.5
+        assert config.auto_priors is None
         assert config.seed == 11
+
+    def test_a_pairing_todays_cross_field_rule_rejects_fails_the_reproduction(self, tmp_path):
+        """The other half: a manifest recording both the auto toggle and an
+        explicit sigma loc. Refusing is the intended outcome -- the two cannot
+        both take effect, so re-executing would run an experiment that is not
+        the recorded one."""
+        from types import SimpleNamespace
+
+        from panelcast.cli.runs_cmd import _reproduce_config
+
+        manifest = SimpleNamespace(
+            flags={"auto_priors": True, "sigma_rw_lognormal_loc": -2.5}
+        )
+        with pytest.raises(ValueError, match="auto_priors"):
+            _reproduce_config(tmp_path / "missing", manifest)
 
     def test_unrecorded_flags_keep_their_defaults(self, tmp_path):
         from types import SimpleNamespace
