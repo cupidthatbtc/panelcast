@@ -1474,7 +1474,10 @@ bind a key to the path the stage says it writes; `runs verify` has no stage
 objects and treats every key as dynamic, which only ever softens a verdict. Its
 containment roots are the run directory plus the `ArtifactPaths` roots — not
 the working tree, which would admit any file whose bytes happen to hash
-correctly, including another run's copy of the same artifact.
+correctly, including another run's run-scoped copy of the same artifact. Under
+the flat layout those roots are shared across runs by construction, so
+containment cannot separate one run's copy from another's there; the
+declared-path binding is what does that, and only the stage caller has it.
 
 **Hash computation** (`stages.py:PipelineStage.compute_input_hash`):
 1. For each `input_path` (sorted), compute `sha256_file(path)`

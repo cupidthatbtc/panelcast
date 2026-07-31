@@ -187,6 +187,16 @@ class TestBothCallersAgree:
         assert fx.skip_accepts() is True
         assert fx.verify_accepts() is True
 
+    def test_a_stage_declaring_nothing_still_sees_a_hash_only_key(self, fx):
+        # The lenient direction: with no declared outputs and nothing in
+        # `outputs`, the skip path used to shortcut to True and never look at
+        # a key the manifest hashed. It is the caller that decides whether to
+        # *reuse* artifacts, so it must not be the softer of the two.
+        fx.outputs.clear()
+        fx.stage.output_paths.clear()
+        assert fx.skip_accepts() is False
+        assert fx.verify_accepts() is False
+
     def test_an_escaping_path_is_refused_by_both(self, fx):
         outside = fx.tmp_path / "outside.json"
         outside.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
@@ -209,6 +219,44 @@ class TestBothCallersAgree:
         (model / "smuggled.bin").write_bytes(b"extra")
         assert fx.skip_accepts() is False
         assert fx.verify_accepts() is False
+
+
+class TestContainment:
+    """The root check has to survive a workspace an operator has bent."""
+
+    def test_one_unresolvable_root_does_not_condemn_every_output(self, tmp_path):
+        from panelcast.pipelines.output_integrity import contained_path
+
+        good = tmp_path / "models"
+        good.mkdir()
+        artifact = good / "trace.nc"
+        artifact.write_bytes(b"posterior")
+
+        class Hostile(type(tmp_path)):
+            def resolve(self, strict=False):
+                raise OSError("symlink loop")
+
+        # A bad root ahead of the good one must be skipped, not fatal: the
+        # roots are a shared workspace, and one bent entry out of eight cannot
+        # turn every output in every run into an apparent escape.
+        assert contained_path(artifact, [Hostile(tmp_path / "bad"), good]) is not None
+
+    def test_the_contained_path_is_the_one_that_gets_hashed(self, tmp_path):
+        from panelcast.pipelines.output_integrity import contained_path
+
+        root = tmp_path / "models"
+        root.mkdir()
+        real = root / "real.nc"
+        real.write_bytes(b"posterior")
+        link = root / "alias.nc"
+        try:
+            link.symlink_to(real)
+        except (OSError, NotImplementedError) as exc:
+            pytest.skip(f"symlinks unavailable: {exc}")
+
+        # Returning the resolved form is what keeps the read from walking the
+        # same symlink a second time and landing somewhere else.
+        assert contained_path(link, [root]) == real.resolve()
 
 
 class TestTheDeclaredCallerDifference:

@@ -48,21 +48,30 @@ class OutputVerdict:
 
 
 def contained_path(path: Path, roots: Sequence[Path]) -> Path | None:
-    """``path``, but only if it resolves inside one of ``roots``.
+    """The *resolved* ``path``, but only if it lands inside one of ``roots``.
 
     Manifests are just files on disk; a tampered one must not be able to aim
     the integrity check at something outside the workspace it describes.
     Resolution is what makes a symlinked component that leaves the root fail
-    here rather than at the eventual read.
+    here rather than at the eventual read — and the resolved form is what is
+    returned, so the caller reads and hashes the path this proved rather than
+    walking the same symlink a second time and possibly landing elsewhere.
+
+    A root that will not resolve is skipped rather than fatal. The roots are a
+    shared workspace an operator may have symlinked, and one bad entry among
+    eight must not turn every output in every run into an apparent escape.
     """
     try:
         resolved = path.resolve()
-        for root in roots:
-            resolved_root = Path(root).resolve()
-            if resolved == resolved_root or resolved_root in resolved.parents:
-                return path
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):
         return None
+    for root in roots:
+        try:
+            resolved_root = Path(root).resolve()
+        except (OSError, ValueError, RuntimeError):
+            continue
+        if resolved == resolved_root or resolved_root in resolved.parents:
+            return resolved
     return None
 
 
@@ -81,8 +90,10 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     from the run root. Paths the run does not own — shared data roots, external
     files — are returned untouched.
 
-    Only used by callers that expect to be looking at a moved run; the skip
-    path follows the active pointer and never re-roots.
+    Passed by callers that may be looking at a moved run — `runs verify`
+    resolves active and quarantined runs alike and cannot know which it has
+    until it looks. An active run's paths exist, so this returns before mapping
+    anything. The skip path follows the active pointer and never passes it.
     """
     if path.exists():
         return path
@@ -148,11 +159,13 @@ def verify_output_records(
                 continue
         if reroot is not None:
             path = reroot_under(path, reroot)
-        if contained_path(path, roots) is None:
+        contained = contained_path(path, roots)
+        if contained is None:
             yield OutputVerdict(
                 key, UNBOUND, "recorded output path escapes the run roots", untrusted=True
             )
             continue
+        path = contained
         if not path.exists():
             # Same reason either way; the difference is whether disk is
             # *contradicting* the manifest. Without a declared path behind the

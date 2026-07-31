@@ -46,10 +46,17 @@ def _output_roots(run_dir: Path) -> tuple[Path, ...]:
     """Where a run's outputs may live: its own directory and the artifact roots.
 
     Not the whole working tree — that would admit any file whose bytes happen
-    to hash correctly, including another run's copy of the same artifact, which
-    is the substitution the containment check exists to refuse. A run-scoped
+    to hash correctly, including another run's *run-scoped* copy of the same
+    artifact, which is the substitution containment can refuse. A run-scoped
     layout keeps everything under ``run_dir``; a flat one spreads products
-    across the roots ``ArtifactPaths`` declares, so both are named.
+    across the roots ``ArtifactPaths`` declares, so both are named. Under the
+    flat layout those roots are shared by every run by construction, so
+    containment alone cannot tell one run's copy from another's there; the
+    declared-path binding is what does that, and only the stage caller has it.
+
+    The roots are relative exactly where ``ArtifactPaths.flat()`` is, matching
+    how the orchestrator records those outputs, so path and root are resolved
+    against the same working directory and move together.
     """
     from panelcast.paths import ArtifactPaths
 

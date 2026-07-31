@@ -323,21 +323,17 @@ class PipelineStage:
         recorded = {k: v for k, v in (manifest.outputs or {}).items() if k.startswith(prefix)}
         declared = {f"{prefix}{path.as_posix()}": path for path in self.output_paths}
 
-        if not recorded:
-            if self.output_paths:
-                return SkipDecision(
-                    False,
-                    "manifest recorded no outputs for this stage",
-                    outputs_unverifiable=True,
-                )
-            return SkipDecision(True)
-        if not manifest.output_hashes:
+        if recorded and not manifest.output_hashes:
             return SkipDecision(
                 False,
                 "manifest records no output hashes (pre-0.9.0)",
                 outputs_unverifiable=True,
             )
 
+        # Drained before any "nothing recorded" shortcut: a key hashed but not
+        # recorded is invisible to `recorded`, and skipping on it would make
+        # this — the caller that decides whether to *reuse* artifacts — the
+        # lenient side of the pair.
         for verdict in verify_output_records(
             manifest.outputs,
             manifest.output_hashes,
