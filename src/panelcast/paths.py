@@ -88,11 +88,12 @@ class RunPathError(ValueError):
 
 LATEST_LINK = "latest"
 
-# The layout owns this name, so anything that has to recognize a quarantined
-# run reads it from here: `reroot_under` maps a recorded path back onto the run
-# by matching `<base>/failed/<id>`, and if its spelling ever drifted from the
-# one the quarantine is written under, every intact quarantined run would map
-# to the wrong place and be reported as tampered rather than moved.
+# The layout owns this name, so anything that has to *recognize* a quarantined
+# run reads it from here rather than spelling it again. `reroot_under` maps a
+# recorded path back onto the run by matching `<base>/failed/<id>`; a reader
+# that guessed the name wrong would report every intact quarantined run as
+# tampered rather than moved, which is silent and backwards. Writers still use
+# their own literals — retiring those is a wider change than the readers need.
 QUARANTINE_DIR = "failed"
 
 # Reserved by the layout itself: `latest` is the pointer link, `failed` the

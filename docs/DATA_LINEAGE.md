@@ -1506,8 +1506,9 @@ it and refused by containment. Name-matching cannot separate a relocated
 workspace from another checkout of the same project — both spell the base
 `outputs` — so what bounds it is that the mapping only aims *into* the run
 directory: containment and the recorded hash decide the rest. The declared-path
-binding is the second, and the one
-place `runs verify` is the weaker side: only the stage caller holds the paths a
+binding is the second, and the first
+of the two places `runs verify` is the weaker side — both of them consequences
+of the same missing list: only the stage caller holds the paths a
 stage declares, so only it refuses a manifest that redirects a static output at
 another file inside the run's own directory, where containment has nothing to
 say. The manifest does not record which outputs were declared, so there is

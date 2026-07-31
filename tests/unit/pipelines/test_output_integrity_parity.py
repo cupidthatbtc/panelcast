@@ -378,7 +378,12 @@ class TestContainment:
     """The root check has to survive a workspace an operator has bent."""
 
     def test_one_unresolvable_root_does_not_condemn_every_output(self, tmp_path, monkeypatch):
-        from panelcast.pipelines.output_integrity import _is_contained
+        # Asserted through `_resolved_roots`, which is where the tolerance
+        # lives now that resolution is hoisted out of the per-key check.
+        # Pointing this at `_is_contained` would pass without exercising
+        # anything: that function no longer resolves, so a root that cannot be
+        # resolved never raises there.
+        from panelcast.pipelines.output_integrity import _is_contained, _resolved_roots
 
         good = tmp_path / "models"
         good.mkdir()
@@ -393,12 +398,36 @@ class TestContainment:
             return real_resolve(self)
 
         resolved = artifact.resolve()
+        good_resolved = good.resolve()
         monkeypatch.setattr(Path, "resolve", resolve)
 
-        # A bad root ahead of the good one must be skipped, not fatal: the
+        # A bad root ahead of the good one must be dropped, not fatal: the
         # roots are a shared workspace, and one bent entry out of eight cannot
         # turn every output in every run into an apparent escape.
-        assert _is_contained(resolved, [bad, good]) is True
+        roots = _resolved_roots([bad, good])
+
+        assert roots == (good_resolved,)
+        assert _is_contained(resolved, roots) is True
+
+    def test_no_resolvable_root_contains_nothing(self, tmp_path, monkeypatch):
+        # The other end of dropping bad roots: tolerance must not become
+        # permissiveness. With every root gone the result is empty, and empty
+        # has to mean "not contained" — the refusal both callers already
+        # handle — rather than an unguarded `any()` over nothing being read as
+        # success somewhere downstream.
+        from panelcast.pipelines.output_integrity import _is_contained, _resolved_roots
+
+        artifact = tmp_path / "trace.nc"
+        artifact.write_bytes(b"posterior")
+        resolved = artifact.resolve()
+        monkeypatch.setattr(Path, "resolve", lambda self, strict=False: (_ for _ in ()).throw(
+            OSError("symlink loop")
+        ))
+
+        roots = _resolved_roots([tmp_path / "a", tmp_path / "b"])
+
+        assert roots == ()
+        assert _is_contained(resolved, roots) is False
 
     @pytest.mark.parametrize("layout", ["flat", "run"])
     def test_the_root_enumeration_is_the_dataclass(self, tmp_path, layout):
@@ -771,10 +800,11 @@ class TestTheDeclaredCallerDifference:
         assert reroot_under(recorded_input, moved) == moved / "models" / "manifest.json"
 
     def test_the_quarantine_name_has_one_definition(self):
-        # `reroot_under` recognizes a moved run by matching `<base>/failed/<id>`.
-        # A second copy of that name here could drift from the one the
-        # quarantine is written under, and every intact quarantined run would
-        # then map somewhere else and be reported tampered rather than moved.
+        # `reroot_under` recognizes a moved run by matching `<base>/failed/<id>`,
+        # so it is a *reader* of the name. This pins the reader to the layout's
+        # definition; it cannot pin the writers, which still use literals. What
+        # it rules out is this module drifting from the layout and reporting
+        # every intact quarantined run as tampered rather than moved.
         from panelcast import paths
         from panelcast.pipelines import output_integrity
 
