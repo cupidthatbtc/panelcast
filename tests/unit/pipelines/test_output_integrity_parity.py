@@ -805,8 +805,33 @@ class TestTheDeclaredCallerDifference:
         # definition; it cannot pin the writers, which still use literals. What
         # it rules out is this module drifting from the layout and reporting
         # every intact quarantined run as tampered rather than moved.
+        #
+        # Static, not `is`: CPython interns identifier-like string constants, so
+        # a restored local `QUARANTINE_DIR = "failed"` would be the *same
+        # object* as the layout's and an identity assertion would pass against
+        # the exact defect it exists to forbid. `from`-import is a snapshot
+        # binding anyway, so "one definition" is not observable at runtime —
+        # it is a property of the source, and the source is what to read.
+        import ast
+
         from panelcast import paths
         from panelcast.pipelines import output_integrity
 
-        assert output_integrity.QUARANTINE_DIR is paths.QUARANTINE_DIR
+        tree = ast.parse(Path(output_integrity.__file__).read_text(encoding="utf-8"))
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+            for alias in node.names
+        }
+        assigned = {
+            target.id
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Assign)
+            for target in node.targets
+            if isinstance(target, ast.Name)
+        }
+
+        assert "QUARANTINE_DIR" in imported
+        assert "QUARANTINE_DIR" not in assigned
         assert paths.QUARANTINE_DIR in paths._RESERVED_RUN_IDS

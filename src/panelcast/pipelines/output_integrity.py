@@ -128,6 +128,16 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     read as tampering. The name comes from the run's parent, or its grandparent
     when the run sits under the quarantine directory.
 
+    Matching by name also means matching case-sensitively, on every platform,
+    while the containment check that judges the result compares ``Path``s —
+    which are case-*insensitive* on Windows. So a differently-cased
+    ``--output-base`` against a case-insensitive filesystem is the one input
+    whose verdict is platform-dependent: nothing re-roots either way, and then
+    Windows finds the unmapped path contained while macOS does not. Both are
+    refusals of the right thing on a moved run and neither admits a foreign
+    path; making them agree means deciding case-folding for the layout as a
+    whole, which is #440 rather than this module's to settle.
+
     Be precise about what that admits: it refuses a tree whose base is spelled
     differently, not every foreign one. Another checkout of the *same* project
     also spells its base ``outputs``, so a recorded path from it maps here —
@@ -176,7 +186,15 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
 
 
 def _output_base_name(run_dir: Path) -> str:
-    """The name of the output base ``run_dir`` sits in, seeing past quarantine."""
+    """The name of the output base ``run_dir`` sits in, seeing past quarantine.
+
+    A run *id* of ``failed`` is impossible — the layout reserves it — but the
+    output *base* is the operator's to name and nothing reserves anything
+    there, so ``--output-base ./failed`` makes this read the grandparent when
+    the run was never quarantined. The mapping only ever aims *into* the run
+    directory, so the worst case is a recorded path left unmapped and refused
+    by containment: a wrong verdict on a moved run, not a path escaping one.
+    """
     parent = run_dir.parent
     return parent.parent.name if parent.name == QUARANTINE_DIR else parent.name
 
