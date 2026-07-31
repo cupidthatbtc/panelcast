@@ -505,9 +505,12 @@ def runs_reproduce(
     # `evaluate` carries its own `models/` artifacts here — and a reproduction
     # never resumes and never skips, so it regenerates every one of them.
     # Gating on them abandoned a quarantined run to its recorded paths, and
-    # would still make any run unreproducible for the ordinary cleanup of
-    # pruning the directory it failed in. What the gate is for is raw data
-    # drifting underneath the comparison, which is what is left.
+    # made pruning the directory a run failed in permanent. Ownership is
+    # containment, so this reaches a product the run directory holds and no
+    # other: a flat-layout product at the project root, or one behind a symlink
+    # out of the run, is external as far as containment can tell and stays
+    # gated. What the gate is for — raw data drifting underneath the
+    # comparison — is what is left wherever it does reach.
     for path_str, recorded in sorted((manifest.input_hashes or {}).items()):
         path = Path(path_str)
         if run_owned_path(path, run_dir) is not None:

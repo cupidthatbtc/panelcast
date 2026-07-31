@@ -562,9 +562,9 @@ class TestWhatUnownedStillReads:
 
         result = runner.invoke(app, ["runs", "verify", "run_a", "--output-base", str(base)])
 
+        assert result.exit_code == 1, result.output
         assert "OK           train:models" in result.output
         assert f"MISSING  input {recorded}" in result.output
-        assert result.exit_code == 1
 
     def test_an_escaping_recorded_input_is_checked_where_it_was_recorded(self, tmp_path):
         # What unowned means, stated so the guard is not read as a refusal to
@@ -690,7 +690,9 @@ class TestReproduceOnAQuarantinedRun:
         assert config.skip_existing is False
         # Both argument channels: a keyword taking precedence over the config
         # would leave the assertions above reading defaults nothing acts on.
-        assert set(kwargs) == {"output_base"}
+        # Named rather than exhaustive, so an unrelated keyword added to the
+        # call does not read as the premise breaking.
+        assert not {"resume", "skip_existing"} & set(kwargs)
 
     def test_the_planted_flag_is_one_a_resolved_config_can_carry(self, tmp_path):
         # The other half of the True case's premise: `skip_existing` is a
@@ -731,6 +733,36 @@ class TestReproduceOnAQuarantinedRun:
 
         assert result.exit_code == 1
         assert f"ABORT: recorded input missing: {tmp_path / 'raw.csv'}" in result.output
+
+    def test_a_product_the_run_directory_does_not_hold_is_still_gated(
+        self, tmp_path, monkeypatch
+    ):
+        # The documented limit, at the gate rather than at the helper. Under a
+        # layout that keeps products outside the run directory — flat here,
+        # symlinked-out equivalently — containment cannot tell them from data
+        # the run did not produce, so the skip does not reach them and the
+        # ordinary act of running again over `models/` still stops an earlier
+        # run's reproduction.
+        from panelcast.pipelines import orchestrator
+
+        monkeypatch.chdir(tmp_path)
+        base = _write_run(tmp_path, run_owned_input=True)
+        product = tmp_path / "models" / "manifest.json"
+        product.parent.mkdir()
+        product.write_text("{}", encoding="utf-8")
+        manifest_path = base / "run_a" / "manifest.json"
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        recorded = Path("models") / "manifest.json"
+        payload["input_hashes"] = {str(recorded): sha256_path(product)}
+        manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+        _quarantine(base)
+        monkeypatch.setattr(orchestrator, "run_pipeline", lambda config, **kw: 0)
+        product.write_text('{"run": "a later one"}', encoding="utf-8")
+
+        result = runner.invoke(app, ["runs", "reproduce", "run_a", "--output-base", str(base)])
+
+        assert result.exit_code == 1
+        assert f"ABORT: raw input changed since the run: {recorded}" in result.output
 
     def test_raw_data_that_cannot_be_read_aborts_legibly(self, tmp_path, monkeypatch):
         # The gate's whole job is turning a late failure into an early legible
