@@ -16,6 +16,8 @@ Three consequences of committing by rename, all deliberate:
   — keeps seeing the old contents, and a symlink *at* the target path is
   replaced rather than written through, which is what ``write_text`` did.
   `latest.json` is the plausible victim; follow the directory, not the file.
+  The replacement is also owned by whoever wrote it, where truncating in place
+  kept the original owner and group.
 - Bytes are written through a binary handle, so line endings are whatever the
   caller passed. `Path.write_text` translated ``\\n`` to ``\\r\\n`` on Windows,
   and the records that moved here (manifest, stamp, pointer) are LF on every
@@ -65,15 +67,22 @@ def _target_mode(path: Path) -> int | None:
     verbatim, so an operator who tightened permissions on one must not have
     them widened again at the next stage boundary.
 
+    Only a *missing* target answers None. Any other ``stat`` failure — a
+    symlink loop, an unreadable path component — propagates rather than being
+    read as "nothing there", which would rewrite an existing restrictive file
+    at the umask default and silently widen it. Those failures would defeat
+    the create a few lines later anyway; better to say so at the cause.
+
     Follows symlinks, so replacing a symlinked target inherits the mode of the
     file it pointed at — the one whose content the reader was getting.
 
-    Permission bits only. A rename still drops POSIX ACLs, xattrs and SELinux
-    labels that in-place truncation preserved; nothing here restores those.
+    Permission bits only. A rename still drops owner, group, POSIX ACLs,
+    xattrs and SELinux labels that in-place truncation preserved; nothing here
+    restores those.
     """
     try:
         return stat.S_IMODE(os.stat(path).st_mode)
-    except OSError:
+    except FileNotFoundError:
         return None
 
 
@@ -82,17 +91,24 @@ def _open_temp(tmp: Path, mode: int | None) -> BinaryIO:
 
     Not created-then-narrowed: a file exists between those two calls, and
     permission is checked at ``open``, so a reader who gets a descriptor in
-    that window keeps reading everything written afterwards. With no previous
-    target there is nothing to inherit and the umask default stands, which is
-    what ``write_text`` gave.
+    that window keeps reading everything written afterwards.
 
     ``O_EXCL`` makes the name collision the pid-and-uuid suffix guards against
-    an error rather than a silent share.
+    an error rather than a silent share. With no previous target the create
+    asks for ``0o666`` and the umask trims it to exactly what ``write_text``
+    would have produced; with one, the umask would *narrow* the bits being
+    inherited, so ``fchmod`` restores them — after a create that was never
+    wider than the target, so there is still no window.
     """
-    if mode is None:
-        return tmp.open("wb")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
-    return os.fdopen(fd, "wb")
+    fchmod = getattr(os, "fchmod", None)  # POSIX only; modes are advisory on Windows
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o666 if mode is None else mode)
+    try:
+        if mode is not None and fchmod is not None:
+            fchmod(fd, mode)
+        return os.fdopen(fd, "wb")
+    except BaseException:  # pragma: no cover - a freshly created descriptor rarely refuses
+        os.close(fd)
+        raise
 
 
 @contextmanager

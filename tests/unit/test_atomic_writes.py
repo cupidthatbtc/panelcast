@@ -122,8 +122,16 @@ class TestAtomicWrite:
 
         assert target.read_bytes() == b"original"
 
-    def test_two_writers_on_one_target_do_not_share_a_temporary(self, tmp_path: Path):
+    @pytest.mark.parametrize("target_exists", [False, True])
+    def test_two_writers_on_one_target_do_not_share_a_temporary(
+        self, tmp_path: Path, target_exists: bool
+    ):
+        # Both cases, because the two create paths differ: a fresh target asks
+        # for the umask default, an existing one for the bits it already has.
         target = tmp_path / "payload.bin"
+        if target_exists:
+            target.write_bytes(b"original")
+
         with atomic_write(target) as first, atomic_write(target) as second:
             first.write(b"a")
             second.write(b"bb")
@@ -161,6 +169,28 @@ class TestAtomicWrite:
             handle.write(b"{}")
 
         assert seen == [0o600]
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_inherited_bits_are_not_narrowed_by_the_umask(self, tmp_path: Path):
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+        target.chmod(0o664)
+
+        previous = os.umask(0o077)  # would strip the group bits from a bare create
+        try:
+            atomic_write_text(target, '{"rewritten": true}')
+        finally:
+            os.umask(previous)
+
+        assert stat.S_IMODE(target.stat().st_mode) == 0o664
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_a_missing_target_is_the_only_stat_failure_treated_as_absent(self, tmp_path: Path):
+        loop = tmp_path / "manifest.json"
+        loop.symlink_to(loop)  # stat raises ELOOP, not FileNotFoundError
+
+        with pytest.raises(OSError):
+            atomic_write_text(loop, "{}")
 
     @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
     def test_a_brand_new_file_gets_the_umask_default(self, tmp_path: Path):
