@@ -215,14 +215,16 @@ def coerce_target_transform(value: Any, *, context: str) -> str:
     The config side only knows how to run the shipped pair. The read side is
     deliberately looser (see :func:`target_transform_from_summary`): the
     transform registry is extensible, so a recorded name is checked against the
-    live registry rather than this tuple.
+    live registry rather than this tuple. Both sides strip and return the bare
+    name, so a padded one cannot be accepted by one end and rejected by the other.
     """
-    if value not in TARGET_TRANSFORMS:
+    name = value.strip() if isinstance(value, str) else value
+    if name not in TARGET_TRANSFORMS:
         raise ValueError(
             f"Invalid target_transform in {context}: {value!r}. "
             f"Must be one of {', '.join(TARGET_TRANSFORMS)}."
         )
-    return str(value)
+    return str(name)
 
 
 def logit_offset_from_summary(summary: dict[str, Any]) -> float:
@@ -273,7 +275,7 @@ def target_transform_from_summary(summary: dict[str, Any]) -> str:
             "Invalid target_transform in the training summary "
             f"(re-run the train stage to rewrite it): {value!r}. Must be a transform name."
         )
-    return value
+    return value.strip()
 
 
 def ar_center_on_model_scale(summary: dict[str, Any]) -> float:

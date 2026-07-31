@@ -137,17 +137,33 @@ class TestTargetTransformResolver:
         recorded = {"target_transform": "offset-logit"}
         assert target_transform_from_summary(recorded) == "offset-logit"
         with pytest.raises(ValueError, match="Unknown target_transform"):
-            get_transform(target_transform_from_summary(recorded))
+            get_transform(target_transform_from_summary(recorded), target_bounds=(0.0, 100.0))
+
+    def test_a_padded_name_resolves_to_the_bare_one(self):
+        """Otherwise the read path accepts a name the config side rejects, and
+        a padded "identity" takes the non-identity branch in predict_next."""
+        assert target_transform_from_summary({"target_transform": " identity "}) == "identity"
 
     def test_the_write_path_records_a_resolved_name(self):
         """The identity fallback is only correct because a null never reaches
-        the summary from a post-gate run: resolve_model_facts fills it in, and
-        re-validates, so a descriptor-supplied name is coerced like any other."""
+        the summary from a post-gate run: resolve_model_facts fills it in."""
         config = PipelineConfig(run_id="transform-unset")
         assert config.target_transform is None
         resolve_model_facts(config, DEFAULT_DESCRIPTOR)
         assert config.target_transform in TARGET_TRANSFORMS
+
+    def test_in_place_resolution_re_coerces_what_it_did_not_set(self):
+        """resolve_model_facts is the one established in-place mutation path,
+        and it ends with _validate(). Assigning past the constructor would
+        otherwise re-open the write-then-crash-on-read gap: this fails if that
+        trailing re-validation is ever dropped."""
+        config = PipelineConfig(run_id="transform-unset")
+        config.logit_offset = "0.25"
+        config.target_transform = " offset_logit "
+        resolve_model_facts(config, DEFAULT_DESCRIPTOR)
+        assert config.logit_offset == 0.25
         assert isinstance(config.logit_offset, float)
+        assert config.target_transform == "offset_logit"
 
 
 class TestConsumersUseTheRecordedOffset:
@@ -212,10 +228,10 @@ class TestSingleResolver:
     def test_the_resolvers_are_the_only_readers(self):
         offenders: dict[str, list[tuple[int, str]]] = {}
         exercised: set[tuple[str, str]] = set()
-        scanned = 0
+        scanned_modules: set[str] = set()
         for path in sorted(SRC.rglob("*.py")):
-            scanned += 1
             module = path.relative_to(SRC).as_posix()
+            scanned_modules.add(module)
             found = []
             for read in self._inline_reads(path):
                 if (module, read[1]) in EXEMPT_READS:
@@ -225,7 +241,12 @@ class TestSingleResolver:
             if found:
                 offenders[module] = found
         # A source-stripped install would scan nothing and pass vacuously.
-        assert scanned > 50, f"only {scanned} modules scanned; the guard saw no source"
+        assert scanned_modules >= {
+            "pipelines/evaluate.py",
+            "pipelines/predict_next.py",
+            "pipelines/sensitivity.py",
+            "pipelines/training_summary.py",
+        }, f"the guard did not reach the consumer modules; it scanned {sorted(scanned_modules)}"
         assert offenders == {}, (
             f"inline reads of {GUARDED_KEYS} outside the resolvers: {offenders}; "
             "use logit_offset_from_summary / target_transform_from_summary."
