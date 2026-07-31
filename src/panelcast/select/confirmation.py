@@ -244,9 +244,10 @@ def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> lis
     different: archiving on it would make a stale mount cost a full
     publication-scale refit on the healthy call that follows it. The mirror
     case — this call blind against a ledger that knows its hash — is not
-    exempted, because it buys nothing: reuse is refused per run while the hash
-    is unresolved, so the seeds refit and the per-seed checkpoint overwrites
-    the ledger either way. Archiving at least keeps a copy of what it replaced.
+    exempted, but nothing here decides it either: ``_reusable_prior_seeds``
+    returns before this runs while its own hash is unresolved, so the
+    one-sidedness is what keeps that ordering from mattering rather than a
+    verdict anyone reaches.
 
     The exemption cannot tell a recorded ``null`` from an absent key, so a
     ledger written before this field existed reads as blind on it. What still
@@ -310,8 +311,11 @@ def _reusable_prior_seeds(
         # moves aside because the per-seed checkpoint is about to overwrite it,
         # but only while there is something to preserve: a descriptor that is
         # gone rather than briefly unreachable would otherwise leave one more
-        # copy of the same blind ledger behind every retry.
-        if payload.get("dataset_descriptor_hash") is not None:
+        # copy of the same blind ledger behind every retry. Only a ledger this
+        # path itself wrote counts as nothing to preserve — a file predating
+        # these fields is also missing the hash, and it is not a copy of what
+        # is about to replace it.
+        if payload.get("dataset_descriptor_hash") is not None or "fit_config_hash" not in payload:
             _archive(out_path, reason="unresolved dataset descriptor")
         return {}
     changed = _identity_changes(payload, identity)
@@ -506,16 +510,27 @@ def run_confirmation(
     # From the payload, not from cfg: both are only ever one of three writers of
     # the dataset key, and what the fits run on is what gets written.
     dataset = payloads["reference"].get("dataset")
+    if dataset != payloads["winner"].get("dataset"):
+        raise ValueError(
+            f"the two arms name different datasets ({dataset!r} and "
+            f"{payloads['winner'].get('dataset')!r}): a pair split across domains is "
+            "not paired evidence, and only one of them could be recorded as the "
+            "confirmation's."
+        )
     descriptor_hash = _descriptor_hash(dataset)
     discriminating = _discriminating_keys(payloads["reference"], payloads["winner"], dataset)
     if not discriminating - {"seed", "dataset"}:
-        overwritten = sorted(k for k in winner_knobs if k not in discriminating)
+        # Which cause, decided by whether the knob survived into the payload:
+        # a value that reached the fit and still matches the reference was not
+        # overwritten by anything, and sending its operator to hunt for a
+        # collision in cfg would be the wrong errand.
+        overwritten = sorted(k for k, v in winner_knobs.items() if payloads["winner"].get(k) != v)
         raise ValueError(
             (
                 f"the winner knobs are overwritten by a base option before the fits are "
                 f"written ({overwritten}): "
                 if overwritten
-                else f"the winner knobs do not differ from the reference arm ({winner_knobs}): "
+                else f"the winner arm does not differ from the reference arm ({winner_knobs}): "
             )
             + "both sides would run the same configuration, so the pairing would "
             "compare the reference with itself."

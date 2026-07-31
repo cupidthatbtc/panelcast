@@ -60,7 +60,7 @@ def _fake_env(
         run_dir = tmp_path / "outputs" / payload["run_id"]
         ll = winner_ll_for_seed(seed) if label == "winner" else _REF_LL
         _write_ll(run_dir / "evaluation" / "log_likelihood.nc", ll)
-        _write_manifest(run_dir, payload, dataset)
+        _write_manifest(run_dir, payload)
         if label == "winner":
             (run_dir / "evaluation" / "diagnostics.json").write_text(
                 json.dumps({"passed": winner_passed_for_seed(seed)}), encoding="utf-8"
@@ -77,8 +77,12 @@ def _fake_env(
     return cfg, launch
 
 
-def _write_manifest(run_dir: Path, config_payload: dict, dataset) -> None:
-    """The manifest fields the confirmation cache checks a reused run against."""
+def _write_manifest(run_dir: Path, config_payload: dict) -> None:
+    """The manifest fields the confirmation cache checks a reused run against.
+
+    The descriptor comes from the config that was written, not from what the
+    caller meant to write — the same invariant the orchestrator holds.
+    """
     from panelcast.config.descriptor import load_descriptor
 
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -87,7 +91,9 @@ def _write_manifest(run_dir: Path, config_payload: dict, dataset) -> None:
             {
                 "success": True,
                 "experiment_identity": {
-                    "descriptor_hash": load_descriptor(dataset).descriptor_hash(),
+                    "descriptor_hash": load_descriptor(
+                        config_payload.get("dataset")
+                    ).descriptor_hash(),
                     # run_id is execution mechanics and a None value is unset:
                     # both are excluded exactly as the orchestrator's recorder
                     # excludes them.
@@ -587,17 +593,18 @@ class TestConfirmationResume:
         run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
 
         class _Regenerated:
-            def __init__(self, inner):
-                self._inner = inner
+            """Same descriptor name, re-extracted content — only the hash moves."""
 
             def descriptor_hash(self):
                 return "1" * 64
 
         calls, counting = self._counting(launch)
         with monkeypatch.context() as moved, structlog.testing.capture_logs() as logs:
+            # The fixture keeps recording the real hash, so the refits it writes
+            # do not match the new identity — irrelevant here, since this call
+            # archives before any run is consulted.
             moved.setattr(
-                "panelcast.select.confirmation.load_descriptor",
-                lambda ref: _Regenerated(load_descriptor(ref)),
+                "panelcast.select.confirmation.load_descriptor", lambda ref: _Regenerated()
             )
             run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 2
@@ -612,6 +619,34 @@ class TestConfirmationResume:
         result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
         assert result.dataset_descriptor_hash == _descriptor_hash("aero")
         assert result.dataset_descriptor_hash != _descriptor_hash(None)
+        # And the runs it produced verify against it: resolving the identity
+        # from one dataset and the runs from another would refit forever.
+        calls, counting = self._counting(launch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 0
+
+    def test_arms_on_different_datasets_are_refused(self, tmp_path, monkeypatch):
+        """A pair split across domains is not paired evidence."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)  # unset, so the knob survives
+        with pytest.raises(ValueError, match="different datasets"):
+            run_confirmation({"dataset": "aero"}, cfg, seeds=(42,), launch=launch)
+
+    @pytest.mark.parametrize(
+        ("winner_knobs", "message"),
+        [
+            ({}, "does not differ from the reference arm"),
+            ({"latent_process": "rw"}, "does not differ from the reference arm"),
+            ({"num_samples": 4000}, "overwritten by a base option"),
+        ],
+    )
+    def test_a_pair_that_cannot_differ_is_refused(
+        self, tmp_path, monkeypatch, winner_knobs, message
+    ):
+        """Both sides would run one configuration; each cause says which it is."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.num_samples = 200  # what overwrites the num_samples knob
+        with pytest.raises(ValueError, match=message):
+            run_confirmation(winner_knobs, cfg, seeds=(42,), launch=launch)
 
     def test_a_knob_the_winner_overrides_still_reuses(self, tmp_path, monkeypatch):
         """An extra_config value an arm overrides is compared as the arm's, not the base's."""
@@ -629,12 +664,6 @@ class TestConfirmationResume:
         assert calls["n"] == 0
         assert second.fit_config_hash == first.fit_config_hash
 
-    def test_a_winner_knob_a_base_option_overwrites_is_refused(self, tmp_path, monkeypatch):
-        """Both sides would run one configuration; the pairing would self-compare."""
-        cfg, launch = _fake_env(tmp_path, monkeypatch)
-        cfg.num_samples = 200
-        with pytest.raises(ValueError, match="overwritten by a base option"):
-            run_confirmation({"num_samples": 4000}, cfg, seeds=(42,), launch=launch)
 
     def test_an_option_the_manifest_never_recorded_still_reuses(self, tmp_path, monkeypatch):
         """A key with no recorded value has nothing to disagree with."""
@@ -845,7 +874,7 @@ class TestManifestContract:
         assert ("dataset" in recorded["winner"]) == (dataset is not None)
 
         discriminating = _discriminating_keys(
-            payloads["reference"], payloads["winner"], cfg.dataset
+            payloads["reference"], payloads["winner"], payloads["reference"].get("dataset")
         )
         assert set(winner_knobs) <= discriminating
         descriptor_hash = _descriptor_hash(dataset)
