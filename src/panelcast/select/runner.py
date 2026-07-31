@@ -44,7 +44,7 @@ from typing import Any
 import structlog
 
 from panelcast.config.descriptor import DatasetDescriptor
-from panelcast.paths import safe_run_dir
+from panelcast.paths import RunPathError, safe_run_dir, validate_run_id
 from panelcast.select.space import (
     KNOBS,
     arm_conflicts,
@@ -657,6 +657,205 @@ def _attribution_error(
     return None
 
 
+def sweep_run_dir(output_base: Path, run_id: str, *, field: str = "run_id") -> Path:
+    """Absolute path of a run this sweep minted, containment-checked (#375).
+
+    Read-only: nothing here creates, moves, or deletes anything. Neither the
+    run dir nor ``output_base`` has to exist — containment is a property of the
+    path, not of what is on disk. Select mints its own run ids, but routing
+    every lookup through ``safe_run_dir`` means a separator-bearing id or a run
+    name symlinked out of ``output_base`` fails closed here rather than relying
+    on some earlier caller having validated first. Callers resolve
+    once per decision about a run dir — never inside a polling or scoring loop.
+    The symlink half of the check only bites once the directory exists, so a
+    caller that resolves an id before its run is created resolves again before
+    reading it.
+
+    ``safe_run_dir`` returns the caller's spelling of the join by contract, so
+    the absolute form is taken here: select records run directories in its
+    ledger and in ``confirmation.json``, where a relative path would stop
+    meaning the same run once the resume runs from a different directory.
+    """
+    return safe_run_dir(output_base, run_id, field=field).resolve()
+
+
+def _refused_run_name(output_base: Path, run_id: str) -> str:
+    """Where a refused run name sits and — one hop on — what it points at.
+
+    Absolute, because the default output base is relative and a breadcrumb is
+    only useful if it can be followed from anywhere; the target is joined to
+    the link's own directory, since ``readlink`` returns the link's contents
+    verbatim and a relative one means nothing elsewhere. That join stays
+    lexical (normalizing it would lie whenever ``output_base`` is itself a
+    symlink), and nothing here follows or touches the target. A failure
+    degrades to naming the name alone rather than replacing the refusal.
+    """
+    joined = output_base / run_id
+    refused = joined
+    try:
+        # absolute() reads the cwd, so it belongs under the same guard as the
+        # link calls: on a relative output base it fails if the cwd is gone.
+        # Assigned before the hop so a readlink failure keeps the absolute
+        # spelling it already earned.
+        refused = joined.absolute()
+        if refused.is_symlink():
+            return f"{refused} -> {refused.parent / refused.readlink()}"
+    except (OSError, RuntimeError):  # same pair the resolution guards catch
+        pass
+    return str(refused)
+
+
+def _unresolvable(output_base: Path, run_id: str) -> tuple[Path, Exception] | None:
+    """The path that would not resolve and why, or None if both did.
+
+    ``path_is_within`` fails closed on a resolution error, so a path it cannot
+    resolve produces the same ``RunPathError`` as a genuine escape, and the two
+    deserve opposite advice: nothing left the output root in the second case.
+    Returned rather than reduced to a bool because the refusal has to name
+    both — from the arm handshake the problem string is the entire record, with
+    no exception behind it to carry a traceback.
+
+    Probes the same two operands ``path_is_within`` resolves, in its order and
+    on the same exception pair, so the two agree by construction rather than by
+    an argument about which one can fail. The states known to reach here are a
+    *relative* ``output_base`` whose cwd has been removed (non-strict
+    ``resolve()`` swallows per-component ``lstat`` failures, so its other raise
+    is the ``getcwd()`` inside ``abspath``, which an absolute base skips), and
+    — on the Pythons that convert ``ELOOP`` — a symlink loop anywhere along
+    either path, including at the run name itself. The list is deliberately not
+    closed: the caller reports the errno rather than inferring a cause, so a
+    trigger nobody anticipated (a ``RecursionError`` from a long symlink chain,
+    say) renders correctly without being enumerated here. ``refusal_detail``
+    explains what the caller does with the answer and why it is consulted where
+    it is.
+    """
+    for path in (output_base, output_base / run_id):
+        try:
+            path.resolve()
+        except (OSError, RuntimeError) as exc:
+            return path, exc
+    return None
+
+
+def _resolves_to_the_root(output_base: Path, run_id: str) -> bool:
+    """Whether the refused name is the output root itself rather than an escape.
+
+    ``path_is_within`` demands a *strict* descendant, so a run name symlinked
+    at the root resolves equal to it and is refused — correctly, since it is
+    not a run directory, but nothing left the root and the escape wording would
+    say it had. Both operands resolved by the time this is asked.
+    """
+    try:
+        return (output_base / run_id).resolve() == output_base.resolve()
+    except (OSError, RuntimeError):  # unreachable: `_unresolvable` ran first
+        return False
+
+
+def refusal_detail(
+    output_base: Path,
+    run_id: str,
+    exc: RunPathError,
+    *,
+    field: str,
+    after_fit: bool,
+) -> str:
+    """The tail every select containment refusal carries, parenthetical and all.
+
+    Four outcomes. The order is not about cost: each check has to run before
+    the one after it can be trusted. The shape check gates everything, since an
+    unvalidated id must not be joined onto anything; the unresolvable check
+    gates the two below it, which both resolve; and the resolves-to-the-root
+    check gates the breadcrumb, which would otherwise call a non-escape one.
+
+    A *shape* rejection means this run
+    never wrote under that name, so no path is named. Both paths reach it, for
+    different reasons: confirmation screens the id before launching, so select
+    itself refused and the orchestrator was never invoked, while the arm
+    handshake only looks afterwards and relies on the orchestrator refusing the
+    same shapes before creating a run dir — which holds because
+    ``orchestrator._validate_run_id`` runs the same ``paths.validate_run_id``.
+    If those two ever diverge, the *arm* branch claims nothing was written when
+    something may have been; the confirmation one is unaffected, since nothing
+    ran. The shape half is likewise decided by re-running ``validate_run_id``,
+    exact only while that stays the whole of ``safe_run_dir``'s shape check.
+
+    An *unresolvable* operand comes next, before the breadcrumb is built,
+    because its triggers make one misleading rather than impossible: a dead
+    working directory leaves nothing that can be made absolute, while a loop
+    leaves the breadcrumb perfectly buildable — ``is_symlink`` and ``readlink``
+    do not traverse — and useless, since its single hop lands somewhere inside
+    a cycle nobody can follow out of, or on a component that is not the loop at
+    all. So the branch names the path that would not resolve, reports
+    the errno, and stops — no inference about which trigger fired, because
+    every proxy for that (an absolute base, a path unequal to the root) is
+    right for one and wrong for the other. It owns its own tail, because
+    ``exc`` here says "resolves outside the output root" —
+    ``path_is_within``'s fail-closed default, and the very claim this branch
+    exists to deny. Which lookup meets it depends on the trigger: a dead
+    working directory is process-wide and persistent, so on the confirmation
+    path the pre-launch resolve sees it, while a loop planted at a run name
+    can only be met after that name exists.
+
+    Only a well-formed id against a resolvable base gets a breadcrumb, and only
+    ``after_fit`` lets it claim artifacts may be out there: a refusal before
+    launching means the name was never written to. That pre-launch breadcrumb
+    is defensive — reaching it needs something to already exist at a name
+    minted microseconds earlier, which nothing can plant — but it is the one
+    combination that would otherwise fall through to the escape wording.
+    """
+    try:
+        validate_run_id(run_id)
+    except RunPathError:
+        return (
+            "(this run never wrote under that name — an id of this shape is refused "
+            f"before any run dir is created): {exc}"
+        )
+    undecided = _unresolvable(output_base, run_id)
+    if undecided is not None:
+        unresolved, why = undecided
+        # Deliberately one sentence for both triggers, with no inference about
+        # which: the errno distinguishes a dead working directory from a
+        # symlink loop, and any proxy for it (an absolute base, a name that
+        # differs from the root) is a guess that goes wrong on the other one.
+        # The spelling is likewise taken rather than reasoned about — absolute
+        # where that is obtainable, lexical where the cwd read it needs is
+        # itself what failed.
+        try:
+            unresolved = unresolved.absolute()
+        except (OSError, RuntimeError):  # same pair the resolution guards catch
+            pass
+        return (
+            f"(containment could not be decided — {unresolved} could not be resolved: "
+            f"{why}; nothing is known to have left the output root): containment for "
+            f"{field} {run_id!r} could not be decided"
+        )
+    if _resolves_to_the_root(output_base, run_id):
+        # Absolute without a guard: `_unresolvable` returned None, so both
+        # paths resolved, and resolving a relative one already read the cwd.
+        link, root = (output_base / run_id).absolute(), output_base.absolute()
+        wrote = (
+            "anything the fit wrote through that name landed in the root itself, where "
+            "the walkers that enumerate it read run-scoped directories as siblings of "
+            "real runs"
+            if after_fit
+            else "nothing ran, so nothing was written through it"
+        )
+        # Own tail again: `exc` says "resolves outside the output root", and
+        # this is the one refusal where a fit writes *into* it.
+        return (
+            f"(the refused name {link} resolves to the output root {root} itself, which "
+            f"is not a run directory: nothing left the root, but {wrote}): containment "
+            f"for {field} {run_id!r} could not be satisfied"
+        )
+    where = _refused_run_name(output_base, run_id)
+    if not after_fit:
+        return f"(nothing had been written yet; {where} is refused, not read): {exc}"
+    return (
+        f"(artifacts may exist outside the output base; anything at {where} "
+        f"is left in place, unread): {exc}"
+    )
+
+
 def _claim_named_run(
     run_id: str,
     output_base: Path,
@@ -670,8 +869,18 @@ def _claim_named_run(
     subprocess starts — no dependence on the mutable ``outputs/latest.json``
     pointer that races under concurrency. The manifest sanity checks
     (creation time, knob agreement, prior claim) still apply.
+
+    There is no pre-launch resolve here, so a containment refusal is always the
+    post-fit case: the arm subprocess has already run. Where it wrote — outside
+    the root, into it, or nowhere — is ``refusal_detail``'s to say, and the
+    refusal leaves whatever is at that name alone; this lookup does not delete.
     """
-    run_dir = (output_base / run_id).resolve()
+    try:
+        run_dir = sweep_run_dir(output_base, run_id, field="arm run_id")
+    except RunPathError as exc:
+        # after_fit is always true here: there is no pre-launch arm resolve.
+        detail = refusal_detail(output_base, run_id, exc, field="arm run_id", after_fit=True)
+        return None, f"handshake failed after the arm ran {detail}"
     if not run_dir.exists():
         return None, f"handshake failed: expected run dir {run_dir} was never created"
     problem = _attribution_error(run_dir, merged, launched_at, claimed_runs)

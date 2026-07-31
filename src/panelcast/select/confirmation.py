@@ -21,11 +21,14 @@ from typing import Any
 import structlog
 import yaml  # type: ignore[import-untyped]
 
+from panelcast.paths import RunPathError
 from panelcast.select.runner import (
     SweepConfig,
     _default_panelcast_bin,
     launch_arm,
+    refusal_detail,
     resolve_arm_timeout,
+    sweep_run_dir,
 )
 from panelcast.select.scoring import PairedElpd, paired_elpd
 from panelcast.select.space import default_arm
@@ -272,11 +275,42 @@ def run_confirmation(
     prior = _reusable_prior_seeds(out_path, identity)
     timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
+    def _resolve(run_id: str, seed: int, label: str, *, after_fit: bool) -> Path:
+        """This fit's run dir, contained — raised in the shape ``_one_fit`` uses.
+
+        Re-raising as ``RuntimeError`` keeps the fail-closed path from depending
+        on how wide the seed loop's handler happens to be. The two phases mean
+        very different things to whoever reads the log, so they say so: a
+        pre-launch refusal costs nothing, while a post-fit one means a full fit
+        has already run. Where it wrote depends on why the name was refused,
+        which is ``refusal_detail``'s job — the same wording the arm handshake
+        emits — not this function's. The refused name is left exactly as it is;
+        this lookup does not delete (#413).
+        """
+        try:
+            return sweep_run_dir(cfg.pipeline_output_base, run_id, field="confirmation run_id")
+        except RunPathError as exc:
+            detail = refusal_detail(
+                cfg.pipeline_output_base,
+                run_id,
+                exc,
+                field="confirmation run_id",
+                after_fit=after_fit,
+            )
+            phase = "after its fit" if after_fit else "before launching"
+            raise RuntimeError(f"{label} fit on seed {seed} refused {phase} {detail}") from exc
+
     def _one_fit(merged: dict[str, Any], seed: int, label: str) -> Path | None:
         config_path = cfg.sweep_dir / f"confirm_{label}_seed{seed}.yaml"
         # Named up front (#167 handshake) — no dependence on the mutable
         # `latest` pointer; unique per attempt so retries never collide.
         run_id = f"sel_{cfg.sweep_id}_confirm_{label}_seed{seed}_{datetime.now():%Y%m%dT%H%M%S%f}"
+        # The id's shape is decidable before the fit, so refuse a bad one for
+        # free rather than after a publication-scale run. The return value is
+        # deliberately discarded — nothing exists at that name yet, so only the
+        # post-fit call below can see a symlink escape
+        # (test_confirmation_lookup_refuses_a_symlinked_escape covers both).
+        _resolve(run_id, seed, label, after_fit=False)
         _write_config(cfg, merged, seed, config_path, sampler_overrides, run_id=run_id)
         log.info("confirmation_fit_start", label=label, seed=seed, timeout=timeout)
         started = time.monotonic()
@@ -290,7 +324,10 @@ def run_confirmation(
         )
         if code != 0:
             raise RuntimeError(f"{label} fit failed on seed {seed}: {tail[-500:]}")
-        run_dir = (cfg.pipeline_output_base / run_id).resolve()
+        # Again now that the directory exists: the symlink half of containment
+        # has nothing to resolve through until then, and this is the path whose
+        # contents get read and recorded.
+        run_dir = _resolve(run_id, seed, label, after_fit=True)
         return run_dir if run_dir.exists() else None
 
     for seed in seeds:

@@ -1476,16 +1476,81 @@ fully reads each candidate artifact (including directory trees), so
 - Deterministic hashing of pandas DataFrame contents
 - Used for training data hash in model manifest
 
-## 9.3 Resume Logic
+## 9.3 Run Identifier Containment
+
+Every run identifier resolves through `paths.py:safe_run_dir`. It is the single
+containment gate for every lookup, move, and delete keyed by an identifier:
+`--resume`, the `runs` CLI, sweep and backtest ids, and the ids `panelcast
+select` mints for its own arm and confirmation fits (the #167 handshake, via
+`select/runner.py:sweep_run_dir`). The id must be a bare directory name — no
+separators, traversal, absolute or drive-relative paths, reserved names — and
+the resolved candidate must still sit beneath the output base, so a run name
+symlinked elsewhere is refused rather than followed. Containment therefore
+holds on each lookup itself rather than on the caller having been validated
+first.
+
+The symlink half of that check only has something to resolve through once the
+directory exists, so a lookup that runs before its run dir is created (select
+resolves a confirmation fit's id up front, to refuse a bad id without paying
+for the fit) resolves again after the fit, before reading anything.
+
+What the gate refuses differs by caller. For `--resume` and the `runs` CLI it
+runs before anything happens, so a symlinked run name is never followed. On
+select's mint-then-fit paths the run directory is created by the subprocess
+select launched — the orchestrator validates the id's *shape* before creating
+it, so a pre-planted symlink is written through — and select's gate refuses the
+read, and on the arm path the attribution, not the write. The confirmation path
+has no attribution step of its own: an id that resolves to another run's
+directory *inside* the output base is contained, and only the arm handshake
+re-checks the manifest behind it.
+
+Every refusal says whether the fit had already run, and leaves the refused name
+alone. What it says next depends on why the id was refused, and there are four
+answers. A *well-formed* id whose name resolves outside the output base means
+artifacts may exist there, so the message names that path and — when it is a
+symlink — follows one hop, because the link is the only surviving record of
+where they went (a refusal *before* launching says so instead: the name was
+never written to). A *malformed* id means *this run* created no run directory
+under that name — select refuses it before launching a confirmation fit, and
+the orchestrator refuses the same shape before creating an arm's — so the
+refusal names no path. That is deliberately narrower than "nothing is there":
+a reserved id like `latest` names a directory the layout itself maintains,
+which this run still never wrote. A *path that will not resolve* is refused
+identically, because containment fails closed. A removed working directory and
+a symlink loop are the known causes, but the refusal does not try to tell them
+apart: it says containment could not be decided, names the path that failed and
+reports the errno, which is the evidence that distinguishes them and which also
+makes a cause nobody anticipated read correctly. What it never does is send
+anyone looking outside a root that nothing left. Both causes are conditional.
+A removed working directory is only a refusal when the output base is relative
+(the default `outputs`); against an absolute base both resolves succeed and the
+lookup proceeds normally. A loop is only a refusal on the interpreters that
+raise for one (Python 3.11 and 3.12); on 3.13+ it resolves to itself, stays
+contained, and the lookup simply finds no run directory — the arm handshake
+reports that as "expected run dir was never created" and a confirmation fit
+returns no run at all, neither of which names a link. Finally, a name that
+resolves *to the output root itself* is refused because containment demands a
+strict descendant: nothing left the root, but anything a fit wrote through such
+a name landed in the root itself, where the walkers below read run-scoped
+directories as siblings of real runs — so that refusal says so rather than
+reporting an escape (and, refused before launching, says nothing ran through
+the name at all).
+
+Containment is also a property of an id *lookup*, not of enumeration: `runs
+list`, the dashboard, and the orchestrator's newest-run scan walk the output
+base with `iterdir()`, and `is_dir()` follows a link, so none of them passes
+through the gate. Select's lookups deliberately leave a refused name in place
+rather than deleting it — they are read-only, and the pointer is the breadcrumb
+— which means an escaping link survives the refusal. The two halves need
+different fixes: containing the run directory's *creation* stops panelcast
+writing through such a link, while closing the walk means the enumerating
+callers contain each entry themselves, since a link planted by anything else
+still sits there. Both are tracked in #413.
+
+## 9.4 Resume Logic
 
 The `--resume {run_id}` flag allows resuming a failed run:
 
-0. Resolve the id through `paths.py:safe_run_dir`, the single containment
-   gate every run lookup, move, and delete goes through. The id must be a bare
-   directory name — no separators, traversal, absolute or drive-relative
-   paths, reserved names — and the resolved candidate must still sit beneath
-   the output base, so a symlinked run name pointing elsewhere is refused
-   before anything is read or moved.
 1. Locate run directory: `outputs/{run_id}/` or `outputs/failed/{run_id}/`
 2. If in `failed/`, move back to `outputs/`
 3. Load existing `manifest.json`
@@ -1503,7 +1568,7 @@ The `--resume {run_id}` flag allows resuming a failed run:
 7. Skip already-completed stages (from `manifest.stages_completed`)
 8. Continue from first incomplete stage
 
-## 9.4 Environment Verification
+## 9.5 Environment Verification
 
 Before running, the orchestrator verifies the environment:
 
@@ -1514,7 +1579,7 @@ Before running, the orchestrator verifies the environment:
 
 This ensures the exact package versions can be reproduced via `pixi install`.
 
-## 9.5 Random Seed Management
+## 9.6 Random Seed Management
 
 `utils/random.py:set_seeds(seed)` sets random seeds for:
 - Python's `random` module
@@ -1532,7 +1597,7 @@ CLI --seed 42
       → MCMCConfig.seed (for MCMC sampling)
 ```
 
-## 9.6 Split Manifests
+## 9.7 Split Manifests
 
 Each split strategy saves its own manifest (`data/manifests.py:SplitManifest`):
 
