@@ -183,7 +183,11 @@ def upgrade_training_summary(raw: dict[str, Any], source: str = "<dict>") -> Tra
 
 
 DEFAULT_LOGIT_OFFSET = 0.5
-DEFAULT_TARGET_TRANSFORM = "identity"
+# The pre-gate behavior a legacy summary with no recorded name means -- NOT
+# the shipped config default, which resolves to offset_logit. Named apart from
+# DEFAULT_LOGIT_OFFSET (which is the config default) so the two cannot be used
+# interchangeably.
+LEGACY_TARGET_TRANSFORM = "identity"
 TARGET_TRANSFORMS = ("identity", "offset_logit")
 
 
@@ -195,6 +199,10 @@ def coerce_logit_offset(value: Any, *, context: str) -> float:
     ``bool``, finite and non-negative. Zero is legal -- the plain logit, valid
     when observations sit strictly inside the bounds. Duck-typing through
     ``float`` also accepts numpy scalars, which an in-process summary can carry.
+
+    Deliberately unbounded above: a huge offset flattens the target toward the
+    middle of the bounds rather than leaving the transform's domain, so it is a
+    modeling choice to be judged by the fit, not a malformed value.
     """
     if isinstance(value, bool):
         raise ValueError(f"Invalid logit_offset in {context}: {value!r}. Must be a number.")
@@ -212,11 +220,14 @@ def coerce_logit_offset(value: Any, *, context: str) -> float:
 def coerce_target_transform(value: Any, *, context: str) -> str:
     """Validate a configured target_transform against the shipped names.
 
-    The config side only knows how to run the shipped pair. The read side is
-    deliberately looser (see :func:`target_transform_from_summary`): the
-    transform registry is extensible, so a recorded name is checked against the
-    live registry rather than this tuple. Both sides strip and return the bare
-    name, so a padded one cannot be accepted by one end and rejected by the other.
+    The config side is deliberately narrower than the read side (see
+    :func:`target_transform_from_summary`, which defers name checking to the
+    live registry): a plugin transform is not registered until the model
+    package imports, so a registry check at config-parse time would pass
+    vacuously and fail later anyway. Widening the *configurable* set to the
+    registry is the plugin work (#172), not a property of this contract.
+    Both sides strip and return the bare name, so a padded one cannot be
+    accepted by one end and rejected by the other.
     """
     name = value.strip() if isinstance(value, str) else value
     if name not in TARGET_TRANSFORMS:
@@ -269,7 +280,7 @@ def target_transform_from_summary(summary: dict[str, Any]) -> str:
     """
     value = summary.get("target_transform")
     if value is None:
-        return DEFAULT_TARGET_TRANSFORM
+        return LEGACY_TARGET_TRANSFORM
     if not isinstance(value, str) or not value.strip():
         raise ValueError(
             "Invalid target_transform in the training summary "

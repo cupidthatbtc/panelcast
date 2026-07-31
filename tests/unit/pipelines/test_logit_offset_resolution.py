@@ -137,7 +137,9 @@ class TestTargetTransformResolver:
         recorded = {"target_transform": "offset-logit"}
         assert target_transform_from_summary(recorded) == "offset-logit"
         with pytest.raises(ValueError, match="Unknown target_transform"):
-            get_transform(target_transform_from_summary(recorded), target_bounds=(0.0, 100.0))
+            get_transform(
+                target_transform_from_summary(recorded), target_bounds=(0.0, 100.0), offset=0.5
+            )
 
     def test_a_padded_name_resolves_to_the_bare_one(self):
         """Otherwise the read path accepts a name the config side rejects, and
@@ -200,6 +202,11 @@ class TestSingleResolver:
     Both access forms count -- ``.get("logit_offset")`` and the subscript
     ``["logit_offset"]`` -- because the historical idioms disagreed on zero and
     on an explicit null respectively.
+
+    The guard cannot tell a recorded field from a configured one, so a
+    legitimate config-axis read (a sweep arm, a YAML loader) needs an exemption.
+    Adding one widens a hole rather than annotating a false positive: the pair
+    is exempt for good, including for a summary read that module grows later.
     """
 
     def _inline_reads(self, path: Path) -> list[tuple[int, str]]:
@@ -269,12 +276,14 @@ class TestSingleResolver:
             "summary['logit_offset'] = 1.0\n",
             encoding="utf-8",
         )
-        assert self._inline_reads(sample) == [
-            (1, "logit_offset"),
-            (2, "target_transform"),
-            (3, "logit_offset"),
-            (4, "target_transform"),
-        ]
+        assert sorted(self._inline_reads(sample)) == sorted(
+            [
+                (1, "logit_offset"),
+                (2, "target_transform"),
+                (3, "logit_offset"),
+                (4, "target_transform"),
+            ]
+        )
 
 
 class TestConfigValidation:
@@ -313,3 +322,26 @@ class TestConfigValidation:
 
     def test_the_config_default_is_the_resolver_default(self):
         assert PipelineConfig(run_id="offset-default").logit_offset == DEFAULT_LOGIT_OFFSET
+
+    def test_bulk_restoration_from_manifest_flags_re_validates(self):
+        """setattr past the constructor is the one mutation shape a search for
+        `config.logit_offset` cannot find: `runs reproduce` rebuilds a pre-0.9.0
+        config from a flags dict, so it must re-validate like the resume path."""
+        from types import SimpleNamespace
+
+        from panelcast.cli.runs_cmd import _reproduce_config
+
+        manifest = SimpleNamespace(flags={"logit_offset": "0.25", "seed": 7})
+        config, provenance = _reproduce_config(Path("does-not-exist"), manifest)
+        assert config.logit_offset == 0.25
+        assert isinstance(config.logit_offset, float)
+        assert "manifest flags" in provenance
+
+    def test_bulk_restoration_rejects_an_invalid_recorded_flag(self):
+        from types import SimpleNamespace
+
+        from panelcast.cli.runs_cmd import _reproduce_config
+
+        manifest = SimpleNamespace(flags={"logit_offset": -1.0})
+        with pytest.raises(ValueError, match="logit_offset"):
+            _reproduce_config(Path("does-not-exist"), manifest)

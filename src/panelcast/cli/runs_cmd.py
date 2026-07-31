@@ -400,6 +400,10 @@ def _reproduce_config(run_dir: Path, manifest) -> tuple["object", str]:
         if isinstance(getattr(config, key), tuple) and isinstance(value, list):
             value = tuple(value)
         setattr(config, key, value)
+    # Bulk assignment skips __post_init__, so a recorded value that predates a
+    # validator reaches the run unchecked and un-normalized. The resume path
+    # already re-validates after restoration; this one now does too.
+    config._validate()
     return config, "manifest flags (pre-0.9.0 run; YAML-only gates may be lost)"
 
 
