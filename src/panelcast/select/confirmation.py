@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -280,8 +281,41 @@ def _indexes_a_run(entry: dict[str, Any]) -> bool:
     return bool(entry.get("reference_run") or entry.get("winner_run"))
 
 
-def _archive(out_path: Path, *, reason: str, changed: list[str] | None = None) -> None:
-    """Move the prior ledger aside; evidence is never mixed across protocols.
+def _entry_seed(entry: dict[str, Any]) -> int | None:
+    """The seed a ledger entry stands for, or None if it does not name one.
+
+    A ledger is a file on disk that this module already treats as externally
+    mutable, so a malformed seed makes an entry unusable rather than fatal —
+    the same answer an unparseable ledger gets.
+    """
+    try:
+        return int(entry["seed"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _orphaned_entries(
+    payload: dict[str, Any], reusable: dict[int, SeedResult]
+) -> list[dict[str, Any]]:
+    """Ledger entries naming a finished run this call will not carry forward."""
+    return [
+        entry
+        for entry in payload.get("seeds", [])
+        if _indexes_a_run(entry) and _entry_seed(entry) not in reusable
+    ]
+
+
+def _archive(
+    out_path: Path, *, reason: str, changed: list[str] | None = None, keep: bool = False
+) -> None:
+    """Put the prior ledger somewhere it will survive the next checkpoint.
+
+    Moved by default — evidence is never mixed across protocols, and a caller
+    that reuses nothing has no use for the original. ``keep`` copies instead,
+    for the one caller that hands back reusable seeds: taking the file away
+    there would leave no ledger on disk until the first checkpoint, and an
+    interruption in that window would refit seeds that were verified minutes
+    earlier.
 
     Microseconds in the name because the blind path archives on every re-entry:
     at second granularity two archives in one run would replace each other, and
@@ -295,7 +329,10 @@ def _archive(out_path: Path, *, reason: str, changed: list[str] | None = None) -
     """
     archived = out_path.with_name(f"confirmation_{datetime.now():%Y%m%dT%H%M%S%f}.json")
     try:
-        out_path.replace(archived)
+        if keep:
+            shutil.copyfile(out_path, archived)
+        else:
+            out_path.replace(archived)
     except OSError as exc:
         log.warning("confirmation_cache_unarchivable", path=str(out_path), error=str(exc))
         return
@@ -321,6 +358,11 @@ def _reusable_prior_seeds(
     its run dirs checked against their own manifests, each against the arm and
     seed it stands for; a call that cannot resolve its own descriptor hash has
     nothing to check them against and reuses none of them.
+
+    The ledger is also put aside — protocol or no protocol — whenever this call
+    will overwrite one that is the only name a finished run dir has, including
+    one it cannot parse. Run ids are unique per attempt, so nothing else maps a
+    seed and a label onto those directories.
     """
     if not out_path.exists():
         return {}
@@ -347,7 +389,7 @@ def _reusable_prior_seeds(
         # because this call is blind, and listing it would read as the changed
         # dataset.
         changed = [k for k in _identity_changes(payload, identity) if k != _DESCRIPTOR_KEY]
-        if changed or any(_indexes_a_run(entry) for entry in payload.get("seeds", [])):
+        if changed or _orphaned_entries(payload, {}):
             _archive(
                 out_path,
                 reason="protocol changed" if changed else "unresolved dataset descriptor",
@@ -361,14 +403,28 @@ def _reusable_prior_seeds(
     reusable: dict[int, SeedResult] = {}
     for entry in payload.get("seeds", []):
         ref, win = entry.get("reference_run"), entry.get("winner_run")
-        if not ref or not win or entry.get("error"):
+        seed = _entry_seed(entry)
+        # Said per seed, because the archive below cannot: a seed that never
+        # finished was refused by nothing, so an operator grepping for the
+        # rejection that caused the copy would come back empty.
+        if not ref or not win or entry.get("error") or seed is None:
+            if _indexes_a_run(entry):
+                log.warning(
+                    "confirmation_cached_seed_unusable",
+                    seed=seed,
+                    reason="the seed did not finish",
+                )
             continue
         if not (
             (Path(ref) / "evaluation" / "log_likelihood.nc").exists()
             and (Path(win) / "evaluation" / "log_likelihood.nc").exists()
         ):
+            log.warning(
+                "confirmation_cached_seed_unusable",
+                seed=seed,
+                reason="its log-likelihood snapshot is gone",
+            )
             continue
-        seed = int(entry["seed"])
         rejected = [
             (label, mismatch)
             for label, run in (("reference", ref), ("winner", win))
@@ -392,14 +448,10 @@ def _reusable_prior_seeds(
     # Same doctrine as the blind branch, on the path that reaches it most
     # often: everything the gate refuses is a fit that ran — the snapshot
     # check above already passed — so a seed this call will refit takes its
-    # run dirs' only name with it unless a copy is kept.
-    orphaned = [
-        entry
-        for entry in payload.get("seeds", [])
-        if _indexes_a_run(entry) and int(entry.get("seed", -1)) not in reusable
-    ]
-    if orphaned:
-        _archive(out_path, reason="cached runs could not be verified")
+    # run dirs' only name with it unless a copy is kept. Copied rather than
+    # moved, because this is the one caller that hands seeds back.
+    if _orphaned_entries(payload, reusable):
+        _archive(out_path, reason="cached seeds were not carried forward", keep=True)
     return reusable
 
 

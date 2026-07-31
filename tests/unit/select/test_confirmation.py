@@ -847,11 +847,72 @@ class TestConfirmationResume:
 
     def test_a_rejected_cached_run_leaves_a_copy(self, tmp_path, monkeypatch):
         """Everything the gate refuses is a fit that ran; its run dirs keep a name."""
+        import structlog
+
         cfg, launch = _fake_env(tmp_path, monkeypatch)
         result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
         (Path(result.seeds[0].winner_run) / "manifest.json").unlink()
-        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        calls, counting = self._counting(launch)
+        with structlog.testing.capture_logs() as logs:
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2
+        assert [
+            e["reason"] for e in logs if e["event"] == "confirmation_cache_archived"
+        ] == ["cached seeds were not carried forward"]
+        # Copied, not moved: an interruption before the first checkpoint must
+        # still leave a ledger the next call can resume from.
+        assert (cfg.sweep_dir / "confirmation.json").exists()
         assert self._archives(cfg)
+
+    def test_an_unfinished_seed_says_so(self, tmp_path, monkeypatch):
+        """The archive cannot name a rejection that never happened, so the seed does."""
+        import structlog
+
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+
+        def winner_fails(config_path, panelcast_bin, timeout_seconds=None):
+            if "winner" in Path(config_path).stem:
+                return 1, "boom"
+            return launch(config_path, panelcast_bin, timeout_seconds)
+
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=winner_fails)
+        with structlog.testing.capture_logs() as logs:
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=winner_fails)
+        assert [
+            (e["seed"], e["reason"])
+            for e in logs
+            if e["event"] == "confirmation_cached_seed_unusable"
+        ] == [(42, "the seed did not finish")]
+
+    def test_a_malformed_seed_is_unusable_not_fatal(self, tmp_path, monkeypatch):
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        out = cfg.sweep_dir / "confirmation.json"
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        payload["seeds"][0]["seed"] = None
+        out.write_text(json.dumps(payload), encoding="utf-8")
+        calls, counting = self._counting(launch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2
+
+    def test_an_unarchivable_ledger_does_not_stop_the_confirmation(
+        self, tmp_path, monkeypatch
+    ):
+        """The copy is a courtesy; a sweep dir that refuses it is not fatal."""
+        import structlog
+
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        (Path(result.seeds[0].winner_run) / "manifest.json").unlink()
+
+        def refuse(*_args, **_kwargs):
+            raise OSError("read-only sweep dir")
+
+        monkeypatch.setattr("panelcast.select.confirmation.shutil.copyfile", refuse)
+        with structlog.testing.capture_logs() as logs:
+            result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        assert result.confirmed
+        assert [e["event"] for e in logs].count("confirmation_cache_unarchivable") == 1
 
     def test_a_half_finished_seed_is_worth_a_copy(self, tmp_path, monkeypatch):
         """The reference landed and the winner crashed: one run dir is still real."""
@@ -874,10 +935,16 @@ class TestConfirmationResume:
 
     def test_an_unreadable_ledger_is_moved_aside(self, tmp_path, monkeypatch):
         """Unreadable is not worthless: it still names the run dirs."""
+        import structlog
+
         cfg, launch = _fake_env(tmp_path, monkeypatch)
         run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
         (cfg.sweep_dir / "confirmation.json").write_text("{ truncated", encoding="utf-8")
-        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        with structlog.testing.capture_logs() as logs:
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        assert [
+            e["reason"] for e in logs if e["event"] == "confirmation_cache_archived"
+        ] == ["unreadable ledger"]
         assert self._archives(cfg)
 
     def test_a_seed_that_paired_badly_is_still_worth_a_copy(self, tmp_path, monkeypatch):
