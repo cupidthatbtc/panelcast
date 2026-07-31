@@ -708,22 +708,25 @@ a run whose base was renamed reports `UNBOUND` on intact artifacts.
 
 Output verification is the same primitive the incremental `--skip-existing`
 path uses (`pipelines/output_integrity.py`), so the per-key rules and the
-containment roots are one implementation. Two things still differ, both
-because `runs verify` has no stage objects to work from:
+containment roots are one implementation. Two things still differ, for
+different reasons:
 
-- **Re-rooting.** `runs verify` maps a run-owned recorded path onto the run's
-  current directory, so a run quarantined under `outputs/failed/<id>/` still
-  verifies; skip-existing only ever follows the active `latest` pointer.
+- **Re-rooting.** `runs verify` resolves active and quarantined runs alike and
+  cannot know which it has until it looks, so it maps a run-owned recorded
+  path onto the run's current directory and a run under `outputs/failed/<id>/`
+  still verifies. The skip path only ever follows the active `latest` pointer,
+  so it has nothing to map and never looks under `failed/`.
   Run-owned is decided by the output base's *name*, so that a relocated
   workspace still verifies — which also means a manifest from another checkout
   of the same project re-roots here, and for a reproducible pipeline the
   hashes will agree. A green result says the bytes match, not that this
   manifest was written about this workspace.
-- **The declared-path binding.** The skip path knows which paths a stage said
-  it would write, so it refuses a manifest that redirects a static output at
-  another file *inside the same run directory* — where containment has nothing
-  to say. `runs verify` cannot: the manifest does not record which outputs
-  were declared. Such a redirect is reported `OK` here (#439).
+- **The declared-path binding.** This one *is* about the missing stage
+  objects. The skip path knows which paths a stage said it would write, so it
+  refuses a manifest that redirects a static output at another file *inside
+  the same run directory* — where containment has nothing to say. `runs
+  verify` cannot: the manifest does not record which outputs were declared.
+  Such a redirect is reported `OK` here (#439).
 
 ```bash
 panelcast runs verify [RUN_ID] [OPTIONS]

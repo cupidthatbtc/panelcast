@@ -90,7 +90,10 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
     "Run-owned" means recorded as ``<output base>/<run id>/<rest>``: the run
     id alone is not enough, since a bare-name match would launder
     ``/somewhere/else/<id>/metrics.json`` into the run directory and let a
-    manifest describing a different workspace verify clean.
+    manifest describing a different workspace verify clean. An output base with
+    no name — ``.`` or ``/`` — has no half to pair with, so that case trades
+    the pair for a position and requires the id to be the path's *first*
+    component, which a foreign path cannot satisfy without being run-relative.
 
     The base is matched by *name*, not by identity. A manifest records whatever
     ``--output-base`` was spelled as — usually the relative default ``outputs``
