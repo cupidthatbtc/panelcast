@@ -712,7 +712,7 @@ path uses (`pipelines/output_integrity.py`), so the per-key rules and the
 containment roots are one implementation. The two are scoped differently — a
 stage checks only the keys carrying its own `<stage>:` prefix, `runs verify`
 checks the whole manifest — which divides *which* keys each is responsible for
-rather than what either accepts as proof. Two things differ in that second
+rather than what either accepts as proof. Three things differ in that second
 sense, for different reasons:
 
 - **Re-rooting.** `runs verify` resolves active and quarantined runs alike and
@@ -731,12 +731,18 @@ sense, for different reasons:
   the same run directory* — where containment has nothing to say. `runs
   verify` cannot: the manifest does not record which outputs were declared.
   Such a redirect is reported `OK` here (#439).
-- **Completeness.** For the same reason, the skip path notices a declared
-  output the manifest never recorded, and `runs verify` cannot. A green result
-  proves the outputs the manifest *lists* are intact, not that it lists
-  everything the run produced — a record deleted from both `outputs` and
-  `output_hashes` leaves nothing to check. No verification of the document
-  alone can close that; it needs something outside it (#439).
+- **Completeness, for declared outputs.** For the same reason, the skip path
+  notices a *declared* output the manifest never recorded and `runs verify`
+  cannot. #439 closes this half along with the binding.
+
+Beyond those, both callers share a blind spot worth knowing about next to the
+exit code: neither can tell an incomplete manifest from a complete one for a
+*dynamic* output, because nothing outside the document says such a key ever
+existed — a record deleted from both `outputs` and `output_hashes` leaves
+nothing to check. So a green result proves the outputs the manifest *lists* are
+intact, not that it lists everything the run produced. #439 does not reach
+this; a `declared_outputs` field is part of the same document and can be
+shortened with it, so closing it needs evidence the manifest cannot carry.
 
 ```bash
 panelcast runs verify [RUN_ID] [OPTIONS]

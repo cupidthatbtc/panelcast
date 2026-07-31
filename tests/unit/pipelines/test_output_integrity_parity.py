@@ -556,17 +556,29 @@ class TestContainment:
 class TestTheDeclaredCallerDifference:
     """What the two are meant to disagree on, asserted rather than implied."""
 
-    def test_an_erased_record_is_noticed_only_by_the_skip_path(self, fx):
+    def test_an_erased_declared_record_is_noticed_only_by_the_skip_path(self, fx):
         # A key absent from *both* maps is absent from the union, so there is
-        # no verdict to return: `runs verify` checks the outputs the manifest
-        # lists and cannot check that it lists them all. The skip path notices
-        # because the stage still declares the output. Verification of the
-        # document alone cannot close this — a `declared_outputs` list would be
-        # deleted along with the record — so it is stated, not asserted away.
+        # no verdict to return. The skip path still notices, because the stage
+        # declares the output and can see the key is gone; `runs verify` has no
+        # stage. That half is a divergence, and #439 closes it.
         fx.outputs.clear()
         fx.output_hashes.clear()
 
         assert fx.skip_accepts() is False
+        assert fx.verify_accepts() is True
+
+    def test_an_erased_dynamic_record_is_invisible_to_both(self, fx):
+        # The other half, and the one that matters: with no declared output
+        # behind it, an erased key is indistinguishable from one that never
+        # existed — *both* callers accept, and the skip path is the one that
+        # then reuses artifacts on that basis. Not a divergence but a shared
+        # blind spot, and not closable by #439 either: a `declared_outputs`
+        # field is part of the same document and can be shortened with it.
+        fx.stage.output_paths.clear()
+        fx.outputs.clear()
+        fx.output_hashes.clear()
+
+        assert fx.skip_accepts() is True
         assert fx.verify_accepts() is True
 
     def test_a_redirect_inside_the_run_dir_is_refused_only_by_the_skip_path(self, fx):
