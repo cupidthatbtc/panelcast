@@ -13,7 +13,9 @@ import xarray as xr
 from panelcast.select.confirmation import (
     ConfirmationResult,
     SeedResult,
+    _cached_run_mismatch,
     _confirmation_timeout,
+    _descriptor_hash,
     render_confirmation,
     run_confirmation,
 )
@@ -421,7 +423,8 @@ class TestConfirmationResume:
             {"latent_process": "ar1"}, other_cfg, seeds=(42,), launch=counting
         )
         assert calls["n"] == 2
-        assert result.dataset_descriptor_hash != cfg.sweep_id  # sanity: a real hash
+        assert result.dataset_descriptor_hash is not None
+        assert result.dataset_descriptor_hash != _descriptor_hash(cfg)
         assert [
             p
             for p in cfg.sweep_dir.iterdir()
@@ -429,27 +432,43 @@ class TestConfirmationResume:
         ]
 
     @pytest.mark.parametrize(
-        ("tamper", "mismatch"),
+        ("tamper", "reason", "key"),
         [
-            (None, "no readable manifest"),
-            (lambda m: m.update(success=False), "manifest does not record a successful run"),
-            (lambda m: m.update(experiment_identity={}), "manifest records no experiment identity"),
+            (None, "no readable manifest", None),
+            (
+                lambda m: m.update(success=False),
+                "manifest does not record a successful run",
+                None,
+            ),
+            (
+                lambda m: m.update(experiment_identity={}),
+                "manifest records no experiment identity",
+                None,
+            ),
             (
                 lambda m: m["experiment_identity"].update(config_payload=None),
                 "manifest records no config payload",
+                None,
             ),
             (
                 lambda m: m["experiment_identity"].update(descriptor_hash="0" * 64),
+                "the run was fit on another dataset",
                 "dataset_descriptor_hash",
             ),
             (
                 lambda m: m["experiment_identity"]["config_payload"].update(stages=["train"]),
+                "the run was fit with another value",
                 "stages",
+            ),
+            (
+                lambda m: m["experiment_identity"]["config_payload"].update(latent_process="rw"),
+                "the run was fit with another value",
+                "latent_process",
             ),
         ],
     )
     def test_a_cached_run_that_cannot_prove_itself_refits(
-        self, tmp_path, monkeypatch, tamper, mismatch
+        self, tmp_path, monkeypatch, tamper, reason, key
     ):
         """The identity file matching is not enough — each run's manifest must too."""
         import structlog
@@ -468,9 +487,30 @@ class TestConfirmationResume:
         with structlog.testing.capture_logs() as logs:
             run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 2  # both sides of the seed refit
-        assert [
-            e["mismatch"] for e in logs if e["event"] == "confirmation_cached_run_rejected"
-        ] == [mismatch]
+        rejected = [e for e in logs if e["event"] == "confirmation_cached_run_rejected"]
+        assert [(e["reason"], e["key"]) for e in rejected] == [(reason, key)]
+
+    def test_swapping_the_paired_runs_refits(self, tmp_path, monkeypatch):
+        """Each side is checked against its own arm, so the pair cannot be reversed."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        out = cfg.sweep_dir / "confirmation.json"
+        payload = json.loads(out.read_text(encoding="utf-8"))
+        seed = payload["seeds"][0]
+        seed["reference_run"], seed["winner_run"] = seed["winner_run"], seed["reference_run"]
+        out.write_text(json.dumps(payload), encoding="utf-8")
+        calls, counting = self._counting(launch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 2
+
+    def test_a_knob_the_winner_overrides_still_reuses(self, tmp_path, monkeypatch):
+        """An extra_config value an arm overrides is compared as the arm's, not the base's."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        cfg.extra_config = {"latent_process": "rw"}
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        calls, counting = self._counting(launch)
+        run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+        assert calls["n"] == 0
 
     def test_an_option_the_manifest_never_recorded_still_reuses(self, tmp_path, monkeypatch):
         """A key with no recorded value has nothing to disagree with."""
@@ -485,11 +525,19 @@ class TestConfirmationResume:
         run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 0
 
-    def test_an_unloadable_dataset_records_no_descriptor_hash(self, tmp_path):
-        from panelcast.select.confirmation import _descriptor_hash
-
-        cfg = SweepConfig(sweep_id="c", dataset="not-a-dataset", output_root=tmp_path / "select")
-        assert _descriptor_hash(cfg) is None
+    def test_an_unresolved_descriptor_refuses_every_cached_run(self, tmp_path, monkeypatch):
+        """An unloadable descriptor is an absence, not a value another absence matches."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+        result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+        assert _descriptor_hash(
+            SweepConfig(sweep_id="c", dataset="not-a-dataset", output_root=tmp_path / "s")
+        ) is None
+        # A manifest that recorded no hash must not be admitted by a call that
+        # could not compute one either.
+        assert _cached_run_mismatch(Path(result.seeds[0].winner_run), None, {}) == (
+            "this call could not resolve its own dataset descriptor",
+            None,
+        )
 
     def test_reused_seed_rechecks_convergence(self, tmp_path, monkeypatch):
         cfg, launch = _fake_env(tmp_path, monkeypatch)
@@ -501,6 +549,80 @@ class TestConfirmationResume:
         result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
         assert result.seeds[0].winner_converged is False
         assert not result.confirmed
+
+
+class TestManifestContract:
+    """The gate reads a real manifest, not the shape the fixture happens to write."""
+
+    def test_a_manifest_written_the_orchestrators_way_verifies(self, tmp_path):
+        import yaml as _yaml
+        from panelcast.config.descriptor import load_descriptor
+        from panelcast.config.pipeline_yaml import (
+            apply_yaml_overrides,
+            experiment_config_payload,
+        )
+        from panelcast.pipelines.manifest import (
+            EnvironmentInfo,
+            GitStateModel,
+            RunManifest,
+            save_run_manifest,
+        )
+        from panelcast.pipelines.orchestrator import PipelineConfig
+        from panelcast.select.confirmation import _fit_config_payload, _write_config
+        from panelcast.select.space import default_arm
+
+        cfg = SweepConfig(
+            sweep_id="c", output_root=tmp_path / "select", num_samples=200, num_warmup=100
+        )
+        cfg.sweep_dir.mkdir(parents=True)
+        arm = {**default_arm(), "latent_process": "ar1"}
+        config_path = cfg.sweep_dir / "confirm_winner_seed42.yaml"
+        _write_config(cfg, arm, 42, config_path, run_id="sel_c_confirm_winner_seed42_x")
+
+        # The layering a real fit goes through: the YAML select wrote, mapped
+        # onto PipelineConfig, recorded by the orchestrator's own recorder.
+        written = _yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        config = PipelineConfig(**apply_yaml_overrides({}, written))
+        recorded = experiment_config_payload(config)
+        # Not vacuous: the keys below are the ones the comparison turns on.
+        assert {"stages", "latent_process", "num_samples"} <= set(recorded)
+        run_dir = tmp_path / "outputs" / "sel_c_confirm_winner_seed42_x"
+        save_run_manifest(
+            RunManifest(
+                run_id=config.run_id,
+                created_at="2026-07-31T00:00:00",
+                command="panelcast run",
+                flags={},
+                seed=config.seed,
+                git=GitStateModel(commit="a" * 40, branch="main", dirty=False, untracked_count=0),
+                environment=EnvironmentInfo(
+                    python_version="3.14",
+                    jax_version="0.8.2",
+                    numpyro_version=None,
+                    arviz_version=None,
+                    platform="Linux",
+                    pixi_lock_hash=None,
+                ),
+                input_hashes={},
+                stage_hashes={},
+                stages_completed=[],
+                stages_skipped=[],
+                outputs={},
+                success=True,
+                experiment_identity={
+                    "descriptor_hash": load_descriptor(config.dataset).descriptor_hash(),
+                    "config_payload": recorded,
+                },
+            ),
+            run_dir,
+        )
+
+        assert (
+            _cached_run_mismatch(
+                run_dir, _descriptor_hash(cfg), _fit_config_payload(cfg, arm, None)
+            )
+            is None
+        )
 
 
 class TestConfirmationAlwaysCold:

@@ -118,13 +118,13 @@ def _descriptor_hash(cfg: SweepConfig) -> str | None:
     that is the reference ``_write_config`` puts in every confirmation config —
     the domain the fits actually run against. An unset dataset resolves the
     same default the fits will, so the identity holds the hash their manifests
-    record either way. A descriptor that cannot be loaded leaves the fits to
-    fail on their own; the identity records the absence rather than inventing a
-    value that would match another failure.
+    record either way. A descriptor that cannot be loaded is not a value: None
+    would equal the None a manifest that recorded no hash produces, so it
+    refuses reuse in ``_cached_run_mismatch`` rather than matching there.
     """
     try:
         return load_descriptor(cfg.dataset).descriptor_hash()
-    except (OSError, ValueError):
+    except (OSError, ValueError, yaml.YAMLError):
         return None
 
 
@@ -136,7 +136,9 @@ def _base_config_payload(
     Built by the same helper that writes the fit configs, minus what varies
     inside one confirmation (the arm's knobs, the seed, the run id), so an
     output-affecting option cannot reach the fits without moving the cache
-    identity with it.
+    identity with it. This is the identity's half; what each *run* is checked
+    against is its own arm's full payload, which is where an option an arm
+    overrides gets the value that arm's manifest recorded.
     """
     return _fit_config_payload(cfg, {}, sampler_overrides)
 
@@ -148,42 +150,51 @@ def _canonical_hash(payload: dict[str, Any]) -> str:
 
 
 def _cached_run_mismatch(
-    run_dir: Path, descriptor_hash: str | None, base_config: dict[str, Any]
-) -> str | None:
-    """Why this run's manifest is not the experiment being confirmed (None = it is).
+    run_dir: Path, descriptor_hash: str | None, fit_config: dict[str, Any]
+) -> tuple[str, str | None] | None:
+    """Why this run's manifest is not the fit it stands for; None = it is.
+
+    Returns ``(reason, config key)`` — the key is None when what failed is not
+    a config comparison, so a reader is never left guessing whether a value is
+    prose or a knob name.
 
     The identity file proves what the *previous call* declared; only the run's
     own manifest proves what was fit. Both are needed: an identity file written
     by a version that recorded less, or copied alongside its snapshots, would
-    otherwise carry a foreign run into this verdict. A run that recorded no
-    experiment identity cannot be tied to this one either way, so it refits —
-    the paired z is the evidence a promotion is argued from, and an unprovable
-    snapshot is not evidence.
+    otherwise carry a foreign run into this verdict. ``fit_config`` is the
+    arm's own payload rather than the arm-free base, so the reference and the
+    winner of a seed are told apart — swap the two run dirs and the knobs no
+    longer agree with the manifests. A run that recorded no experiment identity
+    cannot be tied to this one either way, so it refits: the paired z is the
+    evidence a promotion is argued from, and an unprovable snapshot is not
+    evidence.
 
     Only keys the manifest recorded are compared: a config knob it never
     mentions has no recorded value to disagree with.
     """
+    if descriptor_hash is None:
+        return "this call could not resolve its own dataset descriptor", None
     try:
         manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return "no readable manifest"
+        return "no readable manifest", None
     if manifest.get("success") is not True:
-        return "manifest does not record a successful run"
+        return "manifest does not record a successful run", None
     identity = manifest.get("experiment_identity")
     if not isinstance(identity, dict) or not identity:
-        return "manifest records no experiment identity"
+        return "manifest records no experiment identity", None
     if identity.get("descriptor_hash") != descriptor_hash:
-        return "dataset_descriptor_hash"
+        return "the run was fit on another dataset", "dataset_descriptor_hash"
     recorded = identity.get("config_payload")
     if not isinstance(recorded, dict):
-        return "manifest records no config payload"
-    for key, value in base_config.items():
+        return "manifest records no config payload", None
+    for key, value in fit_config.items():
         if key not in recorded:
             continue
         # The recorded value is JSON, so a tuple this call holds is a list there.
         expected = list(value) if isinstance(value, tuple) else value
         if recorded[key] != expected:
-            return key
+            return "the run was fit with another value", key
     return None
 
 
@@ -191,7 +202,7 @@ def _reusable_prior_seeds(
     out_path: Path,
     identity: dict[str, Any],
     descriptor_hash: str | None,
-    base_config: dict[str, Any],
+    fit_configs: dict[str, dict[str, Any]],
 ) -> dict[int, SeedResult]:
     """Prior seeds whose snapshots survive, IF the stored protocol matches this call.
 
@@ -224,17 +235,18 @@ def _reusable_prior_seeds(
         ):
             continue
         rejected = [
-            (label, reason)
+            (label, mismatch)
             for label, run in (("reference", ref), ("winner", win))
-            if (reason := _cached_run_mismatch(Path(run), descriptor_hash, base_config))
+            if (mismatch := _cached_run_mismatch(Path(run), descriptor_hash, fit_configs[label]))
         ]
         if rejected:
-            for label, reason in rejected:
+            for label, (reason, key) in rejected:
                 log.warning(
                     "confirmation_cached_run_rejected",
                     seed=entry.get("seed"),
                     label=label,
-                    mismatch=reason,
+                    reason=reason,
+                    key=key,
                 )
             continue
         reusable[int(entry["seed"])] = SeedResult(
@@ -274,13 +286,16 @@ def _fit_config_payload(
     cfg: SweepConfig,
     merged: dict[str, Any],
     sampler_overrides: dict[str, int] | None,
+    seed: int | None = None,
 ) -> dict[str, Any]:
-    """One confirmation fit's config, less the seed and run id it is named by."""
+    """One confirmation fit's config, less the run id it is named by."""
     payload: dict[str, Any] = {
         **cfg.extra_config,
         **merged,
         "stages": _CONFIRMATION_STAGES,
     }
+    if seed is not None:
+        payload["seed"] = seed
     if cfg.dataset is not None:
         payload["dataset"] = cfg.dataset
     for key, value in (
@@ -302,7 +317,7 @@ def _write_config(
     sampler_overrides: dict[str, int] | None = None,
     run_id: str | None = None,
 ) -> None:
-    payload = {**_fit_config_payload(cfg, merged, sampler_overrides), "seed": seed}
+    payload = _fit_config_payload(cfg, merged, sampler_overrides, seed)
     if run_id is not None:
         payload["run_id"] = run_id
     path.write_text(yaml.safe_dump(payload, sort_keys=True), encoding="utf-8")
@@ -397,7 +412,11 @@ def run_confirmation(
         "dataset_descriptor_hash": descriptor_hash,
         "base_config_hash": result.base_config_hash,
     }
-    prior = _reusable_prior_seeds(out_path, identity, descriptor_hash, base_config)
+    fit_configs = {
+        "reference": _fit_config_payload(cfg, dict(base), sampler_overrides),
+        "winner": _fit_config_payload(cfg, {**base, **winner_knobs}, sampler_overrides),
+    }
+    prior = _reusable_prior_seeds(out_path, identity, descriptor_hash, fit_configs)
     timeout = _confirmation_timeout(cfg, sampler_overrides, winner_knobs, dims)
 
     def _resolve(run_id: str, seed: int, label: str, *, after_fit: bool) -> Path:
