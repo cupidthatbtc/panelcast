@@ -198,19 +198,31 @@ class TestJsonSerialization:
         _json_safe({"a": 1.0, "b": [2.0, 3.0], "c": None}, nulled=nulled)
         assert nulled == []
 
-    def test_write_json_warns_which_fields_were_nulled(self, tmp_path):
+    def _warnings(self, monkeypatch, path, payload) -> list[dict]:
+        """Warnings _write_json emits, via a per-test logger.
+
+        Not ``capture_logs``: with ``cache_logger_on_first_use`` the module's
+        lazy proxy binds to whichever context first uses it, so capturing here
+        would steal the binding from every later test in the session.
+        """
+        from panelcast.pipelines import evaluate as evaluate_module
+
+        capturing = structlog.testing.CapturingLogger()
+        monkeypatch.setattr(evaluate_module, "log", capturing)
+        _write_json(path, payload)
+        return [call.kwargs for call in capturing.calls if call.method_name == "warning"]
+
+    def test_write_json_warns_which_fields_were_nulled(self, tmp_path, monkeypatch):
         """An absent key means "not computed"; a null means it overflowed."""
         path = tmp_path / "metrics.json"
-        with structlog.testing.capture_logs() as logs:
-            _write_json(path, {"point_metrics": {"mae": float("inf")}})
+        warnings = self._warnings(
+            monkeypatch, path, {"point_metrics": {"mae": float("inf")}}
+        )
         assert json.loads(path.read_text())["point_metrics"]["mae"] is None
-        events = [e for e in logs if e["event"] == "non_finite_json_value_nulled"]
-        assert len(events) == 1
-        assert events[0]["fields"] == ["point_metrics.mae"]
-        assert events[0]["artifact"] == "metrics.json"
+        assert len(warnings) == 1
+        assert warnings[0]["fields"] == ["point_metrics.mae"]
+        assert warnings[0]["artifact"] == "metrics.json"
 
-    def test_write_json_is_quiet_on_a_finite_payload(self, tmp_path):
+    def test_write_json_is_quiet_on_a_finite_payload(self, tmp_path, monkeypatch):
         path = tmp_path / "metrics.json"
-        with structlog.testing.capture_logs() as logs:
-            _write_json(path, {"point_metrics": {"mae": 5.0}})
-        assert not [e for e in logs if e["event"] == "non_finite_json_value_nulled"]
+        assert self._warnings(monkeypatch, path, {"point_metrics": {"mae": 5.0}}) == []
