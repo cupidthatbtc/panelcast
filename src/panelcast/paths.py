@@ -50,6 +50,27 @@ class ArtifactPaths:
             reports=run_dir / "reports",
         )
 
+    def roots(self) -> tuple[Path, ...]:
+        """Every directory a recorded artifact may legitimately live under.
+
+        One definition for every containment check, so "which roots" cannot
+        drift between the incremental skip path and `panelcast runs verify` —
+        adding a field to this dataclass widens both at once. Order-preserving
+        and deduplicated, since the flat layout shares roots between products.
+        """
+        seen = dict.fromkeys(
+            (
+                self.processed,
+                self.splits,
+                self.features,
+                self.models,
+                self.evaluation,
+                self.predictions,
+                self.reports,
+            )
+        )
+        return tuple(seen)
+
     @classmethod
     def from_ctx(cls, ctx: object) -> ArtifactPaths:
         """Paths carried by a stage context; flat layout when absent.

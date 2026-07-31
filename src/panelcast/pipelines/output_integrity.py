@@ -67,7 +67,7 @@ def contained_path(path: Path, roots: Sequence[Path]) -> Path | None:
         return None
     for root in roots:
         try:
-            resolved_root = Path(root).resolve()
+            resolved_root = root.resolve()
         except (OSError, ValueError, RuntimeError):
             continue
         if resolved == resolved_root or resolved_root in resolved.parents:

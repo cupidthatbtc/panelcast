@@ -692,6 +692,12 @@ hash map was emptied) is reported as such and every recorded output comes back
 `UNVERIFIABLE`: shape cannot tell the two apart, so neither is excused. A run
 that recorded no outputs in the first place has nothing to check and passes.
 
+**Run it from the project root.** A flat-layout run records its data, model and
+report artifacts as paths relative to the project root, so `runs verify`
+resolves them — and the roots it checks them against — against the working
+directory. Invoked from elsewhere, those outputs read as `MISSING`. Run-scoped
+artifacts are unaffected: they resolve against `--output-base`.
+
 Output verification is the same primitive the incremental `--skip-existing`
 path uses (`pipelines/output_integrity.py`), so what one caller accepts as
 proof the other does too. The one deliberate difference is re-rooting: `runs

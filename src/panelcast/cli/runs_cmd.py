@@ -54,23 +54,20 @@ def _output_roots(run_dir: Path) -> tuple[Path, ...]:
     containment alone cannot tell one run's copy from another's there; the
     declared-path binding is what does that, and only the stage caller has it.
 
-    The roots are relative exactly where ``ArtifactPaths.flat()`` is, matching
-    how the orchestrator records those outputs, so path and root are resolved
-    against the same working directory and move together.
+    The artifact roots come from ``ArtifactPaths.roots()``, the same definition
+    the orchestrator's ``_output_verification_roots`` draws on, so *which*
+    roots — part of what a caller accepts as proof — cannot drift between the
+    two any more than the per-key rules can.
+
+    Those roots are relative exactly where ``ArtifactPaths.flat()`` is, matching
+    how the orchestrator records flat-layout outputs, so path and root resolve
+    against the same working directory and move together. That does mean
+    `runs verify` reads a flat-layout run relative to where it is invoked; run
+    it from the project root, as `panelcast run` was.
     """
     from panelcast.paths import ArtifactPaths
 
-    flat = ArtifactPaths.flat()
-    return (
-        run_dir,
-        flat.processed,
-        flat.splits,
-        flat.features,
-        flat.models,
-        flat.evaluation,
-        flat.predictions,
-        flat.reports,
-    )
+    return (run_dir, *ArtifactPaths.flat().roots())
 
 
 def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:

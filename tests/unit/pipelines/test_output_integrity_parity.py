@@ -14,6 +14,7 @@ explicitly rather than left implicit.
 from __future__ import annotations
 
 import json
+from dataclasses import fields
 from pathlib import Path
 
 import pytest
@@ -84,11 +85,19 @@ class Fixture:
             success=True,
         )
 
-    def skip_accepts(self) -> bool:
-        """Whether the incremental skip path trusts the recorded outputs."""
-        return self.stage.skip_decision(
-            self._manifest(), allowed_roots=[self.run_dir]
-        ).skip
+    def skip_accepts(self, allowed_roots: list[Path] | None = None) -> bool:
+        """Whether the incremental skip path trusts the recorded outputs.
+
+        ``allowed_roots`` defaults to the run dir so the parity cases isolate
+        the per-key rules; pass None explicitly to exercise the stage's own
+        root derivation instead.
+        """
+        roots = [self.run_dir] if allowed_roots is None else allowed_roots
+        return self.stage.skip_decision(self._manifest(), allowed_roots=roots).skip
+
+    def skip_accepts_on_default_roots(self) -> bool:
+        """The same, but through `_default_roots()` rather than a stub."""
+        return self.stage.skip_decision(self._manifest()).skip
 
     def verify_accepts(self) -> bool:
         """Whether `runs verify` reports the run as matching its manifest."""
@@ -123,6 +132,17 @@ class TestBothCallersAgree:
     def test_valid_manifest_is_accepted_by_both(self, fx):
         assert fx.skip_accepts() is True
         assert fx.verify_accepts() is True
+        # Not only through the stubbed roots: the stage's own derivation has to
+        # accept its own artifact too, or the parity cases below are measuring
+        # a configuration production never runs.
+        assert fx.skip_accepts_on_default_roots() is True
+
+    def test_an_escaping_path_is_refused_on_the_stages_own_roots(self, fx):
+        outside = fx.tmp_path / "outside.json"
+        outside.write_text(json.dumps({"mae": 5.3}), encoding="utf-8")
+        fx.outputs[fx.key] = str(outside)
+        fx.output_hashes[fx.key] = sha256_path(outside)
+        assert fx.skip_accepts_on_default_roots() is False
 
     def test_a_modified_output_is_refused_by_both(self, fx):
         fx.artifact.write_text(json.dumps({"mae": 1.0}), encoding="utf-8")
@@ -224,22 +244,45 @@ class TestBothCallersAgree:
 class TestContainment:
     """The root check has to survive a workspace an operator has bent."""
 
-    def test_one_unresolvable_root_does_not_condemn_every_output(self, tmp_path):
+    def test_one_unresolvable_root_does_not_condemn_every_output(self, tmp_path, monkeypatch):
         from panelcast.pipelines.output_integrity import contained_path
 
         good = tmp_path / "models"
         good.mkdir()
         artifact = good / "trace.nc"
         artifact.write_bytes(b"posterior")
+        bad = tmp_path / "bad"
+        real_resolve = Path.resolve
 
-        class Hostile(type(tmp_path)):
-            def resolve(self, strict=False):
+        def resolve(self, strict=False):
+            if self == bad:
                 raise OSError("symlink loop")
+            return real_resolve(self)
+
+        monkeypatch.setattr(Path, "resolve", resolve)
 
         # A bad root ahead of the good one must be skipped, not fatal: the
         # roots are a shared workspace, and one bent entry out of eight cannot
         # turn every output in every run into an apparent escape.
-        assert contained_path(artifact, [Hostile(tmp_path / "bad"), good]) is not None
+        assert contained_path(artifact, [bad, good]) is not None
+
+    def test_both_callers_draw_their_roots_from_one_definition(self, tmp_path):
+        # *Which* roots is part of what a caller accepts as proof, so it is the
+        # last place the two could still drift apart. Adding a field to
+        # `ArtifactPaths` must widen both, not one.
+        from panelcast.cli.runs_cmd import _output_roots
+        from panelcast.paths import ArtifactPaths
+        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+
+        declared = set(ArtifactPaths.flat().roots())
+        orchestrator = PipelineOrchestrator(PipelineConfig(dry_run=True), output_base=tmp_path)
+
+        assert declared <= set(orchestrator._output_verification_roots())
+        assert declared <= set(_output_roots(tmp_path / "run_a"))
+        # And the enumeration is the dataclass, not a hand-kept copy of it.
+        assert len(declared) == len(
+            {getattr(ArtifactPaths.flat(), f.name) for f in fields(ArtifactPaths)}
+        )
 
     def test_the_contained_path_is_the_one_that_gets_hashed(self, tmp_path):
         from panelcast.pipelines.output_integrity import contained_path
