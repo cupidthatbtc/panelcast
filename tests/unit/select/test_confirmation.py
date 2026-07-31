@@ -698,8 +698,8 @@ class TestConfirmationResume:
         healthy = {"promote_z": 2.0, "dataset_descriptor_hash": "abc"}
         blind = {"promote_z": 2.0, "dataset_descriptor_hash": None}
         assert _identity_changes(blind, healthy) == []
-        # The mirror case still archives: this call reuses nothing either way,
-        # and the checkpoint would overwrite the ledger without a copy.
+        # The mirror is not exempted, but no caller reaches it for this key: the
+        # blind branch returns first. Its one-sidedness is what makes that safe.
         assert _identity_changes(healthy, blind) == ["dataset_descriptor_hash"]
         assert _identity_changes({"dataset_descriptor_hash": "xyz"}, healthy) == [
             "dataset_descriptor_hash",
@@ -718,6 +718,13 @@ class TestConfirmationResume:
         def unloadable(_ref):
             raise OSError("stale mount")
 
+        def _archives():
+            return sorted(
+                p.name
+                for p in cfg.sweep_dir.iterdir()
+                if p.name.startswith("confirmation_") and p.suffix == ".json"
+            )
+
         calls, counting = self._counting(launch)
         # Scoped, so undoing the blindness cannot revert whatever else the
         # fixture patched.
@@ -726,23 +733,29 @@ class TestConfirmationResume:
             result = run_confirmation(
                 {"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting
             )
-        assert calls["n"] == 2
-        # Not "the dataset changed", which is what a stale mount must never be
-        # reported as — and the only thing distinguishing the two guard orders.
-        assert [
-            (e["reason"], e["changed"]) for e in logs if e["event"] == "confirmation_cache_archived"
-        ] == [("unresolved dataset descriptor", None)]
+            assert calls["n"] == 2
+            # Not "the dataset changed", which is what a stale mount must never
+            # be reported as — and the only thing distinguishing the guard orders.
+            assert [
+                (e["reason"], e["changed"])
+                for e in logs
+                if e["event"] == "confirmation_cache_archived"
+            ] == [("unresolved dataset descriptor", None)]
+            archived = _archives()
+            assert archived
+
+            # A descriptor that is gone, not blinking: the retry refits, but it
+            # is replacing a ledger of its own protocol, so no copy piles up.
+            calls, counting = self._counting(launch)
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
+            assert calls["n"] == 2
+            assert _archives() == archived
+
         assert result.dataset_descriptor_hash is None
         persisted = json.loads(
             (cfg.sweep_dir / "confirmation.json").read_text(encoding="utf-8")
         )
         assert persisted["dataset_descriptor_hash"] is None
-        archived = [
-            p
-            for p in cfg.sweep_dir.iterdir()
-            if p.name.startswith("confirmation_") and p.suffix == ".json"
-        ]
-        assert archived
 
         # The blink costs one refit, not two: the ledger it wrote is not
         # archived again when the descriptor comes back.
@@ -750,11 +763,36 @@ class TestConfirmationResume:
         result = run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=counting)
         assert calls["n"] == 0
         assert result.confirmed
-        assert [
-            p
-            for p in cfg.sweep_dir.iterdir()
-            if p.name.startswith("confirmation_") and p.suffix == ".json"
-        ] == archived
+        assert _archives() == archived
+        # And the null the blind call persisted heals, rather than describing
+        # every later verdict as coming from a dataset nothing could name.
+        persisted = json.loads(
+            (cfg.sweep_dir / "confirmation.json").read_text(encoding="utf-8")
+        )
+        assert persisted["dataset_descriptor_hash"] == _descriptor_hash(None)
+
+    def test_a_blind_call_still_preserves_another_protocols_ledger(
+        self, tmp_path, monkeypatch
+    ):
+        """Blind is not a licence to overwrite evidence from a different call."""
+        cfg, launch = _fake_env(tmp_path, monkeypatch)
+
+        def unloadable(_ref):
+            raise OSError("stale mount")
+
+        def archives():
+            return sorted(
+                p.name
+                for p in cfg.sweep_dir.iterdir()
+                if p.name.startswith("confirmation_") and p.suffix == ".json"
+            )
+
+        with monkeypatch.context() as blind:
+            blind.setattr("panelcast.select.confirmation.load_descriptor", unloadable)
+            run_confirmation({"latent_process": "ar1"}, cfg, seeds=(42,), launch=launch)
+            first = archives()
+            run_confirmation({"latent_process": "gp"}, cfg, seeds=(42,), launch=launch)
+        assert len(archives()) == len(first) + 1
 
     def test_reused_seed_rechecks_convergence(self, tmp_path, monkeypatch):
         cfg, launch = _fake_env(tmp_path, monkeypatch)
@@ -870,6 +908,11 @@ class TestManifestContract:
         # knob a winner can differ on has to survive the round trip, or the
         # presence floor would reject a real run forever.
         assert {k for k, v in default_arm().items() if v is not None} <= set(recorded["winner"])
+        # And the other half of the fixture's exclusion claim: the recorder
+        # omits an unset value, which is what the presence floor is built on.
+        assert {k for k, v in payloads["winner"].items() if v is None}.isdisjoint(
+            recorded["winner"]
+        )
         assert {"stages", "num_samples", "seed", "max_events"} <= set(recorded["winner"])
         assert ("dataset" in recorded["winner"]) == (dataset is not None)
 

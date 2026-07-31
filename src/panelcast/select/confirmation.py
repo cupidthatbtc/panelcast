@@ -39,6 +39,10 @@ log = structlog.get_logger()
 
 _CONFIRMATION_STAGES = ["splits", "features", "train", "evaluate"]
 
+# The identity key both blind-path branches special-case, named once so they
+# cannot disagree about which one it is.
+_DESCRIPTOR_KEY = "dataset_descriptor_hash"
+
 
 @dataclass
 class SeedResult:
@@ -259,7 +263,7 @@ def _identity_changes(recorded: dict[str, Any], identity: dict[str, Any]) -> lis
         key
         for key, value in identity.items()
         if recorded.get(key) != _as_recorded(value)
-        and not (key == "dataset_descriptor_hash" and recorded.get(key) is None)
+        and not (key == _DESCRIPTOR_KEY and recorded.get(key) is None)
     )
 
 
@@ -311,12 +315,18 @@ def _reusable_prior_seeds(
         # moves aside because the per-seed checkpoint is about to overwrite it,
         # but only while there is something to preserve: a descriptor that is
         # gone rather than briefly unreachable would otherwise leave one more
-        # copy of the same blind ledger behind every retry. Only a ledger this
-        # path itself wrote counts as nothing to preserve — a file predating
-        # these fields is also missing the hash, and it is not a copy of what
-        # is about to replace it.
-        if payload.get("dataset_descriptor_hash") is not None or "fit_config_hash" not in payload:
-            _archive(out_path, reason="unresolved dataset descriptor")
+        # copy of the same blind ledger behind every retry. "Nothing to
+        # preserve" is the same question the identity comparison answers — a
+        # ledger of another protocol is not a copy of what replaces it, whether
+        # or not it was also written blind.
+        # Minus the descriptor hash itself, which differs here because this
+        # call is blind — the reason already says that, and listing it would
+        # read as the changed dataset a stale mount must not be reported as.
+        changed = [k for k in _identity_changes(payload, identity) if k != _DESCRIPTOR_KEY]
+        if payload.get(_DESCRIPTOR_KEY) is not None or changed:
+            _archive(
+                out_path, reason="unresolved dataset descriptor", changed=changed or None
+            )
         return {}
     changed = _identity_changes(payload, identity)
     if changed:
@@ -517,7 +527,6 @@ def run_confirmation(
             "not paired evidence, and only one of them could be recorded as the "
             "confirmation's."
         )
-    descriptor_hash = _descriptor_hash(dataset)
     discriminating = _discriminating_keys(payloads["reference"], payloads["winner"], dataset)
     if not discriminating - {"seed", "dataset"}:
         # Which cause, decided by whether the knob survived into the payload:
@@ -535,6 +544,7 @@ def run_confirmation(
             + "both sides would run the same configuration, so the pairing would "
             "compare the reference with itself."
         )
+    descriptor_hash = _descriptor_hash(dataset)
     result = ConfirmationResult(
         winner_knobs=winner_knobs,
         promote_z=promote_z,
