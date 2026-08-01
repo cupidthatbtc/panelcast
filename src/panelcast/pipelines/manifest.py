@@ -18,6 +18,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from panelcast.utils.atomic import atomic_write_text
 from panelcast.utils.environment import verify_environment
 from panelcast.utils.git_state import GitState
 
@@ -325,7 +326,14 @@ def generate_run_id() -> str:
 
 
 def save_run_manifest(manifest: RunManifest, run_dir: Path) -> Path:
-    """Save run manifest to JSON file.
+    """Save run manifest to JSON file, atomically.
+
+    The manifest is rewritten at every stage boundary and is the entry point
+    for ``--resume``, so a kill inside the write must not be able to leave a
+    truncated document that strands otherwise-complete stage outputs. It is
+    serialized before anything on disk is touched and then committed by
+    temp-plus-rename, so a failure at any point leaves the previous manifest
+    exactly as it was (#424).
 
     Args:
         manifest: RunManifest to save.
@@ -340,10 +348,11 @@ def save_run_manifest(manifest: RunManifest, run_dir: Path) -> Path:
         'manifest.json'
     """
     run_dir = Path(run_dir)
+    payload = manifest.model_dump_json(indent=2)
     run_dir.mkdir(parents=True, exist_ok=True)
 
     manifest_path = run_dir / "manifest.json"
-    manifest_path.write_text(manifest.model_dump_json(indent=2), encoding="utf-8")
+    atomic_write_text(manifest_path, payload)
 
     return manifest_path
 

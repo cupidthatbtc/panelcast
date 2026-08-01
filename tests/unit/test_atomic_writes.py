@@ -1,0 +1,634 @@
+"""Durability of the records a later process reads back (#424).
+
+The run manifest, the data-root stamps and the `latest` pointer are all
+rewritten in place while a run is going, and all three are read by something
+that cannot tell a truncated file from a short one. These tests pin the one
+property that makes that safe: a failed write leaves the previous file, whole.
+"""
+
+import errno
+import json
+import logging
+import os
+import stat
+import uuid
+from collections.abc import Callable
+from contextlib import contextmanager
+from pathlib import Path
+
+import pytest
+
+from panelcast.pipelines.manifest import (
+    EnvironmentInfo,
+    GitStateModel,
+    RunManifest,
+    load_run_manifest,
+    save_run_manifest,
+)
+from panelcast.pipelines.stamps import read_stamp, write_stamp
+from panelcast.utils import atomic as atomic_module
+from panelcast.utils.atomic import TMP_MARKER, atomic_write, atomic_write_text
+
+
+def _manifest(**overrides) -> RunManifest:
+    fields = dict(
+        run_id="2026-01-19_143052",
+        created_at="2026-01-19T14:30:52Z",
+        command="panelcast run --seed 42",
+        flags={"seed": 42},
+        seed=42,
+        git=GitStateModel(
+            commit="abc123def456789012345678901234567890abcd",
+            branch="main",
+            dirty=False,
+            untracked_count=0,
+        ),
+        environment=EnvironmentInfo(
+            python_version="3.11.5",
+            jax_version="0.4.26",
+            numpyro_version="0.15.0",
+            arviz_version="0.18.0",
+            platform="Linux 6.6",
+            pixi_lock_hash=None,
+        ),
+        input_hashes={},
+        stage_hashes={"data": "hash_data"},
+        stages_completed=["data"],
+        stages_skipped=[],
+        outputs={},
+        success=False,
+    )
+    fields.update(overrides)
+    return RunManifest(**fields)
+
+
+def _fail_the_commit(monkeypatch) -> None:
+    """Let the payload reach the temporary, then fail before it is published.
+
+    Patches the ``atomic_write`` name inside its own module — the one every
+    text writer resolves at call time — rather than reaching into the real
+    ``os`` module, so exactly one commit fails and nothing else in the process
+    is affected.
+    """
+    real = atomic_module.atomic_write
+
+    @contextmanager
+    def guarded(path):
+        with real(path) as handle:
+            yield handle
+            raise OSError("no space left on device")
+
+    monkeypatch.setattr(atomic_module, "atomic_write", guarded)
+
+
+def _no_backoff(monkeypatch) -> None:
+    """Drop the commit retry delays without patching the shared `time` module.
+
+    `_commit` reads the tuple from module globals on every call, so this is a
+    module-local seam; replacing `time.sleep` would slow or break anything
+    else in the process that sleeps during the test.
+    """
+    monkeypatch.setattr(
+        atomic_module,
+        "_COMMIT_RETRY_DELAYS",
+        (0.0,) * len(atomic_module._COMMIT_RETRY_DELAYS),
+    )
+
+
+def _fdopen_that_fails(error: Callable[[], BaseException]):
+    """An `os.fdopen` stand-in that takes the descriptor, then fails.
+
+    Ownership is the point: the real one closes the fd on its own error path,
+    so a stand-in that leaves it open would let a double close pass. ``error``
+    is a factory so repeated calls do not accrete onto one traceback.
+    """
+    real = os.fdopen
+
+    def boom(fd, *_args, **_kwargs):
+        real(fd, "wb").close()
+        raise error()
+
+    return boom
+
+
+def _deny_replace(
+    monkeypatch,
+    target: Path,
+    until: int | None,
+    error: Callable[[], OSError] | None = None,
+) -> dict[str, int]:
+    """Refuse renames onto ``target`` the way Windows refuses a held file.
+
+    Simulated, because POSIX has no equivalent to reproduce. `os.replace` has
+    no module-local name to patch, so the stand-in goes on the shared module
+    and passes every other destination straight through — anything else
+    renaming in-process during the test, pytest's own bytecode commits
+    included, must not see a denial that was meant for one path.
+
+    ``error`` is a factory, not an instance, so the *width* of the retry can be
+    tested and not just its depth — and so each raise gets a fresh traceback
+    instead of prepending to one shared across every test in the file.
+    """
+    make_error = error or (lambda: PermissionError("the file is in use by another process"))
+    real = os.replace
+    attempts = {"n": 0}
+
+    def busy(*args, **kwargs):
+        try:
+            mine = Path(args[1]) == target
+        except (IndexError, TypeError):
+            mine = False  # bytes paths, dir-fd keywords: not a shape we judge
+        if not mine:
+            return real(*args, **kwargs)
+        attempts["n"] += 1
+        if until is None or attempts["n"] < until:
+            raise make_error()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(atomic_module.os, "replace", busy)
+    return attempts
+
+
+def _capture_logs(caplog):
+    """Open the capture down to DEBUG; `_records` narrows it back to this module.
+
+    `caplog`'s handler is on the root logger, so the window catches everything
+    in the process that propagates — the filtering has to happen on the way
+    out, not here.
+    """
+    return caplog.at_level(logging.DEBUG, logger=atomic_module.logger.name)
+
+
+def _records(caplog, level: int = logging.DEBUG) -> list[str]:
+    return [
+        r.getMessage()
+        for r in caplog.records
+        if r.name == atomic_module.logger.name and r.levelno >= level
+    ]
+
+
+def _warnings(caplog) -> list[str]:
+    return _records(caplog, logging.WARNING)
+
+
+def _temps(directory: Path) -> list[Path]:
+    return sorted(p for p in directory.iterdir() if TMP_MARKER in p.name)
+
+
+class TestAtomicWrite:
+    def test_the_handle_replaces_the_target_only_on_success(self, tmp_path: Path):
+        target = tmp_path / "payload.bin"
+        target.write_bytes(b"original")
+
+        with atomic_write(target) as handle:
+            handle.write(b"replacement")
+
+        assert target.read_bytes() == b"replacement"
+        assert not _temps(tmp_path)
+
+    def test_an_exception_in_the_body_leaves_the_previous_bytes(self, tmp_path: Path):
+        target = tmp_path / "payload.bin"
+        target.write_bytes(b"original")
+
+        with pytest.raises(ValueError):
+            with atomic_write(target) as handle:
+                handle.write(b"partial")
+                raise ValueError("mid-write")
+
+        assert target.read_bytes() == b"original"
+        assert not _temps(tmp_path)
+
+    def test_a_cleanup_failure_never_replaces_the_original_error(self, tmp_path: Path, monkeypatch):
+        target = tmp_path / "payload.bin"
+        target.write_bytes(b"original")
+
+        def refuse(_self, missing_ok: bool = False):
+            raise OSError("read-only directory")
+
+        monkeypatch.setattr(Path, "unlink", refuse)
+
+        # The write failure is the diagnostic; failing to tidy up must not
+        # stand in front of it.
+        with pytest.raises(ValueError, match="mid-write"):
+            with atomic_write(target) as handle:
+                handle.write(b"partial")
+                raise ValueError("mid-write")
+
+        assert target.read_bytes() == b"original"
+
+    @pytest.mark.parametrize("target_exists", [False, True])
+    def test_two_writers_on_one_target_do_not_share_a_temporary(
+        self, tmp_path: Path, target_exists: bool
+    ):
+        # Both cases, because the two create paths differ: a fresh target asks
+        # for the umask default, an existing one for the bits it already has.
+        target = tmp_path / "payload.bin"
+        if target_exists:
+            target.write_bytes(b"original")
+
+        with atomic_write(target) as first, atomic_write(target) as second:
+            first.write(b"a")
+            second.write(b"bb")
+            assert len({p.name for p in _temps(tmp_path)}) == 2
+
+    def test_the_directory_entry_is_synced_after_the_rename(self, tmp_path: Path, monkeypatch):
+        synced: list[Path] = []
+        monkeypatch.setattr(atomic_module, "fsync_dir", synced.append)
+
+        atomic_write_text(tmp_path / "payload.txt", "x")
+
+        assert synced == [tmp_path]
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_an_existing_target_keeps_its_permissions(self, tmp_path: Path):
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+        target.chmod(0o600)
+
+        atomic_write_text(target, '{"rewritten": true}')
+
+        assert stat.S_IMODE(target.stat().st_mode) == 0o600
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_the_temporary_is_never_wider_than_the_file_it_replaces(self, tmp_path: Path):
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+        target.chmod(0o600)
+
+        seen: list[int] = []
+        with atomic_write(target) as handle:
+            # Whatever a reader could open between here and the rename — the
+            # window that holds the payload while it is written and fsynced.
+            seen = [stat.S_IMODE(p.stat().st_mode) for p in _temps(tmp_path)]
+            handle.write(b"{}")
+
+        assert seen == [0o600]
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_inherited_bits_are_not_narrowed_by_the_umask(self, tmp_path: Path):
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+        target.chmod(0o664)
+
+        # os.umask is process-global and not thread-safe; restored below, and
+        # safe under xdist because that forks rather than threads.
+        previous = os.umask(0o077)  # would strip the group bits from a bare create
+        try:
+            atomic_write_text(target, '{"rewritten": true}')
+        finally:
+            os.umask(previous)
+
+        assert stat.S_IMODE(target.stat().st_mode) == 0o664
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_a_filesystem_that_refuses_chmod_still_gets_its_write(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # CIFS without the unix extensions, exfat, some FUSE mounts. Losing
+        # the exact bits is survivable; losing the manifest write is not.
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+        target.chmod(0o664)
+
+        def refuse(_fd, _mode):
+            raise OSError("operation not supported")
+
+        # Deliberately the real `os` module rather than a module-local seam:
+        # `_open_temp` reaches it through `getattr(os, "fchmod")` so there is
+        # no local name to patch, and nothing else in-process calls it.
+        monkeypatch.setattr(os, "fchmod", refuse)
+        atomic_write_text(target, '{"rewritten": true}')
+
+        assert target.read_text(encoding="utf-8") == '{"rewritten": true}'
+        # Whatever survived, the create can only have narrowed it.
+        assert stat.S_IMODE(target.stat().st_mode) & ~0o664 == 0
+
+    def test_a_handle_that_cannot_be_wrapped_leaves_nothing_behind(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Patched on the shared `os` because `_open_temp` reaches it there and
+        # there is no local name; the stand-in takes the descriptor the way
+        # the real one does, so an unrelated caller in the window would be
+        # left as `fdopen` leaves it rather than with a live fd.
+        monkeypatch.setattr(os, "fdopen", _fdopen_that_fails(lambda: OSError("cannot wrap")))
+
+        with pytest.raises(OSError, match="cannot wrap"):
+            atomic_write_text(tmp_path / "record.json", "x")
+
+        assert not list(tmp_path.iterdir())
+
+    def test_an_open_cleanup_failure_never_replaces_the_original_error(
+        self, tmp_path: Path, monkeypatch
+    ):
+        monkeypatch.setattr(os, "fdopen", _fdopen_that_fails(lambda: ValueError("cannot wrap")))
+
+        def refuse(_self, missing_ok: bool = False):
+            raise OSError("read-only directory")
+
+        monkeypatch.setattr(Path, "unlink", refuse)
+
+        with pytest.raises(ValueError, match="cannot wrap"):
+            atomic_write_text(tmp_path / "record.json", "x")
+
+    def test_a_holder_on_the_target_is_waited_out_rather_than_fatal(
+        self, tmp_path: Path, monkeypatch, caplog
+    ):
+        # Windows denies the rename while another process has the target open.
+        # Simulated, because POSIX has no equivalent to reproduce.
+        target = tmp_path / "manifest.json"
+        attempts = _deny_replace(monkeypatch, target, until=3)
+        _no_backoff(monkeypatch)
+
+        with _capture_logs(caplog):
+            atomic_write_text(target, "{}")
+
+        assert attempts["n"] == 3
+        assert target.read_text(encoding="utf-8") == "{}"
+        assert _warnings(caplog) == []  # recovering inside the loop is unremarkable
+        # But not silent: this is the steady-state case the logging exists for,
+        # and the debug lines are the only place the lost time is accounted.
+        retries = _records(caplog)
+        assert len(retries) == 2
+        assert all(str(target) in line for line in retries)
+
+    def test_a_holder_that_lets_go_on_the_last_attempt_still_commits(
+        self, tmp_path: Path, monkeypatch, caplog
+    ):
+        target = tmp_path / "manifest.json"
+        last = len(atomic_module._COMMIT_RETRY_DELAYS) + 1
+        attempts = _deny_replace(monkeypatch, target, until=last)
+        _no_backoff(monkeypatch)
+
+        with _capture_logs(caplog):
+            atomic_write_text(target, "{}")
+
+        assert attempts["n"] == last
+        assert target.read_text(encoding="utf-8") == "{}"
+        assert len(_warnings(caplog)) == 1
+        assert "succeeded" in _warnings(caplog)[0]
+
+    def test_a_holder_that_never_lets_go_still_raises(self, tmp_path: Path, monkeypatch, caplog):
+        target = tmp_path / "manifest.json"
+        attempts = _deny_replace(monkeypatch, target, until=None)
+        _no_backoff(monkeypatch)
+
+        with _capture_logs(caplog), pytest.raises(PermissionError):
+            atomic_write_text(target, "{}")
+
+        # Every backoff plus the final unguarded attempt: the loop is bounded
+        # by the delay tuple and the last try is the one that reports.
+        assert attempts["n"] == len(atomic_module._COMMIT_RETRY_DELAYS) + 1
+        assert not _temps(tmp_path)
+        # Both causes named. Only one of them can exist on POSIX, and a reader
+        # sent hunting for a process that cannot be there pays for the omission.
+        assert len(_warnings(caplog)) == 1
+        assert "holding" in _warnings(caplog)[0]
+        assert "directory" in _warnings(caplog)[0]
+
+    @pytest.mark.parametrize("denials", [1, 4])
+    def test_a_non_denial_after_a_denial_still_reports_the_time_spent(
+        self, tmp_path: Path, monkeypatch, caplog, denials: int
+    ):
+        # The holder let go and the disk filled. Backoff was spent either way,
+        # so the write must not end without saying where the time went —
+        # whether the change of luck lands mid-loop or on the last attempt.
+        target = tmp_path / "manifest.json"
+        calls = {"n": 0}
+
+        def escalating() -> OSError:
+            calls["n"] += 1
+            if calls["n"] <= denials:
+                return PermissionError("the file is in use by another process")
+            return OSError(errno.ENOSPC, "no space left on device")
+
+        attempts = _deny_replace(monkeypatch, target, until=None, error=escalating)
+        _no_backoff(monkeypatch)
+
+        with _capture_logs(caplog), pytest.raises(OSError) as excinfo:
+            atomic_write_text(target, "{}")
+
+        assert excinfo.value.errno == errno.ENOSPC
+        assert attempts["n"] == denials + 1
+        assert len(_warnings(caplog)) == 1
+        assert "failed" in _warnings(caplog)[0]
+
+    @pytest.mark.parametrize("code", [errno.EXDEV, errno.ENOSPC, errno.EROFS])
+    def test_a_rename_that_can_never_succeed_is_not_retried(
+        self, tmp_path: Path, monkeypatch, caplog, code: int
+    ):
+        # Only a denial is transient: a cross-device link, a full disk and a
+        # read-only mount will all still be true in three quarters of a
+        # second, and the checkpoint store commits once per sampling block.
+        target = tmp_path / "manifest.json"
+        attempts = _deny_replace(
+            monkeypatch, target, until=None, error=lambda: OSError(code, "no way through")
+        )
+        _no_backoff(monkeypatch)
+
+        with _capture_logs(caplog), pytest.raises(OSError, match="no way through"):
+            atomic_write_text(target, "{}")
+
+        assert attempts["n"] == 1
+        assert _records(caplog) == []
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_an_interrupt_while_setting_the_mode_leaves_nothing_behind(
+        self, tmp_path: Path, monkeypatch
+    ):
+        target = tmp_path / "manifest.json"
+        atomic_write_text(target, "{}")
+
+        def interrupt(_fd, _mode):
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(os, "fchmod", interrupt)
+
+        with pytest.raises(KeyboardInterrupt):
+            atomic_write_text(target, '{"rewritten": true}')
+
+        assert target.read_text(encoding="utf-8") == "{}"
+        assert [p.name for p in tmp_path.iterdir()] == ["manifest.json"]
+
+    def test_a_name_collision_never_deletes_the_other_writers_temporary(
+        self, tmp_path: Path, monkeypatch
+    ):
+        # Forced: in practice it needs the same pid and the same uuid prefix.
+        monkeypatch.setattr(atomic_module, "uuid4", lambda: uuid.UUID(int=0))
+        target = tmp_path / "payload.bin"
+
+        with atomic_write(target) as first:
+            first.write(b"mine")
+            with pytest.raises(FileExistsError):
+                with atomic_write(target):
+                    pass
+            assert len(_temps(tmp_path)) == 1
+
+        assert target.read_bytes() == b"mine"
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_a_missing_target_is_the_only_stat_failure_treated_as_absent(self, tmp_path: Path):
+        loop = tmp_path / "manifest.json"
+        loop.symlink_to(loop)  # stat raises ELOOP, not FileNotFoundError
+
+        with pytest.raises(OSError) as excinfo:
+            atomic_write_text(loop, "{}")
+
+        # By errno, not message: ELOOP reads differently across platforms, and
+        # an unrelated OSError from another line would otherwise pass.
+        assert excinfo.value.errno == errno.ELOOP
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_a_brand_new_file_gets_the_umask_default(self, tmp_path: Path):
+        reference = tmp_path / "reference.json"
+        reference.write_text("{}", encoding="utf-8")  # what write_text would have given
+        target = tmp_path / "manifest.json"
+
+        atomic_write_text(target, "{}")
+
+        assert stat.S_IMODE(target.stat().st_mode) == stat.S_IMODE(reference.stat().st_mode)
+
+
+class TestAtomicWriteText:
+    def test_replaces_the_file_whole(self, tmp_path: Path):
+        target = tmp_path / "record.json"
+        atomic_write_text(target, "first")
+        atomic_write_text(target, "second")
+
+        assert target.read_text(encoding="utf-8") == "second"
+        assert [p.name for p in tmp_path.iterdir()] == ["record.json"]
+
+    def test_a_failed_write_leaves_the_previous_content_and_no_debris(
+        self, tmp_path: Path, monkeypatch
+    ):
+        target = tmp_path / "record.json"
+        atomic_write_text(target, "first")
+        synced: list[Path] = []
+        monkeypatch.setattr(atomic_module, "fsync_dir", synced.append)
+        _fail_the_commit(monkeypatch)
+
+        with pytest.raises(OSError):
+            atomic_write_text(target, "second")
+
+        assert target.read_text(encoding="utf-8") == "first"
+        assert [p.name for p in tmp_path.iterdir()] == ["record.json"]
+        assert synced == []  # a failed write never claims a durable rename
+
+    def test_an_unencodable_value_never_creates_a_file(self, tmp_path: Path):
+        target = tmp_path / "record.txt"
+
+        with pytest.raises(UnicodeEncodeError):
+            atomic_write_text(target, "\ud800", encoding="utf-8")
+
+        assert not list(tmp_path.iterdir())
+
+    def test_newlines_are_written_exactly_as_given(self, tmp_path: Path):
+        target = tmp_path / "record.json"
+        atomic_write_text(target, '{\n  "a": 1\n}')
+
+        assert target.read_bytes() == b'{\n  "a": 1\n}'
+
+    def test_debris_from_a_killed_writer_does_not_stop_the_next_write(self, tmp_path: Path):
+        # Reclaiming what a killed process left is #445; what this pins is
+        # that it never stands in the way of the write that follows.
+        (tmp_path / f"record.json{TMP_MARKER}999-deadbeef").write_text("junk", encoding="utf-8")
+
+        atomic_write_text(tmp_path / "record.json", "fresh")
+
+        assert (tmp_path / "record.json").read_text(encoding="utf-8") == "fresh"
+
+
+class TestManifestWritesAreAtomic:
+    def test_persistence_failure_keeps_the_previous_manifest(self, tmp_path: Path, monkeypatch):
+        manifest = _manifest()
+        save_run_manifest(manifest, tmp_path)
+        manifest.stages_completed.append("splits")
+        _fail_the_commit(monkeypatch)
+
+        with pytest.raises(OSError):
+            save_run_manifest(manifest, tmp_path)
+
+        assert load_run_manifest(tmp_path / "manifest.json").stages_completed == ["data"]
+        assert [p.name for p in tmp_path.iterdir()] == ["manifest.json"]
+
+    def test_serialization_failure_keeps_the_previous_manifest(self, tmp_path: Path, monkeypatch):
+        manifest = _manifest()
+        save_run_manifest(manifest, tmp_path)
+
+        def boom(*_args, **_kwargs):
+            raise ValueError("unserializable")
+
+        monkeypatch.setattr(RunManifest, "model_dump_json", boom)
+        with pytest.raises(ValueError):
+            save_run_manifest(manifest, tmp_path)
+
+        assert load_run_manifest(tmp_path / "manifest.json").run_id == manifest.run_id
+
+        # Serializing before anything on disk is touched is the property, not
+        # just that the old file survived: a run directory that did not exist
+        # must not exist afterwards either.
+        fresh = tmp_path / "unborn-run"
+        with pytest.raises(ValueError):
+            save_run_manifest(manifest, fresh)
+        assert not fresh.exists()
+
+    def test_a_completed_write_replaces_the_manifest_whole(self, tmp_path: Path):
+        manifest = _manifest()
+        save_run_manifest(manifest, tmp_path)
+        manifest.stages_completed.append("splits")
+        path = save_run_manifest(manifest, tmp_path)
+
+        assert load_run_manifest(path).stages_completed == ["data", "splits"]
+
+
+class TestStampWritesAreAtomic:
+    def test_a_failed_stamp_write_keeps_the_recorded_stamp(self, tmp_path: Path, monkeypatch):
+        root = tmp_path / "features"
+        write_stamp(root, "features", "hash-one", "run-one")
+        _fail_the_commit(monkeypatch)
+
+        with pytest.raises(OSError):
+            write_stamp(root, "features", "hash-two", "run-two")
+
+        stamp = read_stamp(root)
+        assert stamp is not None
+        assert stamp["run_id"] == "run-one"
+        assert [p.name for p in root.iterdir()] == [".stamp.json"]
+
+
+class TestLatestPointerIsAtomic:
+    def test_a_failed_pointer_write_keeps_the_previous_target(self, tmp_path: Path, monkeypatch):
+        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+
+        orchestrator = PipelineOrchestrator(PipelineConfig(dry_run=True), output_base=tmp_path)
+        orchestrator.run_dir = tmp_path / "run-one"
+        orchestrator.run_dir.mkdir()
+        orchestrator._write_latest_pointer()
+
+        orchestrator.run_dir = tmp_path / "run-two"
+        orchestrator.run_dir.mkdir()
+        _fail_the_commit(monkeypatch)
+        orchestrator._write_latest_pointer()  # warns, never raises
+
+        pointer = json.loads((tmp_path / "latest.json").read_text(encoding="utf-8"))
+        assert pointer["run_dir"] == "run-one"
+        assert not _temps(tmp_path)
+
+
+class TestResumeReadsWhatSurvived:
+    """The crash-resume path #424 exists for, driven end to end."""
+
+    def test_a_quarantined_run_resumes_past_a_killed_attempts_debris(self, tmp_path: Path):
+        from panelcast.pipelines.orchestrator import PipelineConfig, PipelineOrchestrator
+
+        failed_dir = tmp_path / "failed" / "run-one"
+        failed_dir.mkdir(parents=True)
+        save_run_manifest(_manifest(run_id="run-one"), failed_dir)
+        (failed_dir / f"manifest.json{TMP_MARKER}999-deadbeef").write_text(
+            "half a manifest", encoding="utf-8"
+        )
+
+        orchestrator = PipelineOrchestrator(PipelineConfig(resume="run-one"), output_base=tmp_path)
+        orchestrator._setup_resume()
+
+        assert orchestrator.manifest is not None
+        assert orchestrator.manifest.stages_completed == ["data"]
