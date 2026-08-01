@@ -207,6 +207,7 @@ def _run_full_preflight(
     import numpy as np
     from rich.console import Console
 
+    from panelcast.models.bayes.priors import is_skew_rw_innovation
     from panelcast.pipelines.train_bayes import load_training_data
     from panelcast.preflight import (
         PreflightStatus,
@@ -293,6 +294,11 @@ def _run_full_preflight(
     # Config-file-only gates (no CLI flags); read like train_bayes reads ctx.
     eiv_gate = bool(getattr(config, "errors_in_variables", False))
     entity_obs_gate = bool(getattr(config, "heteroscedastic_entity_obs", False))
+    # Skew gates (#412): structural like the booleans above — the walk gains
+    # rw_raw_abs and the entity effect gains its own latents — so a cached
+    # verdict computed for the normal model must not be served to a skew run.
+    rw_innovation_gate = getattr(config, "rw_innovation_type", None)
+    entity_prior_gate = getattr(config, "entity_effect_prior_type", None)
     # Structural gates for the calibration cache key: a calibration must
     # never serve projections for a structurally different model.
     model_signature = {
@@ -308,6 +314,8 @@ def _run_full_preflight(
         "errors_in_variables": eiv_gate,
         "heteroscedastic_entity_obs": entity_obs_gate,
         "entity_group_pooling": effective_group_pooling,
+        "rw_innovation_type": rw_innovation_gate,
+        "entity_effect_prior_type": entity_prior_gate,
     }
     model_signature.update(_period_signature(config))
     # Mirror the memory gate in the calibration runs: with the exclusion on,
@@ -347,6 +355,10 @@ def _run_full_preflight(
         for flag, on in (
             ("errors_in_variables", eiv_gate),
             ("heteroscedastic_entity_obs", entity_obs_gate),
+            # The mini-run's priors come from the transform, not the config, so
+            # a skew production fit measures a model without its extra latents.
+            ("rw_innovation_type=skew_normal", is_skew_rw_innovation(rw_innovation_gate)),
+            ("entity_effect_prior_type=skew_normal", entity_prior_gate == "skew_normal"),
         )
         if on
     ]

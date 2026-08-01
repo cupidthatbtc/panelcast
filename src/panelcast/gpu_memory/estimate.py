@@ -54,26 +54,43 @@ def _count_params(
     heteroscedastic_entity_obs: bool = False,
     entity_group_pooling: bool = False,
     n_groups: int = 0,
+    rw_innovation_type: str | None = None,
+    entity_effect_prior_type: str | None = None,
 ) -> tuple[int, int]:
     """(n_params, collected_params) mirroring train_bayes's site shapes.
 
     The exclusion wiring mirrors train_bayes: the rw_raw exclusion gate also
     carries the EIV latent ({prefix}_prev_latent_raw, n_obs) out of
-    collection, and drops entity_obs_raw (n_artists) only above the keep cap.
-    group_offset_z (n_groups) is never excluded.
+    collection, and drops entity_obs_raw and the entity skew latents (one
+    entity-sized vector each) only above the keep cap. group_offset_z
+    (n_groups) is never excluded.
+
+    The walk and entity-skew site counts come from the same helpers the model
+    and the memory exclusions use, so a new innovation or entity prior cannot
+    add a latent the estimator does not see -- under a skew innovation the fit
+    allocates rw_raw_abs alongside rw_raw, roughly doubling the dominant term.
     """
-    rw_raw_params = n_artists * max(0, max_seq - 1)
+    # Local import: models.bayes.priors is JAX-free, but train_bayes imports
+    # this module, so the dependency stays one-directional at module load.
+    from panelcast.models.bayes.priors import entity_skew_sites, rw_latent_sites
+
+    n_rw_sites = len(rw_latent_sites("m", rw_innovation_type, max_seq=max_seq).present())
+    n_skew_sites = len(entity_skew_sites("m", entity_effect_prior_type).present())
+
+    entity_latents = n_artists  # width of one per-entity latent vector
+    rw_raw_params = entity_latents * max(0, max_seq - 1) * n_rw_sites
     eiv_params = n_observations if errors_in_variables else 0
-    entity_obs_params = n_artists if heteroscedastic_entity_obs else 0
+    entity_obs_params = entity_latents if heteroscedastic_entity_obs else 0
+    entity_skew_params = entity_latents * n_skew_sites
     group_params = max(0, n_groups) if entity_group_pooling else 0
     n_params = n_artists + rw_raw_params + n_features + 10
-    n_params += eiv_params + entity_obs_params + group_params
+    n_params += eiv_params + entity_obs_params + entity_skew_params + group_params
 
     excluded_params = 0
     if exclude_rw_raw_from_collection:
         excluded_params += rw_raw_params + eiv_params
         if n_artists > ENTITY_OBS_KEEP_MAX:
-            excluded_params += entity_obs_params
+            excluded_params += entity_obs_params + entity_skew_params
     return n_params, n_params - excluded_params
 
 
@@ -131,6 +148,8 @@ def estimate_memory_gb(
     heteroscedastic_entity_obs: bool = False,
     entity_group_pooling: bool = False,
     n_groups: int = 0,
+    rw_innovation_type: str | None = None,
+    entity_effect_prior_type: str | None = None,
     collection_overhead_factor: float = COLLECTION_OVERHEAD_FACTOR,
     fixed_overhead_gb: float = FIXED_OVERHEAD_GB,
     chain_method: str = "sequential",
@@ -174,6 +193,12 @@ def estimate_memory_gb(
         entity_group_pooling: Group-pooling gate; adds an n_groups-sized
             latent (never excluded; negligible, included for completeness).
         n_groups: Group count for the entity_group_pooling term.
+        rw_innovation_type: Random-walk innovation gate; the skew innovation
+            allocates rw_raw_abs alongside rw_raw, roughly doubling the
+            dominant collected term. None/"normal" is the gaussian walk.
+        entity_effect_prior_type: Entity-effect prior gate; the skew prior adds
+            two n_artists-sized latents, excluded on the same rule as
+            entity_obs_raw. None/"normal" adds nothing.
         chain_method: "vectorized" runs all chains as one batched program, so
             the live leapfrog state (params + grads/momentum) is per-chain
             simultaneous — that term scales with num_chains. The collected-draw
@@ -217,6 +242,8 @@ def estimate_memory_gb(
         heteroscedastic_entity_obs=heteroscedastic_entity_obs,
         entity_group_pooling=entity_group_pooling,
         n_groups=n_groups,
+        rw_innovation_type=rw_innovation_type,
+        entity_effect_prior_type=entity_effect_prior_type,
     )
 
     # Base model memory: parameters + gradients/momentum/state (~3x params)
