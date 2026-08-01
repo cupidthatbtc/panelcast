@@ -202,4 +202,4 @@ class TestRunsReproduce:
         manifest_path.write_text(json.dumps(payload), encoding="utf-8")
         result, launched = self._invoke(base, monkeypatch)
         assert result.exit_code == 1
-        assert "raw input changed" in result.output
+        assert "recorded input changed" in result.output

@@ -110,9 +110,10 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
 
     A quarantined run keeps the manifest it was written with, so its recorded
     paths still name ``outputs/<id>/...`` while the artifacts now live under
-    ``outputs/failed/<id>/...``. Deliberately generic over what the path is —
-    the same mapping applies to run-owned *inputs* (#420), which this module
-    does not verify but must not stand in the way of.
+    ``outputs/failed/<id>/...``. Deliberately generic over what the path is: the
+    same mapping applies to run-owned *inputs*, which this module does not
+    verify but does locate for the callers that do, through ``run_owned_path``
+    (#420).
 
     "Run-owned" means recorded as ``<output base>/<run id>/<rest>``: the run
     id alone is not enough, since a bare-name match would launder
@@ -188,6 +189,69 @@ def reroot_under(path: Path, run_dir: Path) -> Path:
         if parts[index : index + 2] == marker:
             return run_dir.joinpath(*parts[index + 2 :])
     return path
+
+
+def run_owned_path(path: Path, run_dir: Path) -> Path | None:
+    """Where ``run_dir`` holds ``path``, or None if the run does not own it.
+
+    ``reroot_under`` followed by the containment step, returning the ownership
+    answer the mapping already had to compute. `runs verify`'s input pass
+    re-hashes a run-owned input at the location this gives it; `runs
+    reproduce`'s pre-flight gate uses the None to tell an *external* input —
+    raw data whose drift would invalidate the comparison — from one of the
+    run's own products, which a fresh reproduction regenerates (#420).
+
+    Two things ``reroot_under`` alone cannot give a caller that only stats and
+    hashes. It maps unconditionally once the pair matches, so a recorded tail
+    that climbs back out — ``outputs/<id>/../../etc/shadow`` — would be aimed
+    into this run's directory and read there; ``verify_output_records`` catches
+    that with the containment step it runs afterwards, and these callers have
+    no such step, so here the guard travels with the mapping and an escaping
+    tail reads as unowned. Unowned is all it means: the caller then treats the
+    path as external and checks it wherever the manifest recorded it, which is
+    what it did before any of this existed. What is bounded is where the
+    *mapping* may aim, not what the manifest may name. And for an
+    *active* run the mapping moves nothing — though it still rewrites the
+    spelling onto ``run_dir``, which is why a changed path cannot answer
+    ownership either way. Containment can, and it is the same question.
+
+    Ownership is decided on the *resolved* location, so it also declines an
+    artifact reached through a symlink inside the run directory that leaves it
+    — a run whose ``models/`` points at shared storage, say. That is the bound
+    on purpose, not an oversight about the recorded tail, and what it costs is
+    the re-rooting rather than the read: an unowned path is still checked where
+    the manifest recorded it, so an active run verifies a symlinked-out product
+    through the link, while quarantine leaves the recorded location gone and
+    the input reads ``MISSING``.
+
+    Be exact about how that lines up with the output side, because the two
+    contain against different sets. This asks only about ``run_dir`` — that is
+    what "the run holds it" means — while ``verify_output_records`` is handed
+    the artifact roots as well. So for a target outside every root the two
+    agree, the run's outputs there are ``UNBOUND``, and the price is paid on a
+    run that was not going to verify anyway. For a target *inside* an artifact
+    root — ``models/`` symlinked at the project-level ``models/``, which is a
+    reasonable place to keep large artifacts — they do not: the output
+    verifies and the quarantined input reads ``MISSING`` on the same file. That
+    is the real cost of deciding ownership on the run directory alone, and the
+    alternative buys agreement by making a run "own" whatever the shared roots
+    hold, which is the substitution containment exists to refuse.
+
+    Not folded into ``reroot_under`` itself, because for an *output* an
+    escaping tail is worth reporting rather than quietly declining: the
+    manifest is claiming something about a path outside the run, and only a
+    caller that produces verdicts can say so.
+    """
+    # A run dir that will not resolve is dropped here, leaving no roots, so
+    # nothing is contained and the answer is None — the same answer an escape
+    # gets, which each caller then reads its own way.
+    roots = _resolved_roots((run_dir,))
+    mapped = reroot_under(path, run_dir)
+    try:
+        resolved = mapped.resolve()
+    except (OSError, ValueError, RuntimeError):
+        return None
+    return mapped if _is_contained(resolved, roots) else None
 
 
 def _output_base_name(run_dir: Path) -> str:
@@ -353,5 +417,6 @@ __all__ = [
     "UNVERIFIABLE",
     "OutputVerdict",
     "reroot_under",
+    "run_owned_path",
     "verify_output_records",
 ]

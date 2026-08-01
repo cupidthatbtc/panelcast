@@ -836,8 +836,9 @@ class TestTheDeclaredCallerDifference:
         assert reroot_under(recorded, archived) == archived / "evaluation" / "metrics.json"
 
     def test_the_reroot_mapping_is_generic_over_what_it_moves(self, fx):
-        # Not output-specific on purpose: run-owned *inputs* need the same
-        # mapping (#420), which this module does not verify but must not block.
+        # Not output-specific on purpose: run-owned *inputs* take the same
+        # mapping, through `run_owned_path` (#420). This module does not
+        # verify them; the pairing rule is what they needed from it.
         from panelcast.pipelines.output_integrity import reroot_under
 
         fx.quarantine()

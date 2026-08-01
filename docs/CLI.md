@@ -693,6 +693,25 @@ hash map was emptied) is reported as such and every recorded output comes back
 `UNVERIFIABLE`: shape cannot tell the two apart, so neither is excused. A run
 that recorded no outputs in the first place has nothing to check and passes.
 
+Recorded **inputs** are re-rooted the same way, and for a sharper reason. A
+stage's declared inputs include earlier stages' run-scoped products, and the
+hashes are captured before the stage body runs, so a run that failed at or
+after `evaluate` has already recorded `outputs/<id>/models/manifest.json` as an
+input; after quarantine that file is under `outputs/failed/<id>/`, and it is
+checked there rather than reported missing on the run someone is debugging.
+Inputs the run does not own are checked where the manifest recorded them: the
+shared data roots and external files, but also a path whose recorded tail
+climbs back out of the run directory, and one reached through a symlink that
+leaves it. That last case is the mapping's cost — a run whose `models/` points
+at shared storage verifies its inputs through the link while it is active, and
+after quarantine reads `MISSING`. Ownership asks about the run directory alone
+while output verification also accepts the artifact roots, so a symlink target
+outside every root is `UNBOUND` as an output too and nothing is lost on a run
+that was not going to verify anyway, while a target inside one verifies as an
+output and still reads `MISSING` as a quarantined input. Each line names the
+recorded spelling, preceded by the location actually checked when the artifact
+moved — or only that location, when the two cannot be compared at all.
+
 **Run it from the project root.** A flat-layout run records its data, model and
 report artifacts as paths relative to the project root, so `runs verify`
 resolves them — and the roots it checks them against — against the working
@@ -814,11 +833,24 @@ Re-execute a recorded run from its run directory alone, then compare. The config
 is rebuilt from the run's `resolved_config.yaml` (falling back to the manifest
 flags for pre-0.9.0 runs — weaker provenance). Two guards run before any compute:
 the dataset descriptor must still hash-match the recorded one, and the recorded
-raw inputs must be unchanged on disk, or it aborts (exit `1`). The environment
-fingerprint frames the expectation up front — bit-exact outputs within a matching
-fingerprint, statistical reproduction otherwise — and the post-run comparison
-follows suit (exact output-hash match vs headline-metric deltas). A reproduction
-always runs fresh: never resumes, never skips.
+inputs it still checks must be unchanged on disk, or it aborts (exit `1`). That
+second gate covers only the inputs the run does **not** own: a stage records
+earlier stages' run-scoped products as inputs, and a reproduction regenerates
+all of them, so gating on them would abandon a quarantined run to its recorded
+paths and would make a run unreproducible for the ordinary cleanup of pruning
+the directory it failed in. Ownership is containment, so this reaches a product
+the run directory holds and no other. Under the flat layout a stage's model
+inputs are recorded relative to the project root, and under a run-scoped layout
+whose `models/` is a symlink out they resolve outside the run — either way
+nothing distinguishes them from data the run did not produce, so they stay
+gated. Pruning `models/`, or simply running again and overwriting it, still
+aborts an earlier run's reproduction under either. The symlinked case has a
+third trigger needing no operator action at all: its recorded path is inside
+the run directory, so quarantine alone takes it away. The environment
+fingerprint frames the expectation up front — bit-exact outputs within a
+matching fingerprint, statistical reproduction otherwise — and the post-run
+comparison follows suit (exact output-hash match vs headline-metric deltas). A
+reproduction always runs fresh: never resumes, never skips.
 
 ```bash
 panelcast runs reproduce RUN_ID [OPTIONS]

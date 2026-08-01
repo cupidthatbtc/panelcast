@@ -124,20 +124,87 @@ def _verify_outputs(manifest, run_dir: Path, problems: list[str]) -> None:
         problems.append(verdict.key)
 
 
-def _verify_inputs(manifest, problems: list[str]) -> None:
+def _input_label(path: Path, path_str: str) -> str:
+    """Where the input was checked, naming the recorded spelling either way.
+
+    Moved is a question about *locations*, and the spellings answer it wrong in
+    both directions: ``Path`` normalizes ``./x``, while re-rooting rewrites a
+    relative recorded path onto an absolute run directory even for an active
+    run that never moved. So the two are compared resolved, and the manifest's
+    own string is what gets printed — verbatim when nothing moved, since that
+    is both accurate and the string someone greps the manifest for, and after
+    the checked location when something did. When neither can be established,
+    only the checked location is named: the pre-#420 failure was a line naming
+    a path nothing had stat'd, and that must not come back through an error
+    path.
+    """
+    if path == Path(path_str):  # identical spellings, so nothing moved
+        return path_str
+    try:
+        if path.resolve() == Path(path_str).resolve():
+            return path_str
+    except (OSError, ValueError, RuntimeError):
+        # No evidence the two name one file, so name the one that was checked
+        # rather than asserting a move or a stillness neither is known.
+        return str(path)
+    return f"{path} (recorded as {path_str})"
+
+
+def _verify_inputs(manifest, run_dir: Path, problems: list[str]) -> None:
+    """Re-hash every recorded input, re-rooting the ones the run owns.
+
+    A stage's declared inputs include earlier stages' run-scoped products —
+    `evaluate` reads `<run>/models/manifest.json` — and the hashes are captured
+    before the stage body, so a run that failed at or after `evaluate` has
+    already recorded them at the location it had while it was live. Quarantine
+    moves the run without rewriting its manifest, so checking those where the
+    manifest says would report every one of them missing on exactly the runs
+    someone is debugging.
+
+    Inputs the run does not own are checked where the manifest recorded them:
+    the shared data roots and external files, which the mapping never touches,
+    but equally a run-relative tail that climbs back out and a product behind a
+    symlink that leaves the run — for those two ``reroot_under`` does map and
+    containment declines the result, which is not the same thing as declining
+    to read them. The problem is keyed on the recorded spelling in every case,
+    since that is what the manifest holds and what a second `runs verify` will
+    name again.
+
+    An unreadable input reports `MISSING`, which is the word the output pass
+    uses for the same physical failure. It overstates on its own — the file is
+    there — so the reason carries the correction, and one vocabulary across the
+    two passes is worth more than a verdict word only this one has.
+    """
+    from panelcast.pipelines.output_integrity import run_owned_path
     from panelcast.utils.hashing import sha256_path
 
-    for path_str, recorded in sorted(manifest.input_hashes.items()):
-        path = Path(path_str)
+    for path_str, recorded in sorted((manifest.input_hashes or {}).items()):
+        recorded_at = Path(path_str)
+        owned = run_owned_path(recorded_at, run_dir)
+        path = recorded_at if owned is None else owned
+        label = _input_label(path, path_str)
         if not path.exists():
-            typer.echo(f"MISSING  input {path_str}")
+            typer.echo(f"MISSING  input {label}")
             problems.append(path_str)
             continue
-        if sha256_path(path) != recorded:
-            typer.echo(f"MODIFIED input {path_str} (raw data changed since this run)")
+        try:
+            actual = sha256_path(path)
+        except (OSError, ValueError, RuntimeError) as exc:
+            # The triple the output pass catches at its own hash site. Raising
+            # here would abandon the remaining inputs, the stamps and the
+            # lockfile over one unreadable file. One call inside the `try` on
+            # purpose: `typer.Exit` is a `RuntimeError`, so widening this would
+            # turn an intended exit into a verdict.
+            typer.echo(f"MISSING  input {label} (unreadable: {exc})")
+            problems.append(path_str)
+            continue
+        if actual != recorded:
+            # Not "raw data" any more: this pass also covers the run's own
+            # products, where the likely cause is an edited run directory.
+            typer.echo(f"MODIFIED input {label} (contents changed since this run)")
             problems.append(path_str)
         else:
-            typer.echo(f"OK       input {path_str}")
+            typer.echo(f"OK       input {label}")
 
 
 def _verify_stamps(manifest, problems: list[str]) -> None:
@@ -190,7 +257,7 @@ def runs_verify(
 
     problems: list[str] = []
     _verify_outputs(manifest, run_dir, problems)
-    _verify_inputs(manifest, problems)
+    _verify_inputs(manifest, run_dir, problems)
     _verify_stamps(manifest, problems)
     _verify_lockfile(manifest, problems)
 
@@ -426,13 +493,15 @@ def runs_reproduce(
     """Re-execute a recorded run from its run directory alone, then compare.
 
     Guards before any compute: the dataset descriptor must hash-match the
-    recorded one, and recorded raw inputs must be unchanged on disk. The
+    recorded one, and the recorded inputs the gate still checks — the ones the
+    run directory does not hold — must be unchanged on disk. The
     environment fingerprint frames the expectation up front — bit-exact within
     a matching fingerprint, statistical otherwise — and the post-run
     comparison follows suit (exact output hashes vs headline-metric deltas).
     """
     from panelcast.config.descriptor import load_descriptor
     from panelcast.pipelines.manifest import capture_environment, load_run_manifest
+    from panelcast.pipelines.output_integrity import run_owned_path
     from panelcast.utils.hashing import sha256_path
 
     run_dir = resolve_run_dir(run_id, output_base)
@@ -450,13 +519,36 @@ def runs_reproduce(
             )
             raise typer.Exit(code=1)
 
+    # Only the inputs the run does not own. A stage records earlier stages'
+    # run-scoped products as inputs, so a run that failed at or after
+    # `evaluate` carries its own `models/` artifacts here — and a reproduction
+    # never resumes and never skips, so it regenerates every one of them.
+    # Gating on them abandoned a quarantined run to its recorded paths, and
+    # made pruning the directory a run failed in permanent. Ownership is
+    # containment, so this reaches a product the run directory holds and no
+    # other: a flat-layout product at the project root, or one behind a symlink
+    # out of the run, is external as far as containment can tell and stays
+    # gated — and for the symlinked case the recorded path is inside the run,
+    # so quarantine alone takes it away and the #420 abort survives there. What
+    # the gate is for — raw data drifting underneath the comparison — is what
+    # is left wherever it does reach.
     for path_str, recorded in sorted((manifest.input_hashes or {}).items()):
         path = Path(path_str)
+        if run_owned_path(path, run_dir) is not None:
+            continue
         if not path.exists():
             typer.echo(f"ABORT: recorded input missing: {path_str}")
             raise typer.Exit(code=1)
-        if sha256_path(path) != recorded:
-            typer.echo(f"ABORT: raw input changed since the run: {path_str}")
+        try:
+            actual = sha256_path(path)
+        except (OSError, ValueError, RuntimeError) as exc:
+            # The gate exists to turn a late failure into an early legible one,
+            # so it must not be the thing that raises. One call inside the
+            # `try`, as above: `typer.Exit` is a `RuntimeError`.
+            typer.echo(f"ABORT: recorded input unreadable: {path_str} ({exc})")
+            raise typer.Exit(code=1) from exc
+        if actual != recorded:
+            typer.echo(f"ABORT: recorded input changed since the run: {path_str}")
             raise typer.Exit(code=1)
 
     old_fingerprint = manifest.environment.fingerprint
