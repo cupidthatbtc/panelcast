@@ -183,8 +183,6 @@ def run_calibration(
 
     if model_signature is None:
         model_signature = derive_model_signature(model_args)
-        if exclude_collection:
-            model_signature["exclude_from_collection"] = sorted(exclude_collection)
     # These change what the calibration measures; key the cache on them
     # regardless of where the signature came from.
     model_signature = {
@@ -203,6 +201,7 @@ def run_calibration(
 
     try:
         points: list[tuple[int, float]] = []
+        effective_exclusion: tuple[str, ...] | None = None
 
         for num_samples in CALIBRATION_SAMPLES:
             result = _run_mini_mcmc_subprocess(
@@ -222,11 +221,38 @@ def run_calibration(
                 error_msg = result.get("error", "Unknown error")
                 raise CalibrationError(f"Calibration failed at {num_samples} samples: {error_msg}")
 
+            # Key the cache on the exclusion that was MEASURED: the mini-run
+            # drops walk sites its own panel never samples, and a cache entry
+            # keyed on the requested tuple would serve that measurement to a
+            # run whose exclusion really applied -- under-reporting the peak,
+            # which is the unsafe direction (#433).
+            measured_exclusion = tuple(result.get("effective_exclude_collection", ()))
+            if effective_exclusion is None:
+                effective_exclusion = measured_exclusion
+            elif measured_exclusion != effective_exclusion:
+                raise CalibrationError(
+                    "Calibration points measured different collection exclusions "
+                    f"({effective_exclusion} then {measured_exclusion}); their peaks "
+                    "are not comparable."
+                )
+
             peak_gb = result["peak_memory_bytes"] / (1024**3)
             points.append((num_samples, peak_gb))
 
         # Calculate linear fit
         fixed, per_sample = calculate_calibration(points[0], points[1])
+
+        # Key on the structure that was measured: a requested exclusion the
+        # mini-run reconciled away leaves the key looking like no exclusion at
+        # all, which is what the peak reflects, and cannot then be served to a
+        # run whose exclusion really applies.
+        model_signature = {
+            key: value
+            for key, value in model_signature.items()
+            if key != "exclude_from_collection"
+        }
+        if effective_exclusion:
+            model_signature["exclude_from_collection"] = sorted(effective_exclusion)
 
         # Compute config hash for caching using shared dimension derivation
         n_obs, n_artists, n_features, max_seq = _derive_dimensions_from_model_args(model_args)

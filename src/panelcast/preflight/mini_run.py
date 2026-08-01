@@ -154,6 +154,9 @@ def run_and_measure(
             - success: True if measurement completed
             - peak_memory_bytes: Peak GPU memory in bytes
             - runtime_seconds: Wall-clock time for mini-run
+            - effective_exclude_collection: the exclusion actually passed to
+              mcmc.run, which reconciliation can shorten. Callers key their
+              calibration cache on what was measured, not what was asked for.
     """
     # Import JAX/NumPyro at function level for subprocess isolation
     import jax.numpy as jnp
@@ -311,6 +314,7 @@ def run_and_measure(
         "exit_code": 0,
         "peak_memory_bytes": peak_bytes,
         "runtime_seconds": runtime,
+        "effective_exclude_collection": list(exclude_collection),
     }
 
 
