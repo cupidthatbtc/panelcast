@@ -292,6 +292,11 @@ class PipelineConfig:
     min_train_events: int = 2
     # Rolling-origin backtest offset (0 = the standard split)
     origin_offset: int = 0
+    # Held-out events per entity in the test era. None derives it from
+    # eval_horizon (max(1, H)), so a multi-step evaluation reserves the events
+    # its horizons need instead of scoring h=1 and emitting empty masks. An
+    # explicit value wins and must cover eval_horizon. YAML-only, no CLI flag.
+    test_events: int | None = None
     # Conformal calibration wrapper on the predictive (#156; needs val_events >= 1)
     conformal_calibration: bool = False
     # Multi-step ancestral rollout depth for evaluation (#157). 0 = off (the
@@ -411,7 +416,33 @@ class PipelineConfig:
             raise ValueError("prediction_interval must be in (0, 1).")
         if self.eval_horizon < 0:
             raise ValueError(f"eval_horizon must be >= 0, got {self.eval_horizon}.")
+        self._resolve_test_events()
         self._validate_sampling()
+
+    def _resolve_test_events(self) -> None:
+        """Reserve enough held-out events for the configured eval_horizon.
+
+        The horizons are scored against real held-out events, so a test era of
+        one event can only ever fill h=1: every deeper horizon came back as an
+        empty mask, which read as "no data here" rather than "the split never
+        reserved it". Deriving the default from H makes the advertised h=1..H
+        evaluation reachable from the standard pipeline, and an explicit value
+        that cannot cover H is a configuration error rather than a silent
+        truncation.
+        """
+        needed = max(1, self.eval_horizon)
+        if self.test_events is None:
+            self.test_events = needed
+            return
+        if self.test_events < 1:
+            raise ValueError(f"test_events must be >= 1, got {self.test_events}.")
+        if self.test_events < self.eval_horizon:
+            raise ValueError(
+                f"test_events={self.test_events} cannot score eval_horizon="
+                f"{self.eval_horizon}: horizons {self.test_events + 1}..{self.eval_horizon} "
+                "would have no held-out event. Raise test_events to at least "
+                f"{self.eval_horizon} or lower eval_horizon."
+            )
 
     def _validate_sampling(self) -> None:
         """Validate sampler settings and strict-mode requirements."""

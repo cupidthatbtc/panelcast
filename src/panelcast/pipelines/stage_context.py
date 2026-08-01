@@ -112,6 +112,7 @@ def build_stage_context(
         warmup_export_path=config.warmup_export_path,
         warmup_import_path=config.warmup_import_path,
         val_events=config.val_events,
+        test_events=config.test_events,
         origin_offset=config.origin_offset,
         conformal_calibration=config.conformal_calibration,
         eval_horizon=config.eval_horizon,

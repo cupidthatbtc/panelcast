@@ -211,6 +211,7 @@ class StageContext:
     warmup_import_path: str | None = None
     # Split configuration
     val_events: int = 0
+    test_events: int = 1
     origin_offset: int = 0
     conformal_calibration: bool = False
     # Multi-step ancestral rollout depth for evaluation (#157); 0 = off
@@ -522,6 +523,7 @@ def _run_splits_stage(ctx: StageContext):
         random_state=ctx.seed,
         min_ratings=ctx.min_ratings,
         val_events=getattr(ctx, "val_events", 0),
+        test_events=getattr(ctx, "test_events", 1),
         origin_offset=getattr(ctx, "origin_offset", 0),
         min_train_events=getattr(ctx, "min_train_events", 1),
         entity_col=ctx.descriptor.entity_col,

@@ -623,6 +623,22 @@ def _evaluate_horizon_rollout(
             }
         )
 
+    empty = [row["h"] for row in per_horizon if row["n"] == 0]
+    if empty:
+        # An empty horizon used to be indistinguishable from a horizon whose
+        # entities all happened to be masked. test_events is what reserves the
+        # events a horizon can score, so name it (#429).
+        log.warning(
+            "horizon_rollout_empty_steps",
+            horizons=empty,
+            eval_horizon=horizon,
+            test_events=int(getattr(ctx, "test_events", 1) or 1),
+            message=(
+                "No held-out event reached these horizons; raise test_events to "
+                "at least eval_horizon so the test era can fill them."
+            ),
+        )
+
     return {
         "horizon": horizon,
         "prediction_interval": interval,

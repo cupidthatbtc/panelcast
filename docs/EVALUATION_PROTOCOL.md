@@ -90,6 +90,18 @@ Multi-step rollout evaluation (`eval_horizon: H`, default 0 = off)
 - Step-h covariates are the REALIZED held-out values — the curves isolate the
   model's dynamic honesty, not covariate forecasting. Production callers must
   supply their own future covariates (or hold at last-known).
+- A horizon can only be scored where the split reserved an event for it, so
+  `test_events` (held-out events per entity, YAML-only) defaults to
+  `max(1, eval_horizon)`: `eval_horizon: 3` holds out three events per eligible
+  entity and h=1..3 all carry scored rows. Setting `test_events` explicitly
+  below `eval_horizon` is a configuration error, not a silent truncation.
+  Raising it shrinks the training era and shrinks the eligible entity set (an
+  entity needs `test_events + val_events + min_train_events` events), so the
+  numbers are not comparable across different `test_events`.
+- Coverage of a horizon is still per entity: an entity with fewer test events
+  than H, or whose event at step h has an invalid observation count, is masked
+  out of that step (it stays in the timeline, unscored). A horizon with no
+  scored row at all is reported as `{"h": h, "n": 0}` and logged.
 - CRPS/coverage/RMSE per horizon land in `horizon_rollout.json`, a separate,
   clearly-labeled artifact. Horizon-decay numbers are NOT comparable to and
   never mix into the flagship one-step metrics; h=1 reconciles with the
