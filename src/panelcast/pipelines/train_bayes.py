@@ -185,9 +185,7 @@ def build_training_priors(
         # A null in the config means "unset", not the literal string "None" —
         # which decides whether the skew latents exist and, for the walk, is a
         # value the model rejects outright at fit time.
-        entity_effect_prior_type=str(
-            getattr(ctx, "entity_effect_prior_type", None) or "normal"
-        ),
+        entity_effect_prior_type=str(getattr(ctx, "entity_effect_prior_type", None) or "normal"),
         entity_skew_alpha_scale=float(getattr(ctx, "entity_skew_alpha_scale", 2.0)),
         rw_innovation_type=str(getattr(ctx, "rw_innovation_type", None) or "normal"),
         rw_skew_alpha_scale=float(getattr(ctx, "rw_skew_alpha_scale", 2.0)),
@@ -496,9 +494,7 @@ def _build_entity_groups(
     return group_idx_by_artist, group_to_idx
 
 
-def _normalize_model_frame(
-    frame: pd.DataFrame, descriptor: DatasetDescriptor
-) -> pd.DataFrame:
+def _normalize_model_frame(frame: pd.DataFrame, descriptor: DatasetDescriptor) -> pd.DataFrame:
     date_col = (
         descriptor.parsed_date_col
         if descriptor.parsed_date_col in frame.columns
@@ -551,8 +547,7 @@ def _add_period_args(model_args, train_df, descriptor, valid_mask) -> None:
         )
     if period_col not in train_df.columns:
         raise ValueError(
-            f"period_effects=True but column '{period_col}' is missing "
-            "from the training split."
+            f"period_effects=True but column '{period_col}' is missing from the training split."
         )
     # Same row filtering the model arrays got: valid_mask is all-True unless
     # invalid n_obs rows were dropped.
@@ -571,6 +566,35 @@ def _add_period_args(model_args, train_df, descriptor, valid_mask) -> None:
         # structurally a no-op on a one-period domain.
         log.warning("period_effects_vacuous", period_col=period_col, n_periods=len(periods))
     log.info("period_effects", period_col=period_col, n_periods=len(periods))
+
+
+def _fill_debut_prev_scores(
+    train_df: pd.DataFrame,
+    descriptor: DatasetDescriptor,
+    global_mean: float,
+) -> pd.Series:
+    prev_score = train_df["prev_score"]
+    debut_mask = prev_score.isna()
+    cold_start_col = descriptor.cold_start_target_col
+    if cold_start_col is None:
+        return prev_score.fillna(global_mean)
+    if cold_start_col not in train_df.columns:
+        raise ValueError(
+            f"cold_start_target_col '{cold_start_col}' is missing from the training split"
+        )
+    cold_start = pd.to_numeric(train_df[cold_start_col], errors="coerce")
+    low, high = descriptor.target_bounds
+    valid_cold_start = cold_start.between(low, high) & np.isfinite(cold_start)
+    warm_mask = debut_mask & valid_cold_start
+    prev_score = prev_score.copy()
+    prev_score.loc[warm_mask] = cold_start[warm_mask]
+    log.info(
+        "debut_prev_score_cold_start",
+        column=cold_start_col,
+        warmed=int(warm_mask.sum()),
+        fallback=int((debut_mask & ~valid_cold_start).sum()),
+    )
+    return prev_score.fillna(global_mean)
 
 
 def prepare_model_data(
@@ -597,11 +621,13 @@ def prepare_model_data(
             fewer albums have all their albums treated as sequence 1 (static effect only).
         descriptor: Dataset descriptor providing entity/target/n_obs column
             names (None = AOTY defaults).
-        debut_prev_score_source: Where the debut-album prev_score fill comes
+        debut_prev_score_source: Where the debut-album prev_score fallback comes
             from. "train_mean" (default) uses the training-split mean — no
             information from held-out rows. "dataset_stats" reproduces the
             legacy behavior of reading the pre-split mean from
-            data/processed/dataset_stats.json (mild test-set leakage).
+            data/processed/dataset_stats.json (mild test-set leakage). When the
+            descriptor declares cold_start_target_col, valid row values replace
+            this fallback for entity debuts.
         target_transform: "identity" (default) keeps scores on their natural
             scale; "offset_logit" trains the model on the Smithson-Verkuilen
             logit scale (y and prev_score are forward-transformed AFTER the
@@ -677,7 +703,11 @@ def prepare_model_data(
             f"Unknown debut_prev_score_source: '{debut_prev_score_source}'. "
             "Expected 'train_mean' or 'dataset_stats'."
         )
-    train_df["prev_score"] = train_df["prev_score"].fillna(global_mean)
+    train_df["prev_score"] = _fill_debut_prev_scores(
+        train_df,
+        descriptor,
+        global_mean,
+    )
     prev_score = train_df["prev_score"].values
 
     # Lagged review count for the errors-in-variables measurement-error scale

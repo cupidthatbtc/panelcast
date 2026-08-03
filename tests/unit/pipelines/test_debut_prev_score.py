@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from panelcast.config.descriptor import DatasetDescriptor
 from panelcast.pipelines.train_bayes import prepare_model_data
 
 
@@ -74,3 +75,43 @@ class TestDebutPrevScoreSource:
         assert prev[1] == pytest.approx(70.0)
         assert prev[2] == pytest.approx(75.0)
         assert prev[4] == pytest.approx(72.0)
+
+
+class TestExternalColdStartTarget:
+    def test_debuts_use_external_target_proxy(self):
+        frame = _train_df()
+        frame["External_Score"] = [68.0, 68.0, 68.0, 71.0, 71.0, 77.0]
+        descriptor = DatasetDescriptor(cold_start_target_col="External_Score")
+
+        model_args, _ = prepare_model_data(
+            frame,
+            ["feature_1"],
+            descriptor=descriptor,
+        )
+
+        prev = np.asarray(model_args["prev_score"], dtype=float)
+        np.testing.assert_allclose(prev[[0, 3, 5]], [68.0, 71.0, 77.0])
+        np.testing.assert_allclose(prev[[1, 2, 4]], [70.0, 75.0, 72.0])
+
+    def test_invalid_external_values_fall_back_to_train_mean(self):
+        frame = _train_df()
+        frame["External_Score"] = [np.nan, 68.0, 68.0, 101.0, 71.0, 77.0]
+        descriptor = DatasetDescriptor(cold_start_target_col="External_Score")
+
+        model_args, _ = prepare_model_data(
+            frame,
+            ["feature_1"],
+            descriptor=descriptor,
+        )
+
+        prev = np.asarray(model_args["prev_score"], dtype=float)
+        np.testing.assert_allclose(prev[[0, 3, 5]], [75.0, 75.0, 77.0])
+
+    def test_missing_external_column_raises(self):
+        descriptor = DatasetDescriptor(cold_start_target_col="External_Score")
+        with pytest.raises(ValueError, match="cold_start_target_col.*missing"):
+            prepare_model_data(
+                _train_df(),
+                ["feature_1"],
+                descriptor=descriptor,
+            )

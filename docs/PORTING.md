@@ -58,6 +58,8 @@ entity_col: Airframe
 event_col: Flight_ID
 target_col: Perf_Score
 target_bounds: [0.0, 10.0]
+# Optional external proxy, available before an entity's first event.
+cold_start_target_col: Baseline_Perf
 model_prefix: perf
 n_obs_col: Sensor_Samples
 date_format: "%Y-%m-%d"
@@ -84,6 +86,14 @@ Key decisions:
   `offset_logit` transform) the exact logit offset. Get these right. Report
   figures derive non-default-domain labels and fan-chart limits from the
   descriptor/data; set `invert_target_axis: true` for magnitude-like targets.
+- **`cold_start_target_col`** optionally names an external proxy on the same
+  raw scale as the target, available before an entity's first event. Valid
+  values warm-start debut AR inputs during training and every row of the
+  entity-disjoint evaluation; missing, nonnumeric, or out-of-bounds values fall
+  back to the training mean. Declare the column in `required_raw_columns`.
+  It must be a genuine
+  prediction-time covariate, never a held-out label or statistic derived from
+  held-out targets. Proportion rescaling applies to it alongside the target.
 - **`model_prefix`** names every posterior site (`perf_beta`, `perf_rho`, …)
   and the model key in `models/manifest.json` (`perf_score`). Pick once;
   changing it later orphans fitted models.

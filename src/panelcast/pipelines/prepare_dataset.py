@@ -163,11 +163,17 @@ def prepare_datasets(config: PrepareConfig | None = None) -> PrepareResult:
         # The primary span applies to the secondary target too: a descriptor
         # declares one target_bounds for both targets (they share a scale, as
         # AOTY's user/critic scores do).
-        rescaled = [
-            col
-            for col in (descriptor.target_col, descriptor.secondary_target_col)
-            if col is not None and col in cleaned_df.columns
-        ]
+        rescaled = list(
+            dict.fromkeys(
+                col
+                for col in (
+                    descriptor.target_col,
+                    descriptor.secondary_target_col,
+                    descriptor.cold_start_target_col,
+                )
+                if col is not None and col in cleaned_df.columns
+            )
+        )
         for col in rescaled:
             cleaned_df[col] = (cleaned_df[col] - raw_low) / span
         log.info(

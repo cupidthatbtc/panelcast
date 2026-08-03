@@ -41,6 +41,7 @@ class DatasetSummaryBlock(BaseModel):
     event_col: str = "Album"
     target_col: str = "User_Score"
     target_bounds: list[float] = Field(default_factory=lambda: [0.0, 100.0])
+    cold_start_target_col: str | None = None
     invert_target_axis: bool = False
     model_prefix: str = "user"
     n_obs_col: str = "User_Ratings"
@@ -146,6 +147,9 @@ class TrainingSummary(BaseModel):
         for name in type(self).model_fields:
             if name not in self.model_fields_set and data.get(name) is None:
                 data.pop(name, None)
+        dataset = data.get("dataset")
+        if isinstance(dataset, dict) and dataset.get("cold_start_target_col") is None:
+            dataset.pop("cold_start_target_col", None)
         return data
 
 

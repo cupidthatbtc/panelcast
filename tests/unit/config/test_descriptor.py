@@ -30,6 +30,7 @@ class TestDefaultEqualsAoty:
         d = DatasetDescriptor()
         assert d.target_col == "User_Score"
         assert d.target_bounds == (0.0, 100.0)
+        assert d.cold_start_target_col is None
         assert d.invert_target_axis is False
         assert d.model_prefix == "user"
         assert d.n_obs_col == "User_Ratings"
@@ -150,6 +151,19 @@ class TestDescriptorHash:
             == DatasetDescriptor().descriptor_hash()
         )
 
+    def test_cold_start_target_changes_fit_hash(self):
+        assert (
+            DatasetDescriptor(cold_start_target_col="Gaia_G").descriptor_hash()
+            != DatasetDescriptor().descriptor_hash()
+        )
+
+    def test_summary_omits_disabled_cold_start(self):
+        assert "cold_start_target_col" not in DatasetDescriptor().to_summary_block()
+
+    def test_summary_records_cold_start_target(self):
+        block = DatasetDescriptor(cold_start_target_col="Gaia_G").to_summary_block()
+        assert block["cold_start_target_col"] == "Gaia_G"
+
     def test_summary_block_keys(self):
         block = DatasetDescriptor().to_summary_block()
         assert block["name"] == "aoty"
@@ -230,9 +244,7 @@ class TestLoadDescriptor:
 
         assert descriptor.resolve_raw_path() == csv_path
 
-    def test_descriptor_directory_wins_over_checkout_root_collision(
-        self, tmp_path, monkeypatch
-    ):
+    def test_descriptor_directory_wins_over_checkout_root_collision(self, tmp_path, monkeypatch):
         checkout = tmp_path / "checkout"
         descriptor_dir = checkout / "examples" / "domain"
         descriptor_dir.mkdir(parents=True)
@@ -268,15 +280,10 @@ class TestUnknownFieldsAreFatal:
     def test_unknown_nested_feature_block_field_raises_with_path(self, tmp_path):
         yaml_path = tmp_path / "nested.yaml"
         yaml_path.write_text(
-            "name: nested\n"
-            "feature_blocks:\n"
-            "  - name: temporal\n"
-            "    parms: {x: 1}\n",
+            "name: nested\nfeature_blocks:\n  - name: temporal\n    parms: {x: 1}\n",
             encoding="utf-8",
         )
-        with pytest.raises(
-            ValueError, match=r"feature_blocks\.0\.parms' — did you mean: params"
-        ):
+        with pytest.raises(ValueError, match=r"feature_blocks\.0\.parms' — did you mean: params"):
             load_descriptor(yaml_path)
 
     def test_unknown_constructor_field_raises(self):
@@ -291,8 +298,8 @@ class TestUnknownFieldsAreFatal:
 
     def test_typo_and_value_error_are_both_reported(self, tmp_path):
         yaml_path = tmp_path / "both.yaml"
-        yaml_path.write_text(
-            "targt_col: Perf_Score\nmin_year: not_a_number\n", encoding="utf-8"
-        )
-        with pytest.raises(ValueError, match=r"(?s)targt_col.*Additional validation errors.*min_year"):
+        yaml_path.write_text("targt_col: Perf_Score\nmin_year: not_a_number\n", encoding="utf-8")
+        with pytest.raises(
+            ValueError, match=r"(?s)targt_col.*Additional validation errors.*min_year"
+        ):
             load_descriptor(yaml_path)

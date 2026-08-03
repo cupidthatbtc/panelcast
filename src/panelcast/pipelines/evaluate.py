@@ -247,6 +247,7 @@ def _summary_dataset(summary: dict) -> dict:
         "n_obs_col": block.get("n_obs_col", "User_Ratings"),
         "prefix": block.get("model_prefix", "user"),
         "target_bounds": tuple(block.get("target_bounds", (0.0, 100.0))),
+        "cold_start_target_col": block.get("cold_start_target_col"),
     }
 
 
@@ -470,9 +471,7 @@ def _build_horizon_panel(
     scaler = summary["feature_scaler"]
     test_df = apply_imputation(test_df, feature_cols, scaler.get("imputation"))
     X = test_df[feature_cols].values.astype(np.float32)
-    X = (X - np.array(scaler["mean"], dtype=np.float32)) / np.array(
-        scaler["std"], dtype=np.float32
-    )
+    X = (X - np.array(scaler["mean"], dtype=np.float32)) / np.array(scaler["std"], dtype=np.float32)
 
     if "n_reviews" in test_df.columns:
         nrev_raw = test_df["n_reviews"].to_numpy(dtype=float)
@@ -802,8 +801,11 @@ def _prepare_test_model_args(
     base_prev_nrev: pd.Series = pd.Series(dtype=float)
     if eiv_on:
         nrev_col_test, base_prev_nrev = _eiv_prev_nrev_base(
-            test_df, val_df, train_df,
-            entity_col=entity_col, n_obs_col=n_obs_col,
+            test_df,
+            val_df,
+            train_df,
+            entity_col=entity_col,
+            n_obs_col=n_obs_col,
         )
 
     prev_scores, prev_nrevs = _build_sequential_prev_scores(
@@ -928,9 +930,7 @@ def _period_args_from_summary(summary: dict, df: pd.DataFrame) -> dict:
             f"period_effects is on but column '{period_col}' is missing "
             "from the split being scored."
         )
-    period_idx = np.array(
-        [period_to_idx.get(str(p), -1) for p in df[period_col]], dtype=np.int32
-    )
+    period_idx = np.array([period_to_idx.get(str(p), -1) for p in df[period_col]], dtype=np.int32)
     if len(period_idx) and not (period_idx >= 0).any():
         # An all-unseen split is legitimate for a genuinely future horizon,
         # but it is also exactly what a train/eval dtype drift in period_col
@@ -1067,19 +1067,36 @@ def _prepare_disjoint_inputs(
     is a prediction-time covariate of the new entity, not a label.
     """
     ds = _summary_dataset(summary)
-    # Cold-start protocol: do NOT derive prev_score from held-out labels.
-    # Use training global mean as neutral prior for all unseen-artist rows.
+    # Cold-start protocol: never derive prev_score from held-out labels.
     df = join_splits_with_features(test_df, test_features, name="disjoint_test").copy()
-    df["_prev_score"] = float(summary["global_mean_score"])
-
-    artist_counts = df.groupby(ds["entity_col"]).size()
-    n_multi_album_artists = int((artist_counts > 1).sum())
-    if n_multi_album_artists > 0:
+    global_mean = float(summary["global_mean_score"])
+    cold_start_col = ds["cold_start_target_col"]
+    if cold_start_col is not None:
+        if cold_start_col not in df.columns:
+            raise ValueError(
+                f"cold_start_target_col '{cold_start_col}' is missing from disjoint test data"
+            )
+        cold_start = pd.to_numeric(df[cold_start_col], errors="coerce")
+        low, high = ds["target_bounds"]
+        valid_cold_start = cold_start.between(low, high) & np.isfinite(cold_start)
+        df["_prev_score"] = cold_start.where(valid_cold_start, global_mean)
         log.info(
             "disjoint_prev_score_cold_start_mode",
-            mode="global_mean_for_all_rows",
-            n_multi_album_artists=n_multi_album_artists,
+            mode="external_target_proxy",
+            column=cold_start_col,
+            warmed=int(valid_cold_start.sum()),
+            fallback=int((~valid_cold_start).sum()),
         )
+    else:
+        df["_prev_score"] = global_mean
+        artist_counts = df.groupby(ds["entity_col"]).size()
+        n_multi_album_artists = int((artist_counts > 1).sum())
+        if n_multi_album_artists > 0:
+            log.info(
+                "disjoint_prev_score_cold_start_mode",
+                mode="global_mean_for_all_rows",
+                n_multi_album_artists=n_multi_album_artists,
+            )
 
     feature_cols = summary["feature_cols"]
     scaler = summary["feature_scaler"]
