@@ -320,9 +320,9 @@ def predict_new_entity(
         prediction or (n_events, n_features) for multiple events.
     prev_score : float or jnp.ndarray
         Previous event score for this entity:
-        - Use the training global mean score for debut events (matches the
-          data pipeline's debut fill; 0.0 would understate the AR term)
-        - Use the last known score if available from external data
+        - Use the configured external cold-start target for debut events when
+          available, otherwise the training global-mean fallback
+        - Use the last known score for entities with observed history
         - For multiple events, provide array of shape (n_events,)
     n_reviews_new : jnp.ndarray or None, default None
         Observation counts for the new event(s). Required when the model uses
@@ -396,11 +396,10 @@ def predict_new_entity(
     2. New entity uncertainty (sampled from population distribution)
     3. Observation noise (sigma_obs or sigma_scaled for heteroscedastic)
 
-    For a debut event, pass prev_score equal to the training debut fill
-    (the training global mean) and the matching ar_center: with global
-    centering the AR(1) term is then exactly zero, so the prediction is
-    purely features plus the population effect. For uncentered models
-    (ar_center=0.0) prev_score=0.0 zeroes the AR term instead.
+    For a debut event, pass prev_score equal to the training debut fill: the
+    descriptor's external cold-start target when configured, otherwise the
+    training global mean. Pass the matching ar_center on the model scale. For
+    uncentered models (ar_center=0.0), prev_score=0.0 zeroes the AR term.
 
     Heteroscedastic noise: If the model was trained with learn_n_exponent=True,
     the posterior will contain {prefix}n_exponent samples. Alternatively, if
@@ -424,9 +423,7 @@ def predict_new_entity(
             f"Unknown likelihood_family: '{likelihood_family}'. "
             f"Registered: {list(available_families())}."
         )
-    family_sites = {
-        name: posterior_samples.get(f"{prefix}{name}") for name in spec.required_sites
-    }
+    family_sites = {name: posterior_samples.get(f"{prefix}{name}") for name in spec.required_sites}
     # Genre/group pooling (entity_group_pooling fits): fitted per-group offsets,
     # (n_samples, n_groups). None on gate-off fits -> group_idx_new is ignored.
     group_offset = posterior_samples.get(f"{prefix}group_offset")
@@ -462,8 +459,7 @@ def predict_new_entity(
         sigma_obs = sigma_obs[indices]
         # Subsample the family-specific global sites alongside the shared ones.
         family_sites = {
-            name: (None if arr is None else arr[indices])
-            for name, arr in family_sites.items()
+            name: (None if arr is None else arr[indices]) for name, arr in family_sites.items()
         }
         if group_offset is not None:
             group_offset = group_offset[indices]
