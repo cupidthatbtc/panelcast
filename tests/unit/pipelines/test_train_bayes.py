@@ -2919,6 +2919,7 @@ class TestResolveChainMethod:
         from panelcast.pipelines.train_bayes import _resolve_chain_method
 
         monkeypatch.setattr(jax, "default_backend", lambda: backend)
+        monkeypatch.setattr(jax, "devices", lambda: [])
         monkeypatch.setattr(
             est_mod,
             "estimate_memory_gb",
@@ -2958,6 +2959,7 @@ class TestResolveChainMethod:
         import panelcast.gpu_memory.query as query_mod
 
         monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+        monkeypatch.setattr(jax, "devices", lambda: [])
 
         def boom(device_index=0):
             raise RuntimeError("nvml down")
