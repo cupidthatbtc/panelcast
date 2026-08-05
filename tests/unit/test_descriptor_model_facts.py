@@ -101,9 +101,7 @@ class TestOrchestratorResolution:
     def test_incoherent_descriptor_facts_fail_at_resolution(self, tmp_path):
         dataset = _write_descriptor(
             tmp_path,
-            "name: facts\n"
-            "likelihood_family: beta_binomial\n"
-            "target_transform: offset_logit\n",
+            "name: facts\nlikelihood_family: beta_binomial\ntarget_transform: offset_logit\n",
         )
         with pytest.raises(ValueError, match="identity"):
             PipelineOrchestrator(PipelineConfig(dataset=dataset), output_base=tmp_path)
@@ -138,9 +136,7 @@ class TestSharedResolutionHelper:
         from panelcast.config.descriptor import load_descriptor
         from panelcast.pipelines.orchestrator import resolve_model_facts
 
-        dataset = _write_descriptor(
-            tmp_path, "name: facts\nn_obs_is_aggregation_count: false\n"
-        )
+        dataset = _write_descriptor(tmp_path, "name: facts\nn_obs_is_aggregation_count: false\n")
         config = PipelineConfig(
             dataset=dataset, likelihood_family="beta_binomial", target_transform="identity"
         )
@@ -238,6 +234,7 @@ class TestRescaleTargetToUnit:
                 "Election_Date": ["2018-11-06", "2020-11-03"] * 3,
                 # Percent scale: a true proportion on a non-unit span.
                 "Dem_Share_Pct": [24.2, 41.0, 62.2, 55.0, 70.1, 66.0],
+                "External_Prior_Pct": [25.0, 40.0, 60.0, 54.0, 69.0, 65.0],
                 "Two_Party_Votes": [1000, 1200, 900, 950, 5000, 5200],
             }
         ).to_csv(csv, index=False)
@@ -247,8 +244,13 @@ class TestRescaleTargetToUnit:
             encoding="utf-8",
             raw_column_map={},
             required_raw_columns=[
-                "State", "Election_ID", "Year", "Election_Date",
-                "Dem_Share_Pct", "Two_Party_Votes",
+                "State",
+                "Election_ID",
+                "Year",
+                "Election_Date",
+                "Dem_Share_Pct",
+                "External_Prior_Pct",
+                "Two_Party_Votes",
             ],
             optional_raw_columns=[],
             entity_col="State",
@@ -259,6 +261,7 @@ class TestRescaleTargetToUnit:
             date_format="%Y-%m-%d",
             target_col="Dem_Share_Pct",
             target_bounds=(0.0, 100.0),
+            cold_start_target_col="External_Prior_Pct",
             model_prefix="dem",
             n_obs_col="Two_Party_Votes",
             n_obs_is_aggregation_count=True,
@@ -286,5 +289,6 @@ class TestRescaleTargetToUnit:
         processed = pd.read_parquet(tmp_path / "data" / "processed" / "pct_1.parquet")
         assert processed["Dem_Share_Pct"].between(0.0, 1.0).all()
         assert processed["Dem_Share_Pct"].max() <= 0.71  # 70.1% -> 0.701
+        assert processed["External_Prior_Pct"].max() == pytest.approx(0.69)
         assert processed["Two_Party_Votes"].max() == 5200  # counts untouched
         assert result is not None

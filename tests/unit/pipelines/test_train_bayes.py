@@ -181,7 +181,9 @@ class TestLoadTrainingData:
         sample_features_df.to_parquet(features_path)
         splits_df.to_parquet(splits_path)
 
-        model_args, feature_cols, train_df, _imputation = load_training_data(features_path, splits_path)
+        model_args, feature_cols, train_df, _imputation = load_training_data(
+            features_path, splits_path
+        )
 
         # Feature values should be from features_df, not splits_df
         assert train_df["feature_1"].iloc[0] == 1.0, "feature_1 should come from features"
@@ -196,7 +198,9 @@ class TestLoadTrainingData:
         sample_features_df.to_parquet(features_path)
         sample_splits_df.to_parquet(splits_path)
 
-        _model_args, feature_cols, train_df, _imputation = load_training_data(features_path, splits_path)
+        _model_args, feature_cols, train_df, _imputation = load_training_data(
+            features_path, splits_path
+        )
 
         assert "n_reviews" not in feature_cols
         assert "n_reviews" in train_df.columns
@@ -228,7 +232,9 @@ class TestLoadTrainingData:
         features_df.to_parquet(features_path)
         sample_splits_df.to_parquet(splits_path)
 
-        model_args, feature_cols, train_df, _imputation = load_training_data(features_path, splits_path)
+        model_args, feature_cols, train_df, _imputation = load_training_data(
+            features_path, splits_path
+        )
 
         # NaN values should be filled with 0
         assert not train_df["feature_1"].isna().any(), "NaN values should be filled"
@@ -381,9 +387,7 @@ class TestPrepareModelData:
         )
         descriptor = DatasetDescriptor(entity_group_col=None)
         with pytest.raises(ValueError, match="entity_group_col"):
-            prepare_model_data(
-                df, ["feature_1"], descriptor=descriptor, entity_group_pooling=True
-            )
+            prepare_model_data(df, ["feature_1"], descriptor=descriptor, entity_group_pooling=True)
 
     def test_prev_score_computation(self, sample_train_df):
         """Should compute shifted prev_score within artist."""
@@ -507,9 +511,7 @@ class TestPrepareModelData:
 
     def test_effective_ceiling_from_train_max(self, sample_train_df):
         """identity: ceiling = train max + 0.5 margin."""
-        model_args, _ = prepare_model_data(
-            sample_train_df, ["feature_1"], min_albums_filter=1
-        )
+        model_args, _ = prepare_model_data(sample_train_df, ["feature_1"], min_albums_filter=1)
         assert model_args["effective_ceiling"] == 90.5
 
     def test_effective_ceiling_clamped_to_bounds(self):
@@ -1185,11 +1187,16 @@ class TestImputeMissingGate:
         """Sensitivity replays the fitted record — a deliberately wrong median
         must land in X verbatim, proving no re-fit happened."""
         features_path, splits_path = self._write(tmp_path)
-        record = {"medians": {"feature_1": 99.0, "feature_2": 5.5},
-                  "indicator_cols": ["feature_1__missing"]}
+        record = {
+            "medians": {"feature_1": 99.0, "feature_2": 5.5},
+            "indicator_cols": ["feature_1__missing"],
+        }
         _model_args, feature_cols, train_df, imputation = load_training_data(
-            features_path, splits_path, min_albums_filter=1,
-            impute_missing=True, imputation_record=record,
+            features_path,
+            splits_path,
+            min_albums_filter=1,
+            impute_missing=True,
+            imputation_record=record,
         )
         assert imputation is record
         assert feature_cols == ["feature_1", "feature_2", "feature_1__missing"]
@@ -2919,6 +2926,7 @@ class TestResolveChainMethod:
         from panelcast.pipelines.train_bayes import _resolve_chain_method
 
         monkeypatch.setattr(jax, "default_backend", lambda: backend)
+        monkeypatch.setattr(jax, "devices", lambda: [])
         monkeypatch.setattr(
             est_mod,
             "estimate_memory_gb",
@@ -2958,6 +2966,7 @@ class TestResolveChainMethod:
         import panelcast.gpu_memory.query as query_mod
 
         monkeypatch.setattr(jax, "default_backend", lambda: "gpu")
+        monkeypatch.setattr(jax, "devices", lambda: [])
 
         def boom(device_index=0):
             raise RuntimeError("nvml down")
@@ -3089,9 +3098,7 @@ class TestIdataExclusions:
         )
         assert captured["exclude_from_collection"] == ()
 
-    @pytest.mark.parametrize(
-        "attribute", ["rw_innovation_type", "entity_effect_prior_type"]
-    )
+    @pytest.mark.parametrize("attribute", ["rw_innovation_type", "entity_effect_prior_type"])
     def test_a_null_prior_type_means_unset_not_the_string_none(self, attribute):
         # str(None) is "None", which the model rejects as an unknown type.
         from panelcast.pipelines.train_bayes import build_training_priors

@@ -167,6 +167,33 @@ class TestDisjointInputsTransform:
         # the transform was applied.
         assert not np.allclose(prev_score, 70.0)
 
+    def test_external_target_proxy_is_transformed_on_model_scale(self, summary):
+        s = dict(summary)
+        s["target_transform"] = "offset_logit"
+        s["logit_offset"] = 0.5
+        s["dataset"] = {
+            "cold_start_target_col": "External_Score",
+            "target_bounds": [0.0, 100.0],
+        }
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["New_X"],
+                "User_Score": [75.0],
+                "User_Ratings": [30],
+                "External_Score": [80.0],
+            }
+        )
+        test_features = pd.DataFrame(
+            {"feat_1": [1.0], "feat_2": [2.0], "n_reviews": [30]},
+            index=test_df.index,
+        )
+        from panelcast.models.bayes.transforms import get_transform
+
+        transform = get_transform("offset_logit", target_bounds=(0.0, 100.0), offset=0.5)
+        _, prev_score, _, _, _, _ = _prepare_disjoint_inputs(test_df, test_features, s)
+
+        assert prev_score[0] == pytest.approx(float(transform.forward(80.0)))
+
 
 class TestRunNewArtistPredictive:
     def _minimal_posterior(self, n_draws: int = 4) -> dict:
@@ -1430,7 +1457,9 @@ class TestPrepareDisjointInputsExtended:
             index=test_df.index,
         )
 
-        X, _, n_reviews, y_true, _, _ids = _prepare_disjoint_inputs(test_df, test_features, mock_summary)
+        X, _, n_reviews, y_true, _, _ids = _prepare_disjoint_inputs(
+            test_df, test_features, mock_summary
+        )
         assert len(y_true) == 1
         assert n_reviews[0] == 50
 
@@ -2410,9 +2439,7 @@ class TestPrepareTestModelArgs:
         assert model_args["n_groups"] == 2
 
     def test_entity_group_pooling_missing_summary_data_raises(self):
-        test_df = pd.DataFrame(
-            {"Artist": ["A"], "User_Score": [80.0], "Album": ["a1"]}
-        )
+        test_df = pd.DataFrame({"Artist": ["A"], "User_Score": [80.0], "Album": ["a1"]})
         test_features = pd.DataFrame({"f1": [1.0], "n_reviews": [10]})
         summary = self._make_summary()
         summary["priors"]["entity_group_pooling"] = True
@@ -2493,9 +2520,7 @@ class TestPrepareTestModelArgs:
             test_df, test_features, summary, train_df=train_df, strict=False
         )
 
-        np.testing.assert_array_equal(
-            model_args["album_seq"], np.array([4, 5], dtype=np.int32)
-        )
+        np.testing.assert_array_equal(model_args["album_seq"], np.array([4, 5], dtype=np.int32))
         assert model_args["album_seq"].max() > summary["max_seq"]
 
     def test_capped_artist_strict_horizon_guard_fires(self):
@@ -2560,9 +2585,7 @@ class TestPrepareTestModelArgs:
             test_df, test_features, summary, train_df=train_df, strict=False
         )
 
-        np.testing.assert_array_equal(
-            model_args["album_seq"], np.array([5, 6], dtype=np.int32)
-        )
+        np.testing.assert_array_equal(model_args["album_seq"], np.array([5, 6], dtype=np.int32))
 
     def test_eiv_missing_global_std_zeros_sigma(self):
         """errors_in_variables against a legacy summary (no global_std_score) emits
@@ -2845,6 +2868,56 @@ class TestPrepareDisjointInputs:
         # Cold-start: all prev_score should be global mean
         np.testing.assert_allclose(prev_score, [75.0, 75.0])
         assert group_idx is None  # gate off
+
+    def test_external_target_proxy_warm_starts_all_unseen_rows(self):
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["NewA", "NewA", "NewB"],
+                "User_Score": [80.0, 82.0, 85.0],
+                "External_Score": [78.0, 78.0, 84.0],
+            }
+        )
+        test_features = pd.DataFrame({"f1": [1.0, 2.0, 3.0], "n_reviews": [10, 20, 30]})
+        summary = self._make_summary()
+        summary["dataset"] = {
+            "cold_start_target_col": "External_Score",
+            "target_bounds": [0.0, 100.0],
+        }
+
+        _, prev_score, _, _, _, _ = _prepare_disjoint_inputs(test_df, test_features, summary)
+
+        np.testing.assert_allclose(prev_score, [78.0, 78.0, 84.0])
+
+    def test_invalid_external_target_proxy_falls_back_to_global_mean(self):
+        test_df = pd.DataFrame(
+            {
+                "Artist": ["NewA", "NewB", "NewC"],
+                "User_Score": [80.0, 82.0, 85.0],
+                "External_Score": [np.nan, 101.0, 84.0],
+            }
+        )
+        test_features = pd.DataFrame({"f1": [1.0, 2.0, 3.0], "n_reviews": [10, 20, 30]})
+        summary = self._make_summary()
+        summary["dataset"] = {
+            "cold_start_target_col": "External_Score",
+            "target_bounds": [0.0, 100.0],
+        }
+
+        _, prev_score, _, _, _, _ = _prepare_disjoint_inputs(test_df, test_features, summary)
+
+        np.testing.assert_allclose(prev_score, [75.0, 75.0, 84.0])
+
+    def test_missing_external_target_proxy_raises(self):
+        test_df = pd.DataFrame({"Artist": ["NewA"], "User_Score": [80.0]})
+        test_features = pd.DataFrame({"f1": [1.0], "n_reviews": [10]})
+        summary = self._make_summary()
+        summary["dataset"] = {
+            "cold_start_target_col": "External_Score",
+            "target_bounds": [0.0, 100.0],
+        }
+
+        with pytest.raises(ValueError, match="cold_start_target_col.*missing"):
+            _prepare_disjoint_inputs(test_df, test_features, summary)
 
     def test_group_idx_mapped_through_training_groups(self):
         """Gate-on: each artist's modal group maps via group_to_idx; unseen -> -1."""
@@ -3198,9 +3271,7 @@ class TestConformalBlock:
     def test_happy_path_returns_conformal_payload(self, mock_summary, tmp_path):
         from panelcast.pipelines.evaluate import _conformal_block
 
-        val_df = pd.DataFrame(
-            {"Artist": ["Artist_A", "Artist_B"], "User_Score": [70.0, 75.0]}
-        )
+        val_df = pd.DataFrame({"Artist": ["Artist_A", "Artist_B"], "User_Score": [70.0, 75.0]})
         pd.DataFrame({"feat_1": [1.0, 2.0], "feat_2": [2.0, 3.0]}).to_parquet(
             tmp_path / "validation_features.parquet"
         )

@@ -179,6 +179,9 @@ class DatasetDescriptor(BaseModel):
     # --- targets ----------------------------------------------------------
     target_col: str = "User_Score"
     target_bounds: tuple[float, float] = (0.0, 100.0)
+    # Optional prediction-time proxy on the target scale for entities with no
+    # observed history. Missing/invalid values fall back to the training mean.
+    cold_start_target_col: str | None = None
     invert_target_axis: bool = False
     model_prefix: str = "user"
     n_obs_col: str = "User_Ratings"
@@ -258,6 +261,10 @@ class DatasetDescriptor(BaseModel):
         lo, hi = self.target_bounds
         if not lo < hi:
             raise ValueError(f"target_bounds must satisfy low < high, got {self.target_bounds}.")
+        if self.cold_start_target_col == self.target_col:
+            raise ValueError(
+                "cold_start_target_col must differ from target_col to avoid target leakage."
+            )
         secondary_fields = (
             self.secondary_target_col,
             self.secondary_prefix,
@@ -325,6 +332,7 @@ class DatasetDescriptor(BaseModel):
             "max_events",
             "auto_priors",
             "period_col",
+            "cold_start_target_col",
         ):
             if fields.get(optional) is None:
                 fields.pop(optional, None)
@@ -352,6 +360,8 @@ class DatasetDescriptor(BaseModel):
             "secondary_prefix": self.secondary_prefix,
             "descriptor_hash": self.descriptor_hash(),
         }
+        if self.cold_start_target_col is not None:
+            summary["cold_start_target_col"] = self.cold_start_target_col
         if self.basis_curves:
             summary["basis_curves"] = {
                 name: spec.model_dump(mode="json") for name, spec in self.basis_curves.items()
@@ -455,8 +465,7 @@ def load_descriptor(ref: str | Path | None) -> DatasetDescriptor:
         others = [err for err in e.errors() if err["type"] != "extra_forbidden"]
         if others:
             message += "\nAdditional validation errors:\n" + "\n".join(
-                f"  {'.'.join(str(part) for part in err['loc'])}: {err['msg']}"
-                for err in others
+                f"  {'.'.join(str(part) for part in err['loc'])}: {err['msg']}" for err in others
             )
         raise ValueError(message) from e
     descriptor._source_path = path.resolve()
