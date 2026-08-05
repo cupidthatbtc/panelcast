@@ -115,6 +115,10 @@ class TestValidation:
         with pytest.raises(ValueError, match="target_bounds"):
             DatasetDescriptor(target_bounds=(100.0, 0.0))
 
+    def test_cold_start_target_must_not_be_the_label(self):
+        with pytest.raises(ValueError, match="cold_start_target_col must differ"):
+            DatasetDescriptor(cold_start_target_col="User_Score")
+
     def test_secondary_fields_all_or_none(self):
         with pytest.raises(ValueError, match="secondary"):
             DatasetDescriptor(secondary_target_col=None)

@@ -261,6 +261,10 @@ class DatasetDescriptor(BaseModel):
         lo, hi = self.target_bounds
         if not lo < hi:
             raise ValueError(f"target_bounds must satisfy low < high, got {self.target_bounds}.")
+        if self.cold_start_target_col == self.target_col:
+            raise ValueError(
+                "cold_start_target_col must differ from target_col to avoid target leakage."
+            )
         secondary_fields = (
             self.secondary_target_col,
             self.secondary_prefix,

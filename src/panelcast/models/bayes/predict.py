@@ -320,9 +320,11 @@ def predict_new_entity(
         prediction or (n_events, n_features) for multiple events.
     prev_score : float or jnp.ndarray
         Previous event score for this entity:
-        - Use the configured external cold-start target for debut events when
+        - For debut events, use the configured external cold-start target when
           available, otherwise the training global-mean fallback
-        - Use the last known score for entities with observed history
+        - Forward-transform that raw-scale value before calling this function
+          when target_transform is not "identity"
+        - Use the last known model-scale score for entities with observed history
         - For multiple events, provide array of shape (n_events,)
     n_reviews_new : jnp.ndarray or None, default None
         Observation counts for the new event(s). Required when the model uses
@@ -381,9 +383,19 @@ def predict_new_entity(
     >>> posterior_samples = result.mcmc.get_samples()
     >>> X_new = jnp.array([0.5, -0.2, 0.1])  # Feature vector for new event
     >>>
-    >>> # Debut event for new entity
+    >>> # Debut input is on the same transformed scale used during fitting.
+    >>> transform = get_transform(
+    ...     "offset_logit", target_bounds=(0.0, 100.0), offset=0.5
+    ... )
+    >>> debut_prev = transform.forward(70.0)
+    >>> center = transform.forward(68.0)
     >>> pred = predict_new_entity(
-    ...     posterior_samples, X_new, prev_score=0.0, prefix="user_"
+    ...     posterior_samples,
+    ...     X_new,
+    ...     prev_score=debut_prev,
+    ...     prefix="user_",
+    ...     target_transform="offset_logit",
+    ...     ar_center=center,
     ... )
     >>> print(f"Mean prediction: {pred['mu'].mean():.1f}")
     >>> print(f"95% CI: [{jnp.percentile(pred['y'], 2.5):.1f}, "
@@ -398,8 +410,8 @@ def predict_new_entity(
 
     For a debut event, pass prev_score equal to the training debut fill: the
     descriptor's external cold-start target when configured, otherwise the
-    training global mean. Pass the matching ar_center on the model scale. For
-    uncentered models (ar_center=0.0), prev_score=0.0 zeroes the AR term.
+    training global mean. Forward-transform this value when the fitted target
+    transform is not identity, and pass the matching model-scale ar_center.
 
     Heteroscedastic noise: If the model was trained with learn_n_exponent=True,
     the posterior will contain {prefix}n_exponent samples. Alternatively, if
